@@ -1,0 +1,61 @@
+{
+  "best_model": "LR",
+  "accuracy": 82.7,
+  "all_results": {
+    "RF": {
+      "accuracy": 82.6,
+      "std": 4.46
+    },
+    "XGB": {
+      "accuracy": 82.2,
+      "std": 5.26
+    },
+    "GB": {
+      "accuracy": 81.8,
+      "std": 4.65
+    },
+    "LR": {
+      "accuracy": 82.7,
+      "std": 4.08
+    },
+    "Ensemble": {
+      "accuracy": 83.0,
+      "std": 4.94
+    }
+  },
+  "feature_importance": {
+    "budget": 15.300000190734863,
+    "co2_reduction": 9.300000190734863,
+    "social_impact": 12.600000381469727,
+    "duration_months": 12.800000190734863,
+    "budget_per_month": 9.699999809265137,
+    "co2_per_dollar": 7.0,
+    "efficiency_score": 33.20000076293945
+  },
+  "dataset_size": 500,
+  "augmented_size": 564,
+  "success_rate": 56.4,
+  "features": [
+    "budget",
+    "co2_reduction",
+    "social_impact",
+    "duration_months",
+    "budget_per_month",
+    "co2_per_dollar",
+    "efficiency_score"
+  ],
+  "smote": true,
+  "hyperparameter_tuning": {
+    "RF": {
+      "max_depth": 5,
+      "min_samples_split": 5,
+      "n_estimators": 100
+    },
+    "XGB": {
+      "learning_rate": 0.05,
+      "max_depth": 4,
+      "n_estimators": 100
+    }
+  },
+  "mcnemar_test": true
+}
