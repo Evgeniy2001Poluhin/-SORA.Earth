@@ -242,3 +242,33 @@ class TestStacking:
         j = r.json()
         expected = 1 if j["probability"] >= j["threshold"] else 0
         assert j["prediction"] == expected
+
+
+class TestBatch:
+    def test_batch_predict(self, client):
+        r = client.post("/predict/batch", json=[
+            {"budget": 500000, "co2_reduction": 1200, "social_impact": 8, "duration_months": 18},
+            {"budget": 100000, "co2_reduction": 300, "social_impact": 3, "duration_months": 6}
+        ])
+        assert r.status_code == 200
+        j = r.json()
+        assert j["total"] == 2
+        assert j["success"] == 2
+        assert len(j["results"]) == 2
+
+    def test_batch_with_invalid(self, client):
+        r = client.post("/predict/batch", json=[
+            {"budget": 500000, "co2_reduction": 1200, "social_impact": 8, "duration_months": 18},
+            {"budget": -100, "co2_reduction": 300, "social_impact": 3, "duration_months": 6}
+        ])
+        j = r.json()
+        assert j["total"] == 2
+        assert any(r["status"] == "error" for r in j["results"])
+
+
+class TestPredictionHistory:
+    def test_history_endpoint(self, client):
+        r = client.get("/predictions/history")
+        assert r.status_code == 200
+        assert "predictions" in r.json()
+        assert "total" in r.json()

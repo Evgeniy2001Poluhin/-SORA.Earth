@@ -2,7 +2,7 @@ from functools import lru_cache
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
-from typing import Optional
+from typing import List, Optional
 import pickle
 import numpy as np
 import math
@@ -47,6 +47,32 @@ def init_db():
         region TEXT DEFAULT 'Europe', lat REAL DEFAULT 50.0, lon REAL DEFAULT 10.0)""")
     conn.commit()
     conn.close()
+
+
+import csv, datetime
+PRED_LOG = os.path.join(ROOT_DIR, "data", "predictions_log.csv")
+def log_prediction(endpoint, input_data, result):
+    file_exists = os.path.exists(PRED_LOG)
+    with open(PRED_LOG, "a", newline="") as f:
+        w = csv.writer(f)
+        if not file_exists:
+            w.writerow(["timestamp","endpoint","budget","co2_reduction","social_impact","duration_months","prediction","probability"])
+        w.writerow([datetime.datetime.now().isoformat(), endpoint,
+                    input_data.budget, input_data.co2_reduction, input_data.social_impact,
+                    input_data.duration_months, result.get("prediction",""), result.get("probability","")])
+
+
+import csv, datetime
+PRED_LOG = os.path.join(ROOT_DIR, "data", "predictions_log.csv")
+def log_prediction(endpoint, input_data, result):
+    file_exists = os.path.exists(PRED_LOG)
+    with open(PRED_LOG, "a", newline="") as f:
+        w = csv.writer(f)
+        if not file_exists:
+            w.writerow(["timestamp","endpoint","budget","co2_reduction","social_impact","duration_months","prediction","probability"])
+        w.writerow([datetime.datetime.now().isoformat(), endpoint,
+                    input_data.budget, input_data.co2_reduction, input_data.social_impact,
+                    input_data.duration_months, result.get("prediction",""), result.get("probability","")])
 
 app = FastAPI(title="SORA.Earth AI Platform", version="2.0.0")
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
@@ -520,7 +546,7 @@ def predict_stacking(project: Project):
     prob = stacking_meta.predict_proba(meta_features)[:,1][0]
     prediction = int(prob >= best_threshold)
     
-    return {
+    result = {
         "model": "Stacking (RF+XGB+NN)",
         "prediction": prediction,
         "probability": round(float(prob), 4),
@@ -531,6 +557,8 @@ def predict_stacking(project: Project):
             "neural_network": round(float(nn_prob), 4)
         }
     }
+    log_prediction("stacking", project, result)
+    return result
 
 
 @app.post("/predict/stacking")
@@ -565,3 +593,48 @@ def predict_stacking(project: Project):
             "neural_network": round(float(nn_prob), 4)
         }
     }
+
+
+@app.post("/predict/batch")
+def predict_batch(projects: List[dict]):
+    from fastapi import HTTPException
+    results = []
+    for p in projects:
+        try:
+            proj = Project(**p)
+            budget_per_month = proj.budget / max(proj.duration_months, 1)
+            co2_per_dollar = proj.co2_reduction / max(proj.budget, 1) * 1000
+            efficiency_score = (proj.co2_reduction * proj.social_impact) / max(proj.duration_months, 1)
+            features = pd.DataFrame([[proj.budget, proj.co2_reduction, proj.social_impact, proj.duration_months, budget_per_month, co2_per_dollar, efficiency_score]],
+                columns=["budget","co2_reduction","social_impact","duration_months","budget_per_month","co2_per_dollar","efficiency_score"])
+            features_scaled = scaler.transform(features)
+
+            rf_prob = rf_model.predict_proba(features_scaled)[:,1]
+            xgb_prob = xgb_model.predict_proba(features_scaled)[:,1]
+            import torch as _torch
+            nn_model.eval()
+            with _torch.no_grad():
+                nn_prob_val = nn_model(_torch.FloatTensor(features_scaled.values if hasattr(features_scaled, "values") else features_scaled)).squeeze().item()
+            meta_features = np.column_stack([rf_prob, xgb_prob, [[nn_prob_val]]])
+            prob = stacking_meta.predict_proba(meta_features)[:,1][0]
+            prediction = int(prob >= best_threshold)
+            results.append({"input": p, "prediction": prediction, "probability": round(float(prob), 4), "status": "ok"})
+        except Exception as e:
+            results.append({"input": p, "error": str(e), "status": "error"})
+    return {"total": len(results), "success": sum(1 for r in results if r["status"]=="ok"), "results": results}
+
+
+@app.get("/predictions/history")
+def predictions_history(limit: int = 50):
+    if not os.path.exists(PRED_LOG):
+        return {"predictions": [], "total": 0}
+    df = pd.read_csv(PRED_LOG)
+    return {"predictions": df.tail(limit).to_dict(orient="records"), "total": len(df)}
+
+
+@app.get("/predictions/history")
+def predictions_history(limit: int = 50):
+    if not os.path.exists(PRED_LOG):
+        return {"predictions": [], "total": 0}
+    df = pd.read_csv(PRED_LOG)
+    return {"predictions": df.tail(limit).to_dict(orient="records"), "total": len(df)}
