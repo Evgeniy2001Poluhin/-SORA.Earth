@@ -1,0 +1,101 @@
+name,budget,co2_reduction,social_impact,duration_months,success,category,region
+Tree Planting Project 1,5819,32,8,9,1,Tree Planting,Europe
+Composting Pilot 2,4424,18,7,3,0,Composting,North America
+Recycling Hub Pilot 3,48118,21,8,12,1,Recycling Hub,Africa
+Green Building Program 4,51703,50,8,22,1,Green Building,Asia
+Geothermal Energy Network 5,376472,78,3,48,1,Geothermal Energy,North America
+Smart Grid Hub 6,338685,75,4,47,0,Smart Grid,Africa
+Coral Reef Network 7,80656,42,8,44,1,Coral Reef,South America
+Ocean Cleanup Project 8,124025,54,8,20,1,Ocean Cleanup,Europe
+Coral Reef Network 9,132869,39,8,29,1,Coral Reef,Asia
+Geothermal Energy Pilot 10,551364,83,3,34,1,Geothermal Energy,South America
+Water Purification Hub 11,100589,54,9,24,1,Water Purification,Oceania
+Recycling Hub Network 12,59866,40,7,7,1,Recycling Hub,North America
+Coral Reef Network 13,130186,27,7,42,0,Coral Reef,Oceania
+Geothermal Energy Phase II 14,543638,90,6,53,1,Geothermal Energy,Europe
+Electric Bus Alliance 15,229303,95,9,30,1,Electric Bus,Africa
+Coral Reef Project 16,154895,32,7,40,0,Coral Reef,Africa
+Wind Farm Alliance 17,108743,74,6,33,1,Wind Farm,Africa
+Ocean Cleanup Hub 18,301728,64,9,34,1,Ocean Cleanup,Asia
+Solar Panel Phase II 19,74583,67,9,18,1,Solar Panel,North America
+LED Lighting Phase II 20,20365,34,4,8,1,LED Lighting,Oceania
+Water Purification Hub 21,106542,36,10,14,1,Water Purification,Oceania
+Smart Grid Hub 22,304286,54,5,48,1,Smart Grid,Europe
+Methane Capture Initiative 23,390777,60,5,28,1,Methane Capture,Africa
+Tree Planting Alliance 24,16894,34,8,6,1,Tree Planting,Europe
+Ocean Cleanup Program 25,483730,71,6,42,0,Ocean Cleanup,South America
+Hydropower Alliance 26,796421,97,4,52,1,Hydropower,South America
+LED Lighting Campaign 27,23880,37,5,8,1,LED Lighting,Asia
+Mangrove Restore Pilot 28,87422,68,9,32,1,Mangrove Restore,North America
+Recycling Hub Alliance 29,19196,41,7,12,0,Recycling Hub,Europe
+Ocean Cleanup Initiative 30,471112,80,6,25,1,Ocean Cleanup,North America
+EV Charging System 31,98574,67,5,14,1,EV Charging,Oceania
+Geothermal Energy Campaign 32,482713,79,6,39,0,Geothermal Energy,Africa
+Tree Planting System 33,26593,42,9,12,1,Tree Planting,Africa
+Wind Farm Network 34,256518,90,5,13,1,Wind Farm,Africa
+Tree Planting Program 35,13147,27,8,14,0,Tree Planting,Africa
+LED Lighting System 36,22025,28,7,4,1,LED Lighting,North America
+Composting Program 37,4604,6,7,3,0,Composting,Europe
+LED Lighting Program 38,41826,35,5,6,0,LED Lighting,North America
+Coral Reef Hub 39,129521,50,9,33,1,Coral Reef,Africa
+Hydropower Alliance 40,381158,86,5,49,1,Hydropower,North America
+Wind Farm System 41,276077,80,5,13,1,Wind Farm,South America
+Methane Capture Hub 42,391011,87,5,23,1,Methane Capture,North America
+Ocean Cleanup Campaign 43,197425,44,6,39,0,Ocean Cleanup,Europe
+Tidal Energy Campaign 44,529087,88,2,55,1,Tidal Energy,North America
+Tidal Energy Network 45,674088,80,4,42,0,Tidal Energy,Oceania
+Coral Reef Project 46,94308,46,8,38,0,Coral Reef,Asia
+Smart Grid Hub 47,495170,53,4,41,0,Smart Grid,Europe
+Green Building Phase II 48,84722,62,5,19,1,Green Building,Asia
+Water Purification Hub 49,97433,64,10,14,1,Water Purification,South America
+Solar Panel Phase II 50,73769,95,9,11,1,Solar Panel,Europe
+Tree Planting Alliance 51,8507,50,8,10,0,Tree Planting,Asia
+EV Charging Initiative 52,133371,51,7,17,1,EV Charging,Asia
+Ocean Cleanup Network 53,432547,67,8,19,1,Ocean Cleanup,North America
+Electric Bus Campaign 54,237340,70,10,29,1,Electric Bus,Oceania
+Composting Hub 55,3158,8,7,8,0,Composting,Europe
+Wind Farm Initiative 56,298784,81,6,25,1,Wind Farm,Europe
+Sustainable Farm Pilot 57,33897,53,8,11,1,Sustainable Farm,Europe
+Tree Planting Program 58,16589,50,10,15,1,Tree Planting,Oceania
+Recycling Hub Network 59,25649,31,10,4,1,Recycling Hub,Europe
+LED Lighting Campaign 60,26263,28,5,8,1,LED Lighting,North America
+Hydropower Pilot 61,416619,86,6,58,1,Hydropower,Asia
+Recycling Hub Project 62,16550,32,10,9,1,Recycling Hub,Asia
+Green Building Initiative 63,142050,72,8,29,1,Green Building,Asia
+Tree Planting Alliance 64,13559,26,9,6,1,Tree Planting,North America
+EV Charging Pilot 65,194398,67,5,16,1,EV Charging,South America
+Green Building Pilot 66,61635,67,5,28,1,Green Building,South America
+Mangrove Restore Network 67,86531,42,9,28,1,Mangrove Restore,South America
+Tree Planting Network 68,28584,34,9,16,1,Tree Planting,Africa
+Coral Reef Campaign 69,137504,42,7,30,1,Coral Reef,Africa
+Water Purification Phase II 70,120676,49,9,18,1,Water Purification,North America
+Sustainable Farm Network 71,23774,38,10,15,1,Sustainable Farm,Oceania
+Bike Sharing Program 72,43952,24,8,14,1,Bike Sharing,Africa
+Sustainable Farm Project 73,43780,46,10,15,1,Sustainable Farm,Asia
+Recycling Hub Initiative 74,59092,39,8,7,1,Recycling Hub,Europe
+Wind Farm Alliance 75,144184,85,5,26,1,Wind Farm,Africa
+Geothermal Energy Pilot 76,576620,97,6,55,1,Geothermal Energy,Africa
+Electric Bus Hub 77,102907,66,10,19,1,Electric Bus,Europe
+Bike Sharing Program 78,18291,27,8,7,0,Bike Sharing,Africa
+Bike Sharing Hub 79,58750,26,9,13,1,Bike Sharing,South America
+LED Lighting System 80,45905,34,5,8,0,LED Lighting,Africa
+Recycling Hub System 81,56789,37,10,7,1,Recycling Hub,Asia
+Ocean Cleanup Network 82,474103,58,7,26,1,Ocean Cleanup,Asia
+Composting Program 83,4320,9,8,4,0,Composting,Africa
+Geothermal Energy System 84,233674,88,6,45,1,Geothermal Energy,South America
+LED Lighting Initiative 85,14080,26,7,6,0,LED Lighting,South America
+Tidal Energy Campaign 86,599429,85,2,47,1,Tidal Energy,Asia
+LED Lighting Phase II 87,45272,43,5,6,1,LED Lighting,Europe
+Solar Panel Program 88,55484,81,10,13,1,Solar Panel,Africa
+Smart Grid Initiative 89,480034,50,5,42,0,Smart Grid,South America
+LED Lighting Campaign 90,18893,34,5,3,0,LED Lighting,Asia
+EV Charging Phase II 91,135485,64,6,15,1,EV Charging,Africa
+LED Lighting Hub 92,26532,22,7,3,0,LED Lighting,Oceania
+Mangrove Restore Pilot 93,59389,60,7,19,1,Mangrove Restore,North America
+Geothermal Energy System 94,210684,94,4,39,1,Geothermal Energy,Europe
+Tidal Energy Network 95,896897,76,5,58,0,Tidal Energy,Asia
+Smart Grid Phase II 96,592128,72,4,48,0,Smart Grid,Europe
+Solar Panel Alliance 97,50444,84,10,14,1,Solar Panel,North America
+Recycling Hub Hub 98,21678,39,7,4,1,Recycling Hub,Asia
+LED Lighting System 99,34285,22,6,3,0,LED Lighting,Africa
+Mangrove Restore Program 100,113307,68,8,22,1,Mangrove Restore,Africa

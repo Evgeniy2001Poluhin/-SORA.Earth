@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+    <meta name="description" content="SORA.Earth - AI-Powered ESG Assessment">
+    <meta name="author" content="Polukhin Evgeniy">
+    <meta name="theme-color" content="#00e5a0">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta property="og:title" content="SORA.Earth AI Platform">
+    <meta property="og:description" content="AI-Powered ESG Assessment & Environmental Project Evaluation">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SORA.Earth AI Platform</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#060b14;--bg2:#0c1220;--sidebar:#080e1c;--card:#0f1729;--accent:#00e5a0;--accent2:#00c2ff;--accent3:#8b5cf6;--text:#e8edf5;--text2:#7a8ba8;--border:#1a2540;--success:#22c55e;--warning:#eab308;--danger:#ef4444;--radius:16px}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh;overflow-x:hidden}
+::selection{background:var(--accent);color:var(--bg)}
+html,body,div,span,p,h1,h2,h3,h4,h5,h6,strong,em,label,table,tr,td,th{cursor:default!important}
+a,.nav-item,.btn,.template-btn,button,[onclick]{cursor:pointer!important}
+input,textarea,select{cursor:default!important}
+input:focus,textarea:focus{cursor:text!important}
+
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+canvas#particles{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none}
+.sidebar{width:260px;background:rgba(8,14,28,0.9);border-right:1px solid var(--border);padding:28px 18px;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:20;backdrop-filter:blur(20px)}
+.sidebar-logo{display:flex;align-items:center;gap:12px;padding:0 10px;margin-bottom:36px}
+.logo-orb{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:var(--bg);box-shadow:0 4px 20px rgba(0,229,160,0.3);animation:orbPulse 3s ease infinite}
+@keyframes orbPulse{0%,100%{box-shadow:0 4px 20px rgba(0,229,160,0.3)}50%{box-shadow:0 4px 30px rgba(0,229,160,0.5)}}
+.logo-text{font-size:20px;font-weight:800;letter-spacing:-.5px}
+.logo-text span{background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.nav-label{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1.5px;padding:0 12px;margin:24px 0 10px;font-weight:600}
+.nav-item{cursor:pointer;display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:12px;color:var(--text2);cursor:pointer;font-size:14px;font-weight:500;transition:all .2s;margin-bottom:3px;position:relative;overflow:hidden;text-decoration:none;-webkit-user-select:none;user-select:none}
+.nav-item:hover{background:rgba(255,255,255,0.03);color:var(--text)}
+.nav-item.active{color:var(--accent);font-weight:600}
+.nav-item.active::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,var(--accent),var(--accent2));border-radius:0 3px 3px 0}
+.nav-item.active::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(0,229,160,0.06),rgba(0,194,255,0.03));border-radius:12px}
+.nav-icon{width:20px;text-align:center;font-size:15px;position:relative;z-index:1}
+.nav-text{position:relative;z-index:1}
+.sidebar-footer{margin-top:auto;padding:18px 14px;border-top:1px solid var(--border)}
+.model-badge{font-size:11px;color:var(--accent2);background:rgba(0,194,255,0.08);padding:8px 12px;border-radius:10px;display:block;text-align:center;border:1px solid rgba(0,194,255,0.1)}
+.sidebar-version{text-align:center;margin-top:10px;font-size:10px;color:var(--text2)}
+.content{margin-left:260px;flex:1;padding:32px;position:relative;z-index:1;min-height:100vh}
+.page{display:none;animation:pageIn .4s ease}.page.active{display:block}
+@keyframes pageIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.page-header{margin-bottom:28px}.page-title{font-size:28px;font-weight:800;letter-spacing:-.5px;margin-bottom:6px}.page-sub{color:var(--text2);font-size:14px}
+.grid-2{display:grid;grid-template-columns:1fr 1.4fr;gap:24px;align-items:start}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px}
+.grid-2-eq{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.card{background:rgba(15,23,41,0.8);backdrop-filter:blur(16px);border:1px solid var(--border);border-radius:var(--radius);padding:24px;position:relative;overflow:hidden;transition:all .25s}
+.card:hover{border-color:rgba(0,229,160,0.15)}
+.card-glow{position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle,rgba(0,229,160,0.02) 0%,transparent 70%);pointer-events:none}
+.card-title{font-size:15px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.glow-line{height:1px;background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent3),transparent);margin-bottom:20px;opacity:.4}
+.form-group{margin-bottom:16px}.form-label{display:block;font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.form-input,.form-select{width:100%;padding:12px 16px;border-radius:12px;border:1px solid var(--border);background:rgba(12,18,32,0.8);color:var(--text);font-size:14px;transition:all .25s;font-family:inherit}
+.form-input:focus,.form-select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,229,160,0.06)}
+.form-select option{background:var(--bg2);color:var(--text)}
+.btn{cursor:pointer;width:100%;padding:14px;border:none;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;transition:all .25s;font-family:inherit}
+.btn-primary{background:linear-gradient(135deg,var(--accent),#00c4a0);color:var(--bg)}
+.btn-primary:hover{box-shadow:0 8px 30px rgba(0,229,160,0.3);transform:translateY(-2px)}
+.btn-secondary{background:rgba(255,255,255,0.03);color:var(--text);border:1px solid var(--border);margin-top:10px}
+.btn-secondary:hover{border-color:var(--accent2)}
+.btn-sm{width:auto;padding:10px 20px;font-size:13px;display:inline-flex;align-items:center;gap:6px}
+.btn-danger{background:none;color:var(--danger);border:1px solid rgba(239,68,68,0.3);margin-left:10px}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:350px;color:var(--text2);text-align:center}
+.empty-orb{width:70px;height:70px;border-radius:50%;background:linear-gradient(135deg,rgba(0,229,160,0.08),rgba(0,194,255,0.05));display:flex;align-items:center;justify-content:center;margin-bottom:16px;font-size:28px;animation:float 4s ease infinite}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+.result-panel{display:none;animation:fadeIn .5s ease}
+@keyframes fadeIn{from{opacity:0;transform:scale(0.98)}to{opacity:1;transform:scale(1)}}
+.score-ring{width:160px;height:160px;margin:0 auto 20px;position:relative}
+.score-ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+.score-ring circle{fill:none;stroke-width:7;stroke-linecap:round}
+.ring-bg{stroke:var(--border)}.ring-fill{transition:stroke-dashoffset 1.2s cubic-bezier(0.4,0,0.2,1)}
+.score-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center}
+.score-num{font-size:40px;font-weight:800;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.score-of{font-size:12px;color:var(--text2)}
+.prob-bar{background:rgba(12,18,32,0.9)!important;border-radius:12px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;border:1px solid var(--border)}
+.prob-info{flex:1}.prob-label{font-size:12px;color:var(--text2)}.prob-track{height:6px;background:var(--border);border-radius:3px;margin-top:6px;overflow:hidden}
+.prob-fill{height:100%;border-radius:3px;transition:width 1s ease}.prob-val{font-size:18px;font-weight:800;min-width:50px;text-align:right}
+.risk-badge{display:inline-flex;padding:6px 14px;border-radius:10px;font-size:12px;font-weight:700}
+.risk-low{background:rgba(34,197,94,0.1);color:var(--success)}.risk-medium{background:rgba(234,179,8,0.1);color:var(--warning)}.risk-high{background:rgba(239,68,68,0.1);color:var(--danger)}
+.metric-card{background:rgba(12,18,32,0.5);border-radius:12px;padding:14px;margin-bottom:8px;display:flex;align-items:center;gap:12px;border:1px solid var(--border)}
+.metric-dot{width:10px;height:10px;border-radius:50%}.metric-body{flex:1}
+.metric-top{display:flex;justify-content:space-between;margin-bottom:6px}.metric-name{font-size:13px;color:var(--text2)}.metric-pct{font-size:14px;font-weight:800}
+.metric-track{height:4px;background:var(--border);border-radius:2px;overflow:hidden}.metric-fill{height:100%;border-radius:2px;transition:width 1s ease}
+.metric-weight{font-size:10px;color:var(--text2);margin-top:4px}
+.rec-item{background:rgba(12,18,32,0.9)!important;border-radius:10px;padding:11px 14px;margin-bottom:6px;font-size:13px;color:var(--text);border-left:3px solid var(--accent)}
+.whatif-section{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);overflow-x:auto}
+.whatif-title{font-size:11px;font-weight:700;margin-bottom:12px;color:var(--text2);text-transform:uppercase;letter-spacing:1px}
+.whatif-row{display:flex;align-items:center;gap:8px;padding:8px 0;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.02)}
+.whatif-label{flex:1;color:var(--text2)}.whatif-change{font-weight:700;min-width:55px;text-align:right;font-size:11px;white-space:nowrap}
+.whatif-pos{color:var(--success)}.whatif-neg{color:var(--danger)}
+.stats-row{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px}
+.stat{background:rgba(15,23,41,0.8);border:1px solid var(--border);border-radius:var(--radius);padding:20px;position:relative;overflow:hidden}
+.stat-accent{position:absolute;top:0;left:0;right:0;height:2px}
+.stat-label{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;font-weight:600}
+.stat-value{font-size:30px;font-weight:800}
+.dist-flex{display:flex;gap:20px;align-items:flex-end;height:130px;padding:10px 10px 0;overflow:hidden}
+.dist-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px}
+.dist-bar{width:100%;border-radius:10px 10px 4px 4px;transition:height .8s ease;min-height:4px;max-height:100px}
+.dist-count{font-size:22px;font-weight:800}.dist-label{font-size:12px;color:var(--text2)}
+.top-item{display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.03)}
+.top-item:last-child{border:none}
+.top-rank{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800}
+.rank-1{background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#000}
+.rank-2{background:linear-gradient(135deg,#d1d5db,#9ca3af);color:#000}
+.rank-3{background:linear-gradient(135deg,#d97706,#92400e);color:#fff}
+.rank-n{background:var(--card);color:var(--text2)}
+.top-name{flex:1;font-size:14px;font-weight:600}.top-score{font-size:14px;font-weight:800;color:var(--accent)}
+.fi-row{display:flex;align-items:center;gap:14px;padding:10px 0}
+.fi-label{width:120px;font-size:13px;color:var(--text2)}.fi-track{flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden}
+.fi-fill{height:100%;border-radius:4px;transition:width .8s ease}.fi-val{font-size:13px;font-weight:700;min-width:45px;text-align:right}
+table{width:100%;border-collapse:collapse}
+th{padding:12px 14px;text-align:left;font-size:10px;color:var(--text2);font-weight:700;text-transform:uppercase;letter-spacing:.8px;background:rgba(12,18,32,0.5);border-bottom:1px solid var(--border)}
+td{padding:10px 14px;font-size:13px;border-bottom:1px solid rgba(255,255,255,0.02)}
+tr:hover td{background:rgba(0,229,160,0.01)}
+.badge{padding:3px 8px;border-radius:6px;font-size:11px;font-weight:700}
+.badge-s{background:rgba(34,197,94,0.1);color:var(--success)}.badge-m{background:rgba(234,179,8,0.1);color:var(--warning)}.badge-w{background:rgba(239,68,68,0.1);color:var(--danger)}
+.del-btn{background:none;border:1px solid var(--border);color:var(--text2);padding:3px 8px;border-radius:6px;cursor:pointer;font-size:11px}
+.del-btn:hover{border-color:var(--danger);color:var(--danger)}
+.card-accent{position:absolute;top:0;left:0;right:0;height:3px;border-radius:var(--radius) var(--radius) 0 0}
+.card-label{font-size:11px;color:var(--text2);font-weight:700;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:16px}
+.winner-card{background:linear-gradient(135deg,rgba(0,229,160,0.06),rgba(0,194,255,0.03));border:1px solid rgba(0,229,160,0.15);border-radius:var(--radius);padding:24px;text-align:center;margin-bottom:24px}
+.winner-label{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+.winner-name{font-size:28px;font-weight:800;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px}
+.winner-detail{font-size:14px;color:var(--success)}
+.best{color:var(--accent);font-weight:800}
+.bar-cell .track{height:4px;background:var(--border);border-radius:2px;margin-top:6px}.bar-cell .fill{height:100%;border-radius:2px}
+th.center,td.center{text-align:center}
+#map{height:500px;border-radius:var(--radius);border:1px solid var(--border)}
+.leaflet-popup-content-wrapper{background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4)}
+.leaflet-popup-tip{background:var(--card)}
+.leaflet-popup-content{font-family:'Inter',sans-serif;font-size:13px;line-height:1.6}
+.radar-container{width:280px;height:280px;margin:0 auto}
+.ghg-result{text-align:center;padding:20px 0}
+.ghg-total{font-size:48px;font-weight:800;margin-bottom:4px}
+.ghg-unit{font-size:14px;color:var(--text2)}
+.ghg-rating{display:inline-block;padding:6px 16px;border-radius:10px;font-size:13px;font-weight:700;margin:12px 0}
+.scope-bar{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.03)}
+.scope-label{width:80px;font-size:13px;color:var(--text2);font-weight:600}
+.scope-track{flex:1;height:10px;background:var(--border);border-radius:5px;overflow:hidden}
+.scope-fill{height:100%;border-radius:5px;transition:width .8s ease}
+.scope-val{font-size:14px;font-weight:700;min-width:60px;text-align:right}
+.trend-chart{height:300px;position:relative}
+@keyframes markerPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.8;transform:scale(1.2)}}
+@keyframes markerPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.8;transform:scale(1.2)}}
+
+.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:10px}
+.toast{padding:14px 20px;background:rgba(15,23,41,0.95);color:var(--text);border-radius:12px;font-size:13px;font-weight:600;backdrop-filter:blur(20px);border:1px solid;animation:toastIn .4s ease,toastOut .4s ease 3.6s forwards;max-width:380px;box-shadow:0 8px 30px rgba(0,0,0,0.3);display:flex;align-items:center;gap:10px}
+.toast-success{background:rgba(34,197,94,0.12);border-color:rgba(34,197,94,0.2);color:#22c55e}
+.toast-warning{background:rgba(234,179,8,0.12);border-color:rgba(234,179,8,0.2);color:#eab308}
+.toast-danger{background:rgba(239,68,68,0.12);border-color:rgba(239,68,68,0.2);color:#ef4444}
+.toast-info{background:rgba(0,194,255,0.12);border-color:rgba(0,194,255,0.2);color:#00c2ff}
+@keyframes toastIn{from{opacity:0;transform:translateX(100px)}to{opacity:1;transform:translateX(0)}}
+@keyframes toastOut{from{opacity:1}to{opacity:0;transform:translateY(-20px)}}
+.template-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:16px}
+.template-btn{padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:rgba(12,18,32,0.9)!important;color:var(--text2);cursor:pointer;font-size:11px;font-weight:600;text-align:left;transition:all .2s;font-family:inherit;line-height:1.3}
+.template-btn.active{border-color:var(--accent);background:rgba(0,229,160,0.08);color:var(--accent)}.template-btn:hover{cursor:pointer;border-color:var(--accent);color:var(--accent);background:rgba(0,229,160,0.04)}
+.template-btn span{display:block;font-size:10px;color:var(--text2);font-weight:400;margin-top:2px;opacity:.7}
+
+.loader-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(8,12,24,0.85);backdrop-filter:blur(8px);z-index:9998;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .3s}
+.loader-overlay.active{opacity:1;pointer-events:all}
+.loader-spinner{width:60px;height:60px;border:3px solid rgba(0,229,160,0.1);border-top:3px solid var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loader-text{color:var(--accent);margin-top:16px;font-size:14px;font-weight:600;letter-spacing:1px}
+.loader-sub{color:var(--text2);margin-top:6px;font-size:11px;animation:pulse 1.5s ease infinite}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+.form-input.error,.form-select.error{border-color:#ef4444!important;box-shadow:0 0 0 2px rgba(239,68,68,0.15)}
+.error-msg{color:#ef4444;font-size:10px;margin-top:2px;display:none}
+.error-msg.show{display:block}
+@media(max-width:1100px){.sidebar{display:none}.content{margin-left:0}}
+@media(max-width:900px){.grid-2{grid-template-columns:1fr}.stats-row{grid-template-columns:repeat(2,1fr)}.grid-3{grid-template-columns:1fr}.grid-2-eq{grid-template-columns:1fr}}
+.leaflet-control-attribution{display:none!important}
+.leaflet-container{background:#0c1220!important}.leaflet-tile-pane{background:#0c1220!important}
+
+body.light-theme{background:#f0f2f5!important;color:#1a1a2e!important}
+body.light-theme .sidebar{background:rgba(255,255,255,0.95)!important}
+body.light-theme .card,.light-theme [style*="background:rgba(15,23,42"],.light-theme [style*="background: rgba(15,23,42"]{background:rgba(255,255,255,0.9)!important;border-color:rgba(0,0,0,0.08)!important;color:#1a1a2e!important}
+body.light-theme h1,body.light-theme h2,body.light-theme h3{color:#1a1a2e!important}
+body.light-theme .section-subtitle{color:#666!important}
+body.light-theme,body.light-theme select{background:rgba(0,0,0,0.03)!important;color:#1a1a2e!important;border-color:rgba(0,0,0,0.1)!important}
+body.light-theme .nav-item{color:#555!important}
+body.light-theme .nav-item.active{color:#059669!important}
+
+</style>
+</head>
+<body>
+<div id="toastContainer" style="position:fixed;top:20px;right:20px;z-index:10000;display:flex;flex-direction:column;gap:8px"></div>
+
+<canvas id="particles"></canvas>
+<div class="sidebar">
+<div class="sidebar-logo"><div class="logo-orb">S</div><div class="logo-text">SORA.<span>Earth</span></div></div>
+<div class="nav-label">Platform</div>
+<div class="nav-item active" data-page="evaluate"><span class="nav-icon">+</span><span class="nav-text">Evaluate</span></div>
+<div class="nav-item" data-page="dashboard"><span class="nav-icon">#</span><span class="nav-text">Dashboard</span></div>
+<div class="nav-item" data-page="compare"><span class="nav-icon">=</span><span class="nav-text">Compare</span></div>
+<div class="nav-item" data-page="map"><span class="nav-icon">O</span><span class="nav-text">World Map</span></div>
+<div class="nav-item" data-page="ghg"><span class="nav-icon">~</span><span class="nav-text">GHG Calculator</span></div>
+<div class="nav-item" data-page="trends"><span class="nav-icon">^</span><span class="nav-text">Trends</span></div>
+<div class="nav-label">System</div>
+<a href="/docs" target="_blank" class="nav-item"><span class="nav-icon">&lt;&gt;</span><span class="nav-text">API Docs</span></a>
+<div class="sidebar-footer"><span class="model-badge" id="modelBadge">Loading...</span><div class="sidebar-version">SORA.Earth v2.0</div><div style="margin-top:16px;padding:8px 12px"><button id="themeToggle" onclick="toggleTheme()" style="width:100%;padding:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#7a8ba8;cursor:pointer;font-size:12px">🌙 Dark / ☀️ Light</button></div></div>
+</div>
+<div class="toast-container" id="toasts"></div>
+<div class="loader-overlay" id="loader"><div class="loader-spinner"></div><div class="loader-text">Analyzing with AI...</div><div class="loader-sub">Running RandomForest model & ESG scoring</div></div>
+<div class="content">
+
+<!-- EVALUATE -->
+<div class="page active" id="page-evaluate">
+<div class="page-header"><div class="page-title">Project Evaluation</div><div class="page-sub">AI-powered ESG analysis with risk assessment and recommendations</div></div>
+<div class="grid-2">
+<div><div class="card"><div class="card-glow"></div><div class="card-title">Project Data</div><div class="glow-line"></div>
+<div class="template-grid">
+<button class="template-btn" onclick="loadTemplate('solar')">☀️ Solar Energy<span>Budget $50K, CO2 85t</span></button>
+<button class="template-btn" onclick="loadTemplate('wind')">💨 Wind Farm<span>Budget $120K, CO2 95t</span></button>
+<button class="template-btn" onclick="loadTemplate('forest')">🌲 Reforestation<span>Budget $25K, CO2 60t</span></button>
+<button class="template-btn" onclick="loadTemplate('water')">💧 Water Treatment<span>Budget $40K, CO2 30t</span></button>
+<button class="template-btn" onclick="loadTemplate('ev')">🔋 EV Infrastructure<span>Budget $200K, CO2 120t</span></button>
+<button class="template-btn" onclick="loadTemplate('waste')">♻️ Waste Recycling<span>Budget $15K, CO2 45t</span></button>
+</div>
+<div class="form-group"><label class="form-label">Project Name</label><input class="form-input" id="name" value="Solar Panel Initiative"></div>
+<div class="form-group"><label class="form-label">Budget (USD)</label><input class="form-input" id="budget" type="number" value="50000"></div>
+<div class="form-group"><label class="form-label">CO2 Reduction (tons/year)</label><input class="form-input" id="co2" type="number" value="85"></div>
+<div class="form-group"><label class="form-label">Social Impact (1-10)</label><input class="form-input" id="social" type="number" value="8" min="1" max="10"></div>
+<div class="form-group"><label class="form-label">Duration (months)</label><input class="form-input" id="duration" type="number" value="12"></div>
+<div class="form-group"><label class="form-label">Country</label>
+<div style="position:relative"><input class="form-input" id="region" value="Germany" autocomplete="off" placeholder="Type country name...">
+<div id="countryDrop" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:220px;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:0 0 12px 12px;z-index:999;box-shadow:0 12px 40px rgba(0,0,0,0.5)"></div></div></div>
+<button class="btn btn-primary" id="evalBtn">Evaluate Project</button>
+<button class="btn btn-secondary" id="whatifBtn">What-If Analysis</button>
+</div></div>
+<div>
+<div class="card">
+<div class="card-glow"></div><div class="card-title">Analysis Results</div><div class="glow-line"></div>
+<div id="empty" class="empty-state"><div class="empty-orb">E</div><div style="font-size:14px">Enter project parameters and click<br><strong>Evaluate Project</strong></div></div>
+<div class="result-panel" id="res">
+<svg width="0" height="0"><defs><linearGradient id="scoreGrad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#00e5a0"/><stop offset="100%" style="stop-color:#00c2ff"/></linearGradient></defs></svg>
+<div style="display:flex;gap:24px;align-items:flex-start">
+<div style="flex:1">
+<div class="score-ring"><svg viewBox="0 0 120 120"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fill" id="ring" cx="60" cy="60" r="52" stroke="url(#scoreGrad)" stroke-dasharray="326.7" stroke-dashoffset="326.7"/></svg><div class="score-center"><div class="score-num" id="scoreNum">0</div><div class="score-of">/ 100</div></div></div>
+<div style="text-align:center;margin-bottom:14px"><div class="risk-badge" id="riskBadge">-</div></div>
+</div>
+<div style="flex:1"><div class="radar-container"><canvas id="radarChart"></canvas></div></div>
+</div>
+<div class="prob-bar"><span style="color:var(--accent2)">%</span><div class="prob-info"><div class="prob-label">ML Success Probability</div><div class="prob-track"><div class="prob-fill" id="probFill" style="width:0%"></div></div></div><div class="prob-val" id="probVal">0%</div></div>
+<div id="metrics"></div>
+<div class="rec-list" id="recs"></div>
+<div class="whatif-section" id="whatifSection" style="display:none"><div class="whatif-title">What-If Analysis</div><div id="whatifResults"></div></div>
+</div>
+</div>
+<div class="card" style="margin-top:16px"><div class="card-title">Recent Evaluations</div><div class="glow-line"></div>
+<table><thead><tr><th>Project</th><th>ESG</th><th>Success</th><th>Risk</th></tr></thead><tbody id="histBody"><tr><td colspan="4" style="text-align:center;color:var(--text2);padding:20px">No evaluations yet</td></tr></tbody></table></div>
+</div></div></div>
+
+<!-- DASHBOARD -->
+<div class="page" id="page-dashboard">
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:center">
+<div><div class="page-title">Analytics Dashboard</div><div class="page-sub">Overview of all evaluated environmental projects</div></div>
+<div><a href="/export/csv" class="btn btn-primary btn-sm" style="text-decoration:none">Export CSV</a><button class="btn btn-danger btn-sm" onclick="clearAll()">Clear All</button></div>
+</div>
+<div class="stats-row" id="stats"></div>
+<div class="grid-2-eq">
+<div class="card"><div class="card-glow"></div><div class="card-title">Score Distribution</div><div class="glow-line"></div><div class="dist-flex" id="dist"></div></div>
+<div class="card"><div class="card-glow"></div><div class="card-title">Top Projects</div><div class="glow-line"></div><div id="topList"></div></div>
+</div>
+<div class="card" style="margin-bottom:24px"><div class="card-glow"></div><div class="card-title">Feature Importance</div><div class="glow-line"></div><div id="fiRows"></div></div>
+<div class="card"><div class="card-glow"></div><div class="card-title">All Evaluations</div><div class="glow-line"></div>
+<table><thead><tr><th>#</th><th>Project</th><th>ESG</th><th>Env</th><th>Soc</th><th>Econ</th><th>Success</th><th>Risk</th><th>Region</th><th></th></tr></thead><tbody id="tbody"></tbody></table></div>
+</div>
+
+<!-- COMPARE -->
+<div class="page" id="page-compare">
+<div class="page-header"><div class="page-title">Compare Projects</div><div class="page-sub">Side-by-side ESG analysis of up to 3 initiatives</div></div>
+<div class="grid-3">
+<div class="card"><div class="card-accent" style="background:var(--accent)"></div><div class="card-label">Project A</div><div class="glow-line"></div>
+<div class="form-group"><label class="form-label">Name</label><input class="form-input" id="n1" value="Solar Panel Initiative"></div>
+<div class="form-group"><label class="form-label">Budget</label><input class="form-input" id="b1" type="number" value="50000"></div>
+<div class="form-group"><label class="form-label">CO2</label><input class="form-input" id="c1" type="number" value="85"></div>
+<div class="form-group"><label class="form-label">Social</label><input class="form-input" id="s1" type="number" value="8"></div>
+<div class="form-group"><label class="form-label">Duration</label><input class="form-input" id="d1" type="number" value="12"></div></div>
+<div class="card"><div class="card-accent" style="background:var(--accent2)"></div><div class="card-label">Project B</div><div class="glow-line"></div>
+<div class="form-group"><label class="form-label">Name</label><input class="form-input" id="n2" value="Wind Farm Project"></div>
+<div class="form-group"><label class="form-label">Budget</label><input class="form-input" id="b2" type="number" value="120000"></div>
+<div class="form-group"><label class="form-label">CO2</label><input class="form-input" id="c2" type="number" value="95"></div>
+<div class="form-group"><label class="form-label">Social</label><input class="form-input" id="s2" type="number" value="6"></div>
+<div class="form-group"><label class="form-label">Duration</label><input class="form-input" id="d2" type="number" value="24"></div></div>
+<div class="card"><div class="card-accent" style="background:var(--accent3)"></div><div class="card-label">Project C</div><div class="glow-line"></div>
+<div class="form-group"><label class="form-label">Name</label><input class="form-input" id="n3" value="Community Garden"></div>
+<div class="form-group"><label class="form-label">Budget</label><input class="form-input" id="b3" type="number" value="5000"></div>
+<div class="form-group"><label class="form-label">CO2</label><input class="form-input" id="c3" type="number" value="10"></div>
+<div class="form-group"><label class="form-label">Social</label><input class="form-input" id="s3" type="number" value="9"></div>
+<div class="form-group"><label class="form-label">Duration</label><input class="form-input" id="d3" type="number" value="6"></div></div>
+</div>
+<div style="text-align:center;margin-bottom:24px"><button class="btn btn-primary btn-sm" id="cmpBtn" style="width:320px">Compare Projects</button></div>
+<div id="cmpResults" style="display:none"><div class="winner-card"><div class="winner-label">Winner</div><div class="winner-name" id="wName"></div><div class="winner-detail" id="wDetail"></div></div>
+<div class="card"><table><thead><tr><th>Metric</th><th class="center" id="h1">A</th><th class="center" id="h2">B</th><th class="center" id="h3">C</th></tr></thead><tbody id="cmpBody"></tbody></table></div></div>
+</div>
+
+<!-- MAP -->
+<div class="page" id="page-map">
+<div class="page-header"><div class="page-title">World Map</div><div class="page-sub">Geographic distribution of evaluated projects</div></div>
+<div class="grid-2-eq">
+<div class="card" style="grid-column:1/3"><div class="card-glow"></div><div id="map"></div></div>
+</div>
+<div class="grid-3" style="margin-top:16px" id="regionStats"></div>
+</div>
+
+<!-- GHG -->
+<div class="page" id="page-ghg">
+<div class="page-header"><div class="page-title">GHG Calculator</div><div class="page-sub">Calculate greenhouse gas emissions by Scope 1, 2, and 3 (GRI Standards)</div></div>
+<div class="grid-2">
+<div><div class="card"><div class="card-glow"></div><div class="card-title">Input Data</div><div class="glow-line"></div>
+<div class="form-group"><label class="form-label">Electricity (kWh/year)</label><input class="form-input" id="ghg_elec" type="number" value="10000"></div>
+<div class="form-group"><label class="form-label">Natural Gas (m3/year)</label><input class="form-input" id="ghg_gas" type="number" value="500"></div>
+<div class="form-group"><label class="form-label">Diesel (liters/year)</label><input class="form-input" id="ghg_diesel" type="number" value="200"></div>
+<div class="form-group"><label class="form-label">Petrol (liters/year)</label><input class="form-input" id="ghg_petrol" type="number" value="300"></div>
+<div class="form-group"><label class="form-label">Air Travel (km/year)</label><input class="form-input" id="ghg_flights" type="number" value="5000"></div>
+<div class="form-group"><label class="form-label">Waste (kg/year)</label><input class="form-input" id="ghg_waste" type="number" value="1000"></div>
+<button class="btn btn-primary" id="ghgBtn">Calculate Emissions</button>
+</div></div>
+<div><div class="card" id="ghgResultCard"><div class="card-glow"></div><div class="card-title">Results</div><div class="glow-line"></div>
+<div id="ghgEmpty" class="empty-state" style="height:300px"><div class="empty-orb">~</div><div style="font-size:14px">Enter data and click Calculate</div></div>
+<div id="ghgRes" style="display:none">
+<div class="ghg-result"><div class="ghg-total" id="ghgTotal">0</div><div class="ghg-unit">tons CO2e / year</div><div class="ghg-rating" id="ghgRating"></div><div id="ghgTip" style="font-size:13px;color:var(--text2);margin-top:8px"></div></div>
+<div id="ghgScopes"></div>
+<div style="margin-top:16px"><canvas id="ghgChart" height="200"></canvas></div>
+</div></div></div>
+</div></div>
+
+<!-- TRENDS -->
+<div class="page" id="page-trends">
+<div class="page-header"><div class="page-title">Trends</div><div class="page-sub">ESG score and success probability over time</div></div>
+<div class="card"><div class="card-glow"></div><div class="card-title">Score Trends</div><div class="glow-line"></div>
+<div class="trend-chart"><canvas id="trendChart"></canvas></div></div>
+</div>
+
+</div>
+<script>
+// Particles
+var canvas=document.getElementById('particles'),ctx=canvas.getContext('2d');
+var W,H,mouse={x:-9999,y:-9999},t=0;
+function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;}
+resize();window.addEventListener('resize',resize);
+document.addEventListener('mousemove',function(e){mouse.x=e.clientX;mouse.y=e.clientY;});
+var N=80,CD=150,MD=220,pts=[];
+for(var i=0;i<N;i++){var spd=0.12+Math.random()*0.18;pts.push({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-0.5)*spd,vy:(Math.random()-0.5)*spd,br:1+Math.random()*2,r:1+Math.random()*2,hue:150+Math.random()*60,ph:Math.random()*6.28,ps:0.008+Math.random()*0.02,op:0.15+Math.random()*0.3});}
+function frame(){t+=0.003;ctx.fillStyle='rgba(6,11,20,0.12)';ctx.fillRect(0,0,W,H);
+for(var i=0;i<N;i++){var n=pts[i];n.ph+=n.ps;n.r=n.br*(1+0.3*Math.sin(n.ph));var mx=mouse.x-n.x,my=mouse.y-n.y,md=Math.sqrt(mx*mx+my*my);if(md<MD&&md>0){var f=0.0003*(MD-md);n.vx+=mx/md*f;n.vy+=my/md*f;}n.vx*=0.998;n.vy*=0.998;n.x+=n.vx;n.y+=n.vy;if(n.x<-50)n.x=W+50;if(n.x>W+50)n.x=-50;if(n.y<-50)n.y=H+50;if(n.y>H+50)n.y=-50;}
+for(var i=0;i<N;i++){for(var j=i+1;j<N;j++){var dx=pts[i].x-pts[j].x,dy=pts[i].y-pts[j].y,d=Math.sqrt(dx*dx+dy*dy);if(d<CD){var a=0.06*(1-d/CD);ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);ctx.lineTo(pts[j].x,pts[j].y);ctx.strokeStyle='hsla('+Math.round((pts[i].hue+pts[j].hue)/2)+',70%,60%,'+a+')';ctx.lineWidth=0.6;ctx.stroke();}}}
+for(var i=0;i<N;i++){var p=pts[i];var g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r*3.5);g.addColorStop(0,'hsla('+p.hue+',80%,65%,'+(p.op*0.5)+')');g.addColorStop(1,'hsla('+p.hue+',80%,65%,0)');ctx.beginPath();ctx.arc(p.x,p.y,p.r*3.5,0,6.28);ctx.fillStyle=g;ctx.fill();ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.28);ctx.fillStyle='hsla('+p.hue+',80%,70%,'+p.op+')';ctx.fill();}
+requestAnimationFrame(frame);}frame();
+
+// Navigation
+var mapInited=false,trendChartObj=null,ghgChartObj=null,radarChartObj=null;
+document.querySelectorAll('.nav-item[data-page]').forEach(function(el){
+el.addEventListener('click',function(){
+var pg=this.dataset.page;
+document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active');});
+document.getElementById('page-'+pg).classList.add('active');
+document.querySelectorAll('.nav-item').forEach(function(n){n.classList.remove('active');});
+this.classList.add('active');
+if(pg==='dashboard')loadDashboard();
+if(pg==='map'){initMap();if(mapInited)loadMapMarkers();}
+if(pg==='trends')loadTrends();
+});});
+
+// Helpers
+function post(url,body,cb){var x=new XMLHttpRequest();x.open("POST",url,true);x.setRequestHeader("Content-Type","application/json");x.onload=function(){cb(JSON.parse(x.responseText));};x.send(JSON.stringify(body));}
+function get(url,cb){var x=new XMLHttpRequest();x.open("GET",url,true);x.onload=function(){cb(JSON.parse(x.responseText));};x.send();}
+function getProject(){return{name:document.getElementById("name").value,budget:Number(document.getElementById("budget").value),co2_reduction:Number(document.getElementById("co2").value),social_impact:Number(document.getElementById("social").value),duration_months:Number(document.getElementById("duration").value),region:document.getElementById("region").value};}
+
+// Toast notifications
+function showToast(msg,type){var c=document.getElementById("toasts");var t=document.createElement("div");t.className="toast toast-"+type;t.textContent=msg;c.appendChild(t);setTimeout(function(){if(t.parentNode)t.parentNode.removeChild(t);},4200);}
+
+
+
+// Templates
+function loadTemplate(type){document.querySelectorAll('.template-btn').forEach(function(b){b.classList.remove('active');});event.currentTarget.classList.add('active');
+var templates={
+solar:{name:'Solar Panel Initiative',budget:50000,co2:85,social:8,duration:12,country:'Germany'},
+wind:{name:'Wind Farm Project',budget:120000,co2:95,social:6,duration:24,country:'United Kingdom'},
+forest:{name:'Reforestation Program',budget:25000,co2:60,social:9,duration:18,country:'Brazil'},
+water:{name:'Water Treatment Plant',budget:40000,co2:30,social:7,duration:12,country:'Nigeria'},
+ev:{name:'EV Charging Network',budget:200000,co2:120,social:5,duration:36,country:'United States'},
+waste:{name:'Waste Recycling Center',budget:15000,co2:45,social:8,duration:10,country:'India'}
+};
+var t=templates[type];if(!t)return;
+document.getElementById('name').value=t.name;
+document.getElementById('budget').value=t.budget;
+document.getElementById('co2').value=t.co2;
+document.getElementById('social').value=t.social;
+document.getElementById('duration').value=t.duration;
+document.getElementById('region').value=t.country;
+showToast('Template loaded: '+t.name,'info');
+}
+
+// Animated counter
+function animateNum(el,target,suffix,dur){
+var start=0;var st=null;suffix=suffix||'';dur=dur||800;
+function step(ts){if(!st)st=ts;var p=Math.min((ts-st)/dur,1);
+var val=Math.round(p*target*10)/10;
+el.textContent=val+suffix;
+if(p<1)requestAnimationFrame(step);}
+requestAnimationFrame(step);
+}
+
+// Country autocomplete
+var allCountries={};
+get("/countries",function(data){
+allCountries=data;
+var inp=document.getElementById("region");
+var drop=document.getElementById("countryDrop");
+inp.addEventListener("input",function(){
+var val=this.value.toLowerCase();drop.innerHTML="";
+if(val.length<1){drop.style.display="none";return;}
+var matches=Object.keys(allCountries).filter(function(c){return c.toLowerCase().indexOf(val)!==-1;}).slice(0,10);
+if(!matches.length){drop.style.display="none";return;}
+drop.style.display="block";
+for(var i=0;i<matches.length;i++){var d=document.createElement("div");d.textContent=matches[i]+" ("+allCountries[matches[i]]+")";
+d.style.cssText="padding:10px 16px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border);transition:background .15s";
+d.dataset.country=matches[i];
+d.addEventListener("mouseenter",function(){this.style.background="rgba(0,229,160,0.06)";});
+d.addEventListener("mouseleave",function(){this.style.background="none";});
+d.addEventListener("click",function(){inp.value=this.dataset.country;drop.style.display="none";});
+drop.appendChild(d);}
+});
+inp.addEventListener("blur",function(){setTimeout(function(){drop.style.display="none";},200);});
+inp.addEventListener("focus",function(){if(this.value.length>=1)this.dispatchEvent(new Event("input"));});
+});
+
+// Model info
+get("/model-info",function(m){document.getElementById("modelBadge").textContent=m.best_model+" | "+m.accuracy+"% acc";
+var fi=m.feature_importance;var labels={"budget":"Budget","co2_reduction":"CO2 Reduction","social_impact":"Social Impact","duration_months":"Duration"};
+var colors=["#00e5a0","#00c2ff","#8b5cf6","#eab308"];var fhtml="";var idx=0;
+for(var k in fi){fhtml+='<div class="fi-row"><div class="fi-label">'+labels[k]+'</div><div class="fi-track"><div class="fi-fill" style="width:'+fi[k]+'%;background:'+colors[idx]+'"></div></div><div class="fi-val" style="color:'+colors[idx]+'">'+fi[k]+'%</div></div>';idx++;}
+document.getElementById("fiRows").innerHTML=fhtml;});
+
+// Evaluate
+function loadMiniHistory(){get("/history",function(data){var tb=document.getElementById("histBody");if(!data.length){tb.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--text2);padding:20px">No evaluations yet</td></tr>';return;}tb.innerHTML="";var s=data.slice(0,6);for(var i=0;i<s.length;i++){var r=s[i];var bc=r.total_score>=70?"badge-s":r.total_score>=40?"badge-m":"badge-w";tb.innerHTML+="<tr><td><strong>"+r.name+"</strong></td><td><strong>"+r.total_score+"</strong></td><td>"+r.success_probability+"%</td><td><span class='badge "+bc+"'>"+(r.risk_level||"-")+"</span></td></tr>";}});}
+
+function drawRadar(env,soc,eco){
+if(radarChartObj)radarChartObj.destroy();
+radarChartObj=new Chart(document.getElementById('radarChart'),{type:'radar',data:{labels:['Environment','Social','Economic'],datasets:[{label:'ESG Score',data:[env,soc,eco],backgroundColor:'rgba(0,229,160,0.15)',borderColor:'#00e5a0',borderWidth:2,pointBackgroundColor:['#00c2ff','#8b5cf6','#00e5a0'],pointBorderColor:'#fff',pointRadius:5}]},options:{responsive:true,maintainAspectRatio:true,scales:{r:{beginAtZero:true,max:100,ticks:{display:false},grid:{color:'rgba(255,255,255,0.05)'},pointLabels:{color:'#7a8ba8',font:{size:12,weight:'600'}}}},plugins:{legend:{display:false}}}});
+}
+
+document.getElementById("evalBtn").addEventListener("click",function(){
+post("/evaluate",getProject(),function(d){
+document.getElementById("res").style.display="block";document.getElementById("empty").style.display="none";document.getElementById("whatifSection").style.display="none";
+document.getElementById("scoreNum").textContent=d.total_score;
+document.getElementById("ring").style.strokeDashoffset=326.7-(d.total_score/100)*326.7;
+var rb=document.getElementById("riskBadge");rb.textContent="Risk: "+d.risk_level;rb.className="risk-badge risk-"+d.risk_level.toLowerCase();
+document.getElementById("probFill").style.width=d.success_probability+"%";document.getElementById("probVal").textContent=d.success_probability+"%";
+var pc=d.success_probability>=70?"#22c55e":d.success_probability>=40?"#eab308":"#ef4444";document.getElementById("probFill").style.background=pc;
+drawRadar(d.environment_score,d.social_score,d.economic_score);
+var ms=[{n:"Environment",v:d.environment_score,c:"#00c2ff",w:"40%"},{n:"Social Impact",v:d.social_score,c:"#8b5cf6",w:"30%"},{n:"Economic",v:d.economic_score,c:"#00e5a0",w:"30%"}];
+var mh="";for(var i=0;i<ms.length;i++){mh+='<div class="metric-card"><div class="metric-dot" style="background:'+ms[i].c+'"></div><div class="metric-body"><div class="metric-top"><span class="metric-name">'+ms[i].n+'</span><span class="metric-pct" style="color:'+ms[i].c+'">'+ms[i].v+'%</span></div><div class="metric-track"><div class="metric-fill" style="width:'+ms[i].v+'%;background:'+ms[i].c+'"></div></div><div class="metric-weight">Weight: '+ms[i].w+'</div></div></div>';}
+document.getElementById("metrics").innerHTML=mh;
+var rh="";for(var i=0;i<d.recommendations.length;i++){rh+='<div class="rec-item">'+d.recommendations[i]+'</div>';}document.getElementById("recs").innerHTML=rh;
+var riskType=d.risk_level==='Low'?'success':d.risk_level==='Medium'?'warning':'danger';
+showToast(document.getElementById('name').value+' — ESG '+d.total_score+', Risk '+d.risk_level+', Success '+d.success_probability+'%',riskType);
+loadMiniHistory();});});
+
+document.getElementById("whatifBtn").addEventListener("click",function(){
+post("/what-if",getProject(),function(d){
+document.getElementById("res").style.display="block";document.getElementById("empty").style.display="none";document.getElementById("whatifSection").style.display="block";
+var labels={"budget":"Budget +20%","co2_reduction":"CO2 +20 tons","social_impact":"Social +2 pts","duration_months":"Duration -6 mo"};
+var wh="";for(var key in d.variations){var v=d.variations[key];var cls=v.score_change>0?"whatif-pos":v.score_change<0?"whatif-neg":"";var sign=v.score_change>0?"+":"";
+wh+='<div class="whatif-row"><div class="whatif-label">'+labels[key]+'</div><div class="whatif-change '+cls+'">'+sign+v.score_change+' ESG</div><div class="whatif-change '+cls+'">'+sign+v.prob_change+'%</div></div>';}
+document.getElementById("whatifResults").innerHTML=wh;});});
+loadMiniHistory();
+
+// Dashboard
+function loadDashboard(){get("/history",function(data){
+var n=data.length,avgS=0,avgP=0,strong=0,medium=0,weak=0;
+for(var i=0;i<n;i++){avgS+=data[i].total_score;avgP+=data[i].success_probability;if(data[i].total_score>=70)strong++;else if(data[i].total_score>=40)medium++;else weak++;}
+if(n>0){avgS=(avgS/n).toFixed(1);avgP=(avgP/n).toFixed(1);}
+data.sort(function(a,b){return b.total_score-a.total_score;});
+document.getElementById("stats").innerHTML='<div class="stat"><div class="stat-accent" style="background:#00e5a0"></div><div class="stat-label">Total Projects</div><div class="stat-value">'+n+'</div></div><div class="stat"><div class="stat-accent" style="background:#00c2ff"></div><div class="stat-label">Avg ESG</div><div class="stat-value">'+avgS+'</div></div><div class="stat"><div class="stat-accent" style="background:#8b5cf6"></div><div class="stat-label">Avg Success</div><div class="stat-value">'+avgP+'%</div></div><div class="stat"><div class="stat-accent" style="background:#22c55e"></div><div class="stat-label">Strong</div><div class="stat-value" style="color:#22c55e">'+strong+'</div></div><div class="stat"><div class="stat-accent" style="background:#ef4444"></div><div class="stat-label">Weak</div><div class="stat-value" style="color:#ef4444">'+weak+'</div></div>';
+var mx=Math.max(strong,medium,weak,1);
+document.getElementById("dist").innerHTML='<div class="dist-col"><div class="dist-bar" style="height:'+Math.round(strong/mx*80)+'px;background:linear-gradient(180deg,#22c55e,rgba(34,197,94,0.3))"></div><div class="dist-count" style="color:#22c55e">'+strong+'</div><div class="dist-label">Strong</div></div><div class="dist-col"><div class="dist-bar" style="height:'+Math.round(medium/mx*80)+'px;background:linear-gradient(180deg,#eab308,rgba(234,179,8,0.3))"></div><div class="dist-count" style="color:#eab308">'+medium+'</div><div class="dist-label">Medium</div></div><div class="dist-col"><div class="dist-bar" style="height:'+Math.round(weak/mx*80)+'px;background:linear-gradient(180deg,#ef4444,rgba(239,68,68,0.3))"></div><div class="dist-count" style="color:#ef4444">'+weak+'</div><div class="dist-label">Weak</div></div>';
+var tl=document.getElementById("topList");tl.innerHTML="";var t5=data.slice(0,5);for(var i=0;i<t5.length;i++){var rc=i<3?["rank-1","rank-2","rank-3"][i]:"rank-n";tl.innerHTML+='<div class="top-item"><div class="top-rank '+rc+'">'+(i+1)+'</div><div class="top-name">'+t5[i].name+'</div><div class="top-score">'+t5[i].total_score+'</div></div>';}
+if(!t5.length)tl.innerHTML='<div style="text-align:center;color:var(--text2);padding:24px">No projects</div>';
+var tb=document.getElementById("tbody");tb.innerHTML="";for(var i=0;i<data.length;i++){var r=data[i];var bc=r.total_score>=70?"badge-s":r.total_score>=40?"badge-m":"badge-w";
+tb.innerHTML+="<tr><td>"+(i+1)+"</td><td><strong>"+r.name+"</strong></td><td><strong>"+r.total_score+"</strong></td><td>"+r.environment_score+"%</td><td>"+r.social_score+"%</td><td>"+r.economic_score+"%</td><td>"+r.success_probability+"%</td><td><span class='badge "+bc+"'>"+(r.risk_level||"-")+"</span></td><td>"+(r.region||"-")+"</td><td><button class='del-btn' onclick='del("+r.id+")'>x</button></td></tr>";}
+if(!n)tb.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--text2);padding:24px">No evaluations</td></tr>';
+});}
+function del(id){var x=new XMLHttpRequest();x.open("DELETE","/history/"+id,true);x.onload=function(){loadDashboard();loadMiniHistory();};x.send();}
+function clearAll(){if(confirm("Delete all?")){var x=new XMLHttpRequest();x.open("DELETE","/history",true);x.onload=function(){loadDashboard();loadMiniHistory();};x.send();}}
+
+// Compare
+function gp(n,b,c,s,d){return{name:document.getElementById(n).value,budget:Number(document.getElementById(b).value),co2_reduction:Number(document.getElementById(c).value),social_impact:Number(document.getElementById(s).value),duration_months:Number(document.getElementById(d).value)};}
+document.getElementById("cmpBtn").addEventListener("click",function(){var ps=[gp("n1","b1","c1","s1","d1"),gp("n2","b2","c2","s2","d2"),gp("n3","b3","c3","s3","d3")];var rs=[];var done=0;for(var i=0;i<3;i++){(function(idx){post("/evaluate",ps[idx],function(r){r.name=ps[idx].name;rs[idx]=r;done++;if(done===3)showCompare(rs);});})(i);}});
+function showCompare(r){document.getElementById("cmpResults").style.display="block";document.getElementById("h1").textContent=r[0].name;document.getElementById("h2").textContent=r[1].name;document.getElementById("h3").textContent=r[2].name;var best=r[0];for(var i=1;i<3;i++){if(r[i].total_score>best.total_score)best=r[i];}document.getElementById("wName").textContent=best.name;document.getElementById("wDetail").textContent="ESG: "+best.total_score+" | Success: "+best.success_probability+"%";
+var metrics=[["Total ESG","total_score"],["Environment","environment_score"],["Social","social_score"],["Economic","economic_score"],["Success %","success_probability"]];var colors=["#00e5a0","#00c2ff","#8b5cf6"];var tb=document.getElementById("cmpBody");tb.innerHTML="";
+for(var i=0;i<metrics.length;i++){var vals=[r[0][metrics[i][1]],r[1][metrics[i][1]],r[2][metrics[i][1]]];var mx=Math.max(vals[0],vals[1],vals[2]);var tr="<tr><td>"+metrics[i][0]+"</td>";for(var j=0;j<3;j++){var cls=vals[j]===mx?"best":"";tr+='<td class="center bar-cell '+cls+'">'+vals[j]+'<div class="track"><div class="fill" style="width:'+vals[j]+'%;background:'+colors[j]+'"></div></div></td>';}tb.innerHTML+=tr+"</tr>";}
+document.getElementById("cmpResults").scrollIntoView({behavior:'smooth'});}
+
+// Map
+var leafletMap=null;
+function initMap(){
+if(mapInited)return;mapInited=true;
+setTimeout(function(){
+var bounds=L.latLngBounds(L.latLng(-85,-180),L.latLng(85,180));
+leafletMap=L.map('map',{zoomControl:true,maxBounds:bounds,maxBoundsViscosity:1.0,minZoom:2,maxZoom:12,worldCopyJump:false}).setView([25,10],2);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'SORA.Earth',maxZoom:12,noWrap:true,bounds:[[-85,-180],[85,180]]}).addTo(leafletMap);
+loadMapMarkers();},200);}
+var mapMarkers=[];
+function loadMapMarkers(){if(!leafletMap)return;
+for(var m=0;m<mapMarkers.length;m++)leafletMap.removeLayer(mapMarkers[m]);
+mapMarkers=[];
+get("/history",function(data){
+var regionData={};
+for(var i=0;i<data.length;i++){var r=data[i];
+var country=r.region||'Unknown';
+var reg=(allCountries[country])||country;
+if(!regionData[reg])regionData[reg]={count:0,totalScore:0,totalProb:0};
+regionData[reg].count++;regionData[reg].totalScore+=r.total_score;regionData[reg].totalProb+=r.success_probability;
+if(!r.lat||!r.lon)continue;
+var color=r.total_score>=70?'#22c55e':r.total_score>=40?'#eab308':'#ef4444';
+var icon=L.divIcon({className:'',html:'<div style="width:16px;height:16px;background:'+color+';border-radius:50%;border:2px solid rgba(255,255,255,0.8);box-shadow:0 0 12px '+color+',0 0 24px '+color+'40;animation:markerPulse 2s ease infinite"></div>',iconSize:[16,16]});
+var marker=L.marker([r.lat,r.lon],{icon:icon}).addTo(leafletMap).bindPopup('<div style="min-width:200px"><strong style="font-size:15px;color:#00e5a0">'+r.name+'</strong><br><span style="color:#7a8ba8;font-size:12px">'+reg+'</span><hr style="border-color:rgba(255,255,255,0.1);margin:8px 0"><div style="display:flex;justify-content:space-between;margin:4px 0"><span>ESG Score</span><strong style="color:#00e5a0">'+r.total_score+'</strong></div><div style="display:flex;justify-content:space-between;margin:4px 0"><span>Success</span><strong style="color:#00c2ff">'+r.success_probability+'%</strong></div><div style="display:flex;justify-content:space-between;margin:4px 0"><span>Risk</span><strong style="color:'+color+'">'+r.risk_level+'</strong></div></div>');
+mapMarkers.push(marker);}
+var icons={"Europe":"🇪🇺","North America":"🌎","South America":"🌎","Asia":"🌏","Africa":"🌍","Oceania":"🌏","Middle East":"🌍"};
+var colors=["#00e5a0","#00c2ff","#8b5cf6","#eab308","#ef4444","#22c55e","#f97316"];
+var rs=document.getElementById("regionStats");rs.innerHTML="";
+var keys=Object.keys(regionData);var ci=0;
+for(var k=0;k<keys.length;k++){var rd=regionData[keys[k]];var avg=(rd.totalScore/rd.count).toFixed(1);var avgP=(rd.totalProb/rd.count).toFixed(1);var c=colors[ci%colors.length];ci++;
+rs.innerHTML+='<div class="card" style="padding:18px"><div class="card-glow"></div><div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:22px">'+(icons[keys[k]]||"&#127758;")+'</span><div><div style="font-size:14px;font-weight:700">'+keys[k]+'</div><div style="font-size:11px;color:var(--text2)">'+rd.count+' project'+(rd.count>1?"s":"")+'</div></div></div><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px"><span style="color:var(--text2)">Avg ESG</span><strong style="color:'+c+'">'+avg+'</strong></div><div class="metric-track"><div class="metric-fill" style="width:'+avg+'%;background:'+c+'"></div></div><div style="display:flex;justify-content:space-between;font-size:13px;margin-top:8px"><span style="color:var(--text2)">Avg Success</span><strong>'+avgP+'%</strong></div></div>';}
+if(!keys.length)rs.innerHTML='<div class="card" style="grid-column:1/4;text-align:center;color:var(--text2);padding:40px">No projects evaluated yet. Go to Evaluate to add projects.</div>';
+});}
+
+// GHG Calculator
+document.getElementById("ghgBtn").addEventListener("click",function(){
+var body={electricity_kwh:Number(document.getElementById("ghg_elec").value),natural_gas_m3:Number(document.getElementById("ghg_gas").value),diesel_liters:Number(document.getElementById("ghg_diesel").value),petrol_liters:Number(document.getElementById("ghg_petrol").value),flights_km:Number(document.getElementById("ghg_flights").value),waste_kg:Number(document.getElementById("ghg_waste").value)};
+post("/ghg-calculate",body,function(d){
+document.getElementById("ghgEmpty").style.display="none";document.getElementById("ghgRes").style.display="block";
+document.getElementById("ghgTotal").textContent=d.total_tons_co2;
+var rc=d.rating==="Excellent"?"#22c55e":d.rating==="Good"?"#00e5a0":d.rating==="Average"?"#eab308":"#ef4444";
+document.getElementById("ghgRating").textContent=d.rating;document.getElementById("ghgRating").style.background=rc+"20";document.getElementById("ghgRating").style.color=rc;
+document.getElementById("ghgTip").textContent=d.tip;
+var ghgType=d.rating==='Excellent'||d.rating==='Good'?'success':d.rating==='Average'?'warning':'danger';
+showToast('Carbon footprint: '+d.total_tons_co2+' tons CO2 — '+d.rating,ghgType);
+var mx=Math.max(d.scope1,d.scope2,d.scope3,0.01);
+document.getElementById("ghgScopes").innerHTML='<div class="scope-bar"><div class="scope-label">Scope 1</div><div class="scope-track"><div class="scope-fill" style="width:'+Math.round(d.scope1/mx*100)+'%;background:#ef4444"></div></div><div class="scope-val" style="color:#ef4444">'+d.scope1+'t</div></div><div class="scope-bar"><div class="scope-label">Scope 2</div><div class="scope-track"><div class="scope-fill" style="width:'+Math.round(d.scope2/mx*100)+'%;background:#eab308"></div></div><div class="scope-val" style="color:#eab308">'+d.scope2+'t</div></div><div class="scope-bar"><div class="scope-label">Scope 3</div><div class="scope-track"><div class="scope-fill" style="width:'+Math.round(d.scope3/mx*100)+'%;background:#00c2ff"></div></div><div class="scope-val" style="color:#00c2ff">'+d.scope3+'t</div></div>';
+if(ghgChartObj)ghgChartObj.destroy();
+ghgChartObj=new Chart(document.getElementById('ghgChart'),{type:'doughnut',data:{labels:Object.keys(d.breakdown).map(function(k){return k.charAt(0).toUpperCase()+k.slice(1).replace('_',' ');}),datasets:[{data:Object.values(d.breakdown),backgroundColor:['#eab308','#ef4444','#f97316','#00e5a0','#00c2ff','#8b5cf6'],borderWidth:0}]},options:{responsive:true,plugins:{legend:{position:'bottom',labels:{color:'#7a8ba8',font:{size:11}}}}}});
+});});
+
+// Trends
+function loadTrends(){get("/trends",function(data){
+if(!data.length)return;
+var labels=data.map(function(d){return d.date;});
+var scores=data.map(function(d){return d.score;});
+var probs=data.map(function(d){return d.prob;});
+if(trendChartObj)trendChartObj.destroy();
+trendChartObj=new Chart(document.getElementById('trendChart'),{type:'line',data:{labels:labels,datasets:[{label:'ESG Score',data:scores,borderColor:'#00e5a0',backgroundColor:'rgba(0,229,160,0.1)',fill:true,tension:0.4,pointRadius:4,pointBackgroundColor:'#00e5a0'},{label:'Success %',data:probs,borderColor:'#00c2ff',backgroundColor:'rgba(0,194,255,0.1)',fill:true,tension:0.4,pointRadius:4,pointBackgroundColor:'#00c2ff'}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{ticks:{color:'#7a8ba8',font:{size:10},maxRotation:45},grid:{color:'rgba(255,255,255,0.03)'}},y:{beginAtZero:true,max:100,ticks:{color:'#7a8ba8'},grid:{color:'rgba(255,255,255,0.03)'}}},plugins:{legend:{labels:{color:'#e8edf5'}}}}});
+});}
+</script>
+<script>
+function showLoader(msg){
+  var l=document.getElementById("loader");
+  if(msg)l.querySelector(".loader-text").textContent=msg;
+  l.classList.add("active");
+}
+function hideLoader(){document.getElementById("loader").classList.remove("active");}
+
+function validateForm(){
+  var ok=true;
+  var fields=[
+    {el:document.getElementById("name"),check:function(v){return v.trim().length>0}},
+    {el:document.getElementById("budget"),check:function(v){return !isNaN(v)&&parseFloat(v)>=0}},
+    {el:document.getElementById("co2"),check:function(v){return !isNaN(v)&&parseFloat(v)>=0}},
+    {el:document.getElementById("social"),check:function(v){var n=parseFloat(v);return !isNaN(n)&&n>=1&&n<=10}},
+    {el:document.getElementById("duration"),check:function(v){var n=parseFloat(v);return !isNaN(n)&&n>=1&&n<=120}}
+  ];
+  fields.forEach(function(f){f.el.classList.remove("error");});
+  fields.forEach(function(f){
+    if(!f.check(f.el.value)){f.el.classList.add("error");ok=false;}
+  });
+  if(!ok)showToast("Please fix invalid fields","danger");
+  return ok;
+}
+
+function exportPDF(){
+  var w=window.open("","_blank");
+  var name=document.getElementById("name").value;
+  var d=w.document;
+  d.open();
+  d.write("<!DOCTYPE html><html><head><meta charset=utf-8><title>SORA.Earth Report - "+name+"</title>");
+  d.write("<style>body{font-family:system-ui;background:#0c1220;color:#e8edf5;padding:40px;max-width:900px;margin:0 auto}");
+  d.write("h1{color:#00e5a0;border-bottom:2px solid #00e5a0;padding-bottom:12px}");
+  d.write(".meta{color:#7a8ba8;font-size:12px;margin-bottom:30px}");
+  d.write(".card{background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.06);border-radius:16px;padding:24px;margin-bottom:16px}");
+  d.write("table{width:100%;border-collapse:collapse}th,td{padding:8px 12px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.06)}th{color:#7a8ba8;font-size:11px;text-transform:uppercase}");
+  d.write(".score{font-size:48px;font-weight:800;color:#00e5a0;text-align:center}");
+  d.write(".footer{text-align:center;color:#7a8ba8;font-size:10px;margin-top:40px;border-top:1px solid rgba(255,255,255,0.06);padding-top:16px}");
+  d.write("@media print{body{background:#fff;color:#1a1a1a}h1{color:#059669}.card{border:1px solid #e5e7eb}}.leaflet-control-attribution{display:none!important}
+.leaflet-container{background:#0c1220!important}.leaflet-tile-pane{background:#0c1220!important}
+
+body.light-theme{background:#f0f2f5!important;color:#1a1a2e!important}
+body.light-theme .sidebar{background:rgba(255,255,255,0.95)!important}
+body.light-theme .card,.light-theme [style*="background:rgba(15,23,42"],.light-theme [style*="background: rgba(15,23,42"]{background:rgba(255,255,255,0.9)!important;border-color:rgba(0,0,0,0.08)!important;color:#1a1a2e!important}
+body.light-theme h1,body.light-theme h2,body.light-theme h3{color:#1a1a2e!important}
+body.light-theme .section-subtitle{color:#666!important}
+body.light-theme,body.light-theme select{background:rgba(0,0,0,0.03)!important;color:#1a1a2e!important;border-color:rgba(0,0,0,0.1)!important}
+body.light-theme .nav-item{color:#555!important}
+body.light-theme .nav-item.active{color:#059669!important}
+
+</style></head><body>
+<div id="toastContainer" style="position:fixed;top:20px;right:20px;z-index:10000;display:flex;flex-direction:column;gap:8px"></div>
+");
+  d.write("<h1>SORA.Earth ESG Report</h1>");
+  d.write("<div class=meta>Generated: "+new Date().toLocaleString()+" | Model: RandomForest 84%</div>");
+  d.write("<div class=card><table>");
+  d.write("<tr><th>Project</th><td>"+name+"</td></tr>");
+  d.write("<tr><th>Budget</th><td>$"+Number(document.getElementById("budget").value).toLocaleString()+"</td></tr>");
+  d.write("<tr><th>CO2 Reduction</th><td>"+document.getElementById("co2").value+" t/year</td></tr>");
+  d.write("<tr><th>Social Impact</th><td>"+document.getElementById("social").value+"/10</td></tr>");
+  d.write("<tr><th>Duration</th><td>"+document.getElementById("duration").value+" months</td></tr>");
+  d.write("<tr><th>Country</th><td>"+document.getElementById("region").value+"</td></tr>");
+  d.write("</table></div>");
+  var s=document.getElementById("scoreNum");
+  if(s)d.write("<div class=card><div class=score>ESG: "+s.textContent+"/100</div></div>");
+  var r=document.getElementById("riskBadge");
+  if(r)d.write("<div class=card><strong>"+r.textContent+"</strong></div>");
+  var recs=document.getElementById("recs");
+  if(recs&&recs.innerHTML)d.write("<div class=card><strong>Recommendations:</strong><br>"+recs.innerHTML+"</div>");
+  d.write("<div class=footer>SORA.Earth AI Platform v2.0</div>");
+  d.write("</body></html>");
+  d.close();
+  setTimeout(function(){w.print();},600);
+}
+
+(function(){
+  var origEval=document.getElementById("evalBtn");
+  if(!origEval)return;
+  var origHandler=origEval.onclick;
+  origEval.addEventListener("click",function(e){
+    if(!validateForm()){e.stopImmediatePropagation();return;}
+  },true);
+  
+  var origClickListeners=true;
+  var pdfBtn=document.getElementById("pdfBtn");
+  
+  var observer=new MutationObserver(function(){
+    var res=document.getElementById("res");
+    if(res&&res.style.display==="block"&&pdfBtn){
+      pdfBtn.style.display="block";
+    }
+  });
+  var res=document.getElementById("res");
+  if(res)observer.observe(res,{attributes:true,attributeFilter:["style"]});
+})();
+
+function loadShap(){
+  var data={
+    name:document.getElementById("name").value,
+    budget:parseFloat(document.getElementById("budget").value),
+    co2_reduction:parseFloat(document.getElementById("co2").value),
+    social_impact:parseFloat(document.getElementById("social").value),
+    duration_months:parseInt(document.getElementById("duration").value),
+    region:document.getElementById("region").value
+  };
+  var xhr=new XMLHttpRequest();
+  xhr.open("POST","/shap");
+  xhr.setRequestHeader("Content-Type","application/json");
+  xhr.onload=function(){
+    if(xhr.status!==200)return;
+    var r=JSON.parse(xhr.responseText);
+    var container=document.getElementById("shapBars");
+    container.innerHTML="";
+    var maxVal=Math.max.apply(null,r.shap_values.map(function(v){return Math.abs(v);}));
+    if(maxVal===0)maxVal=0.01;
+    for(var i=0;i<r.features.length;i++){
+      var val=r.shap_values[i];
+      var pct=Math.abs(val)/maxVal*100;
+      var color=val>=0?"#00e5a0":"#ef4444";
+      var row=document.createElement("div");
+      row.style.cssText="display:flex;align-items:center;margin-bottom:8px;gap:10px";
+      row.innerHTML="<span style=\"color:#7a8ba8;font-size:12px;width:110px;text-align:right\">"+r.features[i]+"</span>"
+        +"<div style=\"flex:1;height:24px;background:rgba(255,255,255,0.03);border-radius:6px;overflow:hidden;position:relative\">"
+        +"<div style=\"height:100%;width:"+pct+"%;background:"+color+";border-radius:6px;transition:width 0.8s ease\"></div></div>"
+        +"<span style=\"color:"+color+";font-size:13px;font-weight:600;width:70px\">"+(val>=0?"+":"")+val.toFixed(4)+"</span>";
+      container.appendChild(row);
+    }
+    document.getElementById("shapBase").textContent=(r.base_value*100).toFixed(1)+"%";
+    document.getElementById("shapBlock").style.display="block";
+  };
+  xhr.send(JSON.stringify(data));
+}
+
+
+function showToast(msg, type){
+  var c=document.getElementById("toastContainer");
+  if(!c)return;
+  var t=document.createElement("div");
+  var bg=type==="success"?"linear-gradient(135deg,#00e5a0,#00c2ff)":type==="danger"?"linear-gradient(135deg,#ef4444,#dc2626)":"linear-gradient(135deg,#3b82f6,#2563eb)";
+  t.style.cssText="padding:12px 20px;border-radius:10px;color:#fff;font-size:13px;font-weight:600;background:"+bg+";box-shadow:0 4px 20px rgba(0,0,0,0.3);animation:slideIn 0.3s ease;max-width:320px";
+  t.textContent=msg;
+  c.appendChild(t);
+  setTimeout(function(){t.style.opacity="0";t.style.transition="opacity 0.3s";setTimeout(function(){t.remove();},300);},3000);
+}
+
+function toggleTheme(){
+  document.body.classList.toggle("light-theme");
+  var isLight=document.body.classList.contains("light-theme");
+  localStorage.setItem("sora-theme",isLight?"light":"dark");
+  showToast(isLight?"Switched to Light theme":"Switched to Dark theme","info");
+}
+
+(function(){
+  if(localStorage.getItem("sora-theme")==="light")document.body.classList.add("light-theme");
+})();
+
+var origEvalBtn=document.getElementById("evalBtn");
+if(origEvalBtn){
+  var origOnclick=origEvalBtn.getAttribute("onclick");
+  origEvalBtn.setAttribute("onclick","");
+  origEvalBtn.addEventListener("click",function(){
+    var loader=document.getElementById("loader");
+    if(loader){loader.style.display="flex";}
+    setTimeout(function(){
+      try{eval(origOnclick);}catch(e){}
+      setTimeout(function(){
+        if(loader)loader.style.display="none";
+        showToast("Project evaluated successfully!","success");
+        loadModelComparison();
+      },500);
+    },800);
+  });
+}
+
+function loadModelComparison(){
+  var data={
+    name:document.getElementById("name").value,
+    budget:parseFloat(document.getElementById("budget").value)||0,
+    co2_reduction:parseFloat(document.getElementById("co2").value)||0,
+    social_impact:parseFloat(document.getElementById("social").value)||0,
+    duration_months:parseInt(document.getElementById("duration").value)||12,
+    region:document.getElementById("region").value
+  };
+  var xhr=new XMLHttpRequest();
+  xhr.open("POST","/evaluate-compare");
+  xhr.setRequestHeader("Content-Type","application/json");
+  xhr.onload=function(){
+    if(xhr.status!==200)return;
+    var r=JSON.parse(xhr.responseText);
+    var block=document.getElementById("modelCompare");
+    if(!block)return;
+    block.style.display="block";
+    block.innerHTML="<h4 style=\"color:#e8edf5;margin-bottom:8px\">🤖 Model Comparison</h4>"
+      +"<div style=\"display:flex;gap:12px\">"
+      +"<div style=\"flex:1;background:rgba(0,229,160,0.08);padding:12px;border-radius:10px;text-align:center\">"
+      +"<div style=\"color:#7a8ba8;font-size:11px\">RandomForest</div>"
+      +"<div style=\"color:#00e5a0;font-size:22px;font-weight:800\">"+r.RandomForest.probability+"%</div></div>"
+      +"<div style=\"flex:1;background:rgba(0,194,255,0.08);padding:12px;border-radiu10px;text-align:center\">"
+      +"<div style=\"color:#7a8ba8;font-size:11px\">XGBoost</div>"
+      +"<div style=\"color:#00c2ff;font-size:22px;font-weight:800\">"+r.XGBoost.probability+"%</div></div>"
+      +"</div>"
+      +"<div style=\"margin-top:8px;text-align:center;font-size:11px;color:"+(r.agreement?"#00e5a0":"#eab308")+"\">"+(r.agreement?"✅ Models agree":"⚠️ Models diverge — review recommended")+"</div>";
+  };
+  xhr.send(JSON.stringify(data));
+}
+
+</script>
+
+</body>
+</html>

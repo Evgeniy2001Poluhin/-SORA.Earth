@@ -1,0 +1,16 @@
+{
+  "name": "SORA.Earth AI Platform",
+  "short_name": "SORA.Earth",
+  "description": "AI-Powered ESG Assessment",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#00e5a0",
+  "icons": [
+    {
+      "src": "/static/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
