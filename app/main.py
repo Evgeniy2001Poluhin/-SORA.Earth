@@ -1,5 +1,6 @@
 from functools import lru_cache
 from fastapi import FastAPI
+from app.middleware import MetricsMiddleware, METRICS
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from typing import List, Optional
@@ -75,6 +76,7 @@ def log_prediction(endpoint, input_data, result):
                     input_data.duration_months, result.get("prediction",""), result.get("probability","")])
 
 app = FastAPI(title="SORA.Earth AI Platform", version="2.0.0")
+app.add_middleware(MetricsMiddleware)
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 with open(SCALER_PATH, "rb") as f:
@@ -638,3 +640,24 @@ def predictions_history(limit: int = 50):
         return {"predictions": [], "total": 0}
     df = pd.read_csv(PRED_LOG)
     return {"predictions": df.tail(limit).to_dict(orient="records"), "total": len(df)}
+
+
+@app.get("/metrics")
+async def metrics():
+    return METRICS
+
+@app.get("/metrics/prometheus")
+async def prometheus_metrics():
+    m = METRICS
+    lines = [
+        f'sora_requests_total {m["requests_total"]}',
+        f'sora_predictions_total {m["predictions_total"]}',
+        f'sora_errors_total {m["errors_total"]}',
+        f'sora_avg_response_time_ms {m["avg_response_time_ms"]}',
+    ]
+    for ep, count in m["requests_by_endpoint"].items():
+        lines.append(f'sora_requests_by_endpoint{{path="{ep}"}} {count}')
+    for st, count in m["requests_by_status"].items():
+        lines.append(f'sora_requests_by_status{{status="{st}"}} {count}')
+    from starlette.responses import PlainTextResponse
+    return PlainTextResponse("\n".join(lines))

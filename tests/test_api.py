@@ -272,3 +272,17 @@ class TestPredictionHistory:
         assert r.status_code == 200
         assert "predictions" in r.json()
         assert "total" in r.json()
+
+def test_metrics_endpoint(client):
+    client.post("/predict/stacking", json={"budget": 500000, "co2_reduction": 1000, "social_impact": 7, "duration_months": 12})
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["requests_total"] >= 1
+    assert data["predictions_total"] >= 1
+
+def test_prometheus_metrics(client):
+    client.get("/health")
+    r = client.get("/metrics/prometheus")
+    assert r.status_code == 200
+    assert "sora_requests_total" in r.text
