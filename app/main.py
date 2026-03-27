@@ -275,7 +275,7 @@ def export_csv():
     w = csv.writer(output)
     w.writerow(["Name","Budget","CO2 Reduction","Social Impact","Duration (months)","ESG Score","Environment","Social","Economic","Success Probability","Risk Level","Region","Date"])
     for r in rows:
-        w.writerow([r["name"],r["budget"],r["co2_reduction"],r["social_impact"],r["duration_months"],r["total_score"],r["environment_score"],r["social_score"],r["economiscore"],r["success_probability"],r["risk_level"],r["region"],r["created_at"]])
+        w.writerow([r["name"],r["budget"],r["co2_reduction"],r["social_impact"],r["duration_months"],r["total_score"],r["environment_score"],r["social_score"],r["economic_score"],r["success_probability"],r["risk_level"],r["region"],r["created_at"]])
     output.seek(0)
     return StreamingResponse(io.BytesIO(output.getvalue().encode()), media_type="text/csv", headers={"Content-Disposition":"attachment; filename=sora_earth_projects.csv"})
 

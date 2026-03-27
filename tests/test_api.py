@@ -123,3 +123,8 @@ def test_trends():
 def test_model_compare():
     r = client.post("/analytics/model-compare", json=PROJECT)
     assert r.status_code == 200
+
+def test_csv_export():
+    r = client.get("/export/csv")
+    assert r.status_code == 200
+    assert "text/csv" in r.headers.get("content-type", "")
