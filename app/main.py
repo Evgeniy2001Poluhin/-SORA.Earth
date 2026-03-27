@@ -45,7 +45,7 @@ def log_prediction(endpoint, input_data, result):
         w = csv.writer(f)
         if not file_exists:
             w.writerow(["timestamp","endpoint","budget","co2_reduction","social_impact","duration_months","prediction","probability"])
-        w.writerow([datetime.now().isoformat(), endpoint,
+        w.writerow([datetime.datetime.now().isoformat(), endpoint,
                     input_data.budget, input_data.co2_reduction, input_data.social_impact,
                     input_data.duration_months, result.get("prediction",""), result.get("probability","")])
 
@@ -128,11 +128,26 @@ def calculate_esg(project, region_name='Europe'):
     features_scaled = make_features(project)
     success_prob = round(float(rf_model.predict_proba(features_scaled)[0][1]) * 100, 2)
     recommendations = []
-    if score_env < 0.5: recommendations.append("Increase CO2 reduction targets")
-    if score_soc < 0.5: recommendations.append("Strengthen social programs")
-    if score_eco < 0.5: recommendations.append("Consider increasing budget")
-    if project.duration_months > 36: recommendations.append("Long timeline may reduce confidence")
-    if not recommendations: recommendations.append("Strong project across all ESG dimensions")
+    if score_env < 0.7:
+        target_co2 = min(int(project.co2_reduction + (0.7 - score_env) * 100), 100)
+        recommendations.append(f"Increase CO2 reduction from {project.co2_reduction}% to {target_co2}%+ to reach Strong environmental rating")
+    if score_soc < 0.7:
+        target_si = min(int(project.social_impact + (0.7 - score_soc) * 10) + 1, 10)
+        recommendations.append(f"Boost social impact score from {project.social_impact} to {target_si}+ (add community engagement, job creation programs)")
+    if score_eco < 0.5:
+        recommendations.append(f"Budget of ${project.budget:,.0f} is below optimal. Consider $75,000+ for stronger economic score")
+    elif score_eco < 0.7:
+        recommendations.append(f"Budget is moderate. Increasing to $120,000+ would significantly improve economic rating")
+    if project.duration_months > 36:
+        recommendations.append(f"Duration of {project.duration_months} months applies a penalty. Consider splitting into phases under 36 months")
+    elif project.duration_months < 6:
+        recommendations.append("Very short timeline may limit impact. Consider extending to 6-12 months")
+    if total < 50:
+        recommendations.append("⚠️ High risk: focus on CO2 reduction and social impact as priority improvements")
+    elif total >= 75 and success_prob >= 70:
+        recommendations.append("[OK] Excellent ESG profile — r green bond certification")
+    if not recommendations:
+        recommendations.append("Strong project across all ESG dimensions — consider scaling up")
     risk_level = "Low" if total >= 75 and success_prob >= 70 else ("Medium" if total >= 50 and success_prob >= 40 else "High")
     return {"total_score":total,"environment_score":round(score_env*100,1),"social_score":round(score_soc*100,1),
         "economic_score":round(score_eco*100,1),"success_probability":success_prob,"recommendations":recommendations,
@@ -157,7 +172,7 @@ def evaluate_project(project: Project):
     lon = cdata["lon"] + (hash(project.name) % 10 - 5) * 0.3
     conn = get_db()
     conn.execute("INSERT INTO evaluations (name,budget,co2_reduction,social_impact,duration_months,total_score,environment_score,social_score,economic_score,success_probability,recommendation,risk_level,created_at,region,lat,lon) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (project.name,project.budget,project.co2_reduction,project.social_impact,project.duration_months,result["total_score"],result["environment_score"],result["social_score"],result["economic_score"],result["success_probability"],"; ".join(result["recommendations"]),result["risk_level"],datetime.now().isoformat(),region_name,lat,lon))
+        (project.name,project.budget,project.co2_reduction,project.social_impact,project.duration_months,result["total_score"],result["environment_score"],result["social_score"],result["economic_score"],result["success_probability"],"; ".join([_sanitize_pdf(r) for r in result["recommendations"]]),result["risk_level"],datetime.datetime.now().isoformat(),region_name,lat,lon))
     conn.commit(); conn.close()
     result["region"]=region_name; result["lat"]=lat; result["lon"]=lon
     return result
@@ -248,6 +263,23 @@ def delete_evaluation(eval_id: int):
 
 @app.delete("/history")
 def clear_history():
+    conn = get_db(); conn.execute('DELETE FROM evaluations'); conn.commit(); conn.close()
+    return {"status":"cleared"}
+
+@app.get("/export/csv")
+def export_csv():
+    conn = get_db()
+    rows = conn.execute("SELECT name,budget,co2_reduction,social_impact,duration_months,total_score,environment_score,social_score,economic_score,success_probability,risk_level,region,created_at FROM evaluations ORDER BY created_at DESC").fetchall()
+    conn.close()
+    output = io.StringIO()
+    w = csv.writer(output)
+    w.writerow(["Name","Budget","CO2 Reduction","Social Impact","Duration (months)","ESG Score","Environment","Social","Economic","Success Probability","Risk Level","Region","Date"])
+    for r in rows:
+        w.writerow([r["name"],r["budget"],r["co2_reduction"],r["social_impact"],r["duration_months"],r["total_score"],r["environment_score"],r["social_score"],r["economiscore"],r["success_probability"],r["risk_level"],r["region"],r["created_at"]])
+    output.seek(0)
+    return StreamingResponse(io.BytesIO(output.getvalue().encode()), media_type="text/csv", headers={"Content-Disposition":"attachment; filename=sora_earth_projects.csv"})
+
+# EXPORT_MARKER
     conn = get_db(); conn.execute("DELETE FROM evaluations"); conn.commit(); conn.close()
     return {"status":"cleared"}
 
@@ -320,6 +352,9 @@ def countries_list(): return {k:v["region"] for k,v in COUNTRIES.items()}
 @app.get("/metrics")
 async def get_metrics(): return METRICS
 
+@app.get("/system/metrics")
+async def get_system_metrics(): return METRICS
+
 @app.get("/metrics/prometheus")
 async def prometheus_metrics():
     m = METRICS
@@ -337,3 +372,167 @@ def predict_nn_legacy(project: Project):
 def evaluate_compare_legacy(project: Project):
     data = ProjectInput(budget=project.budget, co2_reduction=project.co2_reduction, social_impact=project.social_impact, duration_months=project.duration_months)
     return predict_compare(data)
+
+# ============ CLUSTERING ============
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+
+@app.get("/analytics/clusters")
+def cluster_projects(n_clusters: int = 3):
+    db = get_db()
+    rows = db.execute("SELECT * FROM evaluations").fetchall()
+    if len(rows) < n_clusters:
+        return {"error": "Not enough projects", "clusters": []}
+    data = []
+    projects = []
+    for r in rows:
+        d = dict(r)
+        projects.append(d)
+        data.append([d.get("total_score",0), d.get("environment_score",0),
+                      d.get("social_score",0), d.get("economic_score",0),
+                      float(d.get("success_probability",0) or 0)])
+    import numpy as np
+    X = StandardScaler().fit_transform(np.array(data))
+    km = KMeans(n_clusters=min(n_clusters, len(rows)), random_state=42, n_init=10).fit(X)
+    for i, p in enumerate(projects):
+        p["cluster"] = int(km.labels_[i])
+    centers = km.cluster_centers_.tolist()
+    return {"projects": projects, "centers": centers, "n_clusters": len(set(km.labels_))}
+
+# ============ PDF REPORT ============
+from fpdf import FPDF
+from fastapi.responses import FileResponse
+import tempfile, datetime
+
+def _sanitize_pdf(text):
+    import re
+    return str(text).encode('ascii', 'ignore').decode('ascii').strip()
+
+@app.post("/report/pdf")
+def generate_pdf_report(project: Project):
+    esg = calculate_esg(project, project.region)
+    feats = make_features(ProjectInput(budget=project.budget, co2_reduction=project.co2_reduction,
+                                        social_impact=project.social_impact, duration_months=project.duration_months))
+    prob = float(ensemble_model.predict_proba(feats)[0][1])
+    prediction = int(prob >= best_threshold)
+    risk = "Low" if esg["total_score"]>=70 else "Medium" if esg["total_score"]>=40 else "High"
+
+    pdf = FPDF()
+    _orig_normalize = pdf.normalize_text
+    def _safe_normalize(txt):
+        return _orig_normalize(_sanitize_pdf(txt))
+    pdf.normalize_text = _safe_normalize
+    pdf.add_page()
+    pdf.set_font("Helvetica","B",22)
+    pdf.cell(0,15,"SORA.Earth - Project ESG Report",ln=True,align="C")
+    pdf.set_font("Helvetica","",10)
+    pdf.cell(0,8,f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}",ln=True,align="C")
+    pdf.ln(10)
+
+    pdf.set_font("Helvetica","B",14)
+    pdf.cell(0,10,"Project Overview",ln=True)
+    pdf.set_font("Helvetica","",11)
+    info = [("Name", project.name), ("Budget", f"${project.budget:,.0f}"),
+            ("CO2 Reduction", f"{project.co2_reduction} tons/year"),
+            ("Social Impact", f"{project.social_impact}/10"),
+            ("Duration", f"{project.duration_months} months"), ("Country", project.region)]
+    for k,v in info:
+        pdf.cell(60,8,k+":",0)
+        pdf.cell(0,8,str(v),ln=True)
+    pdf.ln(6)
+
+    pdf.set_font("Helvetica","B",14)
+    pdf.cell(0,10,"ESG Assessment",ln=True)
+    pdf.set_font("Helvetica","",11)
+    scores = [("Total ESG Score", f"{esg['total_score']}/100"),
+              ("Environment", f"{esg['environment_score']}/100"),
+              ("Social", f"{esg['social_score']}/100"),
+              ("Economic", f"{esg['economic_score']}/100"),
+              ("Risk Level", risk),
+              ("ML Success Probability", f"{prob*100:.2f}%"),
+              ("Prediction", "Success" if prediction else "Fail")]
+    for k,v in scores:
+        pdf.cell(60,8,k+":",0)
+        pdf.cell(0,8,str(v),ln=True)
+    pdf.ln(6)
+
+    if esg.get("recommendations"):
+        pdf.set_font("Helvetica","B",14)
+        pdf.cell(0,10,"Recommendations",ln=True)
+        pdf.set_font("Helvetica","",11)
+        for i,r in enumerate(esg["recommendations"],1):
+            pdf.set_x(10)
+            pdf.multi_cell(0,7,_sanitize_pdf(f"{i}. {r}"))
+    pdf.ln(6)
+
+    pdf.set_font("Helvetica","I",9)
+    pdf.cell(0,8,"This report was generated by SORA.Earth AI Platform v2.0",ln=True,align="C")
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    pdf.output(tmp.name)
+    return FileResponse(tmp.name, media_type="application/pdf",
+                        filename=f"SORA_Earth_{project.name.replace(' ','_')}_Report.pdf")
+
+# ============ CLUSTERING ============
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+
+
+@app.get("/analytics/correlation")
+def correlation_matrix():
+    db = get_db()
+    rows = db.execute("SELECT budget, co2_reduction, social_impact, duration_months, total_score FROM evaluations").fetchall()
+    if len(rows) < 3:
+        return {"error": "Need at least 3 projects"}
+    import numpy as np
+    cols = ["budget","co2_reduction","social_impact","duration_months","total_score"]
+    data = np.array([[r[c] for c in cols] for r in rows], dtype=float)
+    corr = np.corrcoef(data.T).tolist()
+    return {"labels": cols, "matrix": corr}
+
+# ============ MONTE CARLO ============
+import numpy as np
+
+@app.post("/analytics/montecarlo")
+def monte_carlo(project: ProjectInput, n_simulations: int = 1000):
+    base = [project.budget, project.co2_reduction, project.social_impact, project.duration_months]
+    results = []
+    for _ in range(n_simulations):
+        noise = np.random.normal(1.0, 0.15, 4)
+        sim = [max(0, base[i]*noise[i]) for i in range(4)]
+        sim[2] = min(10, max(1, sim[2]))
+        feats = make_features(ProjectInput(budget=sim[0], co2_reduction=sim[1],
+                                            social_impact=sim[2], duration_months=sim[3]))
+        prob = float(ensemble_model.predict_proba(feats)[0][1])
+        results.append(round(prob*100, 2))
+    results.sort()
+    return {
+        "simulations": n_simulations,
+        "mean_probability": round(np.mean(results), 2),
+        "median_probability": round(np.median(results), 2),
+        "std": round(np.std(results), 2),
+        "p5": round(np.percentile(results, 5), 2),
+        "p25": round(np.percentile(results, 25), 2),
+        "p75": round(np.percentile(results, 75), 2),
+        "p95": round(np.percentile(results, 95), 2),
+        "histogram": results
+    }
+
+# ============ MODEL COMPARISON ============
+@app.post("/analytics/model-compare")
+def compare_models(data: ProjectInput):
+    feats = make_features(data)
+    results = {}
+    for name, mdl in [("RandomForest", rf_model), ("XGBoost", xgb_model)]:
+        prob = float(mdl.predict_proba(feats)[0][1])
+        results[name] = {"probability": round(prob*100, 2), "prediction": int(prob >= 0.5)}
+    # Stacking
+    prob_s = float(ensemble_model.predict_proba(feats)[0][1])
+    results["Stacking Ensemble"] = {"probability": round(prob_s*100, 2), "prediction": int(prob_s >= best_threshold)}
+    # Neural
+    import torch
+    nt = torch.FloatTensor(feats if isinstance(feats, np.ndarray) else feats.values)
+    with torch.no_grad():
+        prob_n = float(nn_model(nt).item())
+    results["Neural Network"] = {"probability": round(prob_n*100, 2), "prediction": int(prob_n >= 0.5)}
+    return {"models": results, "best_model": max(results.keys(), key=lambda k: results[k]["probability"])}
