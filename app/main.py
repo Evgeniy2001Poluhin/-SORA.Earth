@@ -3,6 +3,7 @@ from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 from functools import lru_cache
 from fastapi import FastAPI, Depends, HTTPException
 from prometheus_fastapi_instrumentator import Instrumentator
+from app.cache import cache
 from app.drift_detection import drift_detector
 from app.mlflow_tracking import log_prediction, log_evaluation, get_experiment_stats
 from app.rate_limit import limiter, rate_limit_handler, SlowAPIMiddleware, RateLimitExceeded
@@ -198,6 +199,17 @@ def list_users(user: UserInfo = Depends(require_admin)):
 
 
 
+
+# ============ CACHE MANAGEMENT ============
+@app.get("/cache/stats", tags=["cache"])
+def cache_stats():
+    return cache.stats()
+
+@app.post("/cache/clear", tags=["cache"])
+def clear_cache():
+    cache.clear()
+    return {"status": "cache cleared"}
+
 # ============ DATA DRIFT DETECTION ============
 @app.get("/mlops/drift", tags=["mlops"])
 def check_drift():
@@ -235,6 +247,10 @@ def health():
 
 @app.post("/evaluate")
 def evaluate_project(project: Project):
+    cache_key = cache._make_key("eval", project.dict())
+    cached = cache.get(cache_key)
+    if cached:
+        return cached
     cdata = COUNTRIES.get(project.region or "Germany", {"region":"Europe","lat":50.0,"lon":10.0})
     region_name = cdata.get("region","Europe")
     result = calculate_esg(project, region_name)
@@ -247,6 +263,7 @@ def evaluate_project(project: Project):
     result["region"]=region_name; result["lat"]=lat; result["lon"]=lon
     log_evaluation(project.name, result, result["risk_level"])
     drift_detector.add_observation({"budget": project.budget, "co2_reduction": project.co2_reduction, "social_impact": project.social_impact, "duration_months": project.duration_months})
+
     country_name = project.region or "Germany"
     bench = BENCHMARKS.get(country_name, GLOBAL_AVG)
     result["country_benchmark"] = {
@@ -257,6 +274,7 @@ def evaluate_project(project: Project):
         "hdi": bench["hdi"],
         "project_vs_country": {"esg_score_diff": round(result["total_score"] - bench["esg_rank"], 2), "above_average": result["total_score"] > 50}
     }
+    cache.set(cache_key, result, ttl=600)
     return result
 
 @app.post("/predict/compare")
