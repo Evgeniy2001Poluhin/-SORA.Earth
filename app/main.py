@@ -243,7 +243,7 @@ def batch_evaluate(req: BatchRequest):
     fail = 0
     for p in req.projects:
         try:
-            project = Project(**{k: v for k, v in p.items() if k in Project.__fields__})
+            project = Project(**{k: v for k, v in p.items() if k in Project.model_fields})
             cdata = COUNTRIES.get(project.region or "Germany", {"region":"Europe","lat":50.0,"lon":10.0})
             region_name = cdata.get("region","Europe")
             result = calculate_esg(project, region_name)
@@ -331,7 +331,7 @@ def health():
 
 @app.post("/evaluate")
 def evaluate_project(project: Project):
-    cache_key = cache._make_key("eval", project.dict())
+    cache_key = cache._make_key("eval", project.model_dump())
     cached = cache.get(cache_key)
     if cached:
         return cached
