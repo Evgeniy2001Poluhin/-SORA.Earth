@@ -1,65 +1,43 @@
-version: '3.8'
+version: "3.9"
 
 services:
-  web:
+  app:
     build: .
-    container_name: sora-earth-api
+    container_name: sora_earth_app
     ports:
       - "8000:8000"
-    environment:
-      - SORA_ENV=production
     volumes:
       - ./data:/app/data
-      - ./models:/app/models
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.retention.time=30d'
-    depends_on:
-      - web
-    restart: unless-stopped
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
-    ports:
-      - "3000:3000"
+      - ./logs:/app/logs
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=sora2026
+      - PYTHONUNBUFFERED=1
+      - SORA_ENV=production
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: sora_earth_nginx
+    ports:
+      - "80:80"
     volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - prometheus
+      app:
+        condition: service_healthy
     restart: unless-stopped
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:latest
-    container_name: mlflow
+    image: python:3.9-slim
+    container_name: sora_earth_mlflow
+    command: >
+      bash -c "pip install mlflow && mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow.db"
     ports:
       - "5000:5000"
-    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow.db --default-artifact-root /mlflow/artifacts
     volumes:
-      - mlflow_data:/mlflow
+      - ./mlruns:/mlruns
     restart: unless-stopped
-
-volumes:
-  mlflow_data:
-  prometheus_data:
-  grafana_data:
