@@ -176,6 +176,16 @@ def evaluate_project(project: Project):
         (project.name,project.budget,project.co2_reduction,project.social_impact,project.duration_months,result["total_score"],result["environment_score"],result["social_score"],result["economic_score"],result["success_probability"],"; ".join([_sanitize_pdf(r) for r in result["recommendations"]]),result["risk_level"],datetime.datetime.now().isoformat(),region_name,lat,lon))
     conn.commit(); conn.close()
     result["region"]=region_name; result["lat"]=lat; result["lon"]=lon
+    country_name = project.region or "Germany"
+    bench = BENCHMARKS.get(country_name, GLOBAL_AVG)
+    result["country_benchmark"] = {
+        "country": country_name if country_name in BENCHMARKS else "Global Average",
+        "co2_per_capita": bench["co2_per_capita"],
+        "renewable_share": bench["renewable_share"],
+        "esg_rank": bench["esg_rank"],
+        "hdi": bench["hdi"],
+        "project_vs_country": {"esg_score_diff": round(result["total_score"] - bench["esg_rank"], 2), "above_average": result["total_score"] > 50}
+    }
     return result
 
 @app.post("/predict/compare")
