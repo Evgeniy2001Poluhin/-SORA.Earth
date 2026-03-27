@@ -464,22 +464,6 @@ def export_csv():
     output.seek(0)
     return StreamingResponse(io.BytesIO(output.getvalue().encode()), media_type="text/csv", headers={"Content-Disposition":"attachment; filename=sora_earth_projects.csv"})
 
-# EXPORT_MARKER
-    conn = get_db(); conn.execute("DELETE FROM evaluations"); conn.commit(); conn.close()
-    return {"status":"cleared"}
-
-@app.get("/export/csv")
-def export_csv():
-    conn = get_db()
-    rows = conn.execute("SELECT * FROM evaluations ORDER BY created_at DESC").fetchall()
-    conn.close()
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["id","name","budget","co2_reduction","social_impact","duration_months","total_score","environment_score","social_score","economic_score","success_probability","recommendation","risk_level","created_at","region"])
-    for r in rows: writer.writerow(list(r))
-    output.seek(0)
-    return StreamingResponse(iter([output.getvalue()]),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=sora_earth_report.csv"})
-
 @app.get("/model-info")
 def model_info(): return model_meta
 
@@ -687,26 +671,7 @@ def generate_pdf_report(project: Project):
                         filename=f"SORA_Earth_{project.name.replace(' ','_')}_Report.pdf")
 
 
-@app.get("/analytics/country-benchmark/{country}")
-def country_benchmark(country: str):
-    bench = BENCHMARKS.get(country, GLOBAL_AVG)
-    return {
-        "country": country,
-        "benchmarks": bench,
-        "global_average": GLOBAL_AVG,
-        "comparison": {
-            k: round(bench[k] - GLOBAL_AVG[k], 2) for k in GLOBAL_AVG
-        }
-    }
-
-@app.get("/analytics/country-ranking")
-def country_ranking():
-    ranked = sorted(BENCHMARKS.items(), key=lambda x: x[1]["esg_rank"])
-    return [{"country": k, **v} for k, v in ranked]
-
 # ============ CLUSTERING ============
-from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
 
 
 @app.get("/analytics/correlation")
