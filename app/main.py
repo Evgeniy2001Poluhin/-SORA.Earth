@@ -64,7 +64,9 @@ def log_prediction(endpoint, input_data, result):
                     input_data.budget, input_data.co2_reduction, input_data.social_impact,
                     input_data.duration_months, result.get("prediction",""), result.get("probability","")])
 
-app = FastAPI(title="SORA.Earth AI Platform", version="2.0.0")
+app = FastAPI(
+    swagger_ui_parameters={"defaultModelsExpandDepth": -1, "docExpansion": "list", "filter": True},
+    redoc_url="/redoc",title="SORA.Earth AI Platform", version="2.0.0")
 
 # ============ SENTRY ERROR TRACKING ============
 import os
