@@ -4,6 +4,8 @@ from functools import lru_cache
 from fastapi import FastAPI, Depends, HTTPException
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.cache import cache
+from app.batch import BatchRequest, BatchResult, batch_history, generate_batch_id
+from app.websocket import manager, WebSocket, WebSocketDisconnect
 from app.drift_detection import drift_detector
 from app.mlflow_tracking import log_prediction, log_evaluation, get_experiment_stats
 from app.rate_limit import limiter, rate_limit_handler, SlowAPIMiddleware, RateLimitExceeded
@@ -17,6 +19,7 @@ from typing import List
 import pickle, numpy as np, math, os, io, csv, json, logging, shap
 import pandas as pd
 from datetime import datetime
+import time
 import torch
 import torch.nn as tnn
 
@@ -199,6 +202,58 @@ def list_users(user: UserInfo = Depends(require_admin)):
 
 
 
+
+
+# ============ BATCH API ============
+@app.post("/batch/evaluate", tags=["batch"])
+def batch_evaluate(req: BatchRequest):
+    batch_id = generate_batch_id()
+    start = time.time()
+    results = []
+    success = 0
+    fail = 0
+    for p in req.projects:
+        try:
+            project = Project(**{k: v for k, v in p.items() if k in Project.__fields__})
+            cdata = COUNTRIES.get(project.region or "Germany", {"region":"Europe","lat":50.0,"lon":10.0})
+            region_name = cdata.get("region","Europe")
+            result = calculate_esg(project, region_name)
+            result["project_name"] = project.name
+            result["status"] = "success"
+            results.append(result)
+            success += 1
+        except Exception as e:
+            results.append({"project_name": p.get("name","unknown"), "status": "error", "error": str(e)})
+            fail += 1
+    elapsed = round((time.time() - start) * 1000, 2)
+    batch_result = {"batch_id": batch_id, "total": len(req.projects), "successful": success, "failed": fail, "results": results, "processing_time_ms": elapsed}
+    batch_history[batch_id] = batch_result
+    return batch_result
+
+@app.get("/batch/{batch_id}", tags=["batch"])
+def get_batch(batch_id: str):
+    if batch_id not in batch_history:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    return batch_history[batch_id]
+
+@app.get("/batch", tags=["batch"])
+def list_batches():
+    return [{"batch_id": k, "total": v["total"], "successful": v["successful"]} for k, v in batch_history.items()]
+
+# ============ WEBSOCKET ============
+@app.websocket("/ws/live")
+async def websocket_endpoint(ws: WebSocket):
+    await manager.connect(ws)
+    try:
+        while True:
+            data = await ws.receive_text()
+            await ws.send_json({"echo": data, "connections": manager.count})
+    except WebSocketDisconnect:
+        manager.disconnect(ws)
+
+@app.get("/ws/status", tags=["websocket"])
+def ws_status():
+    return {"active_connections": manager.count}
 
 # ============ CACHE MANAGEMENT ============
 @app.get("/cache/stats", tags=["cache"])
