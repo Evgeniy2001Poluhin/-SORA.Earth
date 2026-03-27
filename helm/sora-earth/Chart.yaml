@@ -1,0 +1,14 @@
+apiVersion: v2
+name: sora-earth
+description: SORA.Earth AI Platform - ESG Assessment API
+type: application
+version: 2.0.0
+appVersion: "2.0.0"
+keywords:
+  - esg
+  - ai
+  - ml
+  - sustainability
+maintainers:
+  - name: SORA.Earth Team
+    email: dev@sora.earth

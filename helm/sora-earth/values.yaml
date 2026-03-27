@@ -1,0 +1,62 @@
+replicaCount: 3
+
+image:
+  repository: sora-earth
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: api.sora.earth
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: sora-earth-tls
+      hosts:
+        - api.sora.earth
+
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "250m"
+  limits:
+    memory: "2Gi"
+    cpu: "1000m"
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+env:
+  SORA_ENV: "production"
+  MLFLOW_TRACKING_URI: "http://mlflow:5000"
+
+secrets:
+  jwtSecret: "sora-earth-secret-key-2026-change-in-production"
+  sentryDsn: ""
+
+prometheus:
+  enabled: true
+  port: 8000
+  path: /metrics
+
+monitoring:
+  grafana:
+    enabled: true
+  prometheus:
+    enabled: true
+  mlflow:
+    enabled: true
