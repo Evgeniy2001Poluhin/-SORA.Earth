@@ -1,6 +1,7 @@
 from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 from functools import lru_cache
 from fastapi import FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
 from app.middleware import MetricsMiddleware, METRICS
 from app.validators import ProjectInput
 from fastapi.staticfiles import StaticFiles
@@ -155,6 +156,10 @@ def calculate_esg(project, region_name='Europe'):
         "risk_level":risk_level,"esg_weights":{"environment":0.4,"social":0.3,"economic":0.3}}
 
 # ---- ENDPOINTS ----
+
+
+# ============ PROMETHEUS METRICS ============
+Instrumentator().instrument(app).expose(app)
 
 @app.get("/")
 def read_root():
