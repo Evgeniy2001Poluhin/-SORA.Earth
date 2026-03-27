@@ -1,3 +1,4 @@
+from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 from functools import lru_cache
 from fastapi import FastAPI
 from app.middleware import MetricsMiddleware, METRICS
@@ -373,6 +374,24 @@ def evaluate_compare_legacy(project: Project):
     data = ProjectInput(budget=project.budget, co2_reduction=project.co2_reduction, social_impact=project.social_impact, duration_months=project.duration_months)
     return predict_compare(data)
 
+
+@app.get("/analytics/country-benchmark/{country}")
+def country_benchmark(country: str):
+    bench = BENCHMARKS.get(country, GLOBAL_AVG)
+    return {
+        "country": country,
+        "benchmarks": bench,
+        "global_average": GLOBAL_AVG,
+        "comparison": {
+            k: round(bench[k] - GLOBAL_AVG[k], 2) for k in GLOBAL_AVG
+        }
+    }
+
+@app.get("/analytics/country-ranking")
+def country_ranking():
+    ranked = sorted(BENCHMARKS.items(), key=lambda x: x[1]["esg_rank"])
+    return [{"country": k, **v} for k, v in ranked]
+
 # ============ CLUSTERING ============
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
@@ -407,6 +426,16 @@ import tempfile, datetime
 def _sanitize_pdf(text):
     import re
     return str(text).encode('ascii', 'ignore').decode('ascii').strip()
+
+def sanitize_text(text: str) -> str:
+    replacements = {
+        "\u2014": "-", "\u2013": "-", "\u2018": "'", "\u2019": "'",
+        "\u201c": '"', "\u201d": '"', "\u2026": "...", "\u2022": "*",
+        "\u00b7": "*", "\u2212": "-", "\u00a0": " ",
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    return text.encode("latin-1", errors="replace").decode("latin-1")
 
 @app.post("/report/pdf")
 def generate_pdf_report(project: Project):
@@ -472,6 +501,24 @@ def generate_pdf_report(project: Project):
     pdf.output(tmp.name)
     return FileResponse(tmp.name, media_type="application/pdf",
                         filename=f"SORA_Earth_{project.name.replace(' ','_')}_Report.pdf")
+
+
+@app.get("/analytics/country-benchmark/{country}")
+def country_benchmark(country: str):
+    bench = BENCHMARKS.get(country, GLOBAL_AVG)
+    return {
+        "country": country,
+        "benchmarks": bench,
+        "global_average": GLOBAL_AVG,
+        "comparison": {
+            k: round(bench[k] - GLOBAL_AVG[k], 2) for k in GLOBAL_AVG
+        }
+    }
+
+@app.get("/analytics/country-ranking")
+def country_ranking():
+    ranked = sorted(BENCHMARKS.items(), key=lambda x: x[1]["esg_rank"])
+    return [{"country": k, **v} for k, v in ranked]
 
 # ============ CLUSTERING ============
 from sklearn.cluster import KMeans
