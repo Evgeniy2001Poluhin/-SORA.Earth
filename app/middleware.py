@@ -8,13 +8,16 @@ logger = logging.getLogger("sora_earth")
 
 METRICS = {
     "requests_total": 0,
-    "requests_by_endpoint": {},
-    "requests_by_status": {},
-    "avg_response_time_ms": 0,
-    "total_response_time_ms": 0,
     "predictions_total": 0,
     "errors_total": 0,
+    "avg_response_time_ms": 0.0,
+    "total_response_time_ms": 0.0,
+    "requests_by_endpoint": {},
+    "requests_by_status": {},
+    "evaluations_total": 0,
+    "evaluations_avg_score": 0.0,
 }
+
 
 class MetricsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
