@@ -3,6 +3,7 @@ from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 from functools import lru_cache
 from fastapi import FastAPI, Depends, HTTPException
 from prometheus_fastapi_instrumentator import Instrumentator
+from app.mlflow_tracking import log_prediction, log_evaluation, get_experiment_stats
 from app.rate_limit import limiter, rate_limit_handler, SlowAPIMiddleware, RateLimitExceeded
 from app.logging_config import setup_logging
 import sentry_sdk
@@ -194,6 +195,12 @@ def get_me(user: UserInfo = Depends(require_auth)):
 def list_users(user: UserInfo = Depends(require_admin)):
     return [{"username": u, "role": d["role"]} for u, d in USERS_DB.items()]
 
+
+# ============ MLFLOW TRACKING ============
+@app.get("/mlflow/stats", tags=["mlflow"])
+def mlflow_stats():
+    return get_experiment_stats()
+
 # ============ PROMETHEUS METRICS ============
 Instrumentator().instrument(app).expose(app)
 
@@ -217,6 +224,7 @@ def evaluate_project(project: Project):
         (project.name,project.budget,project.co2_reduction,project.social_impact,project.duration_months,result["total_score"],result["environment_score"],result["social_score"],result["economic_score"],result["success_probability"],"; ".join([_sanitize_pdf(r) for r in result["recommendations"]]),result["risk_level"],datetime.datetime.now().isoformat(),region_name,lat,lon))
     conn.commit(); conn.close()
     result["region"]=region_name; result["lat"]=lat; result["lon"]=lon
+    log_evaluation(project.name, result, result["risk_level"])
     country_name = project.region or "Germany"
     bench = BENCHMARKS.get(country_name, GLOBAL_AVG)
     result["country_benchmark"] = {
