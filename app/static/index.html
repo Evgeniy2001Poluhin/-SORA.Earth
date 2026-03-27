@@ -136,7 +136,7 @@
         </div>
         <div class="metric">
           <div class="metric-label">Uptime (s)</div>
-          <div class="metric-value" id="me">–</div>
+          <div class="metric-value" id="m-uptime">–</div>
         </div>
         <div class="metric">
           <div class="metric-label">Avg req duration (ms)</div>
@@ -163,11 +163,11 @@ curl -X POST http://localhost:8000/batch/evaluate \
 </main>
 
 <script>
-async function evaluateProject(event) {
+  async function evaluateProject(event) {
   event.preventDefault();
   const form = event.target;
   const btn = document.getElementById("eval-btn");
-  const statusEl = document.getEntById("eval-status");
+  const statusEl = document.getElementById("eval-status");
   const payload = {
     name: form.name.value || "Untitled project",
     budget: Number(form.budget.value),
@@ -201,7 +201,7 @@ async function evaluateProject(event) {
 
 function renderResult(data) {
   document.getElementById("result-empty").style.display = "none";
-  document.getElementById("result-view").style.display = lock";
+  document.getElementById("result-view").style.display = "block";
 
   document.getElementById("score-total").textContent =
     data.total_score !== undefined ? data.total_score.toFixed(2) : "–";
@@ -221,7 +221,7 @@ function renderResult(data) {
   pill.textContent = data.risk_level ? `Risk: ${data.risk_level}` : "Risk: –";
   pill.classList.remove("low", "medium", "high");
   if (risk === "low") pill.classList.add("low");
-  else if (risk === "mediumclassList.add("medium");
+  else if (risk === "medium") pill.classList.add("medium");
   else if (risk === "high") pill.classList.add("high");
 
   const recsUl = document.getElementById("recs-list");
@@ -262,6 +262,39 @@ async function fetchMetrics() {
 document.getElementById("eval-form").addEventListener("submit", evaluateProject);
 fetchMetrics();
 setInterval(fetchMetrics, 10000);
+
+function initFromQueryString() {
+  const params = new URLSearchParams(window.location.search);
+  if ([...params.keys()].length === 0) return;
+
+  const form = document.getElementById("eval-form");
+  if (!form) return;
+
+  const map = {
+    name: "name",
+    budget: "budget",
+    duration_months: "duration_months",
+    co2_reduction: "co2_reduction",
+    social_impact: "social_impact",
+    region: "region",
+  };
+
+  let hasAny = false;
+
+  Object.entries(map).forEach(([queryKey, fieldName]) => {
+    const val = params.get(queryKey);
+    if (val !== null && form[fieldName]) {
+      form[fieldName].value = val;
+      hasAny = true;
+    }
+  });
+
+  if (hasAny) {
+    evaluateProject(new Event("submit", { cancelable: true, bubbles: true }));
+  }
+}
+
+initFromQueryString();
 </script>
 </body>
 </html>
