@@ -3,6 +3,9 @@ from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 from functools import lru_cache
 from fastapi import FastAPI, Depends, HTTPException
 from prometheus_fastapi_instrumentator import Instrumentator
+from app.rate_limit import limiter, rate_limit_handler, SlowAPIMiddleware, RateLimitExceeded
+from app.logging_config import setup_logging
+import sentry_sdk
 from app.middleware import MetricsMiddleware, METRICS
 from app.validators import ProjectInput
 from fastapi.staticfiles import StaticFiles
@@ -53,6 +56,20 @@ def log_prediction(endpoint, input_data, result):
                     input_data.duration_months, result.get("prediction",""), result.get("probability","")])
 
 app = FastAPI(title="SORA.Earth AI Platform", version="2.0.0")
+
+# ============ SENTRY ERROR TRACKING ============
+import os
+if os.getenv("SENTRY_DSN"):
+    sentry_sdk.init(dsn=os.getenv("SENTRY_DSN"), traces_sample_rate=0.1, environment=os.getenv("SORA_ENV", "development"))
+
+# ============ STRUCTURED LOGGING ============
+logger = setup_logging()
+
+# ============ RATE LIMITING ============
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
+app.add_middleware(SlowAPIMiddleware)
+
 app.add_middleware(MetricsMiddleware)
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
