@@ -32,7 +32,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         METRICS["requests_by_endpoint"][path] = METRICS["requests_by_endpoint"].get(path, 0) + 1
         METRICS["requests_by_status"][str(status)] = METRICS["requests_by_status"].get(str(status), 0) + 1
 
-        if "predict" in path and request.method == "POST":
+        if ("predict" in path or "evaluate" in path) and request.method == "POST":
             METRICS["predictions_total"] += 1
 
         if status >= 400:

@@ -1,17 +1,39 @@
 version: "3.8"
+
 services:
   api:
     build: .
+    container_name: sora-earth-api
     ports:
-      - "8000:8000"
+      - "8001:8000"
     volumes:
       - ./data:/app/data
-      - ./models:/app/models
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 15s
+    networks:
+      - sora-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: sora-earth-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - sora-network
+
+networks:
+  sora-network:
+    driver: bridge
