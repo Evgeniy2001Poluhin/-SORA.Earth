@@ -1,6 +1,7 @@
+from app.auth import Token, LoginRequest, UserInfo, verify_password, create_access_token, get_current_user, require_auth, require_admin, USERS_DB
 from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 from functools import lru_cache
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.middleware import MetricsMiddleware, METRICS
 from app.validators import ProjectInput
@@ -157,6 +158,24 @@ def calculate_esg(project, region_name='Europe'):
 
 # ---- ENDPOINTS ----
 
+
+
+# ============ AUTHENTICATION ============
+@app.post("/auth/login", response_model=Token, tags=["auth"])
+def login(req: LoginRequest):
+    user = USERS_DB.get(req.username)
+    if not user or not verify_password(req.password, user["hashed_password"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = create_access_token({"sub": user["username"], "role": user["role"]})
+    return Token(access_token=token, token_type="bearer", expires_in=3600)
+
+@app.get("/auth/me", tags=["auth"])
+def get_me(user: UserInfo = Depends(require_auth)):
+    return {"username": user.username, "role": user.role}
+
+@app.get("/admin/users", tags=["admin"])
+def list_users(user: UserInfo = Depends(require_admin)):
+    return [{"username": u, "role": d["role"]} for u, d in USERS_DB.items()]
 
 # ============ PROMETHEUS METRICS ============
 Instrumentator().instrument(app).expose(app)
