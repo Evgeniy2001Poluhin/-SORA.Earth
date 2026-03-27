@@ -3,6 +3,7 @@ from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 from functools import lru_cache
 from fastapi import FastAPI, Depends, HTTPException
 from prometheus_fastapi_instrumentator import Instrumentator
+from app.drift_detection import drift_detector
 from app.mlflow_tracking import log_prediction, log_evaluation, get_experiment_stats
 from app.rate_limit import limiter, rate_limit_handler, SlowAPIMiddleware, RateLimitExceeded
 from app.logging_config import setup_logging
@@ -196,6 +197,26 @@ def list_users(user: UserInfo = Depends(require_admin)):
     return [{"username": u, "role": d["role"]} for u, d in USERS_DB.items()]
 
 
+
+# ============ DATA DRIFT DETECTION ============
+@app.get("/mlops/drift", tags=["mlops"])
+def check_drift():
+    return drift_detector.check_drift()
+
+@app.get("/mlops/health", tags=["mlops"])
+def mlops_health():
+    drift = drift_detector.check_drift()
+    return {
+        "model_status": "healthy",
+        "drift_status": drift["status"],
+        "observations_tracked": drift["observations"],
+        "monitoring": {
+            "prometheus": "/metrics",
+            "mlflow": "/mlflow/stats",
+            "drift": "/mlops/drift"
+        }
+    }
+
 # ============ MLFLOW TRACKING ============
 @app.get("/mlflow/stats", tags=["mlflow"])
 def mlflow_stats():
@@ -225,6 +246,7 @@ def evaluate_project(project: Project):
     conn.commit(); conn.close()
     result["region"]=region_name; result["lat"]=lat; result["lon"]=lon
     log_evaluation(project.name, result, result["risk_level"])
+    drift_detector.add_observation({"budget": project.budget, "co2_reduction": project.co2_reduction, "social_impact": project.social_impact, "duration_months": project.duration_months})
     country_name = project.region or "Germany"
     bench = BENCHMARKS.get(country_name, GLOBAL_AVG)
     result["country_benchmark"] = {
