@@ -1,9 +1,12 @@
 from app.auth import Token, LoginRequest, UserInfo, verify_password, create_access_token, get_current_user, require_auth, require_admin, USERS_DB
 from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 from functools import lru_cache
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.cache import cache
+from app.rate_limit import rate_limiter
+from app.auth import get_api_key, require_api_key, require_admin_apikey, api_key_header
+from app.metrics import metrics
 from app.batch import BatchRequest, BatchResult, batch_history, generate_batch_id
 from app.websocket import manager, WebSocket, WebSocketDisconnect
 from app.drift_detection import drift_detector
@@ -203,6 +206,30 @@ def list_users(user: UserInfo = Depends(require_admin)):
 
 
 
+
+
+# ============ METRICS & RATE LIMITING ============
+@app.get("/metrics", tags=["monitoring"])
+def get_metrics():
+    return metrics.summary()
+
+@app.get("/metrics/prometheus", tags=["monitoring"])
+def prometheus_metrics():
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(metrics.prometheus_format(), media_type="text/plain")
+
+@app.get("/rate-limit/status", tags=["monitoring"])
+def rate_limit_status(request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    return rate_limiter.get_usage(client_ip)
+
+@app.get("/auth/verify", tags=["auth"])
+def verify_key(user=Depends(require_api_key)):
+    return {"authenticated": True, "user": user["name"], "role": user["role"]}
+
+@app.get("/admin/stats", tags=["admin"])
+def admin_stats(user=Depends(require_admin_apikey)):
+    return {"metrics": metrics.summary(), "authenticated_as": user["name"]}
 
 # ============ BATCH API ============
 @app.post("/batch/evaluate", tags=["batch"])

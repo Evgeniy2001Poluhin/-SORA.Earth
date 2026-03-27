@@ -1,3 +1,4 @@
+from app.metrics import metrics as app_metrics
 import time
 import logging
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -38,5 +39,8 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         if status >= 400:
             METRICS["errors_total"] += 1
 
+        app_metrics.inc("http_requests_total")
+        app_metrics.inc(f"http_{status}")
+        app_metrics.observe("request_duration", duration_ms)
         logger.info(f"{request.method} {path} {status} {duration_ms}ms")
         return response
