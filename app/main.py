@@ -1,5 +1,6 @@
 from app.auth import Token, LoginRequest, UserInfo, verify_password, create_access_token, get_current_user, require_auth, require_admin, USERS_DB
 from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
+from app.services.esg_service import evaluate_project_esg
 from functools import lru_cache
 from fastapi import FastAPI, Depends, HTTPException, Request
 from prometheus_fastapi_instrumentator import Instrumentator
