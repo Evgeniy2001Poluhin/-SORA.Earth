@@ -5,8 +5,8 @@ from collections import OrderedDict
 
 
 class LRUCache:
-    def __init__(self, max_size=1000, default_ttl=300):
-        self.max_size = max_size
+    def __init__(self, maxsize=1000, default_ttl=300):
+        self.max_size = maxsize
         self.default_ttl = default_ttl
         self.store = OrderedDict()
         self.hits = 0
