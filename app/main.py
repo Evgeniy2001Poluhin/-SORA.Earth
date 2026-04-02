@@ -25,6 +25,7 @@ from app.api import auth as auth_api
 from app.api import evaluate as evaluate_api
 from app.api import predict as predict_api
 from app.api import analytics as analytics_api
+from app.api import system as system_api
 from app.api import infra as infra_api
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -246,6 +247,7 @@ app.include_router(auth_api.router)
 app.include_router(evaluate_api.router)
 app.include_router(predict_api.router)
 app.include_router(analytics_api.router)
+app.include_router(system_api.router)
 app.include_router(infra_api.router)
 
 from app.api import data_pipeline as data_api
@@ -292,3 +294,19 @@ def model_info():
 @app.get("/model-metrics")
 def get_model_metrics():
     return model_metrics
+
+# --- Startup/shutdown lifecycle ---
+from concurrent.futures import ProcessPoolExecutor
+import asyncio
+
+_executor: ProcessPoolExecutor = None
+
+@app.on_event("startup")
+async def startup_event():
+    global _executor
+    _executor = ProcessPoolExecutor(max_workers=4)
+    app.state.executor = _executor
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    app.state.executor.shutdown(wait=True)
