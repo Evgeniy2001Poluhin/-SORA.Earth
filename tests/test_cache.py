@@ -30,7 +30,7 @@ def test_cache_hit():
 
 
 def test_lru_eviction():
-    c = LRUCache(max_size=3, default_ttl=60)
+    c = LRUCache(maxsize=3, default_ttl=60)
     c.set("a", 1)
     c.set("b", 2)
     c.set("c", 3)
@@ -41,7 +41,7 @@ def test_lru_eviction():
 
 def test_lru_ttl():
     import time
-    c = LRUCache(max_size=10, default_ttl=1)
+    c = LRUCache(maxsize=10, default_ttl=1)
     c.set("x", 42, ttl=1)
     assert c.get("x") == 42
     time.sleep(1.1)

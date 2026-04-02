@@ -29,7 +29,7 @@ def predict_project(project: Project):
     proba = float(rf_model.predict_proba(feats)[0][1])
     prediction = int(proba >= best_threshold)
     result = {"prediction": prediction, "probability": round(proba*100,2), "model": "RandomForest", "threshold": best_threshold}
-    prediction("RandomForest", project.model_dump(), prediction, round(proba*100,2))
+    log_prediction("RandomForest", project.model_dump(), prediction, round(proba*100,2))
     METRICS["predictions_total"] = METRICS.get("predictions_total",0)+1
     return result
 
