@@ -1,27 +1,10 @@
 {
-  "RF": {
-    "accuracy": 74.3,
-    "auc": 82.4,
-    "f1": 71.8
-  },
-  "XGB": {
-    "accuracy": 75.2,
-    "auc": 81.3,
-    "f1": 73.6
-  },
-  "GB": {
-    "accuracy": 77.0,
-    "auc": 82.4,
-    "f1": 74.5
-  },
-  "LR": {
-    "accuracy": 74.3,
-    "auc": 84.0,
-    "f1": 72.9
-  },
-  "Ensemble": {
-    "accuracy": 77.0,
-    "auc": 82.7,
-    "f1": 74.5
-  }
+  "accuracy": 0.75,
+  "f1_score": 0.7573,
+  "best_f1": 0.7928,
+  "roc_auc": 0.7881,
+  "best_threshold": 0.4,
+  "train_samples": 400,
+  "test_samples": 100,
+  "enrichment_from_log": 94
 }
