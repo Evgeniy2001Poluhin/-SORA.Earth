@@ -1,8 +1,9 @@
 venv/
 __pycache__/
 *.pyc
-.pytest_cache/
-.DS_Store
-data/history.db
-*.egg-info/
 .env
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.DS_Store

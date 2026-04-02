@@ -129,3 +129,148 @@ def get_country_context(country: Optional[str]) -> Optional[Dict[str, Any]]:
 def get_supported_countries():
     """Return list of all supported countries."""
     return sorted(COUNTRY_ESG_DATA.keys())
+
+
+# ===== LIVE DATA FROM WORLD BANK API =====
+import requests
+from datetime import datetime as _dt
+
+WB_INDICATORS = {
+    "co2_kt": "EN.ATM.CO2E.KT",
+    "renewable_share": "EG.FEC.RNEW.ZS",
+    "gdp_per_capita": "NY.GDP.PCAP.CD",
+    "forest_cover_pct": "AG.LND.FRST.ZS",
+    "population": "SP.POP.TOTL",
+    "internet_users_pct": "IT.NET.USER.ZS",
+}
+
+COUNTRY_ISO = {
+    "Sweden": "SWE", "Norway": "NOR", "Switzerland": "CHE", "Netherlands": "NLD",
+    "Germany": "DEU", "UK": "GBR", "France": "FRA", "Italy": "ITA", "Canada": "CAN",
+    "Spain": "ESP", "Japan": "JPN", "Australia": "AUS", "South Korea": "KOR",
+    "USA": "USA", "Brazil": "BRA", "China": "CHN", "India": "IND", "Mexico": "MEX",
+    "Russia": "RUS", "South Africa": "ZAF", "Indonesia": "IDN", "Turkey": "TUR",
+    "Saudi Arabia": "SAU", "UAE": "ARE", "Nigeria": "NGA", "Kenya": "KEN",
+    "Egypt": "EGY", "Argentina": "ARG", "Chile": "CHL", "Poland": "POL",
+}
+
+_live_cache: Dict[str, Any] = {}
+_last_refresh: Optional[str] = None
+_refresh_status: str = "never"
+_refresh_errors: list = []
+
+
+def _fetch_wb_indicator(iso: str, indicator: str) -> Optional[float]:
+    """Fetch latest value from World Bank API via curl subprocess."""
+    import subprocess
+    url = f"https://api.worldbank.org/v2/country/{iso}/indicator/{indicator}?format=json&date=2018:2024&per_page=10"
+    try:
+        r = subprocess.run(
+            ["curl", "-s", "-m", "15", url],
+            capture_output=True, text=True, timeout=20
+        )
+        if r.returncode != 0 or not r.stdout.strip():
+            return None
+        data = json.loads(r.stdout)
+        if len(data) < 2 or not data[1]:
+            return None
+        for entry in data[1]:
+            if entry.get("value") is not None:
+                return round(float(entry["value"]), 2)
+        return None
+    except Exception:
+        return None
+
+def refresh_live_data() -> Dict[str, Any]:
+    """Fetch fresh data from World Bank for all countries. Returns status report."""
+    global _live_cache, _last_refresh, _refresh_status, _refresh_errors
+    _refresh_errors = []
+    updated = 0
+    failed = 0
+
+    for country, iso in COUNTRY_ISO.items():
+        country_data = {}
+        for field, wb_code in WB_INDICATORS.items():
+            val = _fetch_wb_indicator(iso, wb_code)
+            if val is not None:
+                country_data[field] = val
+
+        # Derive co2_per_capita from co2_kt and population
+        if "co2_kt" in country_data and "population" in country_data and country_data["population"] > 0:
+            country_data["co2_per_capita"] = round(country_data["co2_kt"] * 1000 / country_data["population"], 2)
+        if "population" in country_data:
+            country_data["population_millions"] = round(country_data["population"] / 1_000_000, 1)
+
+        if country_data:
+            # Merge with static: live overwrites static
+            base = COUNTRY_ESG_DATA.get(country, {}).copy()
+            base.update(country_data)
+            _live_cache[country] = base
+            updated += 1
+        else:
+            _refresh_errors.append(country)
+            failed += 1
+
+    # Save to disk cache
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_file = CACHE_DIR / "wb_live.json"
+    cache_file.write_text(json.dumps({
+        "data": _live_cache,
+        "timestamp": _dt.utcnow().isoformat(),
+    }, indent=2))
+
+    _last_refresh = _dt.utcnow().isoformat()
+    _refresh_status = "ok" if failed == 0 else "partial"
+
+    return {
+        "status": _refresh_status,
+        "updated": updated,
+        "failed": failed,
+        "failed_countries": _refresh_errors,
+        "timestamp": _last_refresh,
+    }
+
+
+def get_merged_country_data(country: str) -> Optional[Dict[str, Any]]:
+    """Get country data: live (if available) > static fallback."""
+    _load_disk_cache()
+    name = country.strip().title()
+    if name in _live_cache:
+        return _live_cache[name]
+    return COUNTRY_ESG_DATA.get(name)
+
+
+def get_all_countries_merged() -> Dict[str, Dict]:
+    """All countries with live data merged over static."""
+    _load_disk_cache()
+    result = {}
+    for country in set(list(COUNTRY_ESG_DATA.keys()) + list(_live_cache.keys())):
+        base = COUNTRY_ESG_DATA.get(country, {}).copy()
+        base.update(_live_cache.get(country, {}))
+        result[country] = base
+    return result
+
+
+def _load_disk_cache():
+    """Load cached live data from disk if memory cache is empty."""
+    global _live_cache, _last_refresh
+    if _live_cache:
+        return
+    cache_file = CACHE_DIR / "wb_live.json"
+    if cache_file.exists():
+        try:
+            raw = json.loads(cache_file.read_text())
+            _live_cache = raw.get("data", {})
+            _last_refresh = raw.get("timestamp")
+        except Exception:
+            pass
+
+
+def get_refresh_status() -> Dict[str, Any]:
+    return {
+        "last_refresh": _last_refresh,
+        "status": _refresh_status,
+        "live_countries": len(_live_cache),
+        "static_countries": len(COUNTRY_ESG_DATA),
+        "errors": _refresh_errors,
+    }

@@ -49,7 +49,7 @@ def test_evaluate_success():
 # ---- Model Comparison ----
 
 def test_predict_compare():
-    r = client.post("/predict/compare", json=PROJECT)
+    r = client.post("/predict/compare", json={"projects": [PROJECT]})
     assert r.status_code == 200
     data = r.json()
     assert "RandomForest" in data

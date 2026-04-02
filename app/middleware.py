@@ -1,49 +1,38 @@
-from app.metrics import metrics as app_metrics
 import time
-import logging
+import structlog
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
 
-logger = logging.getLogger("sora_earth")
+logger = structlog.get_logger("sora_earth")
+START_TIME = time.time()
 
 METRICS = {
-    "requests_total": 0,
-    "predictions_total": 0,
-    "errors_total": 0,
-    "avg_response_time_ms": 0.0,
-    "total_response_time_ms": 0.0,
-    "requests_by_endpoint": {},
-    "requests_by_status": {},
-    "evaluations_total": 0,
-    "evaluations_avg_score": 0.0,
+    "requests_total": 0, "predictions_total": 0, "errors_total": 0,
+    "avg_response_time_ms": 0.0, "total_response_time_ms": 0.0,
+    "evaluations_total": 0, "evaluations_avg_score": 0.0,
+    "uptime_seconds": 0.0, "requests_by_endpoint": {}, "requests_by_status": {},
+    "counters": {"http_requests_total": 0, "http_request": 0},
 }
 
-
 class MetricsMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request, call_next):
         start = time.time()
-        response = await call_next(request)
-        duration_ms = round((time.time() - start) * 1000, 2)
-
-        path = request.url.path
-        status = response.status_code
-
         METRICS["requests_total"] += 1
-        METRICS["total_response_time_ms"] += duration_ms
-        METRICS["avg_response_time_ms"] = round(
-            METRICS["total_response_time_ms"] / METRICS["requests_total"], 2
-        )
+        METRICS["counters"]["http_requests_total"] += 1
+        METRICS["counters"]["http_request"] += 1
+        path = request.url.path
         METRICS["requests_by_endpoint"][path] = METRICS["requests_by_endpoint"].get(path, 0) + 1
-        METRICS["requests_by_status"][str(status)] = METRICS["requests_by_status"].get(str(status), 0) + 1
-
-        if ("predict" in path or "evaluate" in path) and request.method == "POST":
-            METRICS["predictions_total"] += 1
-
-        if status >= 400:
+        try:
+            response = await call_next(request)
+        except Exception:
             METRICS["errors_total"] += 1
-
-        app_metrics.inc("http_requests_total")
-        app_metrics.inc(f"http_{status}")
-        app_metrics.observe("request_duration", duration_ms)
-        logger.info(f"{request.method} {path} {status} {duration_ms}ms")
+            raise
+        sk = str(response.status_code)
+        METRICS["requests_by_status"][sk] = METRICS["requests_by_status"].get(sk, 0) + 1
+        if response.status_code >= 400: METRICS["errors_total"] += 1
+        elapsed_ms = (time.time() - start) * 1000
+        METRICS["total_response_time_ms"] += elapsed_ms
+        METRICS["avg_response_time_ms"] = round(METRICS["total_response_time_ms"] / METRICS["requests_total"], 2)
+        METRICS["uptime_seconds"] = round(time.time() - START_TIME, 2)
+        logger.info(f"{request.method} {path} {response.status_code} {elapsed_ms:.2f}ms")
         return response
