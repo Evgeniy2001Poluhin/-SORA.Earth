@@ -4,12 +4,26 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Request, Depends
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 _executor = ProcessPoolExecutor(max_workers=os.cpu_count() or 4)
+
+_mc_limiter = None
+
+def _get_mc_limiter():
+    global _mc_limiter
+    if _mc_limiter is None:
+        from app.rate_limit import RateLimiter
+        _mc_limiter = RateLimiter(max_requests=10, window_seconds=60)
+    return _mc_limiter
+
+def monte_carlo_dep(request: Request):
+    ip = request.client.host if request.client else "127.0.0.1"
+    _get_mc_limiter().check(f"mc:{ip}")
+
 
 
 class MonteCarloRequest(BaseModel):
@@ -105,7 +119,7 @@ def _run_monte_carlo(data: dict) -> dict:
 
 
 @router.post("/monte-carlo", summary="Monte Carlo risk simulation")
-async def monte_carlo_simulation(req: MonteCarloRequest):
+async def monte_carlo_simulation(req: MonteCarloRequest, _: None = Depends(monte_carlo_dep)):
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(_executor, _run_monte_carlo, req.dict())
