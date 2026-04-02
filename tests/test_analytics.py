@@ -27,7 +27,13 @@ class TestMonteCarlo:
         assert r.json()["simulations"] == 100
 
     def test_max_simulations_cap(self):
+        # Pydantic Field(le=10000) отклоняет значения > 10000
         data = {**PROJECT, "simulations": 99999}
+        r = client.post("/analytics/monte-carlo", json=data)
+        assert r.status_code == 422
+
+    def test_max_simulations_valid(self):
+        data = {**PROJECT, "simulations": 10000}
         r = client.post("/analytics/monte-carlo", json=data)
         assert r.status_code == 200
         assert r.json()["simulations"] == 10000
@@ -101,12 +107,15 @@ class TestCountryRanking:
     def test_ranking_sorted(self):
         r = client.get("/analytics/country-ranking")
         assert r.status_code == 200
-        data = r.json()
+        data = r.json()["data"]
         ranks = [d["esg_rank"] for d in data]
         assert ranks == sorted(ranks)
 
     def test_ranking_has_country_field(self):
         r = client.get("/analytics/country-ranking")
-        for item in r.json():
+        resp = r.json()
+        assert "total" in resp
+        assert "data" in resp
+        for item in resp["data"]:
             assert "country" in item
             assert "esg_rank" in item

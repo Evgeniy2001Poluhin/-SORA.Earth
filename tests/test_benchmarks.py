@@ -24,7 +24,7 @@ def test_country_benchmark_unknown():
 def test_country_ranking():
     resp = client.get("/analytics/country-ranking")
     assert resp.status_code == 200
-    data = resp.json()
+    data = resp.json()["data"]
     assert len(data) == 20
     assert data[0]["country"] == "Sweden"
     assert data[-1]["country"] == "South Africa"
