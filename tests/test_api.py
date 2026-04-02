@@ -72,7 +72,7 @@ def test_what_if():
 # ---- Monte Carlo ----
 
 def test_monte_carlo():
-    r = client.post("/analytics/montecarlo", json=PROJECT)
+    r = client.post("/analytics/monte-carlo", json=PROJECT)
     assert r.status_code == 200
     data = r.json()
     assert "mean_score" in data or "mean" in str(data).lower()

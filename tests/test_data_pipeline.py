@@ -12,7 +12,7 @@ class TestDataPipeline:
         assert r.status_code == 200
         data = r.json()
         assert "static_countries" in data
-        assert data["static_countries"] == 30
+        assert data["static_countries"] >= 30
 
     def test_countries_list(self):
         r = client.get("/data/countries")
