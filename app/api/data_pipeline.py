@@ -58,7 +58,7 @@ def single_country(name: str):
         merged = external_data.get_merged_country_data(name)
         if merged:
             return {"country": name.strip().title(), "indicators": merged, "source": "merged"}
-        return {"error": f"Country '{name}' not found", "supported": external_data.get_supported_countries()}
+        return {"country": name.strip().title(), "error": f"Country '{name}' not found", "supported": external_data.get_supported_countries()}
     return context
 
 
