@@ -48,8 +48,9 @@ def _fetch_indicator(iso3: str, indicator: str) -> Optional[float]:
     return None
 
 
-@lru_cache(maxsize=128)
 def get_country_esg_realtime(country_name: str) -> Optional[Dict]:
+    if country_name in _live_cache:
+        return _live_cache[country_name]
     iso3 = COUNTRY_ISO3.get(country_name)
     if not iso3:
         return None
@@ -80,6 +81,8 @@ def refresh_live_data() -> Dict:
     from datetime import datetime
     _refresh_status["status"] = "running"
     result = refresh_all_countries()
+    get_country_esg_realtime.cache_clear() if hasattr(get_country_esg_realtime, "cache_clear") else None
+    get_country_esg_realtime.cache_clear()
     _live_cache.update(result.get("countries", {}))
     _refresh_status["last_refresh"] = datetime.now().isoformat()
     _refresh_status["countries_refreshed"] = result["fetched"]

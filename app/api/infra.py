@@ -69,6 +69,11 @@ def list_batches():
 # ===== WEBSOCKET =====
 @router.websocket("/ws/live")
 async def websocket_endpoint(ws: WebSocket):
+    from app.auth import API_KEYS
+    token = ws.query_params.get("token") or ws.headers.get("x-api-key")
+    if token not in API_KEYS:
+        await ws.close(code=1008)
+        return
     await manager.connect(ws)
     try:
         while True:
