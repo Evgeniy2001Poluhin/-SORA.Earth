@@ -7,3 +7,22 @@ __pycache__/
 dist/
 build/
 .DS_Store
+
+# Large files
+mlflow.db
+mlruns/
+*.db
+
+# Temporary patch scripts
+patch_*.py
+fix_*.py
+add_metrics.py
+clean_report.py
+update_report_with_metrics.py
+train_model_backup.py
+
+# Coverage artifacts
+.coverage
+
+# Model binaries (опционально — если модели большие)
+# models/*.pkl
