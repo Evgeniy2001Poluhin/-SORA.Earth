@@ -81,7 +81,7 @@ def refresh_live_data() -> Dict:
     from datetime import datetime
     _refresh_status["status"] = "running"
     result = refresh_all_countries()
-    get_country_esg_realtime.cache_clear() if hasattr(get_country_esg_realtime, "cache_clear") else None
+    # cache cleared via _live_cache below
     get_country_esg_realtime.cache_clear()
     _live_cache.update(result.get("countries", {}))
     _refresh_status["last_refresh"] = datetime.now().isoformat()

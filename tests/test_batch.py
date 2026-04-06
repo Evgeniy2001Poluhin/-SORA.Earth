@@ -68,3 +68,41 @@ def test_batch_processing_time():
     data = resp.json()
     assert data["processing_time_ms"] > 0
     assert data["processing_time_ms"] < 10000
+
+# --- external_data coverage ---
+from unittest.mock import patch, MagicMock
+
+def test_fetch_indicator_success():
+    from app.external_data import _fetch_indicator
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [
+        {"page": 1},
+        [{"value": 5.42}, {"value": None}]
+    ]
+    mock_resp.raise_for_status = MagicMock()
+    with patch("httpx.get", return_value=mock_resp):
+        result = _fetch_indicator("DEU", "EN.ATM.CO2E.PC")
+    assert result == 5.42
+
+def test_fetch_indicator_empty():
+    from app.external_data import _fetch_indicator
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [{"page": 1}, []]
+    mock_resp.raise_for_status = MagicMock()
+    with patch("httpx.get", return_value=mock_resp):
+        result = _fetch_indicator("DEU", "EN.ATM.CO2E.PC")
+    assert result is None
+
+def test_fetch_indicator_error():
+    from app.external_data import _fetch_indicator
+    with patch("httpx.get", side_effect=Exception("timeout")):
+        result = _fetch_indicator("DEU", "EN.ATM.CO2E.PC")
+    assert result is None
+
+def test_refresh_live_data():
+    from app.external_data import refresh_live_data
+    with patch("app.external_data.refresh_all_countries", return_value={
+        "fetched": 2, "total": 30, "countries": {"Germany": {"co2": 5.0}}
+    }), patch("app.external_data.get_country_esg_realtime"):
+        result = refresh_live_data()
+    assert result["fetched"] == 2
