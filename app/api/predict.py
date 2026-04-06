@@ -109,3 +109,64 @@ def export_predictions_csv():
     if not PRED_LOG or not os.path.exists(PRED_LOG): raise HTTPException(status_code=404, detail="No prediction log found")
     with open(PRED_LOG,"r") as f: content = f.read()
     return StreamingResponse(io.BytesIO(content.encode()), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=sora_predictions_log.csv"})
+
+
+
+@router.post("/predict/explain")
+def predict_explain(project: Project):
+    """Enhanced SHAP explanation: ranked features, verdict, confidence."""
+    import app.main as m
+
+    feats = m.make_features(_to_legacy(project))
+    shap_values = m.explainer_shap.shap_values(feats)
+
+    # Берём SHAP values для класса 1
+    if isinstance(shap_values, list):
+        raw = shap_values[1][0].ravel()
+    else:
+        raw = shap_values[0].ravel()
+
+    # base_value для класса 1
+    ev = m.explainer_shap.expected_value
+    if hasattr(ev, "__len__"):
+        base_value = float(ev[1])
+    else:
+        base_value = float(ev)
+
+    proba = float(m.rf_model.predict_proba(feats)[0][1])
+    prediction = int(proba >= m.best_threshold)
+
+    feature_names = list(feats.columns)
+    feature_values = feats.iloc[0].to_dict()
+
+    contributions = []
+    for shap_val, name, feat_val in zip(raw.tolist(), feature_names, feature_values.values()):
+        contributions.append({
+            "feature": name,
+            "value": round(float(feat_val), 4),
+            "shap": round(float(shap_val), 4),
+            "direction": "positive" if shap_val > 0 else "negative",
+            "impact": "high" if abs(shap_val) > 0.05 else "medium" if abs(shap_val) > 0.01 else "low"
+        })
+
+    contributions.sort(key=lambda x: abs(x["shap"]), reverse=True)
+    top = contributions[0]
+
+    _feat = top['feature']
+    _shap = top['shap']
+    _dir = 'boosting' if _shap > 0 else 'reducing'
+    verdict = (
+        f"{'Approved' if prediction else 'Rejected'}: "
+        f"'{_feat}' is the key driver "
+        f"({_dir} score by {abs(_shap):+.3f})"
+    )
+
+    return {
+        "prediction": prediction,
+        "probability": round(proba * 100, 2),
+        "threshold": m.best_threshold,
+        "verdict": verdict,
+        "base_value": round(base_value, 4),
+        "top_features": contributions[:3],
+        "all_features": contributions,
+    }
