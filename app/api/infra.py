@@ -132,6 +132,7 @@ def rate_limit_status(request: Request):
 # ===== UNIFIED METRICS =====
 @router.get("/metrics")
 async def get_metrics():
+    METRICS["uptime_seconds"] = round(time.time() - START_TIME, 2)
     return METRICS
 
 

@@ -16,7 +16,7 @@ class CompareRequest(BaseModel):
     projects: List[Project]
 
 def _to_legacy(p):
-    return LegacyProjectInput(budget=p.budget, co2_reduction=p.co2_reduction, social_impact=p.social_impact, duration_months=p.duration_months)
+    return LegacyProjectInput(budget=p.budget, co2_reduction=p.co2_reduction, social_impact=p.social_impact, duration_months=p.duration_months, category=getattr(p, "category", "Solar Energy"))
 
 def _nn_forward(nn_model, feats):
     x = torch.tensor(feats.values, dtype=torch.float32)
@@ -24,18 +24,21 @@ def _nn_forward(nn_model, feats):
 
 @router.post("/predict")
 def predict_project(project: Project):
-    from app.main import rf_model, best_threshold, make_features
-    feats = make_features(_to_legacy(project))
-    proba = float(rf_model.predict_proba(feats)[0][1])
-    prediction = int(proba >= best_threshold)
-    result = {"prediction": prediction, "probability": round(proba*100,2), "model": "RandomForest", "threshold": best_threshold}
-    log_prediction("RandomForest", project.model_dump(), prediction, round(proba*100,2))
+    import app.main as m
+    feats = m.make_features(_to_legacy(project))
+    proba = float(m.rf_model.predict_proba(feats)[0][1])
+    prediction = int(proba >= m.best_threshold)
+    cat = getattr(project, "category", "Solar Energy")
+    reg = getattr(project, "region", "Europe")
+    prob_v2 = round(float(m.ensemble_model_v2.predict_proba(m.make_features_v2(_to_legacy(project), cat, reg))[0][1]) * 100, 2) if m.ensemble_model_v2 else round(proba*100, 2)
+    result = {"prediction": prediction, "probability": round(proba*100,2), "probability_v2": prob_v2, "model": "RandomForest", "threshold": m.best_threshold}
+    log_prediction("RandomForest", project.model_dump(), prediction, round(proba*100,2), prob_v2)
     METRICS["predictions_total"] = METRICS.get("predictions_total",0)+1
     return result
 
 @router.post("/predict/neural")
 def predict_neural(project: Project):
-    from app.main import nn_model, best_threshold, make_features
+    from app.main import nn_model, best_threshold, make_features, make_features
     feats = make_features(_to_legacy(project))
     p = _nn_forward(nn_model, feats)
     prediction = int(p >= best_threshold)
@@ -46,24 +49,32 @@ def predict_neural(project: Project):
 
 @router.post("/predict/stacking")
 def predict_stacking(project: Project):
-    from app.main import rf_model, xgb_model, nn_model, ensemble_model, best_threshold, make_features
-    feats = make_features(_to_legacy(project))
-    rf_p = float(rf_model.predict_proba(feats)[0][1])
-    xgb_p = float(xgb_model.predict_proba(feats)[0][1])
-    nn_p = _nn_forward(nn_model, feats)
-    ens_p = float(ensemble_model.predict_proba(feats)[0][1])
-    prediction = int(ens_p >= best_threshold)
-    result = {"prediction": prediction, "probability": round(ens_p*100,2), "base_models": {"rf": round(rf_p*100,2), "xgb": round(xgb_p*100,2), "nn": round(nn_p*100,2)}, "threshold": best_threshold, "model": "StackingEnsemble"}
-    log_prediction("StackingEnsemble", project.model_dump(), prediction, round(ens_p*100,2))
+    import app.main as m
+    feats = m.make_features(_to_legacy(project))
+    rf_p = float(m.rf_model.predict_proba(feats)[0][1])
+    xgb_p = float(m.xgb_model.predict_proba(feats)[0][1])
+    nn_p = _nn_forward(m.nn_model, feats)
+    ens_p = float(m.ensemble_model.predict_proba(feats)[0][1])
+    prediction = int(ens_p >= m.best_threshold)
+    cat = getattr(project, "category", "Solar Energy")
+    reg = getattr(project, "region", "Europe")
+    prob_v2 = round(float(m.ensemble_model_v2.predict_proba(m.make_features_v2(_to_legacy(project), cat, reg))[0][1]) * 100, 2) if m.ensemble_model_v2 else round(ens_p*100, 2)
+    result = {"prediction": prediction, "probability": round(ens_p*100,2), "probability_v2": prob_v2, "base_models": {"rf": round(rf_p*100,2), "xgb": round(xgb_p*100,2), "nn": round(nn_p*100,2)}, "threshold": m.best_threshold, "model": "StackingEnsemble"}
+    log_prediction("StackingEnsemble", project.model_dump(), prediction, round(ens_p*100,2), prob_v2)
     METRICS["predictions_total"] = METRICS.get("predictions_total",0)+1
     return result
 
 @router.post("/predict/compare")
 def predict_compare(req: CompareRequest):
-    from app.main import rf_model, xgb_model, nn_model, ensemble_model, best_threshold, make_features
     results = []
+    import app.main as m
+    rf_model = m.rf_model
+    xgb_model = m.xgb_model
+    nn_model = m.nn_model
+    ensemble_model = m.ensemble_model
+    best_threshold = m.best_threshold
     for p in req.projects:
-        feats = make_features(_to_legacy(p))
+        feats = m.make_features(_to_legacy(p))
         rf_p = float(rf_model.predict_proba(feats)[0][1])
         xgb_p = float(xgb_model.predict_proba(feats)[0][1])
         nn_p = _nn_forward(nn_model, feats)
@@ -77,7 +88,7 @@ def predict_compare(req: CompareRequest):
 
 @router.post("/shap")
 def shap_explain(project: Project):
-    from app.main import explainer_shap, make_features
+    from app.main import explainer_shap, make_features, make_features
     feats = make_features(_to_legacy(project))
     shap_values = explainer_shap.shap_values(feats)
     vals = shap_values[1][0].tolist() if isinstance(shap_values, list) else shap_values[0].tolist()
@@ -86,7 +97,7 @@ def shap_explain(project: Project):
 
 @router.get("/predictions/history")
 def predictions_history():
-    from app.main import PRED_LOG
+    from app.main import PRED_LOG, make_features
     if not PRED_LOG: raise HTTPException(status_code=500, detail="Prediction log path not configured")
     if not os.path.exists(PRED_LOG): return []
     with open(PRED_LOG,"r") as f: rows = list(csv.DictReader(f))
@@ -94,7 +105,7 @@ def predictions_history():
 
 @router.get("/predictions/export/csv")
 def export_predictions_csv():
-    from app.main import PRED_LOG
+    from app.main import PRED_LOG, make_features
     if not PRED_LOG or not os.path.exists(PRED_LOG): raise HTTPException(status_code=404, detail="No prediction log found")
     with open(PRED_LOG,"r") as f: content = f.read()
     return StreamingResponse(io.BytesIO(content.encode()), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=sora_predictions_log.csv"})

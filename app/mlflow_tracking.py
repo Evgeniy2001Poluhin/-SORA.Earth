@@ -15,30 +15,34 @@ except Exception:
     pass
 
 
-def log_prediction(model_name: str, input_data: dict, prediction: float, probability: float):
+def log_prediction(model_name: str, input_data: dict, prediction: float, probability: float, probability_v2: float = None):
     try:
-        with mlflow.start_run(run_name=f"predict_{model_name}_{datetime.now().strftime('%H%M%S')}"):
+        with mlflow.start_run(run_name=f"predict_{model_name}_{datetime.now().strftime(chr(37)+chr(72)+chr(37)+chr(77)+chr(37)+chr(83))}"):
             mlflow.log_params({k: str(v)[:250] for k, v in input_data.items()})
-            mlflow.log_metrics({
-                "prediction": prediction,
-                "probability": probability,
-            })
+            metrics = {"prediction": prediction, "probability": probability}
+            if probability_v2 is not None:
+                metrics["probability_v2"] = probability_v2
+                metrics["ab_divergence"] = abs(probability - probability_v2)
+            mlflow.log_metrics(metrics)
             mlflow.set_tag("model", model_name)
             mlflow.set_tag("type", "prediction")
     except Exception:
         pass
 
-
 def log_evaluation(project_name: str, esg_scores: dict, risk_level: str):
     try:
         with mlflow.start_run(run_name=f"eval_{project_name}_{datetime.now().strftime('%H%M%S')}"):
-            mlflow.log_metrics({
+            metrics = {
                 "total_score": esg_scores.get("total_score", 0),
                 "environment_score": esg_scores.get("environment_score", 0),
                 "social_score": esg_scores.get("social_score", 0),
                 "economic_score": esg_scores.get("economic_score", 0),
                 "success_probability": esg_scores.get("success_probability", 0),
-            })
+            }
+            if esg_scores.get("success_probability_v2") is not None:
+                metrics["success_probability_v2"] = esg_scores["success_probability_v2"]
+                metrics["ab_divergence"] = abs(metrics["success_probability"] - metrics["success_probability_v2"])
+            mlflow.log_metrics(metrics)
             mlflow.set_tag("project", project_name)
             mlflow.set_tag("risk_level", risk_level)
             mlflow.set_tag("type", "evaluation")

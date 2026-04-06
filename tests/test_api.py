@@ -71,6 +71,7 @@ def test_what_if():
 
 # ---- Monte Carlo ----
 
+@pytest.mark.timeout(60)
 def test_monte_carlo():
     r = client.post("/analytics/monte-carlo", json=PROJECT)
     assert r.status_code == 200

@@ -5,6 +5,7 @@ class ProjectInput(BaseModel):
     co2_reduction: float
     social_impact: float
     duration_months: float
+    category: str = "Solar Energy"
 
     @field_validator("budget")
     def budget_positive(cls, v):

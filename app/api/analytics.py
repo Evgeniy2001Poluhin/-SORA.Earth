@@ -17,7 +17,7 @@ def _get_mc_limiter():
     global _mc_limiter
     if _mc_limiter is None:
         from app.rate_limit import RateLimiter
-        _mc_limiter = RateLimiter(max_requests=10, window_seconds=60)
+        _mc_limiter = RateLimiter(max_requests=50, window_seconds=60)
     return _mc_limiter
 
 def monte_carlo_dep(request: Request):
@@ -46,36 +46,42 @@ class ModelCompareRequest(BaseModel):
 
 
 def _run_monte_carlo(data: dict) -> dict:
-    from app.main import calculate_esg, COUNTRIES
+    from app.main import COUNTRIES, REGIONAL_FACTORS, rf_model, make_features
     from app.schemas import ProjectInput as Project
 
-    n = min(data["simulations"], 10000)
+    n = min(data['simulations'], 10000)
     rng = np.random.default_rng()
 
-    budget_arr   = np.clip(rng.normal(data["budget"],          data["budget"] * 0.15,         n), 1000, None)
-    co2_arr      = np.clip(rng.normal(data["co2_reduction"],   data["co2_reduction"] * 0.2,   n), 1, 100)
-    social_arr   = np.clip(rng.normal(data["social_impact"],   1.0,                           n), 1, 10)
-    duration_arr = np.clip(rng.normal(data["duration_months"], data["duration_months"] * 0.1, n).astype(int), 1, None)
+    budget_arr   = np.clip(rng.normal(data['budget'],          data['budget'] * 0.15,         n), 1000, None)
+    co2_arr      = np.clip(rng.normal(data['co2_reduction'],   data['co2_reduction'] * 0.2,   n), 1, 100)
+    social_arr   = np.clip(rng.normal(data['social_impact'],   1.0,                           n), 1, 10)
+    duration_arr = np.clip(rng.normal(data['duration_months'], data['duration_months'] * 0.1, n).astype(int), 1, None)
 
-    cdata      = COUNTRIES.get(data["region"], {"region": "Europe"})
-    region_str = cdata.get("region", "Europe")
+    cdata      = COUNTRIES.get(data['region'], {'region': 'Europe'})
+    region_str = cdata.get('region', 'Europe')
+    rf = REGIONAL_FACTORS.get(region_str, REGIONAL_FACTORS['Europe'])
 
-    scores, probabilities = [], []
-    for i in range(n):
-        project = Project(
-            name=data["name"],
-            budget=float(budget_arr[i]),
-            co2_reduction=float(co2_arr[i]),
-            social_impact=float(social_arr[i]),
-            duration_months=int(duration_arr[i]),
-            region=data["region"],
-        )
-        result = calculate_esg(project, region_str)
-        scores.append(result["total_score"])
-        probabilities.append(result["success_probability"])
+    score_env = np.minimum(co2_arr / 100.0 * rf['env_mult'] + rf['renewable_bonus'], 1.0)
+    score_soc = np.minimum(social_arr / 10.0 * rf['soc_mult'], 1.0)
+    score_eco = np.minimum(1.0 / (1.0 + np.exp(-0.00005 * (budget_arr - 50000))) * rf['eco_mult'], 1.0)
+    dur_factor = np.where(duration_arr > 48, 0.9, np.where(duration_arr > 36, 0.95, 1.0))
+    scores = np.minimum((score_env * 0.4 + score_soc * 0.3 + score_eco * 0.3) * dur_factor * 100, 100.0)
 
-    scores = np.array(scores)
-    probs  = np.array(probabilities)
+    sample_n = min(n, 200)
+    idx = rng.choice(n, sample_n, replace=False)
+    probs_sample = []
+    for i in idx:
+        p = Project(name=data['name'], budget=float(budget_arr[i]),
+                    co2_reduction=float(co2_arr[i]), social_impact=float(social_arr[i]),
+                    duration_months=int(duration_arr[i]), region=data['region'])
+        feats = make_features(p)
+        probs_sample.append(float(rf_model.predict_proba(feats)[0][1]) * 100)
+    probs = np.interp(scores, np.sort(scores[idx]), np.array(probs_sample)[np.argsort(scores[idx])])
+
+    # Интерполируем на весь массив через скор (линейная аппроксимация)
+    probs = np.interp(scores, np.sort(scores[idx]), np.array(probs_sample)[np.argsort(scores[idx])])
+
+
 
     low    = float(np.mean((scores >= 75) & (probs >= 70))) * 100
     medium = float(np.mean((scores >= 50) & (scores < 75))) * 100

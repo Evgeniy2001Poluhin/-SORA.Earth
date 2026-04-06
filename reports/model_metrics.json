@@ -1,0 +1,17 @@
+{
+  "accuracy": 0.842,
+  "auc_roc": 0.9252,
+  "f1": 0.846,
+  "n_samples": 500,
+  "n_features": 7,
+  "pipeline": "StandardScaler + VotingClassifier",
+  "feature_importance": {
+    "budget": 0.1061,
+    "co2_reduction": 0.0367,
+    "social_impact": 0.0834,
+    "duration_months": 0.0442,
+    "budget_per_month": 0.051,
+    "co2_per_dollar": 0.02,
+    "efficiency_score": 0.1236
+  }
+}

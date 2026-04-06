@@ -24,3 +24,17 @@ def low_project():
 def ghg_data():
     return {"electricity_kwh": 10000, "natural_gas_m3": 500, "diesel_liters": 200,
             "petrol_liters": 300, "flights_km": 5000, "waste_kg": 1000}
+
+def pytest_addoption(parser):
+    parser.addoption('--integration', action='store_true', default=False, help='run integration tests')
+
+def pytest_configure(config):
+    config.addinivalue_line('markers', 'integration: mark test as integration (external API, multiprocessing)')
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption('--integration'):
+        return
+    skip_mark = pytest.mark.skip(reason='use --integration to run')
+    for item in items:
+        if 'integration' in item.keywords:
+            item.add_marker(skip_mark)
