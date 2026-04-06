@@ -31,3 +31,16 @@ def test_check_external_data_unhealthy():
     with patch("app.external_data.get_refresh_status", side_effect=Exception("timeout")):
         result = _check_external_data()
     assert result["status"] == "unhealthy"
+from starlette.testclient import TestClient
+from app.main import app as _app
+
+_client = TestClient(_app)
+
+def test_ping():
+    r = _client.get("/ping")
+    assert r.status_code == 200
+    assert r.json()["pong"] is True
+
+def test_readiness_ok():
+    r = _client.get("/ready")
+    assert r.status_code in (200, 503)  # 503 если модели не загружены в тестах
