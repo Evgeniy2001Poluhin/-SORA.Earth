@@ -56,7 +56,7 @@ def test_ws_status():
 
 
 def test_websocket_connect():
-    with client.websocket_connect("/ws/live") as ws:
+    with client.websocket_connect("/ws/live?token=demo-key-2026") as ws:
         ws.send_text("hello")
         data = ws.receive_json()
         assert data["echo"] == "hello"
