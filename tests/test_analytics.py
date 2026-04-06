@@ -123,3 +123,52 @@ class TestCountryRanking:
         for item in resp["data"]:
             assert "country" in item
             assert "esg_rank" in item
+
+# --- Monte Carlo & Model Compare ---
+
+def test_monte_carlo_basic():
+    r = client.post("/analytics/monte-carlo", json={
+        "name": "Test", "budget": 100000, "co2_reduction": 50,
+        "social_impact": 7, "duration_months": 24,
+        "region": "Germany", "simulations": 10
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert "score_stats" in data
+    assert "simulations" in data
+    assert data["simulations"] == 10
+
+def test_monte_carlo_invalid():
+    r = client.post("/analytics/monte-carlo", json={
+        "budget": -1, "simulations": 5
+    })
+    assert r.status_code == 422
+
+def test_model_compare_basic():
+    r = client.post("/analytics/model-compare", json={
+        "budget": 100000, "co2_reduction": 50,
+        "social_impact": 7, "duration_months": 24
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert "models" in data
+    assert "RandomForest" in data["models"]
+    assert "XGBoost" in data["models"]
+
+def test_model_compare_invalid():
+    r = client.post("/analytics/model-compare", json={"budget": -1})
+    assert r.status_code == 422
+
+# --- Coverage fix: run _run_monte_carlo in-process ---
+
+def test_run_monte_carlo_direct():
+    """Вызываем _run_monte_carlo напрямую — покрывает строки 49-104."""
+    from app.api.analytics import _run_monte_carlo
+    result = _run_monte_carlo({
+        "name": "Test", "budget": 100000, "co2_reduction": 50,
+        "social_impact": 7, "duration_months": 24,
+        "region": "Germany", "simulations": 10
+    })
+    assert "score_stats" in result
+    assert result["simulations"] == 10
+    assert "risk_distribution" in result
