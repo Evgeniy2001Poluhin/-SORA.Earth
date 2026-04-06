@@ -158,7 +158,7 @@ def predict_explain(project: Project):
     verdict = (
         f"{'Approved' if prediction else 'Rejected'}: "
         f"'{_feat}' is the key driver "
-        f"({_dir} score by {abs(_shap):+.3f})"
+        f"({_dir} score by {abs(_shap):.3f})"
     )
 
     return {
