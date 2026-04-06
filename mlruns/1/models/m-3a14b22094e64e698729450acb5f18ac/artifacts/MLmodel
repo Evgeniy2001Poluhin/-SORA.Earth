@@ -1,0 +1,22 @@
+artifact_path: /Users/evgenijpoluhin/sora_earth_ai_platform/mlruns/1/models/m-3a14b22094e64e698729450acb5f18ac/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.9.6
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.6.1
+mlflow_version: 3.1.4
+model_id: m-3a14b22094e64e698729450acb5f18ac
+model_size_bytes: 3865
+model_uuid: m-3a14b22094e64e698729450acb5f18ac
+prompts: null
+run_id: 8547b50576824ab7941b8dc0da772787
+utc_time_created: '2026-04-06 12:09:40.015988'

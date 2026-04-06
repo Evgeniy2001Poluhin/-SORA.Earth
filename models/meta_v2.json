@@ -1,0 +1,22 @@
+{
+  "best_model": "Stacking",
+  "cv_auc": 0.8194,
+  "full_dataset_auc": 1,
+  "accuracy": 0.778,
+  "f1": 0.8049,
+  "features": [
+    "budget",
+    "co2_reduction",
+    "social_impact",
+    "duration_months",
+    "budget_per_month",
+    "co2_per_dollar",
+    "efficiency_score",
+    "impact_ratio",
+    "budget_efficiency",
+    "category_enc",
+    "region_enc"
+  ],
+  "dataset_size": 500,
+  "note": "CV AUC is the honest metric. Full dataset AUC shows upper bound."
+}

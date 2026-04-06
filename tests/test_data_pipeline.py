@@ -41,6 +41,7 @@ class TestDataPipeline:
         assert "Germany" in data
         assert len(data) >= 30
 
+    @pytest.mark.integration
     def test_refresh_starts(self):
         r = client.post("/data/refresh")
         assert r.status_code == 200
@@ -67,7 +68,7 @@ class TestModelRetrain:
         assert "current_threshold" in data
 
     def test_feature_importance(self):
-        r = client.get("/model/feature-importance")
+        r = client.get("/model/feature-importance", headers={"X-API-Key": "demo-key-2026"})
         assert r.status_code == 200
         data = r.json()
         assert "features" in data

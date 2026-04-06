@@ -5,7 +5,8 @@ from fastapi.responses import StreamingResponse, FileResponse
 
 from app.schemas import ProjectInput as Project, GHGInput
 from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
-from app import cache, external_data
+from app.cache import cache
+from app import external_data
 from app.drift_detection import drift_detector
 from app.mlflow_tracking import log_evaluation
 from app.middleware import METRICS
@@ -64,7 +65,7 @@ def evaluate_project(project: Project):
             result["social_score"],
             result["economic_score"],
             result["success_probability"],
-            "; ".join([_sanitize_pdf(r) for r in result["recommendations"]]),
+            "; ".join([_sanitize_pdf(r) for r in result.get("recommendations", [])]),
             result["risk_level"],
             datetime.now().isoformat(),
             region_name,
@@ -326,10 +327,13 @@ def generate_pdf_report(project: Project):
         ensemble_model,
         best_threshold,
         _sanitize_pdf,
+        COUNTRIES,
     )
     from app.validators import ProjectInput as ValidatorProject
 
-    esg = calculate_esg(project, project.region)
+    cdata = COUNTRIES.get(project.region or "Germany", {"region": "Europe"})
+    pdf_region = cdata.get("region", "Europe")
+    esg = calculate_esg(project, pdf_region)
     feats = make_features(
         ValidatorProject(
             budget=project.budget,

@@ -9,7 +9,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, classification_report
 import torch
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from app.auth import require_api_key
 
 router = APIRouter(prefix="/model", tags=["ml-ops"])
 
@@ -182,7 +183,7 @@ def retrain_model(min_samples: int = 50):
 
 
 @router.get("/feature-importance")
-def feature_importance():
+def feature_importance(current_user=Depends(require_api_key), ):
     """Current RF model feature importances."""
     from app.main import rf_model, FEATURE_COLS
     importances = rf_model.feature_importances_

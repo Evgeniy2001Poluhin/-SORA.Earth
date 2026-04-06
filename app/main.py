@@ -113,6 +113,22 @@ with open(os.path.join(ROOT_DIR, "models", "best_threshold.pkl"), "rb") as f:
 
 ENS_PATH = os.path.join(ROOT_DIR, "models", "ensemble_model.pkl")
 ensemble_model = None
+
+# v2 stacking model
+try:
+    with open(os.path.join(ROOT_DIR, "models", "cat_encodings.json")) as _f:
+        cat_encodings = json.load(_f)
+    with open(os.path.join(ROOT_DIR, "models", "scaler_v2.pkl"), "rb") as _f:
+        scaler_v2 = pickle.load(_f)
+    with open(os.path.join(ROOT_DIR, "models", "ensemble_model_v2.pkl"), "rb") as _f:
+        ensemble_model_v2 = pickle.load(_f)
+    FEATURE_COLS_V2 = ["budget","co2_reduction","social_impact","duration_months",
+                       "budget_per_month","co2_per_dollar","efficiency_score",
+                       "impact_ratio","budget_efficiency","category_enc","region_enc"]
+    logger.info("ensemble_model_v2 loaded OK (CV AUC=0.82)")
+except Exception as _e:
+    ensemble_model_v2 = None;caler_v2 = None; FEATURE_COLS_V2 = []
+    logger.warning(f"ensemble_model_v2 not loaded: {_e}")
 if os.path.exists(ENS_PATH):
     with open(ENS_PATH, "rb") as f:
         ensemble_model = pickle.load(f)
@@ -145,6 +161,14 @@ explainer_shap = shap.TreeExplainer(rf_model)
 FEATURE_COLS = ["budget", "co2_reduction", "social_impact", "duration_months", "budget_per_month", "co2_per_dollar", "efficiency_score"]
 
 
+def log_evaluation(project_name, esg_scores, risk_level):
+    try:
+        from app.mlflow_tracking import log_evaluation as _log_eval
+        _log_eval(project_name, esg_scores, risk_level)
+    except Exception:
+        pass
+
+
 def make_features(data):
     budget_per_month = data.budget / max(data.duration_months, 1)
     co2_per_dollar = data.co2_reduction / max(data.budget, 1) * 1000
@@ -154,6 +178,21 @@ def make_features(data):
         columns=FEATURE_COLS,
     )
     return pd.DataFrame(scaler.transform(df), columns=FEATURE_COLS)
+
+def make_features_v2(data, category: str = "Solar Energy", region: str = "Europe"):
+    if scaler_v2 is None:
+        return make_features(data)
+    bpm = data.budget / max(data.duration_months, 1)
+    c2d = data.co2_reduction / max(data.budget, 1) * 1000
+    eff = (data.co2_reduction * data.social_impact) / max(data.duration_months, 1)
+    ir  = data.social_impact / max(data.co2_reduction, 1)
+    be  = data.co2_reduction / max(bpm, 1)
+    c_enc = cat_encodings.get("category", {}).get(category, 0.5)
+    r_enc = cat_encodings.get("region", {}).get(region, 0.5)
+    row = [[data.budget, data.co2_reduction, data.social_impact, data.duration_months,
+            bpm, c2d, eff, ir, be, c_enc, r_enc]]
+    df = pd.DataFrame(row, columns=FEATURE_COLS_V2)
+    return pd.DataFrame(scaler_v2.transform(df), columns=FEATURE_COLS_V2)
 
 
 COUNTRIES = {
@@ -202,6 +241,14 @@ def calculate_esg(project, region_name: str = "Europe"):
     features_scaled = make_features(project)
     success_prob = round(float(rf_model.predict_proba(features_scaled)[0][1]) * 100, 2)
 
+    category = getattr(project, "category", "Solar Energy")
+    region   = getattr(project, "region",   "Europe")
+    if ensemble_model_v2 is not None:
+        feats_v2 = make_features_v2(project, category, region)
+        success_prob_v2 = round(float(ensemble_model_v2.predict_proba(feats_v2)[0][1]) * 100, 2)
+    else:
+        success_prob_v2 = success_prob
+
     recommendations = []
     if score_env < 0.7:
         target_co2 = min(int(project.co2_reduction + (0.7 - score_env) * 100), 100)
@@ -226,16 +273,20 @@ def calculate_esg(project, region_name: str = "Europe"):
 
     risk_level = "Low" if total >= 75 and success_prob >= 70 else ("Medium" if total >= 40 else "High")
 
-    return {
+    result = {
         "total_score": total,
         "environment_score": round(score_env * 100, 1),
         "social_score": round(score_soc * 100, 1),
         "economic_score": round(score_eco * 100, 1),
         "success_probability": success_prob,
+        "success_probability_v2": success_prob_v2,
         "recommendations": recommendations,
         "risk_level": risk_level,
         "esg_weights": {"environment": 0.4, "social": 0.3, "economic": 0.3},
     }
+    project_name = getattr(project, "name", "unknown")
+    log_evaluation(project_name, result, risk_level)
+    return result
 
 
 def _sanitize_pdf(text):

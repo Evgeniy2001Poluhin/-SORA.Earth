@@ -40,12 +40,19 @@ print(f"\nCategory distribution:\n{df['category'].value_counts().to_string()}")
 print(f"\nRegion distribution:\n{df['region'].value_counts().to_string()}")
 print(f"\nStats:\n{df[['budget','co2_reduction','social_impact','duration_months']].describe().round(1).to_string()}")
 
-FEATURES = ["budget", "co2_reduction", "social_impact", "duration_months"]
+# Feature engineering — должно совпадать с make_features() в app/main.py
+df["budget_per_month"] = df["budget"] / df["duration_months"].clip(lower=1)
+df["co2_per_dollar"]   = df["co2_reduction"] / df["budget"].clip(lower=1) * 1000
+df["efficiency_score"] = (df["co2_reduction"] * df["social_impact"]) / df["duration_months"].clip(lower=1)
+
+FEATURES = ["budget", "co2_reduction", "social_impact", "duration_months",
+            "budget_per_month", "co2_per_dollar", "efficiency_score"]
 X = df[FEATURES]
 y = df["success"]
 
 scaler = StandardScaler()
-X_scaled = pd.DataFrame(scaler.fit_transform(X), columns=FEATURES)
+scaler.fit(X)
+X_scaled = pd.DataFrame(scaler.transform(X), columns=FEATURES)
 
 X_train, X_test, y_train, y_test = train_test_split(
     X_scaled, y, test_size=0.2, random_state=42, stratify=y)

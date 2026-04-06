@@ -11,7 +11,11 @@ PROJECT = {
 }
 
 
+import pytest
+
 class TestMonteCarlo:
+    pytestmark = pytest.mark.timeout(60)
+    pytestmark = pytest.mark.timeout(60)
     def test_default_params(self):
         r = client.post("/analytics/monte-carlo", json=PROJECT)
         assert r.status_code == 200

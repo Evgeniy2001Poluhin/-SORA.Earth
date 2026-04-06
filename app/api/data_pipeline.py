@@ -1,5 +1,6 @@
 """Data pipeline API — live data refresh, country data access."""
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends
+from app.auth import require_api_key
 from app import external_data
 
 router = APIRouter(prefix="/data", tags=["data-pipeline"])
@@ -25,7 +26,7 @@ def refresh_data(bg: BackgroundTasks):
     return {"status": "started", "message": "Refresh started in background. Check /data/refresh-status for progress."}
 
 
-@router.get("/rresh/status")
+@router.get("/refresh/status")
 @router.get("/refresh-status")
 def refresh_job_status():
     """Check background refresh job status."""
