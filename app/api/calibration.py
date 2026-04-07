@@ -24,6 +24,12 @@ def reliability_diagram():
     from app.validators import ProjectInput as PI
 
     probas_v1, probas_v2, probas_cal, labels = [], [], [], []
+    # Pre-load calibrated model once
+    cal_path = os.path.join(ROOT, "models", "ensemble_model_v2_cal.pkl")
+    cal_model = None
+    if os.path.exists(cal_path) and m.ensemble_model_v2:
+        with open(cal_path, "rb") as f:
+            cal_model = pickle.load(f)
     for _, row in df.iterrows():
         try:
             p = PI(budget=row.get("budget", 10000), co2_reduction=row.get("co2_reduction", 50),
@@ -41,10 +47,7 @@ def reliability_diagram():
             else:
                 probas_v2.append(pr1)
 
-            cal_path = os.path.join(ROOT, "models", "ensemble_model_v2_cal.pkl")
-            if os.path.exists(cal_path) and m.ensemble_model_v2:
-                with open(cal_path, "rb") as f:
-                    cal_model = pickle.load(f)
+            if cal_model is not None:
                 pr_cal = float(cal_model.predict_proba(feats2)[0][1])
                 probas_cal.append(pr_cal)
             else:

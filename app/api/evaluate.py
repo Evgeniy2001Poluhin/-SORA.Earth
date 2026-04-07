@@ -10,6 +10,7 @@ from app import external_data
 from app.drift_detection import drift_detector
 from app.mlflow_tracking import log_evaluation
 from app.middleware import METRICS
+from app.database import Evaluation
 
 import csv, io, time
 from datetime import datetime
@@ -23,7 +24,7 @@ router = APIRouter()
 
 @router.post("/evaluate")
 def evaluate_project(project: Project):
-    from app.main import calculate_esg, get_db, COUNTRIES, _sanitize_pdf
+    from app.main import calculate_esg, get_db_sync, COUNTRIES, _sanitize_pdf
 
     cache_key = cache.make_key("eval", project.model_dump())
     cached = cache.get(cache_key)
@@ -35,10 +36,8 @@ def evaluate_project(project: Project):
         {"region": "Europe", "lat": 50.0, "lon": 10.0},
     )
     region_name = cdata.get("region", "Europe")
-
     result = calculate_esg(project, region_name)
 
-    # Enrich with external ESG country context
     try:
         ctx = external_data.get_country_context(project.region or region_name)
         if ctx is not None:
@@ -49,32 +48,30 @@ def evaluate_project(project: Project):
     lat = cdata["lat"] + (hash(project.name) % 10 - 5) * 0.3
     lon = cdata["lon"] + (hash(project.name) % 10 - 5) * 0.3
 
-    conn = get_db()
-    conn.execute(
-        "INSERT INTO evaluations (name,budget,co2_reduction,social_impact,duration_months,total_score,environment_score,"
-        "social_score,economic_score,success_probability,recommendation,risk_level,created_at,region,lat,lon) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (
-            project.name,
-            project.budget,
-            project.co2_reduction,
-            project.social_impact,
-            project.duration_months,
-            result["total_score"],
-            result["environment_score"],
-            result["social_score"],
-            result["economic_score"],
-            result["success_probability"],
-            "; ".join([_sanitize_pdf(r) for r in result.get("recommendations", [])]),
-            result["risk_level"],
-            datetime.now().isoformat(),
-            region_name,
-            lat,
-            lon,
-        ),
-    )
-    conn.commit()
-    conn.close()
+    db = get_db_sync()
+    try:
+        ev = Evaluation(
+            name=project.name,
+            budget=project.budget,
+            co2_reduction=project.co2_reduction,
+            social_impact=project.social_impact,
+            duration_months=project.duration_months,
+            total_score=result["total_score"],
+            environment_score=result["environment_score"],
+            social_score=result["social_score"],
+            economic_score=result["economic_score"],
+            success_probability=result["success_probability"],
+            recommendation="; ".join([_sanitize_pdf(r) for r in result.get("recommendations", [])]),
+            risk_level=result["risk_level"],
+            created_at=datetime.now(),
+            region=region_name,
+            lat=lat,
+            lon=lon,
+        )
+        db.add(ev)
+        db.commit()
+    finally:
+        db.close()
 
     result["region"] = region_name
     result["lat"] = lat
@@ -118,92 +115,74 @@ def evaluate_project(project: Project):
 
 @router.get("/history")
 def get_history():
-    from app.main import get_db
+    from app.main import get_db_sync
 
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM evaluations ORDER BY created_at DESC"
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    db = get_db_sync()
+    try:
+        rows = db.query(Evaluation).order_by(Evaluation.created_at.desc()).all()
+        return [
+            {c.name: getattr(r, c.name) for c in Evaluation.__table__.columns}
+            for r in rows
+        ]
+    finally:
+        db.close()
 
 
 @router.delete("/history/{eval_id}")
 def delete_evaluation(eval_id: int):
-    from app.main import get_db
+    from app.main import get_db_sync
 
-    conn = get_db()
-    conn.execute("DELETE FROM evaluations WHERE id=?", (eval_id,))
-    conn.commit()
-    conn.close()
+    db = get_db_sync()
+    try:
+        db.query(Evaluation).filter(Evaluation.id == eval_id).delete()
+        db.commit()
+    finally:
+        db.close()
     return {"status": "deleted"}
 
 
 @router.delete("/history")
 def clear_history():
-    from app.main import get_db
+    from app.main import get_db_sync
 
-    conn = get_db()
-    conn.execute("DELETE FROM evaluations")
-    conn.commit()
-    conn.close()
+    db = get_db_sync()
+    try:
+        db.query(Evaluation).delete()
+        db.commit()
+    finally:
+        db.close()
     return {"status": "cleared"}
 
 
 @router.get("/export/csv")
 def export_csv():
-    from app.main import get_db
+    from app.main import get_db_sync
 
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT name,budget,co2_reduction,social_impact,duration_months,total_score,environment_score,social_score,"
-        "economic_score,success_probability,risk_level,region,created_at FROM evaluations ORDER BY created_at DESC"
-    ).fetchall()
-    conn.close()
+    db = get_db_sync()
+    try:
+        rows = db.query(Evaluation).order_by(Evaluation.created_at.desc()).all()
+    finally:
+        db.close()
+
     output = io.StringIO()
     w = csv.writer(output)
-    w.writerow(
-        [
-            "Name",
-            "Budget",
-            "CO2 Reduction",
-            "Social Impact",
-            "Duration (months)",
-            "ESG Score",
-            "Environment",
-            "Social",
-            "Economic",
-            "Success Probability",
-            "Risk Level",
-            "Region",
-            "Date",
-        ]
-    )
+    w.writerow([
+        "Name", "Budget", "CO2 Reduction", "Social Impact", "Duration (months)",
+        "ESG Score", "Environment", "Social", "Economic",
+        "Success Probability", "Risk Level", "Region", "Date",
+    ])
     for r in rows:
-        w.writerow(
-            [
-                r["name"],
-                r["budget"],
-                r["co2_reduction"],
-                r["social_impact"],
-                r["duration_months"],
-                r["total_score"],
-                r["environment_score"],
-                r["social_score"],
-                r["economic_score"],
-                r["success_probability"],
-                r["risk_level"],
-                r["region"],
-                r["created_at"],
-            ]
-        )
+        w.writerow([
+            r.name, r.budget, r.co2_reduction, r.social_impact,
+            r.duration_months, r.total_score, r.environment_score,
+            r.social_score, r.economic_score, r.success_probability,
+            r.risk_level, r.region, r.created_at,
+        ])
     output.seek(0)
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode()),
         media_type="text/csv",
-        headers={
-            "Content-Disposition": "attachment; filename=sora_earth_projects.csv"
-        },
+        headers={"Content-Disposition": "attachment; filename=sora_earth_projects.csv"},
     )
 
 
@@ -249,8 +228,7 @@ def what_if(project: Project):
 def ghg_calculate(data: GHGInput):
     scope1 = round(
         (data.natural_gas_m3 * 2.0 + data.diesel_liters * 2.68 + data.petrol_liters * 2.31)
-        / 1000,
-        2,
+        / 1000, 2,
     )
     scope2 = round((data.electricity_kwh * 0.4) / 1000, 2)
     scope3 = round(
@@ -274,31 +252,26 @@ def ghg_calculate(data: GHGInput):
     else:
         rating, tip = "High", "Urgent action needed."
     return {
-        "total_tons_co2": total,
-        "scope1": scope1,
-        "scope2": scope2,
-        "scope3": scope3,
-        "breakdown": breakdown,
-        "rating": rating,
-        "tip": tip,
+        "total_tons_co2": total, "scope1": scope1, "scope2": scope2, "scope3": scope3,
+        "breakdown": breakdown, "rating": rating, "tip": tip,
     }
 
 
 # ===== TRENDS / REGIONS / COUNTRIES =====
 @router.get("/trends")
 def trends():
-    from app.main import get_db
+    from app.main import get_db_sync
 
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT total_score,success_probability,created_at FROM evaluations ORDER BY created_at ASC"
-    ).fetchall()
-    conn.close()
+    db = get_db_sync()
+    try:
+        rows = db.query(Evaluation).order_by(Evaluation.created_at.asc()).all()
+    finally:
+        db.close()
     return [
         {
-            "score": r["total_score"],
-            "prob": r["success_probability"],
-            "date": r["created_at"][:16].replace("T", " "),
+            "score": r.total_score,
+            "prob": r.success_probability,
+            "date": str(r.created_at)[:16].replace("T", " "),
         }
         for r in rows
     ]
@@ -307,14 +280,12 @@ def trends():
 @router.get("/regions")
 def regions():
     from app.main import REGIONAL_FACTORS
-
     return list(REGIONAL_FACTORS.keys())
 
 
 @router.get("/countries")
 def countries_list():
     from app.main import COUNTRIES
-
     return {k: v["region"] for k, v in COUNTRIES.items()}
 
 
@@ -322,12 +293,8 @@ def countries_list():
 @router.post("/report/pdf")
 def generate_pdf_report(project: Project):
     from app.main import (
-        calculate_esg,
-        make_features,
-        ensemble_model,
-        best_threshold,
-        _sanitize_pdf,
-        COUNTRIES,
+        calculate_esg, make_features, ensemble_model, best_threshold,
+        _sanitize_pdf, COUNTRIES,
     )
     from app.validators import ProjectInput as ValidatorProject
 
@@ -336,19 +303,13 @@ def generate_pdf_report(project: Project):
     esg = calculate_esg(project, pdf_region)
     feats = make_features(
         ValidatorProject(
-            budget=project.budget,
-            co2_reduction=project.co2_reduction,
-            social_impact=project.social_impact,
-            duration_months=project.duration_months,
+            budget=project.budget, co2_reduction=project.co2_reduction,
+            social_impact=project.social_impact, duration_months=project.duration_months,
         )
     )
     prob = float(ensemble_model.predict_proba(feats)[0][1])
     prediction = int(prob >= best_threshold)
-    risk = (
-        "Low"
-        if esg["total_score"] >= 70
-        else "Medium" if esg["total_score"] >= 40 else "High"
-    )
+    risk = "Low" if esg["total_score"] >= 70 else "Medium" if esg["total_score"] >= 40 else "High"
 
     pdf = FPDF()
     _orig_normalize = pdf.normalize_text
@@ -361,25 +322,17 @@ def generate_pdf_report(project: Project):
     pdf.set_font("Helvetica", "B", 22)
     pdf.cell(0, 15, "SORA.Earth - Project ESG Report", ln=True, align="C")
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(
-        0,
-        8,
-        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        ln=True,
-        align="C",
-    )
+    pdf.cell(0, 8, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align="C")
     pdf.ln(10)
 
     pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 10, "Project Overview", ln=True)
     pdf.set_font("Helvetica", "", 11)
     info = [
-        ("Name", project.name),
-        ("Budget", f"${project.budget:,.0f}"),
+        ("Name", project.name), ("Budget", f"${project.budget:,.0f}"),
         ("CO2 Reduction", f"{project.co2_reduction} tons/year"),
         ("Social Impact", f"{project.social_impact}/10"),
-        ("Duration", f"{project.duration_months} months"),
-        ("Country", project.region),
+        ("Duration", f"{project.duration_months} months"), ("Country", project.region),
     ]
     for k, v in info:
         pdf.cell(60, 8, k + ":", 0)
@@ -413,18 +366,11 @@ def generate_pdf_report(project: Project):
     pdf.ln(6)
 
     pdf.set_font("Helvetica", "I", 9)
-    pdf.cell(
-        0,
-        8,
-        "This report was generated by SORA.Earth AI Platform v2.0",
-        ln=True,
-        align="C",
-    )
+    pdf.cell(0, 8, "This report was generated by SORA.Earth AI Platform v2.0", ln=True, align="C")
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     pdf.output(tmp.name)
     return FileResponse(
-        tmp.name,
-        media_type="application/pdf",
+        tmp.name, media_type="application/pdf",
         filename=f"SORA_Earth_{project.name.replace(' ', '_')}_Report.pdf",
     )

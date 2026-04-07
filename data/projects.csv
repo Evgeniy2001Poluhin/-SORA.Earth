@@ -1,501 +1,567 @@
 name,budget,co2_reduction,social_impact,duration_months,category,region,success,budget_per_month,co2_per_dollar,efficiency_score
-Water Conservation Project 1,7973,51,10,12,Water Conservation,Oceania,1,664.42,6.3966,42.5
-Recycling Hub Project 2,3576,77,3,48,Recycling Hub,Europe,0,74.5,21.5324,4.81
-Composting Project 3,12889,70,6,18,Composting,Asia,1,716.06,5.431,23.33
-Water Conservation Project 4,61554,20,10,3,Water Conservation,Europe,1,20518.0,0.3249,66.67
-Wind Farm Project 5,28478,44,10,6,Wind Farm,South America,1,4746.33,1.5451,73.33
-Geothermal Energy Project 6,4939,9,9,6,Geothermal Energy,North America,1,823.17,1.8222,13.5
-Composting Project 7,27114,13,1,6,Composting,Oceania,1,4519.0,0.4795,2.17
-Composting Project 8,34974,90,5,48,Composting,South America,1,728.62,2.5733,9.38
-Water Conservation Project 9,7626,1,4,12,Water Conservation,North America,0,635.5,0.1311,0.33
-Solar Energy Project 10,26488,3,8,48,Solar Energy,Europe,0,551.83,0.1133,0.5
-Wind Farm Project 11,23620,9,1,18,Wind Farm,Europe,0,1312.22,0.381,0.5
-Water Conservation Project 12,5588,1,9,12,Water Conservation,Europe,1,465.67,0.179,0.75
-Wind Farm Project 13,33838,8,6,9,Wind Farm,Europe,0,3759.78,0.2364,5.33
-Wind Farm Project 14,43171,34,4,36,Wind Farm,Africa,0,1199.19,0.7876,3.78
-Geothermal Energy Project 15,80794,21,9,6,Geothermal Energy,South America,1,13465.67,0.2599,31.5
-Composting Project 16,78007,89,5,48,Composting,South America,0,1625.15,1.1409,9.27
-Recycling Hub Project 17,4216,68,5,9,Recycling Hub,Europe,1,468.44,16.129,37.78
-Geothermal Energy Project 18,7148,16,5,24,Geothermal Energy,Africa,0,297.83,2.2384,3.33
-Geothermal Energy Project 19,40865,12,1,48,Geothermal Energy,Asia,0,851.35,0.2936,0.25
-Wind Farm Project 20,40804,19,1,3,Wind Farm,Europe,0,13601.33,0.4656,6.33
-Green Building Project 21,40866,35,8,36,Green Building,Asia,1,1135.17,0.8565,7.78
-Composting Project 22,500000,12,8,3,Composting,South America,1,166666.67,0.024,32.0
-Solar Energy Project 23,43698,39,6,12,Solar Energy,Europe,1,3641.5,0.8925,19.5
-Geothermal Energy Project 24,86049,21,4,36,Geothermal Energy,North America,0,2390.25,0.244,2.33
-Recycling Hub Project 25,69203,32,2,48,Recycling Hub,North America,1,1441.73,0.4624,1.33
-Green Building Project 26,48130,22,2,18,Green Building,Europe,0,2673.89,0.4571,2.44
-Green Building Project 27,15088,13,9,9,Green Building,Africa,1,1676.44,0.8616,13.0
-Solar Energy Project 28,54762,118,5,18,Solar Energy,Asia,1,3042.33,2.1548,32.78
-Geothermal Energy Project 29,8713,57,4,48,Geothermal Energy,Asia,0,181.52,6.5419,4.75
-Recycling Hub Project 30,16577,6,10,12,Recycling Hub,North America,1,1381.42,0.3619,5.0
-Composting Project 31,12302,81,1,3,Composting,North America,0,4100.67,6.5843,27.0
-Tree Planting Project 32,24300,26,7,36,Tree Planting,Asia,0,675.0,1.07,5.06
-Recycling Hub Project 33,354190,89,3,18,Recycling Hub,South America,1,19677.22,0.2513,14.83
-Solar Energy Project 34,2343,64,6,48,Solar Energy,Europe,0,48.81,27.3154,8.0
-Green Building Project 35,50187,22,5,18,Green Building,South America,1,2788.17,0.4384,6.11
-Composting Project 36,3180,1,5,48,Composting,Asia,0,66.25,0.3145,0.1
-Recycling Hub Project 37,12502,12,5,3,Recycling Hub,North America,0,4167.33,0.9598,20.0
-Tree Planting Project 38,81368,31,1,36,Tree Planting,Europe,1,2260.22,0.381,0.86
-Tree Planting Project 39,23792,40,1,9,Tree Planting,Asia,0,2643.56,1.6812,4.44
-Wind Farm Project 40,6043,11,3,3,Wind Farm,Europe,0,2014.33,1.8203,11.0
-Wind Farm Project 41,9336,6,10,18,Wind Farm,Europe,1,518.67,0.6427,3.33
-Water Conservation Project 42,49787,72,4,9,Water Conservation,Europe,1,5531.89,1.4462,32.0
-Solar Energy Project 43,9168,166,5,48,Solar Energy,North America,0,191.0,18.1065,17.29
-Geothermal Energy Project 44,28559,29,2,9,Geothermal Energy,Asia,1,3173.22,1.0154,6.44
-Recycling Hub Project 45,23264,7,8,48,Recycling Hub,South America,0,484.67,0.3009,1.17
-Recycling Hub Project 46,10077,12,2,3,Recycling Hub,Europe,0,3359.0,1.1908,8.0
-Geothermal Energy Project 47,288581,1,9,18,Geothermal Energy,Africa,1,16032.28,0.0035,0.5
-Water Conservation Project 48,47131,98,2,12,Water Conservation,Africa,1,3927.58,2.0793,16.33
-Green Building Project 49,1938,5,9,18,Green Building,Africa,1,107.67,2.58,2.5
-Green Building Project 50,27549,34,7,48,Green Building,Europe,0,573.94,1.2342,4.96
-Water Conservation Project 51,9955,12,8,6,Water Conservation,North America,0,1659.17,1.2054,16.0
-Green Building Project 52,61262,32,2,36,Green Building,Oceania,0,1701.72,0.5223,1.78
-Wind Farm Project 53,8509,42,7,24,Wind Farm,Asia,0,354.54,4.936,12.25
-Recycling Hub Project 54,19193,70,6,12,Recycling Hub,Europe,1,1599.42,3.6472,35.0
-Water Conservation Project 55,40375,9,4,9,Water Conservation,Europe,1,4486.11,0.2229,4.0
-Recycling Hub Project 56,62249,1,7,12,Recycling Hub,North America,1,5187.42,0.0161,0.58
-Geothermal Energy Project 57,5216,5,4,36,Geothermal Energy,Africa,0,144.89,0.9586,0.56
-Tree Planting Project 58,14744,92,2,9,Tree Planting,South America,1,1638.22,6.2398,20.44
-Wind Farm Project 59,12457,82,10,36,Wind Farm,North America,0,346.03,6.5826,22.78
-Composting Project 60,10056,36,7,9,Composting,Europe,1,1117.33,3.58,28.0
-Wind Farm Project 61,183238,36,8,12,Wind Farm,Asia,1,15269.83,0.1965,24.0
-Water Conservation Project 62,35809,43,2,9,Water Conservation,Asia,1,3978.78,1.2008,9.56
-Composting Project 63,4850,7,5,9,Composting,North America,0,538.89,1.4433,3.89
-Tree Planting Project 64,66266,98,1,6,Tree Planting,Asia,1,11044.33,1.4789,16.33
-Water Conservation Project 65,281134,21,7,18,Water Conservation,Oceania,1,15618.56,0.0747,8.17
-Solar Energy Project 66,76035,19,8,18,Solar Energy,Europe,1,4224.17,0.2499,8.44
-Recycling Hub Project 67,3557,29,6,24,Recycling Hub,South America,0,148.21,8.1529,7.25
-Tree Planting Project 68,12319,1,5,24,Tree Planting,Europe,0,513.29,0.0812,0.21
-Recycling Hub Project 69,100739,7,6,48,Recycling Hub,Asia,1,2098.73,0.0695,0.88
-Green Building Project 70,9421,53,2,48,Green Building,South America,0,196.27,5.6257,2.21
-Solar Energy Project 71,37518,3,1,48,Solar Energy,South America,0,781.62,0.08,0.06
-Solar Energy Project 72,55801,36,7,6,Solar Energy,Asia,1,9300.17,0.6451,42.0
-Tree Planting Project 73,7242,11,7,24,Tree Planting,North America,0,301.75,1.5189,3.21
-Solar Energy Project 74,20507,19,10,36,Solar Energy,Africa,0,569.64,0.9265,5.28
-Composting Project 75,500,13,10,48,Composting,South America,1,10.42,26.0,2.71
-Solar Energy Project 76,6442,17,2,48,Solar Energy,Europe,0,134.21,2.6389,0.71
-Recycling Hub Project 77,16267,50,2,12,Recycling Hub,Asia,1,1355.58,3.0737,8.33
-Recycling Hub Project 78,4927,14,1,3,Recycling Hub,Asia,0,1642.33,2.8415,4.67
-Water Conservation Project 79,156200,33,10,36,Water Conservation,North America,1,4338.89,0.2113,9.17
-Recycling Hub Project 80,3959,25,8,48,Recycling Hub,Africa,1,82.48,6.3147,4.17
-Water Conservation Project 81,12990,43,8,48,Water Conservation,Africa,0,270.62,3.3102,7.17
-Recycling Hub Project 82,25768,110,1,48,Recycling Hub,Europe,1,536.83,4.2689,2.29
-Composting Project 83,124185,52,8,3,Composting,Oceania,1,41395.0,0.4187,138.67
-Geothermal Energy Project 84,3932,9,9,3,Geothermal Energy,Europe,1,1310.67,2.2889,27.0
-Water Conservation Project 85,88947,1,4,6,Water Conservation,Europe,1,14824.5,0.0112,0.67
-Wind Farm Project 86,22298,12,1,36,Wind Farm,Europe,0,619.39,0.5382,0.33
-Green Building Project 87,6783,36,1,6,Green Building,Africa,0,1130.5,5.3074,6.0
-Tree Planting Project 88,38350,2,3,9,Tree Planting,Asia,0,4261.11,0.0522,0.67
-Recycling Hub Project 89,27969,27,5,3,Recycling Hub,Europe,1,9323.0,0.9654,45.0
-Solar Energy Project 90,10718,36,5,12,Solar Energy,North America,1,893.17,3.3588,15.0
-Geothermal Energy Project 91,23950,16,9,24,Geothermal Energy,South America,0,997.92,0.6681,6.0
-Recycling Hub Project 92,13871,58,10,12,Recycling Hub,Europe,1,1155.92,4.1814,48.33
-Solar Energy Project 93,25240,4,2,24,Solar Energy,Africa,0,1051.67,0.1585,0.33
-Green Building Project 94,48754,3,2,3,Green Building,Asia,0,16251.33,0.0615,2.0
-Green Building Project 95,147741,52,6,3,Green Building,South America,1,49247.0,0.352,104.0
-Green Building Project 96,4987,27,9,3,Green Building,Oceania,1,1662.33,5.4141,81.0
-Solar Energy Project 97,284827,46,1,6,Solar Energy,North America,1,47471.17,0.1615,7.67
-Recycling Hub Project 98,2116,22,9,36,Recycling Hub,Oceania,0,58.78,10.397,5.5
-Green Building Project 99,18358,11,9,24,Green Building,Asia,0,764.92,0.5992,4.12
-Composting Project 100,44621,68,9,36,Composting,South America,1,1239.47,1.5239,17.0
-Water Conservation Project 101,30859,64,5,6,Water Conservation,Europe,0,5143.17,2.0739,53.33
-Solar Energy Project 102,10433,47,9,6,Solar Energy,Africa,1,1738.83,4.5049,70.5
-Solar Energy Project 103,17158,12,4,18,Solar Energy,North America,0,953.22,0.6994,2.67
-Recycling Hub Project 104,12190,35,2,12,Recycling Hub,Europe,0,1015.83,2.8712,5.83
-Solar Energy Project 105,10859,17,6,12,Solar Energy,Europe,1,904.92,1.5655,8.5
-Solar Energy Project 106,61054,3,4,9,Solar Energy,South America,1,6783.78,0.0491,1.33
-Green Building Project 107,33806,99,6,48,Green Building,South America,0,704.29,2.9285,12.38
-Recycling Hub Project 108,9590,5,3,6,Recycling Hub,Asia,0,1598.33,0.5214,2.5
-Green Building Project 109,64829,120,6,24,Green Building,Africa,1,2701.21,1.851,30.0
-Water Conservation Project 110,31848,23,2,18,Water Conservation,Europe,1,1769.33,0.7222,2.56
-Geothermal Energy Project 111,58421,8,2,18,Geothermal Energy,Asia,0,3245.61,0.1369,0.89
-Water Conservation Project 112,46889,31,9,48,Water Conservation,Europe,1,976.85,0.6611,5.81
-Geothermal Energy Project 113,8145,82,7,36,Geothermal Energy,Africa,1,226.25,10.0675,15.94
-Green Building Project 114,11246,52,3,48,Green Building,Asia,1,234.29,4.6239,3.25
-Water Conservation Project 115,54000,65,1,48,Water Conservation,South America,0,1125.0,1.2037,1.35
-Recycling Hub Project 116,45818,43,8,48,Recycling Hub,Asia,0,954.54,0.9385,7.17
-Tree Planting Project 117,21480,47,6,12,Tree Planting,North America,1,1790.0,2.1881,23.5
-Green Building Project 118,25356,75,7,6,Green Building,North America,1,4226.0,2.9579,87.5
-Geothermal Energy Project 119,102047,11,9,9,Geothermal Energy,Asia,1,11338.56,0.1078,11.0
-Composting Project 120,10830,26,5,6,Composting,North America,0,1805.0,2.4007,21.67
-Geothermal Energy Project 121,42468,10,1,36,Geothermal Energy,North America,1,1179.67,0.2355,0.28
-Composting Project 122,17281,175,10,3,Composting,North America,1,5760.33,10.1267,583.33
-Solar Energy Project 123,16962,115,7,48,Solar Energy,Asia,1,353.38,6.7799,16.77
-Water Conservation Project 124,82333,1,5,6,Water Conservation,North America,1,13722.17,0.0121,0.83
-Composting Project 125,59308,48,3,36,Composting,Europe,0,1647.44,0.8093,4.0
-Geothermal Energy Project 126,58466,103,9,3,Geothermal Energy,Asia,1,19488.67,1.7617,309.0
-Solar Energy Project 127,105511,7,1,3,Solar Energy,Asia,0,35170.33,0.0663,2.33
-Tree Planting Project 128,22588,33,1,48,Tree Planting,Europe,0,470.58,1.461,0.69
-Recycling Hub Project 129,49928,98,1,9,Recycling Hub,Europe,0,5547.56,1.9628,10.89
-Recycling Hub Project 130,15179,1,3,24,Recycling Hub,Europe,0,632.46,0.0659,0.12
-Recycling Hub Project 131,32500,47,6,12,Recycling Hub,North America,1,2708.33,1.4462,23.5
-Composting Project 132,18841,14,10,6,Composting,North America,0,3140.17,0.7431,23.33
-Tree Planting Project 133,24745,103,3,3,Tree Planting,Asia,1,8248.33,4.1625,103.0
-Composting Project 134,44989,141,8,6,Composting,Asia,1,7498.17,3.1341,188.0
-Water Conservation Project 135,8251,115,10,24,Water Conservation,South America,1,343.79,13.9377,47.92
-Composting Project 136,271268,25,2,12,Composting,North America,1,22605.67,0.0922,4.17
-Tree Planting Project 137,6586,79,9,24,Tree Planting,Asia,1,274.42,11.9951,29.62
-Tree Planting Project 138,5130,74,3,12,Tree Planting,North America,1,427.5,14.425,18.5
-Water Conservation Project 139,88409,15,5,18,Water Conservation,Oceania,1,4911.61,0.1697,4.17
-Tree Planting Project 140,56953,70,10,12,Tree Planting,South America,1,4746.08,1.2291,58.33
-Geothermal Energy Project 141,46580,1,8,48,Geothermal Energy,Europe,1,970.42,0.0215,0.17
-Tree Planting Project 142,46817,36,2,9,Tree Planting,Asia,0,5201.89,0.769,8.0
-Recycling Hub Project 143,21705,10,6,24,Recycling Hub,North America,0,904.38,0.4607,2.5
-Geothermal Energy Project 144,7504,5,5,3,Geothermal Energy,Asia,1,2501.33,0.6663,8.33
-Geothermal Energy Project 145,24124,3,10,48,Geothermal Energy,Europe,0,502.58,0.1244,0.62
-Water Conservation Project 146,9773,47,9,18,Water Conservation,Europe,1,542.94,4.8092,23.5
-Wind Farm Project 147,70979,16,5,9,Wind Farm,Africa,1,7886.56,0.2254,8.89
-Wind Farm Project 148,18463,51,2,6,Wind Farm,Europe,0,3077.17,2.7623,17.0
-Tree Planting Project 149,8179,2,5,48,Tree Planting,Asia,0,170.4,0.2445,0.21
-Geothermal Energy Project 150,14977,15,4,24,Geothermal Energy,Europe,0,624.04,1.0015,2.5
-Wind Farm Project 151,36153,31,7,36,Wind Farm,South America,1,1004.25,0.8575,6.03
-Wind Farm Project 152,11198,62,6,36,Wind Farm,Asia,0,311.06,5.5367,10.33
-Tree Planting Project 153,8211,15,2,3,Tree Planting,South America,1,2737.0,1.8268,10.0
-Wind Farm Project 154,29508,39,5,12,Wind Farm,North America,1,2459.0,1.3217,16.25
-Composting Project 155,29553,86,7,3,Composting,Europe,0,9851.0,2.91,200.67
-Solar Energy Project 156,11988,38,7,36,Solar Energy,Europe,0,333.0,3.1698,7.39
-Water Conservation Project 157,12515,10,5,6,Water Conservation,North America,0,2085.83,0.799,8.33
-Solar Energy Project 158,29099,1,9,18,Solar Energy,Asia,1,1616.61,0.0344,0.5
-Tree Planting Project 159,3874,81,4,18,Tree Planting,Africa,0,215.22,20.9086,18.0
-Recycling Hub Project 160,4068,1,3,24,Recycling Hub,Africa,0,169.5,0.2458,0.12
-Water Conservation Project 161,9300,83,4,18,Water Conservation,Asia,1,516.67,8.9247,18.44
-Tree Planting Project 162,17049,30,5,24,Tree Planting,Asia,0,710.38,1.7596,6.25
-Geothermal Energy Project 163,31987,111,6,48,Geothermal Energy,Asia,0,666.4,3.4702,13.88
-Recycling Hub Project 164,129369,64,3,24,Recycling Hub,Europe,1,5390.38,0.4947,8.0
-Solar Energy Project 165,61647,200,2,48,Solar Energy,Africa,1,1284.31,3.2443,8.33
-Tree Planting Project 166,18179,17,4,24,Tree Planting,Asia,0,757.46,0.9351,2.83
-Geothermal Energy Project 167,21529,58,5,36,Geothermal Energy,South America,0,598.03,2.694,8.06
-Water Conservation Project 168,6614,20,4,36,Water Conservation,Europe,0,183.72,3.0239,2.22
-Water Conservation Project 169,21542,26,3,12,Water Conservation,North America,0,1795.17,1.2069,6.5
-Green Building Project 170,15577,39,8,48,Green Building,North America,0,324.52,2.5037,6.5
-Geothermal Energy Project 171,32443,82,10,9,Geothermal Energy,Africa,1,3604.78,2.5275,91.11
-Composting Project 172,8162,165,4,48,Composting,South America,0,170.04,20.2156,13.75
-Wind Farm Project 173,41077,58,2,24,Wind Farm,North America,1,1711.54,1.412,4.83
-Recycling Hub Project 174,138591,21,2,24,Recycling Hub,Oceania,1,5774.62,0.1515,1.75
-Geothermal Energy Project 175,19331,21,1,9,Geothermal Energy,Europe,0,2147.89,1.0863,2.33
-Green Building Project 176,35669,53,4,3,Green Building,North America,1,11889.67,1.4859,70.67
-Wind Farm Project 177,50421,10,10,24,Wind Farm,Europe,0,2100.88,0.1983,4.17
-Wind Farm Project 178,13609,4,9,12,Wind Farm,Asia,1,1134.08,0.2939,3.0
-Tree Planting Project 179,28822,17,7,18,Tree Planting,Africa,0,1601.22,0.5898,6.61
-Wind Farm Project 180,22361,13,10,18,Wind Farm,Europe,1,1242.28,0.5814,7.22
-Composting Project 181,24765,14,7,6,Composting,Africa,1,4127.5,0.5653,16.33
-Water Conservation Project 182,8711,10,7,6,Water Conservation,Europe,1,1451.83,1.148,11.67
-Green Building Project 183,22683,1,8,18,Green Building,Africa,0,1260.17,0.0441,0.44
-Wind Farm Project 184,40038,1,1,18,Wind Farm,Asia,0,2224.33,0.025,0.06
-Tree Planting Project 185,125664,175,10,36,Tree Planting,Asia,1,3490.67,1.3926,48.61
-Composting Project 186,69642,22,10,12,Composting,Europe,1,5803.5,0.3159,18.33
-Solar Energy Project 187,291798,19,8,9,Solar Energy,Oceania,1,32422.0,0.0651,16.89
-Water Conservation Project 188,8770,45,4,6,Water Conservation,Asia,1,1461.67,5.1311,30.0
-Water Conservation Project 189,62741,9,4,36,Water Conservation,North America,0,1742.81,0.1434,1.0
-Green Building Project 190,27446,119,4,36,Green Building,Asia,1,762.39,4.3358,13.22
-Water Conservation Project 191,304907,61,6,9,Water Conservation,Europe,1,33878.56,0.2001,40.67
-Wind Farm Project 192,8350,3,7,36,Wind Farm,Africa,0,231.94,0.3593,0.58
-Tree Planting Project 193,8041,21,6,48,Tree Planting,Europe,0,167.52,2.6116,2.62
-Water Conservation Project 194,10729,84,1,12,Water Conservation,Asia,1,894.08,7.8292,7.0
-Water Conservation Project 195,1722,115,8,18,Water Conservation,South America,1,95.67,66.7828,51.11
-Solar Energy Project 196,11720,25,10,24,Solar Energy,Europe,0,488.33,2.1331,10.42
-Solar Energy Project 197,8857,38,7,9,Solar Energy,Europe,1,984.11,4.2904,29.56
-Recycling Hub Project 198,26382,7,6,18,Recycling Hub,Europe,0,1465.67,0.2653,2.33
-Composting Project 199,33193,189,6,18,Composting,North America,1,1844.06,5.694,63.0
-Wind Farm Project 200,209275,10,5,3,Wind Farm,North America,1,69758.33,0.0478,16.67
-Water Conservation Project 201,68906,114,6,48,Water Conservation,South America,1,1435.54,1.6544,14.25
-Geothermal Energy Project 202,11022,41,9,9,Geothermal Energy,Europe,0,1224.67,3.7198,41.0
-Water Conservation Project 203,7494,37,10,36,Water Conservation,Europe,1,208.17,4.9373,10.28
-Tree Planting Project 204,39747,28,9,24,Tree Planting,Asia,1,1656.12,0.7045,10.5
-Recycling Hub Project 205,4517,10,10,9,Recycling Hub,Europe,1,501.89,2.2139,11.11
-Composting Project 206,198342,7,8,36,Composting,Africa,1,5509.5,0.0353,1.56
-Geothermal Energy Project 207,90701,9,10,18,Geothermal Energy,Africa,1,5038.94,0.0992,5.0
-Recycling Hub Project 208,12543,8,9,24,Recycling Hub,Asia,0,522.62,0.6378,3.0
-Green Building Project 209,2819,60,10,36,Green Building,South America,0,78.31,21.2841,16.67
-Composting Project 210,111820,17,8,12,Composting,Africa,1,9318.33,0.152,11.33
-Water Conservation Project 211,19197,2,8,36,Water Conservation,Europe,0,533.25,0.1042,0.44
-Water Conservation Project 212,97283,139,1,3,Water Conservation,Europe,1,32427.67,1.4288,46.33
-Composting Project 213,3250,86,10,48,Composting,Europe,1,67.71,26.4615,17.92
-Water Conservation Project 214,10729,105,5,18,Water Conservation,Asia,1,596.06,9.7866,29.17
-Wind Farm Project 215,22165,200,4,36,Wind Farm,Europe,1,615.69,9.0232,22.22
-Composting Project 216,23303,7,2,48,Composting,South America,0,485.48,0.3004,0.29
-Recycling Hub Project 217,12834,20,8,6,Recycling Hub,Oceania,1,2139.0,1.5584,26.67
-Composting Project 218,46509,56,3,6,Composting,Africa,0,7751.5,1.2041,28.0
-Geothermal Energy Project 219,6117,47,4,48,Geothermal Energy,South America,0,127.44,7.6835,3.92
-Water Conservation Project 220,18567,6,7,48,Water Conservation,Europe,0,386.81,0.3232,0.88
-Wind Farm Project 221,25447,67,10,3,Wind Farm,Asia,1,8482.33,2.6329,223.33
-Wind Farm Project 222,40836,10,9,12,Wind Farm,South America,1,3403.0,0.2449,7.5
-Green Building Project 223,51737,10,2,18,Green Building,Europe,0,2874.28,0.1933,1.11
-Recycling Hub Project 224,5712,30,3,9,Recycling Hub,Europe,0,634.67,5.2521,10.0
-Solar Energy Project 225,3494,35,4,3,Solar Energy,Africa,1,1164.67,10.0172,46.67
-Solar Energy Project 226,102049,34,10,12,Solar Energy,Asia,1,8504.08,0.3332,28.33
-Composting Project 227,32819,3,1,48,Composting,Asia,0,683.73,0.0914,0.06
-Green Building Project 228,8971,83,7,9,Green Building,Africa,1,996.78,9.252,64.56
-Tree Planting Project 229,141687,12,2,48,Tree Planting,South America,0,2951.81,0.0847,0.5
-Composting Project 230,25306,5,5,48,Composting,South America,0,527.21,0.1976,0.52
-Green Building Project 231,90685,87,1,6,Green Building,North America,1,15114.17,0.9594,14.5
-Recycling Hub Project 232,23885,124,3,6,Recycling Hub,North America,1,3980.83,5.1915,62.0
-Recycling Hub Project 233,261162,79,2,9,Recycling Hub,North America,1,29018.0,0.3025,17.56
-Recycling Hub Project 234,181028,66,1,3,Recycling Hub,Asia,1,60342.67,0.3646,22.0
-Recycling Hub Project 235,16337,42,7,6,Recycling Hub,South America,1,2722.83,2.5709,49.0
-Recycling Hub Project 236,70677,32,5,18,Recycling Hub,Africa,0,3926.5,0.4528,8.89
-Green Building Project 237,47784,3,1,48,Green Building,North America,0,995.5,0.0628,0.06
-Green Building Project 238,113818,21,6,24,Green Building,South America,1,4742.42,0.1845,5.25
-Wind Farm Project 239,6919,18,5,36,Wind Farm,South America,0,192.19,2.6015,2.5
-Geothermal Energy Project 240,50174,12,3,9,Geothermal Energy,South America,1,5574.89,0.2392,4.0
-Solar Energy Project 241,78441,51,7,9,Solar Energy,Asia,1,8715.67,0.6502,39.67
-Water Conservation Project 242,2669,27,10,6,Water Conservation,Europe,0,444.83,10.1161,45.0
-Recycling Hub Project 243,5324,3,9,3,Recycling Hub,South America,0,1774.67,0.5635,9.0
-Tree Planting Project 244,1906,9,9,48,Tree Planting,Europe,0,39.71,4.7219,1.69
-Water Conservation Project 245,15941,45,9,18,Water Conservation,North America,1,885.61,2.8229,22.5
-Green Building Project 246,52106,3,2,3,Green Building,North America,1,17368.67,0.0576,2.0
-Tree Planting Project 247,133629,76,3,12,Tree Planting,Asia,1,11135.75,0.5687,19.0
-Tree Planting Project 248,24074,27,7,12,Tree Planting,Oceania,1,2006.17,1.1215,15.75
-Tree Planting Project 249,155490,26,5,24,Tree Planting,South America,1,6478.75,0.1672,5.42
-Wind Farm Project 250,4204,35,2,6,Wind Farm,Asia,0,700.67,8.3254,11.67
-Green Building Project 251,2852,69,3,6,Green Building,South America,1,475.33,24.1935,34.5
-Tree Planting Project 252,20606,17,10,6,Tree Planting,South America,0,3434.33,0.825,28.33
-Recycling Hub Project 253,34922,45,6,24,Recycling Hub,Europe,1,1455.08,1.2886,11.25
-Composting Project 254,21179,33,7,12,Composting,Europe,0,1764.92,1.5581,19.25
-Tree Planting Project 255,1842,12,9,3,Tree Planting,North America,1,614.0,6.5147,36.0
-Wind Farm Project 256,19792,84,1,24,Wind Farm,North America,0,824.67,4.2441,3.5
-Water Conservation Project 257,4603,63,7,24,Water Conservation,Europe,0,191.79,13.6867,18.38
-Green Building Project 258,49197,42,8,3,Green Building,Europe,1,16399.0,0.8537,112.0
-Geothermal Energy Project 259,34197,76,3,6,Geothermal Energy,Europe,1,5699.5,2.2224,38.0
-Wind Farm Project 260,7130,80,4,18,Wind Farm,Oceania,1,396.11,11.2202,17.78
-Tree Planting Project 261,11888,49,10,3,Tree Planting,North America,1,3962.67,4.1218,163.33
-Green Building Project 262,6179,72,6,12,Green Building,North America,1,514.92,11.6524,36.0
-Composting Project 263,20430,47,10,9,Composting,Europe,1,2270.0,2.3005,52.22
-Tree Planting Project 264,69297,45,7,48,Tree Planting,South America,1,1443.69,0.6494,6.56
-Wind Farm Project 265,6748,38,4,9,Wind Farm,Europe,0,749.78,5.6313,16.89
-Solar Energy Project 266,40330,55,8,36,Solar Energy,Europe,1,1120.28,1.3637,12.22
-Recycling Hub Project 267,11657,6,5,36,Recycling Hub,South America,0,323.81,0.5147,0.83
-Geothermal Energy Project 268,8506,85,1,24,Geothermal Energy,Europe,0,354.42,9.9929,3.54
-Water Conservation Project 269,19371,82,4,48,Water Conservation,Europe,1,403.56,4.2331,6.83
-Wind Farm Project 270,6359,1,3,9,Wind Farm,Europe,0,706.56,0.1573,0.33
-Green Building Project 271,11334,69,9,18,Green Building,Europe,1,629.67,6.0879,34.5
-Geothermal Energy Project 272,5231,5,8,6,Geothermal Energy,Europe,0,871.83,0.9558,6.67
-Geothermal Energy Project 273,232738,16,1,12,Geothermal Energy,North America,1,19394.83,0.0687,1.33
-Geothermal Energy Project 274,22978,54,6,36,Geothermal Energy,Asia,0,638.28,2.3501,9.0
-Tree Planting Project 275,9512,7,9,18,Tree Planting,South America,0,528.44,0.7359,3.5
-Recycling Hub Project 276,28474,68,7,12,Recycling Hub,South America,1,2372.83,2.3881,39.67
-Tree Planting Project 277,19248,71,4,12,Tree Planting,Europe,1,1604.0,3.6887,23.67
-Green Building Project 278,16896,28,1,6,Green Building,Africa,0,2816.0,1.6572,4.67
-Tree Planting Project 279,46027,1,2,48,Tree Planting,North America,0,958.9,0.0217,0.04
-Solar Energy Project 280,54666,13,5,24,Solar Energy,Europe,1,2277.75,0.2378,2.71
-Recycling Hub Project 281,11653,38,5,9,Recycling Hub,South America,1,1294.78,3.261,21.11
-Recycling Hub Project 282,11037,158,8,6,Recycling Hub,Europe,1,1839.5,14.3155,210.67
-Green Building Project 283,15834,39,6,18,Green Building,North America,0,879.67,2.4631,13.0
-Water Conservation Project 284,1390,12,8,24,Water Conservation,South America,1,57.92,8.6331,4.0
-Solar Energy Project 285,3575,40,2,18,Solar Energy,Africa,1,198.61,11.1888,4.44
-Wind Farm Project 286,113578,31,3,24,Wind Farm,North America,1,4732.42,0.2729,3.88
-Tree Planting Project 287,158571,60,6,48,Tree Planting,Asia,0,3303.56,0.3784,7.5
-Composting Project 288,16336,4,10,36,Composting,Oceania,1,453.78,0.2449,1.11
-Tree Planting Project 289,43996,57,3,18,Tree Planting,Europe,1,2444.22,1.2956,9.5
-Geothermal Energy Project 290,32000,31,6,6,Geothermal Energy,Europe,1,5333.33,0.9688,31.0
-Tree Planting Project 291,500000,131,6,24,Tree Planting,North America,1,20833.33,0.262,32.75
-Wind Farm Project 292,84414,16,2,24,Wind Farm,North America,0,3517.25,0.1895,1.33
-Tree Planting Project 293,18892,40,7,12,Tree Planting,North America,1,1574.33,2.1173,23.33
-Solar Energy Project 294,6997,107,2,12,Solar Energy,Africa,0,583.08,15.2923,17.83
-Solar Energy Project 295,3204,4,6,3,Solar Energy,Asia,0,1068.0,1.2484,8.0
-Recycling Hub Project 296,28117,110,1,18,Recycling Hub,South America,0,1562.06,3.9122,6.11
-Green Building Project 297,8887,46,3,12,Green Building,North America,0,740.58,5.1761,11.5
-Water Conservation Project 298,3996,2,2,3,Water Conservation,Asia,0,1332.0,0.5005,1.33
-Composting Project 299,10138,14,7,36,Composting,Oceania,1,281.61,1.3809,2.72
-Geothermal Energy Project 300,6015,49,4,36,Geothermal Energy,Asia,0,167.08,8.1463,5.44
-Tree Planting Project 301,166803,2,8,12,Tree Planting,Europe,1,13900.25,0.012,1.33
-Tree Planting Project 302,63447,34,6,18,Tree Planting,South America,1,3524.83,0.5359,11.33
-Wind Farm Project 303,21816,16,10,24,Wind Farm,Europe,0,909.0,0.7334,6.67
-Green Building Project 304,130083,38,4,9,Green Building,Europe,1,14453.67,0.2921,16.89
-Solar Energy Project 305,24169,1,5,48,Solar Energy,Europe,0,503.52,0.0414,0.1
-Composting Project 306,7835,82,9,18,Composting,South America,1,435.28,10.4659,41.0
-Recycling Hub Project 307,137001,145,7,48,Recycling Hub,Asia,1,2854.19,1.0584,21.15
-Solar Energy Project 308,42053,138,10,6,Solar Energy,Europe,1,7008.83,3.2816,230.0
-Geothermal Energy Project 309,6344,55,9,36,Geothermal Energy,North America,1,176.22,8.6696,13.75
-Green Building Project 310,17528,5,7,12,Green Building,North America,0,1460.67,0.2853,2.92
-Geothermal Energy Project 311,7702,56,1,12,Geothermal Energy,North America,0,641.83,7.2708,4.67
-Water Conservation Project 312,4190,1,8,48,Water Conservation,Europe,0,87.29,0.2387,0.17
-Recycling Hub Project 313,66930,1,4,24,Recycling Hub,North America,1,2788.75,0.0149,0.17
-Water Conservation Project 314,217792,15,3,48,Water Conservation,Asia,0,4537.33,0.0689,0.94
-Wind Farm Project 315,4112,26,7,6,Wind Farm,Europe,1,685.33,6.323,30.33
-Geothermal Energy Project 316,43285,58,3,24,Geothermal Energy,Europe,0,1803.54,1.34,7.25
-Wind Farm Project 317,10089,45,8,6,Wind Farm,North America,1,1681.5,4.4603,60.0
-Tree Planting Project 318,12276,23,6,9,Tree Planting,Africa,1,1364.0,1.8736,15.33
-Water Conservation Project 319,10819,12,5,36,Water Conservation,Asia,0,300.53,1.1092,1.67
-Green Building Project 320,7810,200,4,12,Green Building,Asia,1,650.83,25.6082,66.67
-Geothermal Energy Project 321,23347,22,8,12,Geothermal Energy,North America,1,1945.58,0.9423,14.67
-Composting Project 322,8126,24,8,9,Composting,South America,1,902.89,2.9535,21.33
-Recycling Hub Project 323,30471,7,1,3,Recycling Hub,Europe,0,10157.0,0.2297,2.33
-Solar Energy Project 324,20737,63,9,36,Solar Energy,South America,0,576.03,3.038,15.75
-Green Building Project 325,16535,47,5,24,Green Building,Africa,0,688.96,2.8425,9.79
-Green Building Project 326,7412,9,4,9,Green Building,South America,0,823.56,1.2142,4.0
-Wind Farm Project 327,11024,3,6,24,Wind Farm,Africa,1,459.33,0.2721,0.75
-Water Conservation Project 328,54527,45,6,48,Water Conservation,Asia,1,1135.98,0.8253,5.62
-Geothermal Energy Project 329,40179,42,2,18,Geothermal Energy,Europe,1,2232.17,1.0453,4.67
-Geothermal Energy Project 330,6815,12,8,12,Geothermal Energy,Africa,1,567.92,1.7608,8.0
-Tree Planting Project 331,24814,120,7,24,Tree Planting,Europe,1,1033.92,4.836,35.0
-Tree Planting Project 332,54266,6,1,6,Tree Planting,South America,1,9044.33,0.1106,1.0
-Recycling Hub Project 333,2971,22,5,24,Recycling Hub,Europe,0,123.79,7.4049,4.58
-Wind Farm Project 334,42278,115,6,18,Wind Farm,Europe,1,2348.78,2.7201,38.33
-Green Building Project 335,9945,21,4,36,Green Building,North America,0,276.25,2.1116,2.33
-Geothermal Energy Project 336,43683,40,2,12,Geothermal Energy,Europe,1,3640.25,0.9157,6.67
-Composting Project 337,8813,20,4,48,Composting,North America,0,183.6,2.2694,1.67
-Wind Farm Project 338,2525,12,1,9,Wind Farm,South America,0,280.56,4.7525,1.33
-Recycling Hub Project 339,3124,165,7,48,Recycling Hub,Europe,1,65.08,52.8169,24.06
-Recycling Hub Project 340,23334,21,2,18,Recycling Hub,Europe,1,1296.33,0.9,2.33
-Wind Farm Project 341,30081,89,2,12,Wind Farm,South America,1,2506.75,2.9587,14.83
-Recycling Hub Project 342,7441,10,9,24,Recycling Hub,North America,1,310.04,1.3439,3.75
-Wind Farm Project 343,47396,9,5,36,Wind Farm,Asia,0,1316.56,0.1899,1.25
-Solar Energy Project 344,2999,1,2,3,Solar Energy,Asia,0,999.67,0.3334,0.67
-Wind Farm Project 345,20347,42,9,36,Wind Farm,Asia,1,565.19,2.0642,10.5
-Water Conservation Project 346,5150,18,9,3,Water Conservation,Asia,1,1716.67,3.4951,54.0
-Wind Farm Project 347,10074,79,1,6,Wind Farm,North America,0,1679.0,7.842,13.17
-Recycling Hub Project 348,23315,25,3,36,Recycling Hub,Asia,1,647.64,1.0723,2.08
-Geothermal Energy Project 349,7843,137,4,12,Geothermal Energy,Europe,1,653.58,17.4678,45.67
-Water Conservation Project 350,13884,8,7,3,Water Conservation,North America,1,4628.0,0.5762,18.67
-Recycling Hub Project 351,73684,81,10,9,Recycling Hub,Asia,1,8187.11,1.0993,90.0
-Tree Planting Project 352,11022,59,4,12,Tree Planting,North America,0,918.5,5.3529,19.67
-Tree Planting Project 353,60043,58,2,9,Tree Planting,Asia,1,6671.44,0.966,12.89
-Geothermal Energy Project 354,5677,74,7,36,Geothermal Energy,Asia,1,157.69,13.0351,14.39
-Geothermal Energy Project 355,41596,57,6,9,Geothermal Energy,Africa,1,4621.78,1.3703,38.0
-Water Conservation Project 356,124229,39,3,3,Water Conservation,Africa,1,41409.67,0.3139,39.0
-Solar Energy Project 357,1134,5,6,12,Solar Energy,North America,0,94.5,4.4092,2.5
-Geothermal Energy Project 358,8465,1,6,24,Geothermal Energy,North America,0,352.71,0.1181,0.25
-Tree Planting Project 359,44023,101,5,18,Tree Planting,South America,1,2445.72,2.2943,28.06
-Wind Farm Project 360,17263,38,4,3,Wind Farm,North America,1,5754.33,2.2012,50.67
-Recycling Hub Project 361,34384,63,10,3,Recycling Hub,South America,1,11461.33,1.8322,210.0
-Tree Planting Project 362,10670,26,1,24,Tree Planting,Asia,0,444.58,2.4367,1.08
-Tree Planting Project 363,24438,4,10,12,Tree Planting,Asia,0,2036.5,0.1637,3.33
-Solar Energy Project 364,18273,5,6,12,Solar Energy,North America,0,1522.75,0.2736,2.5
-Water Conservation Project 365,89441,46,2,48,Water Conservation,Europe,1,1863.35,0.5143,1.92
-Water Conservation Project 366,29890,22,3,36,Water Conservation,North America,0,830.28,0.736,1.83
-Green Building Project 367,33028,8,8,9,Green Building,Europe,1,3669.78,0.2422,7.11
-Solar Energy Project 368,13436,27,10,36,Solar Energy,Africa,1,373.22,2.0095,7.5
-Wind Farm Project 369,12269,2,6,24,Wind Farm,North America,1,511.21,0.163,0.5
-Water Conservation Project 370,13107,34,3,36,Water Conservation,Europe,1,364.08,2.594,2.83
-Recycling Hub Project 371,35360,12,7,24,Recycling Hub,Europe,1,1473.33,0.3394,3.5
-Geothermal Energy Project 372,13290,63,4,12,Geothermal Energy,South America,0,1107.5,4.7404,21.0
-Solar Energy Project 373,31186,14,9,9,Solar Energy,South America,1,3465.11,0.4489,14.0
-Geothermal Energy Project 374,265795,24,5,36,Geothermal Energy,North America,0,7383.19,0.0903,3.33
-Tree Planting Project 375,62651,1,3,3,Tree Planting,Europe,1,20883.67,0.016,1.0
-Recycling Hub Project 376,14894,3,2,6,Recycling Hub,North America,0,2482.33,0.2014,1.0
-Recycling Hub Project 377,93102,19,2,48,Recycling Hub,North America,1,1939.62,0.2041,0.79
-Tree Planting Project 378,13498,26,3,18,Tree Planting,Asia,0,749.89,1.9262,4.33
-Solar Energy Project 379,1908,36,2,3,Solar Energy,South America,0,636.0,18.8679,24.0
-Tree Planting Project 380,6570,13,4,12,Tree Planting,North America,0,547.5,1.9787,4.33
-Geothermal Energy Project 381,2333,47,2,18,Geothermal Energy,Europe,0,129.61,20.1457,5.22
-Green Building Project 382,14446,78,10,6,Green Building,Oceania,1,2407.67,5.3994,130.0
-Recycling Hub Project 383,22518,60,9,6,Recycling Hub,North America,1,3753.0,2.6645,90.0
-Composting Project 384,164674,1,2,9,Composting,Asia,0,18297.11,0.0061,0.22
-Composting Project 385,32607,26,9,18,Composting,Europe,1,1811.5,0.7974,13.0
-Geothermal Energy Project 386,16934,4,6,9,Geothermal Energy,North America,0,1881.56,0.2362,2.67
-Wind Farm Project 387,59592,11,1,3,Wind Farm,Europe,1,19864.0,0.1846,3.67
-Water Conservation Project 388,1550,172,4,24,Water Conservation,South America,1,64.58,110.9677,28.67
-Tree Planting Project 389,29223,6,1,24,Tree Planting,Oceania,1,1217.62,0.2053,0.25
-Tree Planting Project 390,55549,27,6,24,Tree Planting,North America,1,2314.54,0.4861,6.75
-Wind Farm Project 391,3735,38,4,18,Wind Farm,Europe,0,207.5,10.174,8.44
-Wind Farm Project 392,86899,48,3,24,Wind Farm,Europe,1,3620.79,0.5524,6.0
-Geothermal Energy Project 393,33063,32,3,3,Geothermal Energy,North America,1,11021.0,0.9678,32.0
-Geothermal Energy Project 394,13381,1,9,9,Geothermal Energy,Europe,1,1486.78,0.0747,1.0
-Wind Farm Project 395,47067,15,6,18,Wind Farm,Europe,1,2614.83,0.3187,5.0
-Recycling Hub Project 396,335988,29,9,9,Recycling Hub,Asia,1,37332.0,0.0863,29.0
-Geothermal Energy Project 397,27398,3,5,18,Geothermal Energy,North America,0,1522.11,0.1095,0.83
-Green Building Project 398,29669,17,2,9,Green Building,Europe,0,3296.56,0.573,3.78
-Geothermal Energy Project 399,12692,1,8,6,Geothermal Energy,Africa,0,2115.33,0.0788,1.33
-Tree Planting Project 400,7944,3,5,9,Tree Planting,Europe,0,882.67,0.3776,1.67
-Geothermal Energy Project 401,59659,20,2,24,Geothermal Energy,Oceania,1,2485.79,0.3352,1.67
-Recycling Hub Project 402,7884,5,4,6,Recycling Hub,North America,0,1314.0,0.6342,3.33
-Wind Farm Project 403,24001,33,9,9,Wind Farm,Africa,1,2666.78,1.3749,33.0
-Tree Planting Project 404,12416,46,4,18,Tree Planting,South America,1,689.78,3.7049,10.22
-Geothermal Energy Project 405,39135,64,4,18,Geothermal Energy,Asia,0,2174.17,1.6354,14.22
-Recycling Hub Project 406,32872,8,2,48,Recycling Hub,Oceania,0,684.83,0.2434,0.33
-Green Building Project 407,76500,7,6,18,Green Building,Europe,0,4250.0,0.0915,2.33
-Geothermal Energy Project 408,11943,4,2,12,Geothermal Energy,Oceania,0,995.25,0.3349,0.67
-Recycling Hub Project 409,15933,40,7,3,Recycling Hub,North America,0,5311.0,2.5105,93.33
-Green Building Project 410,6805,49,3,18,Green Building,North America,0,378.06,7.2006,8.17
-Wind Farm Project 411,12924,1,3,6,Wind Farm,North America,1,2154.0,0.0774,0.5
-Geothermal Energy Project 412,34639,110,5,48,Geothermal Energy,South America,0,721.65,3.1756,11.46
-Green Building Project 413,54632,2,3,18,Green Building,Europe,0,3035.11,0.0366,0.33
-Tree Planting Project 414,7283,31,2,12,Tree Planting,South America,0,606.92,4.2565,5.17
-Wind Farm Project 415,62537,49,10,24,Wind Farm,South America,1,2605.71,0.7835,20.42
-Tree Planting Project 416,112057,81,9,6,Tree Planting,Asia,1,18676.17,0.7228,121.5
-Composting Project 417,36174,50,2,12,Composting,Asia,1,3014.5,1.3822,8.33
-Solar Energy Project 418,209432,64,2,24,Solar Energy,North America,1,8726.33,0.3056,5.33
-Geothermal Energy Project 419,8703,16,8,36,Geothermal Energy,North America,1,241.75,1.8384,3.56
-Green Building Project 420,4946,67,9,36,Green Building,Europe,1,137.39,13.5463,16.75
-Solar Energy Project 421,2605,3,7,6,Solar Energy,Europe,1,434.17,1.1516,3.5
-Solar Energy Project 422,132621,90,3,9,Solar Energy,Europe,1,14735.67,0.6786,30.0
-Green Building Project 423,48302,31,9,3,Green Building,North America,1,16100.67,0.6418,93.0
-Wind Farm Project 424,20605,67,3,48,Wind Farm,Europe,0,429.27,3.2516,4.19
-Geothermal Energy Project 425,30821,24,5,3,Geothermal Energy,Oceania,1,10273.67,0.7787,40.0
-Composting Project 426,5706,41,9,12,Composting,South America,0,475.5,7.1854,30.75
-Tree Planting Project 427,414530,29,3,24,Tree Planting,North America,1,17272.08,0.07,3.62
-Recycling Hub Project 428,25721,52,7,3,Recycling Hub,South America,1,8573.67,2.0217,121.33
-Tree Planting Project 429,25116,3,1,24,Tree Planting,Europe,1,1046.5,0.1194,0.12
-Recycling Hub Project 430,52623,2,4,24,Recycling Hub,North America,1,2192.62,0.038,0.33
-Tree Planting Project 431,39230,11,4,12,Tree Planting,South America,0,3269.17,0.2804,3.67
-Green Building Project 432,28815,6,7,12,Green Building,North America,1,2401.25,0.2082,3.5
-Composting Project 433,8530,82,8,12,Composting,North America,1,710.83,9.6131,54.67
-Geothermal Energy Project 434,38783,9,1,3,Geothermal Energy,Oceania,0,12927.67,0.2321,3.0
-Recycling Hub Project 435,210750,148,5,36,Recycling Hub,Africa,1,5854.17,0.7023,20.56
-Geothermal Energy Project 436,110691,16,7,12,Geothermal Energy,South America,1,9224.25,0.1445,9.33
-Geothermal Energy Project 437,149018,8,4,48,Geothermal Energy,South America,0,3104.54,0.0537,0.67
-Geothermal Energy Project 438,11926,62,4,3,Geothermal Energy,South America,1,3975.33,5.1987,82.67
-Water Conservation Project 439,6717,43,4,12,Water Conservation,Europe,0,559.75,6.4017,14.33
-Wind Farm Project 440,18940,27,6,18,Wind Farm,North America,1,1052.22,1.4256,9.0
-Tree Planting Project 441,23549,32,7,24,Tree Planting,Europe,0,981.21,1.3589,9.33
-Geothermal Energy Project 442,81881,50,2,48,Geothermal Energy,North America,0,1705.85,0.6106,2.08
-Tree Planting Project 443,2890,10,5,12,Tree Planting,South America,0,240.83,3.4602,4.17
-Geothermal Energy Project 444,138062,200,4,6,Geothermal Energy,Europe,1,23010.33,1.4486,133.33
-Recycling Hub Project 445,18222,147,3,24,Recycling Hub,Oceania,0,759.25,8.0672,18.38
-Wind Farm Project 446,13196,42,7,24,Wind Farm,Africa,0,549.83,3.1828,12.25
-Wind Farm Project 447,6538,8,6,12,Wind Farm,Asia,1,544.83,1.2236,4.0
-Green Building Project 448,3023,45,7,36,Green Building,South America,0,83.97,14.8859,8.75
-Water Conservation Project 449,59148,2,5,9,Water Conservation,Africa,1,6572.0,0.0338,1.11
-Green Building Project 450,24052,1,6,36,Green Building,Europe,0,668.11,0.0416,0.17
-Green Building Project 451,4684,11,5,12,Green Building,Asia,1,390.33,2.3484,4.58
-Green Building Project 452,4655,24,7,24,Green Building,Europe,1,193.96,5.1557,7.0
-Green Building Project 453,14721,81,2,48,Green Building,Asia,0,306.69,5.5023,3.38
-Green Building Project 454,163215,51,5,6,Green Building,Europe,1,27202.5,0.3125,42.5
-Composting Project 455,16130,54,6,48,Composting,Africa,0,336.04,3.3478,6.75
-Wind Farm Project 456,3627,22,6,48,Wind Farm,Africa,0,75.56,6.0656,2.75
-Green Building Project 457,16401,16,5,24,Green Building,Europe,0,683.38,0.9756,3.33
-Geothermal Energy Project 458,15878,18,10,36,Geothermal Energy,North America,0,441.06,1.1336,5.0
-Wind Farm Project 459,865,175,7,6,Wind Farm,Oceania,1,144.17,202.3121,204.17
-Wind Farm Project 460,20637,1,10,3,Wind Farm,North America,1,6879.0,0.0485,3.33
-Solar Energy Project 461,16695,80,8,18,Solar Energy,Africa,1,927.5,4.7919,35.56
-Composting Project 462,50789,34,7,24,Composting,South America,1,2116.21,0.6694,9.92
-Green Building Project 463,202551,23,5,12,Green Building,North America,1,16879.25,0.1136,9.58
-Tree Planting Project 464,85125,51,1,3,Tree Planting,Europe,1,28375.0,0.5991,17.0
-Recycling Hub Project 465,15951,26,5,18,Recycling Hub,Europe,0,886.17,1.63,7.22
-Water Conservation Project 466,5838,82,10,12,Water Conservation,Asia,1,486.5,14.0459,68.33
-Geothermal Energy Project 467,483125,92,2,48,Geothermal Energy,North America,1,10065.1,0.1904,3.83
-Tree Planting Project 468,23648,21,5,9,Tree Planting,South America,1,2627.56,0.888,11.67
-Composting Project 469,22397,12,5,12,Composting,North America,1,1866.42,0.5358,5.0
-Recycling Hub Project 470,21397,35,2,6,Recycling Hub,South America,1,3566.17,1.6357,11.67
-Composting Project 471,27936,97,5,6,Composting,Africa,1,4656.0,3.4722,80.83
-Geothermal Energy Project 472,18522,9,4,9,Geothermal Energy,Oceania,0,2058.0,0.4859,4.0
-Wind Farm Project 473,11065,39,1,3,Wind Farm,North America,0,3688.33,3.5246,13.0
-Recycling Hub Project 474,11427,39,3,18,Recycling Hub,Asia,1,634.83,3.413,6.5
-Wind Farm Project 475,21177,52,1,12,Wind Farm,Asia,0,1764.75,2.4555,4.33
-Geothermal Energy Project 476,11474,5,5,6,Geothermal Energy,South America,1,1912.33,0.4358,4.17
-Tree Planting Project 477,9363,50,4,3,Tree Planting,Oceania,1,3121.0,5.3402,66.67
-Geothermal Energy Project 478,25027,95,7,9,Geothermal Energy,Europe,1,2780.78,3.7959,73.89
-Tree Planting Project 479,16220,7,5,36,Tree Planting,Europe,1,450.56,0.4316,0.97
-Recycling Hub Project 480,133892,10,10,24,Recycling Hub,Africa,1,5578.83,0.0747,4.17
-Recycling Hub Project 481,914,142,4,36,Recycling Hub,North America,1,25.39,155.3611,15.78
-Green Building Project 482,81618,7,2,36,Green Building,Asia,0,2267.17,0.0858,0.39
-Composting Project 483,98253,77,4,6,Composting,Africa,1,16375.5,0.7837,51.33
-Green Building Project 484,1829,27,2,48,Green Building,Europe,0,38.1,14.7622,1.12
-Composting Project 485,14599,11,8,48,Composting,Africa,0,304.15,0.7535,1.83
-Green Building Project 486,14104,81,3,9,Green Building,North America,0,1567.11,5.7431,27.0
-Wind Farm Project 487,4068,23,9,12,Wind Farm,South America,1,339.0,5.6539,17.25
-Recycling Hub Project 488,8661,28,4,48,Recycling Hub,South America,0,180.44,3.2329,2.33
-Tree Planting Project 489,5809,17,6,36,Tree Planting,Africa,0,161.36,2.9265,2.83
-Composting Project 490,180362,35,10,48,Composting,Europe,0,3757.54,0.1941,7.29
-Geothermal Energy Project 491,67698,7,5,36,Geothermal Energy,North America,0,1880.5,0.1034,0.97
-Composting Project 492,101302,19,10,18,Composting,Asia,1,5627.89,0.1876,10.56
-Tree Planting Project 493,52365,139,1,6,Tree Planting,Asia,1,8727.5,2.6544,23.17
-Green Building Project 494,5682,11,9,6,Green Building,Asia,1,947.0,1.9359,16.5
-Composting Project 495,11737,42,1,12,Composting,Europe,0,978.08,3.5784,3.5
-Water Conservation Project 496,39626,15,8,48,Water Conservation,Europe,0,825.54,0.3785,2.5
-Wind Farm Project 497,5081,59,9,48,Wind Farm,North America,1,105.85,11.6119,11.06
-Recycling Hub Project 498,51823,5,9,24,Recycling Hub,Asia,0,2159.29,0.0965,1.88
-Tree Planting Project 499,16508,140,1,3,Tree Planting,Europe,1,5502.67,8.4807,46.67
-Recycling Hub Project 500,14047,24,2,18,Recycling Hub,Europe,0,780.39,1.7085,2.67
+Water Conservation Project 1,7973.0,51.0,10.0,12,Water Conservation,Oceania,1,664.42,6.3966,42.5
+Recycling Hub Project 2,3576.0,77.0,3.0,48,Recycling Hub,Europe,0,74.5,21.5324,4.81
+Composting Project 3,12889.0,70.0,6.0,18,Composting,Asia,1,716.06,5.431,23.33
+Water Conservation Project 4,61554.0,20.0,10.0,3,Water Conservation,Europe,1,20518.0,0.3249,66.67
+Wind Farm Project 5,28478.0,44.0,10.0,6,Wind Farm,South America,1,4746.33,1.5451,73.33
+Geothermal Energy Project 6,4939.0,9.0,9.0,6,Geothermal Energy,North America,1,823.17,1.8222,13.5
+Composting Project 7,27114.0,13.0,1.0,6,Composting,Oceania,1,4519.0,0.4795,2.17
+Composting Project 8,34974.0,90.0,5.0,48,Composting,South America,1,728.62,2.5733,9.38
+Water Conservation Project 9,7626.0,1.0,4.0,12,Water Conservation,North America,0,635.5,0.1311,0.33
+Solar Energy Project 10,26488.0,3.0,8.0,48,Solar Energy,Europe,0,551.83,0.1133,0.5
+Wind Farm Project 11,23620.0,9.0,1.0,18,Wind Farm,Europe,0,1312.22,0.381,0.5
+Water Conservation Project 12,5588.0,1.0,9.0,12,Water Conservation,Europe,1,465.67,0.179,0.75
+Wind Farm Project 13,33838.0,8.0,6.0,9,Wind Farm,Europe,0,3759.78,0.2364,5.33
+Wind Farm Project 14,43171.0,34.0,4.0,36,Wind Farm,Africa,0,1199.19,0.7876,3.78
+Geothermal Energy Project 15,80794.0,21.0,9.0,6,Geothermal Energy,South America,1,13465.67,0.2599,31.5
+Composting Project 16,78007.0,89.0,5.0,48,Composting,South America,0,1625.15,1.1409,9.27
+Recycling Hub Project 17,4216.0,68.0,5.0,9,Recycling Hub,Europe,1,468.44,16.129,37.78
+Geothermal Energy Project 18,7148.0,16.0,5.0,24,Geothermal Energy,Africa,0,297.83,2.2384,3.33
+Geothermal Energy Project 19,40865.0,12.0,1.0,48,Geothermal Energy,Asia,0,851.35,0.2936,0.25
+Wind Farm Project 20,40804.0,19.0,1.0,3,Wind Farm,Europe,0,13601.33,0.4656,6.33
+Green Building Project 21,40866.0,35.0,8.0,36,Green Building,Asia,1,1135.17,0.8565,7.78
+Composting Project 22,500000.0,12.0,8.0,3,Composting,South America,1,166666.67,0.024,32.0
+Solar Energy Project 23,43698.0,39.0,6.0,12,Solar Energy,Europe,1,3641.5,0.8925,19.5
+Geothermal Energy Project 24,86049.0,21.0,4.0,36,Geothermal Energy,North America,0,2390.25,0.244,2.33
+Recycling Hub Project 25,69203.0,32.0,2.0,48,Recycling Hub,North America,1,1441.73,0.4624,1.33
+Green Building Project 26,48130.0,22.0,2.0,18,Green Building,Europe,0,2673.89,0.4571,2.44
+Green Building Project 27,15088.0,13.0,9.0,9,Green Building,Africa,1,1676.44,0.8616,13.0
+Solar Energy Project 28,54762.0,118.0,5.0,18,Solar Energy,Asia,1,3042.33,2.1548,32.78
+Geothermal Energy Project 29,8713.0,57.0,4.0,48,Geothermal Energy,Asia,0,181.52,6.5419,4.75
+Recycling Hub Project 30,16577.0,6.0,10.0,12,Recycling Hub,North America,1,1381.42,0.3619,5.0
+Composting Project 31,12302.0,81.0,1.0,3,Composting,North America,0,4100.67,6.5843,27.0
+Tree Planting Project 32,24300.0,26.0,7.0,36,Tree Planting,Asia,0,675.0,1.07,5.06
+Recycling Hub Project 33,354190.0,89.0,3.0,18,Recycling Hub,South America,1,19677.22,0.2513,14.83
+Solar Energy Project 34,2343.0,64.0,6.0,48,Solar Energy,Europe,0,48.81,27.3154,8.0
+Green Building Project 35,50187.0,22.0,5.0,18,Green Building,South America,1,2788.17,0.4384,6.11
+Composting Project 36,3180.0,1.0,5.0,48,Composting,Asia,0,66.25,0.3145,0.1
+Recycling Hub Project 37,12502.0,12.0,5.0,3,Recycling Hub,North America,0,4167.33,0.9598,20.0
+Tree Planting Project 38,81368.0,31.0,1.0,36,Tree Planting,Europe,1,2260.22,0.381,0.86
+Tree Planting Project 39,23792.0,40.0,1.0,9,Tree Planting,Asia,0,2643.56,1.6812,4.44
+Wind Farm Project 40,6043.0,11.0,3.0,3,Wind Farm,Europe,0,2014.33,1.8203,11.0
+Wind Farm Project 41,9336.0,6.0,10.0,18,Wind Farm,Europe,1,518.67,0.6427,3.33
+Water Conservation Project 42,49787.0,72.0,4.0,9,Water Conservation,Europe,1,5531.89,1.4462,32.0
+Solar Energy Project 43,9168.0,166.0,5.0,48,Solar Energy,North America,0,191.0,18.1065,17.29
+Geothermal Energy Project 44,28559.0,29.0,2.0,9,Geothermal Energy,Asia,1,3173.22,1.0154,6.44
+Recycling Hub Project 45,23264.0,7.0,8.0,48,Recycling Hub,South America,0,484.67,0.3009,1.17
+Recycling Hub Project 46,10077.0,12.0,2.0,3,Recycling Hub,Europe,0,3359.0,1.1908,8.0
+Geothermal Energy Project 47,288581.0,1.0,9.0,18,Geothermal Energy,Africa,1,16032.28,0.0035,0.5
+Water Conservation Project 48,47131.0,98.0,2.0,12,Water Conservation,Africa,1,3927.58,2.0793,16.33
+Green Building Project 49,1938.0,5.0,9.0,18,Green Building,Africa,1,107.67,2.58,2.5
+Green Building Project 50,27549.0,34.0,7.0,48,Green Building,Europe,0,573.94,1.2342,4.96
+Water Conservation Project 51,9955.0,12.0,8.0,6,Water Conservation,North America,0,1659.17,1.2054,16.0
+Green Building Project 52,61262.0,32.0,2.0,36,Green Building,Oceania,0,1701.72,0.5223,1.78
+Wind Farm Project 53,8509.0,42.0,7.0,24,Wind Farm,Asia,0,354.54,4.936,12.25
+Recycling Hub Project 54,19193.0,70.0,6.0,12,Recycling Hub,Europe,1,1599.42,3.6472,35.0
+Water Conservation Project 55,40375.0,9.0,4.0,9,Water Conservation,Europe,1,4486.11,0.2229,4.0
+Recycling Hub Project 56,62249.0,1.0,7.0,12,Recycling Hub,North America,1,5187.42,0.0161,0.58
+Geothermal Energy Project 57,5216.0,5.0,4.0,36,Geothermal Energy,Africa,0,144.89,0.9586,0.56
+Tree Planting Project 58,14744.0,92.0,2.0,9,Tree Planting,South America,1,1638.22,6.2398,20.44
+Wind Farm Project 59,12457.0,82.0,10.0,36,Wind Farm,North America,0,346.03,6.5826,22.78
+Composting Project 60,10056.0,36.0,7.0,9,Composting,Europe,1,1117.33,3.58,28.0
+Wind Farm Project 61,183238.0,36.0,8.0,12,Wind Farm,Asia,1,15269.83,0.1965,24.0
+Water Conservation Project 62,35809.0,43.0,2.0,9,Water Conservation,Asia,1,3978.78,1.2008,9.56
+Composting Project 63,4850.0,7.0,5.0,9,Composting,North America,0,538.89,1.4433,3.89
+Tree Planting Project 64,66266.0,98.0,1.0,6,Tree Planting,Asia,1,11044.33,1.4789,16.33
+Water Conservation Project 65,281134.0,21.0,7.0,18,Water Conservation,Oceania,1,15618.56,0.0747,8.17
+Solar Energy Project 66,76035.0,19.0,8.0,18,Solar Energy,Europe,1,4224.17,0.2499,8.44
+Recycling Hub Project 67,3557.0,29.0,6.0,24,Recycling Hub,South America,0,148.21,8.1529,7.25
+Tree Planting Project 68,12319.0,1.0,5.0,24,Tree Planting,Europe,0,513.29,0.0812,0.21
+Recycling Hub Project 69,100739.0,7.0,6.0,48,Recycling Hub,Asia,1,2098.73,0.0695,0.88
+Green Building Project 70,9421.0,53.0,2.0,48,Green Building,South America,0,196.27,5.6257,2.21
+Solar Energy Project 71,37518.0,3.0,1.0,48,Solar Energy,South America,0,781.62,0.08,0.06
+Solar Energy Project 72,55801.0,36.0,7.0,6,Solar Energy,Asia,1,9300.17,0.6451,42.0
+Tree Planting Project 73,7242.0,11.0,7.0,24,Tree Planting,North America,0,301.75,1.5189,3.21
+Solar Energy Project 74,20507.0,19.0,10.0,36,Solar Energy,Africa,0,569.64,0.9265,5.28
+Composting Project 75,500.0,13.0,10.0,48,Composting,South America,1,10.42,26.0,2.71
+Solar Energy Project 76,6442.0,17.0,2.0,48,Solar Energy,Europe,0,134.21,2.6389,0.71
+Recycling Hub Project 77,16267.0,50.0,2.0,12,Recycling Hub,Asia,1,1355.58,3.0737,8.33
+Recycling Hub Project 78,4927.0,14.0,1.0,3,Recycling Hub,Asia,0,1642.33,2.8415,4.67
+Water Conservation Project 79,156200.0,33.0,10.0,36,Water Conservation,North America,1,4338.89,0.2113,9.17
+Recycling Hub Project 80,3959.0,25.0,8.0,48,Recycling Hub,Africa,1,82.48,6.3147,4.17
+Water Conservation Project 81,12990.0,43.0,8.0,48,Water Conservation,Africa,0,270.62,3.3102,7.17
+Recycling Hub Project 82,25768.0,110.0,1.0,48,Recycling Hub,Europe,1,536.83,4.2689,2.29
+Composting Project 83,124185.0,52.0,8.0,3,Composting,Oceania,1,41395.0,0.4187,138.67
+Geothermal Energy Project 84,3932.0,9.0,9.0,3,Geothermal Energy,Europe,1,1310.67,2.2889,27.0
+Water Conservation Project 85,88947.0,1.0,4.0,6,Water Conservation,Europe,1,14824.5,0.0112,0.67
+Wind Farm Project 86,22298.0,12.0,1.0,36,Wind Farm,Europe,0,619.39,0.5382,0.33
+Green Building Project 87,6783.0,36.0,1.0,6,Green Building,Africa,0,1130.5,5.3074,6.0
+Tree Planting Project 88,38350.0,2.0,3.0,9,Tree Planting,Asia,0,4261.11,0.0522,0.67
+Recycling Hub Project 89,27969.0,27.0,5.0,3,Recycling Hub,Europe,1,9323.0,0.9654,45.0
+Solar Energy Project 90,10718.0,36.0,5.0,12,Solar Energy,North America,1,893.17,3.3588,15.0
+Geothermal Energy Project 91,23950.0,16.0,9.0,24,Geothermal Energy,South America,0,997.92,0.6681,6.0
+Recycling Hub Project 92,13871.0,58.0,10.0,12,Recycling Hub,Europe,1,1155.92,4.1814,48.33
+Solar Energy Project 93,25240.0,4.0,2.0,24,Solar Energy,Africa,0,1051.67,0.1585,0.33
+Green Building Project 94,48754.0,3.0,2.0,3,Green Building,Asia,0,16251.33,0.0615,2.0
+Green Building Project 95,147741.0,52.0,6.0,3,Green Building,South America,1,49247.0,0.352,104.0
+Green Building Project 96,4987.0,27.0,9.0,3,Green Building,Oceania,1,1662.33,5.4141,81.0
+Solar Energy Project 97,284827.0,46.0,1.0,6,Solar Energy,North America,1,47471.17,0.1615,7.67
+Recycling Hub Project 98,2116.0,22.0,9.0,36,Recycling Hub,Oceania,0,58.78,10.397,5.5
+Green Building Project 99,18358.0,11.0,9.0,24,Green Building,Asia,0,764.92,0.5992,4.12
+Composting Project 100,44621.0,68.0,9.0,36,Composting,South America,1,1239.47,1.5239,17.0
+Water Conservation Project 101,30859.0,64.0,5.0,6,Water Conservation,Europe,0,5143.17,2.0739,53.33
+Solar Energy Project 102,10433.0,47.0,9.0,6,Solar Energy,Africa,1,1738.83,4.5049,70.5
+Solar Energy Project 103,17158.0,12.0,4.0,18,Solar Energy,North America,0,953.22,0.6994,2.67
+Recycling Hub Project 104,12190.0,35.0,2.0,12,Recycling Hub,Europe,0,1015.83,2.8712,5.83
+Solar Energy Project 105,10859.0,17.0,6.0,12,Solar Energy,Europe,1,904.92,1.5655,8.5
+Solar Energy Project 106,61054.0,3.0,4.0,9,Solar Energy,South America,1,6783.78,0.0491,1.33
+Green Building Project 107,33806.0,99.0,6.0,48,Green Building,South America,0,704.29,2.9285,12.38
+Recycling Hub Project 108,9590.0,5.0,3.0,6,Recycling Hub,Asia,0,1598.33,0.5214,2.5
+Green Building Project 109,64829.0,120.0,6.0,24,Green Building,Africa,1,2701.21,1.851,30.0
+Water Conservation Project 110,31848.0,23.0,2.0,18,Water Conservation,Europe,1,1769.33,0.7222,2.56
+Geothermal Energy Project 111,58421.0,8.0,2.0,18,Geothermal Energy,Asia,0,3245.61,0.1369,0.89
+Water Conservation Project 112,46889.0,31.0,9.0,48,Water Conservation,Europe,1,976.85,0.6611,5.81
+Geothermal Energy Project 113,8145.0,82.0,7.0,36,Geothermal Energy,Africa,1,226.25,10.0675,15.94
+Green Building Project 114,11246.0,52.0,3.0,48,Green Building,Asia,1,234.29,4.6239,3.25
+Water Conservation Project 115,54000.0,65.0,1.0,48,Water Conservation,South America,0,1125.0,1.2037,1.35
+Recycling Hub Project 116,45818.0,43.0,8.0,48,Recycling Hub,Asia,0,954.54,0.9385,7.17
+Tree Planting Project 117,21480.0,47.0,6.0,12,Tree Planting,North America,1,1790.0,2.1881,23.5
+Green Building Project 118,25356.0,75.0,7.0,6,Green Building,North America,1,4226.0,2.9579,87.5
+Geothermal Energy Project 119,102047.0,11.0,9.0,9,Geothermal Energy,Asia,1,11338.56,0.1078,11.0
+Composting Project 120,10830.0,26.0,5.0,6,Composting,North America,0,1805.0,2.4007,21.67
+Geothermal Energy Project 121,42468.0,10.0,1.0,36,Geothermal Energy,North America,1,1179.67,0.2355,0.28
+Composting Project 122,17281.0,175.0,10.0,3,Composting,North America,1,5760.33,10.1267,583.33
+Solar Energy Project 123,16962.0,115.0,7.0,48,Solar Energy,Asia,1,353.38,6.7799,16.77
+Water Conservation Project 124,82333.0,1.0,5.0,6,Water Conservation,North America,1,13722.17,0.0121,0.83
+Composting Project 125,59308.0,48.0,3.0,36,Composting,Europe,0,1647.44,0.8093,4.0
+Geothermal Energy Project 126,58466.0,103.0,9.0,3,Geothermal Energy,Asia,1,19488.67,1.7617,309.0
+Solar Energy Project 127,105511.0,7.0,1.0,3,Solar Energy,Asia,0,35170.33,0.0663,2.33
+Tree Planting Project 128,22588.0,33.0,1.0,48,Tree Planting,Europe,0,470.58,1.461,0.69
+Recycling Hub Project 129,49928.0,98.0,1.0,9,Recycling Hub,Europe,0,5547.56,1.9628,10.89
+Recycling Hub Project 130,15179.0,1.0,3.0,24,Recycling Hub,Europe,0,632.46,0.0659,0.12
+Recycling Hub Project 131,32500.0,47.0,6.0,12,Recycling Hub,North America,1,2708.33,1.4462,23.5
+Composting Project 132,18841.0,14.0,10.0,6,Composting,North America,0,3140.17,0.7431,23.33
+Tree Planting Project 133,24745.0,103.0,3.0,3,Tree Planting,Asia,1,8248.33,4.1625,103.0
+Composting Project 134,44989.0,141.0,8.0,6,Composting,Asia,1,7498.17,3.1341,188.0
+Water Conservation Project 135,8251.0,115.0,10.0,24,Water Conservation,South America,1,343.79,13.9377,47.92
+Composting Project 136,271268.0,25.0,2.0,12,Composting,North America,1,22605.67,0.0922,4.17
+Tree Planting Project 137,6586.0,79.0,9.0,24,Tree Planting,Asia,1,274.42,11.9951,29.62
+Tree Planting Project 138,5130.0,74.0,3.0,12,Tree Planting,North America,1,427.5,14.425,18.5
+Water Conservation Project 139,88409.0,15.0,5.0,18,Water Conservation,Oceania,1,4911.61,0.1697,4.17
+Tree Planting Project 140,56953.0,70.0,10.0,12,Tree Planting,South America,1,4746.08,1.2291,58.33
+Geothermal Energy Project 141,46580.0,1.0,8.0,48,Geothermal Energy,Europe,1,970.42,0.0215,0.17
+Tree Planting Project 142,46817.0,36.0,2.0,9,Tree Planting,Asia,0,5201.89,0.769,8.0
+Recycling Hub Project 143,21705.0,10.0,6.0,24,Recycling Hub,North America,0,904.38,0.4607,2.5
+Geothermal Energy Project 144,7504.0,5.0,5.0,3,Geothermal Energy,Asia,1,2501.33,0.6663,8.33
+Geothermal Energy Project 145,24124.0,3.0,10.0,48,Geothermal Energy,Europe,0,502.58,0.1244,0.62
+Water Conservation Project 146,9773.0,47.0,9.0,18,Water Conservation,Europe,1,542.94,4.8092,23.5
+Wind Farm Project 147,70979.0,16.0,5.0,9,Wind Farm,Africa,1,7886.56,0.2254,8.89
+Wind Farm Project 148,18463.0,51.0,2.0,6,Wind Farm,Europe,0,3077.17,2.7623,17.0
+Tree Planting Project 149,8179.0,2.0,5.0,48,Tree Planting,Asia,0,170.4,0.2445,0.21
+Geothermal Energy Project 150,14977.0,15.0,4.0,24,Geothermal Energy,Europe,0,624.04,1.0015,2.5
+Wind Farm Project 151,36153.0,31.0,7.0,36,Wind Farm,South America,1,1004.25,0.8575,6.03
+Wind Farm Project 152,11198.0,62.0,6.0,36,Wind Farm,Asia,0,311.06,5.5367,10.33
+Tree Planting Project 153,8211.0,15.0,2.0,3,Tree Planting,South America,1,2737.0,1.8268,10.0
+Wind Farm Project 154,29508.0,39.0,5.0,12,Wind Farm,North America,1,2459.0,1.3217,16.25
+Composting Project 155,29553.0,86.0,7.0,3,Composting,Europe,0,9851.0,2.91,200.67
+Solar Energy Project 156,11988.0,38.0,7.0,36,Solar Energy,Europe,0,333.0,3.1698,7.39
+Water Conservation Project 157,12515.0,10.0,5.0,6,Water Conservation,North America,0,2085.83,0.799,8.33
+Solar Energy Project 158,29099.0,1.0,9.0,18,Solar Energy,Asia,1,1616.61,0.0344,0.5
+Tree Planting Project 159,3874.0,81.0,4.0,18,Tree Planting,Africa,0,215.22,20.9086,18.0
+Recycling Hub Project 160,4068.0,1.0,3.0,24,Recycling Hub,Africa,0,169.5,0.2458,0.12
+Water Conservation Project 161,9300.0,83.0,4.0,18,Water Conservation,Asia,1,516.67,8.9247,18.44
+Tree Planting Project 162,17049.0,30.0,5.0,24,Tree Planting,Asia,0,710.38,1.7596,6.25
+Geothermal Energy Project 163,31987.0,111.0,6.0,48,Geothermal Energy,Asia,0,666.4,3.4702,13.88
+Recycling Hub Project 164,129369.0,64.0,3.0,24,Recycling Hub,Europe,1,5390.38,0.4947,8.0
+Solar Energy Project 165,61647.0,200.0,2.0,48,Solar Energy,Africa,1,1284.31,3.2443,8.33
+Tree Planting Project 166,18179.0,17.0,4.0,24,Tree Planting,Asia,0,757.46,0.9351,2.83
+Geothermal Energy Project 167,21529.0,58.0,5.0,36,Geothermal Energy,South America,0,598.03,2.694,8.06
+Water Conservation Project 168,6614.0,20.0,4.0,36,Water Conservation,Europe,0,183.72,3.0239,2.22
+Water Conservation Project 169,21542.0,26.0,3.0,12,Water Conservation,North America,0,1795.17,1.2069,6.5
+Green Building Project 170,15577.0,39.0,8.0,48,Green Building,North America,0,324.52,2.5037,6.5
+Geothermal Energy Project 171,32443.0,82.0,10.0,9,Geothermal Energy,Africa,1,3604.78,2.5275,91.11
+Composting Project 172,8162.0,165.0,4.0,48,Composting,South America,0,170.04,20.2156,13.75
+Wind Farm Project 173,41077.0,58.0,2.0,24,Wind Farm,North America,1,1711.54,1.412,4.83
+Recycling Hub Project 174,138591.0,21.0,2.0,24,Recycling Hub,Oceania,1,5774.62,0.1515,1.75
+Geothermal Energy Project 175,19331.0,21.0,1.0,9,Geothermal Energy,Europe,0,2147.89,1.0863,2.33
+Green Building Project 176,35669.0,53.0,4.0,3,Green Building,North America,1,11889.67,1.4859,70.67
+Wind Farm Project 177,50421.0,10.0,10.0,24,Wind Farm,Europe,0,2100.88,0.1983,4.17
+Wind Farm Project 178,13609.0,4.0,9.0,12,Wind Farm,Asia,1,1134.08,0.2939,3.0
+Tree Planting Project 179,28822.0,17.0,7.0,18,Tree Planting,Africa,0,1601.22,0.5898,6.61
+Wind Farm Project 180,22361.0,13.0,10.0,18,Wind Farm,Europe,1,1242.28,0.5814,7.22
+Composting Project 181,24765.0,14.0,7.0,6,Composting,Africa,1,4127.5,0.5653,16.33
+Water Conservation Project 182,8711.0,10.0,7.0,6,Water Conservation,Europe,1,1451.83,1.148,11.67
+Green Building Project 183,22683.0,1.0,8.0,18,Green Building,Africa,0,1260.17,0.0441,0.44
+Wind Farm Project 184,40038.0,1.0,1.0,18,Wind Farm,Asia,0,2224.33,0.025,0.06
+Tree Planting Project 185,125664.0,175.0,10.0,36,Tree Planting,Asia,1,3490.67,1.3926,48.61
+Composting Project 186,69642.0,22.0,10.0,12,Composting,Europe,1,5803.5,0.3159,18.33
+Solar Energy Project 187,291798.0,19.0,8.0,9,Solar Energy,Oceania,1,32422.0,0.0651,16.89
+Water Conservation Project 188,8770.0,45.0,4.0,6,Water Conservation,Asia,1,1461.67,5.1311,30.0
+Water Conservation Project 189,62741.0,9.0,4.0,36,Water Conservation,North America,0,1742.81,0.1434,1.0
+Green Building Project 190,27446.0,119.0,4.0,36,Green Building,Asia,1,762.39,4.3358,13.22
+Water Conservation Project 191,304907.0,61.0,6.0,9,Water Conservation,Europe,1,33878.56,0.2001,40.67
+Wind Farm Project 192,8350.0,3.0,7.0,36,Wind Farm,Africa,0,231.94,0.3593,0.58
+Tree Planting Project 193,8041.0,21.0,6.0,48,Tree Planting,Europe,0,167.52,2.6116,2.62
+Water Conservation Project 194,10729.0,84.0,1.0,12,Water Conservation,Asia,1,894.08,7.8292,7.0
+Water Conservation Project 195,1722.0,115.0,8.0,18,Water Conservation,South America,1,95.67,66.7828,51.11
+Solar Energy Project 196,11720.0,25.0,10.0,24,Solar Energy,Europe,0,488.33,2.1331,10.42
+Solar Energy Project 197,8857.0,38.0,7.0,9,Solar Energy,Europe,1,984.11,4.2904,29.56
+Recycling Hub Project 198,26382.0,7.0,6.0,18,Recycling Hub,Europe,0,1465.67,0.2653,2.33
+Composting Project 199,33193.0,189.0,6.0,18,Composting,North America,1,1844.06,5.694,63.0
+Wind Farm Project 200,209275.0,10.0,5.0,3,Wind Farm,North America,1,69758.33,0.0478,16.67
+Water Conservation Project 201,68906.0,114.0,6.0,48,Water Conservation,South America,1,1435.54,1.6544,14.25
+Geothermal Energy Project 202,11022.0,41.0,9.0,9,Geothermal Energy,Europe,0,1224.67,3.7198,41.0
+Water Conservation Project 203,7494.0,37.0,10.0,36,Water Conservation,Europe,1,208.17,4.9373,10.28
+Tree Planting Project 204,39747.0,28.0,9.0,24,Tree Planting,Asia,1,1656.12,0.7045,10.5
+Recycling Hub Project 205,4517.0,10.0,10.0,9,Recycling Hub,Europe,1,501.89,2.2139,11.11
+Composting Project 206,198342.0,7.0,8.0,36,Composting,Africa,1,5509.5,0.0353,1.56
+Geothermal Energy Project 207,90701.0,9.0,10.0,18,Geothermal Energy,Africa,1,5038.94,0.0992,5.0
+Recycling Hub Project 208,12543.0,8.0,9.0,24,Recycling Hub,Asia,0,522.62,0.6378,3.0
+Green Building Project 209,2819.0,60.0,10.0,36,Green Building,South America,0,78.31,21.2841,16.67
+Composting Project 210,111820.0,17.0,8.0,12,Composting,Africa,1,9318.33,0.152,11.33
+Water Conservation Project 211,19197.0,2.0,8.0,36,Water Conservation,Europe,0,533.25,0.1042,0.44
+Water Conservation Project 212,97283.0,139.0,1.0,3,Water Conservation,Europe,1,32427.67,1.4288,46.33
+Composting Project 213,3250.0,86.0,10.0,48,Composting,Europe,1,67.71,26.4615,17.92
+Water Conservation Project 214,10729.0,105.0,5.0,18,Water Conservation,Asia,1,596.06,9.7866,29.17
+Wind Farm Project 215,22165.0,200.0,4.0,36,Wind Farm,Europe,1,615.69,9.0232,22.22
+Composting Project 216,23303.0,7.0,2.0,48,Composting,South America,0,485.48,0.3004,0.29
+Recycling Hub Project 217,12834.0,20.0,8.0,6,Recycling Hub,Oceania,1,2139.0,1.5584,26.67
+Composting Project 218,46509.0,56.0,3.0,6,Composting,Africa,0,7751.5,1.2041,28.0
+Geothermal Energy Project 219,6117.0,47.0,4.0,48,Geothermal Energy,South America,0,127.44,7.6835,3.92
+Water Conservation Project 220,18567.0,6.0,7.0,48,Water Conservation,Europe,0,386.81,0.3232,0.88
+Wind Farm Project 221,25447.0,67.0,10.0,3,Wind Farm,Asia,1,8482.33,2.6329,223.33
+Wind Farm Project 222,40836.0,10.0,9.0,12,Wind Farm,South America,1,3403.0,0.2449,7.5
+Green Building Project 223,51737.0,10.0,2.0,18,Green Building,Europe,0,2874.28,0.1933,1.11
+Recycling Hub Project 224,5712.0,30.0,3.0,9,Recycling Hub,Europe,0,634.67,5.2521,10.0
+Solar Energy Project 225,3494.0,35.0,4.0,3,Solar Energy,Africa,1,1164.67,10.0172,46.67
+Solar Energy Project 226,102049.0,34.0,10.0,12,Solar Energy,Asia,1,8504.08,0.3332,28.33
+Composting Project 227,32819.0,3.0,1.0,48,Composting,Asia,0,683.73,0.0914,0.06
+Green Building Project 228,8971.0,83.0,7.0,9,Green Building,Africa,1,996.78,9.252,64.56
+Tree Planting Project 229,141687.0,12.0,2.0,48,Tree Planting,South America,0,2951.81,0.0847,0.5
+Composting Project 230,25306.0,5.0,5.0,48,Composting,South America,0,527.21,0.1976,0.52
+Green Building Project 231,90685.0,87.0,1.0,6,Green Building,North America,1,15114.17,0.9594,14.5
+Recycling Hub Project 232,23885.0,124.0,3.0,6,Recycling Hub,North America,1,3980.83,5.1915,62.0
+Recycling Hub Project 233,261162.0,79.0,2.0,9,Recycling Hub,North America,1,29018.0,0.3025,17.56
+Recycling Hub Project 234,181028.0,66.0,1.0,3,Recycling Hub,Asia,1,60342.67,0.3646,22.0
+Recycling Hub Project 235,16337.0,42.0,7.0,6,Recycling Hub,South America,1,2722.83,2.5709,49.0
+Recycling Hub Project 236,70677.0,32.0,5.0,18,Recycling Hub,Africa,0,3926.5,0.4528,8.89
+Green Building Project 237,47784.0,3.0,1.0,48,Green Building,North America,0,995.5,0.0628,0.06
+Green Building Project 238,113818.0,21.0,6.0,24,Green Building,South America,1,4742.42,0.1845,5.25
+Wind Farm Project 239,6919.0,18.0,5.0,36,Wind Farm,South America,0,192.19,2.6015,2.5
+Geothermal Energy Project 240,50174.0,12.0,3.0,9,Geothermal Energy,South America,1,5574.89,0.2392,4.0
+Solar Energy Project 241,78441.0,51.0,7.0,9,Solar Energy,Asia,1,8715.67,0.6502,39.67
+Water Conservation Project 242,2669.0,27.0,10.0,6,Water Conservation,Europe,0,444.83,10.1161,45.0
+Recycling Hub Project 243,5324.0,3.0,9.0,3,Recycling Hub,South America,0,1774.67,0.5635,9.0
+Tree Planting Project 244,1906.0,9.0,9.0,48,Tree Planting,Europe,0,39.71,4.7219,1.69
+Water Conservation Project 245,15941.0,45.0,9.0,18,Water Conservation,North America,1,885.61,2.8229,22.5
+Green Building Project 246,52106.0,3.0,2.0,3,Green Building,North America,1,17368.67,0.0576,2.0
+Tree Planting Project 247,133629.0,76.0,3.0,12,Tree Planting,Asia,1,11135.75,0.5687,19.0
+Tree Planting Project 248,24074.0,27.0,7.0,12,Tree Planting,Oceania,1,2006.17,1.1215,15.75
+Tree Planting Project 249,155490.0,26.0,5.0,24,Tree Planting,South America,1,6478.75,0.1672,5.42
+Wind Farm Project 250,4204.0,35.0,2.0,6,Wind Farm,Asia,0,700.67,8.3254,11.67
+Green Building Project 251,2852.0,69.0,3.0,6,Green Building,South America,1,475.33,24.1935,34.5
+Tree Planting Project 252,20606.0,17.0,10.0,6,Tree Planting,South America,0,3434.33,0.825,28.33
+Recycling Hub Project 253,34922.0,45.0,6.0,24,Recycling Hub,Europe,1,1455.08,1.2886,11.25
+Composting Project 254,21179.0,33.0,7.0,12,Composting,Europe,0,1764.92,1.5581,19.25
+Tree Planting Project 255,1842.0,12.0,9.0,3,Tree Planting,North America,1,614.0,6.5147,36.0
+Wind Farm Project 256,19792.0,84.0,1.0,24,Wind Farm,North America,0,824.67,4.2441,3.5
+Water Conservation Project 257,4603.0,63.0,7.0,24,Water Conservation,Europe,0,191.79,13.6867,18.38
+Green Building Project 258,49197.0,42.0,8.0,3,Green Building,Europe,1,16399.0,0.8537,112.0
+Geothermal Energy Project 259,34197.0,76.0,3.0,6,Geothermal Energy,Europe,1,5699.5,2.2224,38.0
+Wind Farm Project 260,7130.0,80.0,4.0,18,Wind Farm,Oceania,1,396.11,11.2202,17.78
+Tree Planting Project 261,11888.0,49.0,10.0,3,Tree Planting,North America,1,3962.67,4.1218,163.33
+Green Building Project 262,6179.0,72.0,6.0,12,Green Building,North America,1,514.92,11.6524,36.0
+Composting Project 263,20430.0,47.0,10.0,9,Composting,Europe,1,2270.0,2.3005,52.22
+Tree Planting Project 264,69297.0,45.0,7.0,48,Tree Planting,South America,1,1443.69,0.6494,6.56
+Wind Farm Project 265,6748.0,38.0,4.0,9,Wind Farm,Europe,0,749.78,5.6313,16.89
+Solar Energy Project 266,40330.0,55.0,8.0,36,Solar Energy,Europe,1,1120.28,1.3637,12.22
+Recycling Hub Project 267,11657.0,6.0,5.0,36,Recycling Hub,South America,0,323.81,0.5147,0.83
+Geothermal Energy Project 268,8506.0,85.0,1.0,24,Geothermal Energy,Europe,0,354.42,9.9929,3.54
+Water Conservation Project 269,19371.0,82.0,4.0,48,Water Conservation,Europe,1,403.56,4.2331,6.83
+Wind Farm Project 270,6359.0,1.0,3.0,9,Wind Farm,Europe,0,706.56,0.1573,0.33
+Green Building Project 271,11334.0,69.0,9.0,18,Green Building,Europe,1,629.67,6.0879,34.5
+Geothermal Energy Project 272,5231.0,5.0,8.0,6,Geothermal Energy,Europe,0,871.83,0.9558,6.67
+Geothermal Energy Project 273,232738.0,16.0,1.0,12,Geothermal Energy,North America,1,19394.83,0.0687,1.33
+Geothermal Energy Project 274,22978.0,54.0,6.0,36,Geothermal Energy,Asia,0,638.28,2.3501,9.0
+Tree Planting Project 275,9512.0,7.0,9.0,18,Tree Planting,South America,0,528.44,0.7359,3.5
+Recycling Hub Project 276,28474.0,68.0,7.0,12,Recycling Hub,South America,1,2372.83,2.3881,39.67
+Tree Planting Project 277,19248.0,71.0,4.0,12,Tree Planting,Europe,1,1604.0,3.6887,23.67
+Green Building Project 278,16896.0,28.0,1.0,6,Green Building,Africa,0,2816.0,1.6572,4.67
+Tree Planting Project 279,46027.0,1.0,2.0,48,Tree Planting,North America,0,958.9,0.0217,0.04
+Solar Energy Project 280,54666.0,13.0,5.0,24,Solar Energy,Europe,1,2277.75,0.2378,2.71
+Recycling Hub Project 281,11653.0,38.0,5.0,9,Recycling Hub,South America,1,1294.78,3.261,21.11
+Recycling Hub Project 282,11037.0,158.0,8.0,6,Recycling Hub,Europe,1,1839.5,14.3155,210.67
+Green Building Project 283,15834.0,39.0,6.0,18,Green Building,North America,0,879.67,2.4631,13.0
+Water Conservation Project 284,1390.0,12.0,8.0,24,Water Conservation,South America,1,57.92,8.6331,4.0
+Solar Energy Project 285,3575.0,40.0,2.0,18,Solar Energy,Africa,1,198.61,11.1888,4.44
+Wind Farm Project 286,113578.0,31.0,3.0,24,Wind Farm,North America,1,4732.42,0.2729,3.88
+Tree Planting Project 287,158571.0,60.0,6.0,48,Tree Planting,Asia,0,3303.56,0.3784,7.5
+Composting Project 288,16336.0,4.0,10.0,36,Composting,Oceania,1,453.78,0.2449,1.11
+Tree Planting Project 289,43996.0,57.0,3.0,18,Tree Planting,Europe,1,2444.22,1.2956,9.5
+Geothermal Energy Project 290,32000.0,31.0,6.0,6,Geothermal Energy,Europe,1,5333.33,0.9688,31.0
+Tree Planting Project 291,500000.0,131.0,6.0,24,Tree Planting,North America,1,20833.33,0.262,32.75
+Wind Farm Project 292,84414.0,16.0,2.0,24,Wind Farm,North America,0,3517.25,0.1895,1.33
+Tree Planting Project 293,18892.0,40.0,7.0,12,Tree Planting,North America,1,1574.33,2.1173,23.33
+Solar Energy Project 294,6997.0,107.0,2.0,12,Solar Energy,Africa,0,583.08,15.2923,17.83
+Solar Energy Project 295,3204.0,4.0,6.0,3,Solar Energy,Asia,0,1068.0,1.2484,8.0
+Recycling Hub Project 296,28117.0,110.0,1.0,18,Recycling Hub,South America,0,1562.06,3.9122,6.11
+Green Building Project 297,8887.0,46.0,3.0,12,Green Building,North America,0,740.58,5.1761,11.5
+Water Conservation Project 298,3996.0,2.0,2.0,3,Water Conservation,Asia,0,1332.0,0.5005,1.33
+Composting Project 299,10138.0,14.0,7.0,36,Composting,Oceania,1,281.61,1.3809,2.72
+Geothermal Energy Project 300,6015.0,49.0,4.0,36,Geothermal Energy,Asia,0,167.08,8.1463,5.44
+Tree Planting Project 301,166803.0,2.0,8.0,12,Tree Planting,Europe,1,13900.25,0.012,1.33
+Tree Planting Project 302,63447.0,34.0,6.0,18,Tree Planting,South America,1,3524.83,0.5359,11.33
+Wind Farm Project 303,21816.0,16.0,10.0,24,Wind Farm,Europe,0,909.0,0.7334,6.67
+Green Building Project 304,130083.0,38.0,4.0,9,Green Building,Europe,1,14453.67,0.2921,16.89
+Solar Energy Project 305,24169.0,1.0,5.0,48,Solar Energy,Europe,0,503.52,0.0414,0.1
+Composting Project 306,7835.0,82.0,9.0,18,Composting,South America,1,435.28,10.4659,41.0
+Recycling Hub Project 307,137001.0,145.0,7.0,48,Recycling Hub,Asia,1,2854.19,1.0584,21.15
+Solar Energy Project 308,42053.0,138.0,10.0,6,Solar Energy,Europe,1,7008.83,3.2816,230.0
+Geothermal Energy Project 309,6344.0,55.0,9.0,36,Geothermal Energy,North America,1,176.22,8.6696,13.75
+Green Building Project 310,17528.0,5.0,7.0,12,Green Building,North America,0,1460.67,0.2853,2.92
+Geothermal Energy Project 311,7702.0,56.0,1.0,12,Geothermal Energy,North America,0,641.83,7.2708,4.67
+Water Conservation Project 312,4190.0,1.0,8.0,48,Water Conservation,Europe,0,87.29,0.2387,0.17
+Recycling Hub Project 313,66930.0,1.0,4.0,24,Recycling Hub,North America,1,2788.75,0.0149,0.17
+Water Conservation Project 314,217792.0,15.0,3.0,48,Water Conservation,Asia,0,4537.33,0.0689,0.94
+Wind Farm Project 315,4112.0,26.0,7.0,6,Wind Farm,Europe,1,685.33,6.323,30.33
+Geothermal Energy Project 316,43285.0,58.0,3.0,24,Geothermal Energy,Europe,0,1803.54,1.34,7.25
+Wind Farm Project 317,10089.0,45.0,8.0,6,Wind Farm,North America,1,1681.5,4.4603,60.0
+Tree Planting Project 318,12276.0,23.0,6.0,9,Tree Planting,Africa,1,1364.0,1.8736,15.33
+Water Conservation Project 319,10819.0,12.0,5.0,36,Water Conservation,Asia,0,300.53,1.1092,1.67
+Green Building Project 320,7810.0,200.0,4.0,12,Green Building,Asia,1,650.83,25.6082,66.67
+Geothermal Energy Project 321,23347.0,22.0,8.0,12,Geothermal Energy,North America,1,1945.58,0.9423,14.67
+Composting Project 322,8126.0,24.0,8.0,9,Composting,South America,1,902.89,2.9535,21.33
+Recycling Hub Project 323,30471.0,7.0,1.0,3,Recycling Hub,Europe,0,10157.0,0.2297,2.33
+Solar Energy Project 324,20737.0,63.0,9.0,36,Solar Energy,South America,0,576.03,3.038,15.75
+Green Building Project 325,16535.0,47.0,5.0,24,Green Building,Africa,0,688.96,2.8425,9.79
+Green Building Project 326,7412.0,9.0,4.0,9,Green Building,South America,0,823.56,1.2142,4.0
+Wind Farm Project 327,11024.0,3.0,6.0,24,Wind Farm,Africa,1,459.33,0.2721,0.75
+Water Conservation Project 328,54527.0,45.0,6.0,48,Water Conservation,Asia,1,1135.98,0.8253,5.62
+Geothermal Energy Project 329,40179.0,42.0,2.0,18,Geothermal Energy,Europe,1,2232.17,1.0453,4.67
+Geothermal Energy Project 330,6815.0,12.0,8.0,12,Geothermal Energy,Africa,1,567.92,1.7608,8.0
+Tree Planting Project 331,24814.0,120.0,7.0,24,Tree Planting,Europe,1,1033.92,4.836,35.0
+Tree Planting Project 332,54266.0,6.0,1.0,6,Tree Planting,South America,1,9044.33,0.1106,1.0
+Recycling Hub Project 333,2971.0,22.0,5.0,24,Recycling Hub,Europe,0,123.79,7.4049,4.58
+Wind Farm Project 334,42278.0,115.0,6.0,18,Wind Farm,Europe,1,2348.78,2.7201,38.33
+Green Building Project 335,9945.0,21.0,4.0,36,Green Building,North America,0,276.25,2.1116,2.33
+Geothermal Energy Project 336,43683.0,40.0,2.0,12,Geothermal Energy,Europe,1,3640.25,0.9157,6.67
+Composting Project 337,8813.0,20.0,4.0,48,Composting,North America,0,183.6,2.2694,1.67
+Wind Farm Project 338,2525.0,12.0,1.0,9,Wind Farm,South America,0,280.56,4.7525,1.33
+Recycling Hub Project 339,3124.0,165.0,7.0,48,Recycling Hub,Europe,1,65.08,52.8169,24.06
+Recycling Hub Project 340,23334.0,21.0,2.0,18,Recycling Hub,Europe,1,1296.33,0.9,2.33
+Wind Farm Project 341,30081.0,89.0,2.0,12,Wind Farm,South America,1,2506.75,2.9587,14.83
+Recycling Hub Project 342,7441.0,10.0,9.0,24,Recycling Hub,North America,1,310.04,1.3439,3.75
+Wind Farm Project 343,47396.0,9.0,5.0,36,Wind Farm,Asia,0,1316.56,0.1899,1.25
+Solar Energy Project 344,2999.0,1.0,2.0,3,Solar Energy,Asia,0,999.67,0.3334,0.67
+Wind Farm Project 345,20347.0,42.0,9.0,36,Wind Farm,Asia,1,565.19,2.0642,10.5
+Water Conservation Project 346,5150.0,18.0,9.0,3,Water Conservation,Asia,1,1716.67,3.4951,54.0
+Wind Farm Project 347,10074.0,79.0,1.0,6,Wind Farm,North America,0,1679.0,7.842,13.17
+Recycling Hub Project 348,23315.0,25.0,3.0,36,Recycling Hub,Asia,1,647.64,1.0723,2.08
+Geothermal Energy Project 349,7843.0,137.0,4.0,12,Geothermal Energy,Europe,1,653.58,17.4678,45.67
+Water Conservation Project 350,13884.0,8.0,7.0,3,Water Conservation,North America,1,4628.0,0.5762,18.67
+Recycling Hub Project 351,73684.0,81.0,10.0,9,Recycling Hub,Asia,1,8187.11,1.0993,90.0
+Tree Planting Project 352,11022.0,59.0,4.0,12,Tree Planting,North America,0,918.5,5.3529,19.67
+Tree Planting Project 353,60043.0,58.0,2.0,9,Tree Planting,Asia,1,6671.44,0.966,12.89
+Geothermal Energy Project 354,5677.0,74.0,7.0,36,Geothermal Energy,Asia,1,157.69,13.0351,14.39
+Geothermal Energy Project 355,41596.0,57.0,6.0,9,Geothermal Energy,Africa,1,4621.78,1.3703,38.0
+Water Conservation Project 356,124229.0,39.0,3.0,3,Water Conservation,Africa,1,41409.67,0.3139,39.0
+Solar Energy Project 357,1134.0,5.0,6.0,12,Solar Energy,North America,0,94.5,4.4092,2.5
+Geothermal Energy Project 358,8465.0,1.0,6.0,24,Geothermal Energy,North America,0,352.71,0.1181,0.25
+Tree Planting Project 359,44023.0,101.0,5.0,18,Tree Planting,South America,1,2445.72,2.2943,28.06
+Wind Farm Project 360,17263.0,38.0,4.0,3,Wind Farm,North America,1,5754.33,2.2012,50.67
+Recycling Hub Project 361,34384.0,63.0,10.0,3,Recycling Hub,South America,1,11461.33,1.8322,210.0
+Tree Planting Project 362,10670.0,26.0,1.0,24,Tree Planting,Asia,0,444.58,2.4367,1.08
+Tree Planting Project 363,24438.0,4.0,10.0,12,Tree Planting,Asia,0,2036.5,0.1637,3.33
+Solar Energy Project 364,18273.0,5.0,6.0,12,Solar Energy,North America,0,1522.75,0.2736,2.5
+Water Conservation Project 365,89441.0,46.0,2.0,48,Water Conservation,Europe,1,1863.35,0.5143,1.92
+Water Conservation Project 366,29890.0,22.0,3.0,36,Water Conservation,North America,0,830.28,0.736,1.83
+Green Building Project 367,33028.0,8.0,8.0,9,Green Building,Europe,1,3669.78,0.2422,7.11
+Solar Energy Project 368,13436.0,27.0,10.0,36,Solar Energy,Africa,1,373.22,2.0095,7.5
+Wind Farm Project 369,12269.0,2.0,6.0,24,Wind Farm,North America,1,511.21,0.163,0.5
+Water Conservation Project 370,13107.0,34.0,3.0,36,Water Conservation,Europe,1,364.08,2.594,2.83
+Recycling Hub Project 371,35360.0,12.0,7.0,24,Recycling Hub,Europe,1,1473.33,0.3394,3.5
+Geothermal Energy Project 372,13290.0,63.0,4.0,12,Geothermal Energy,South America,0,1107.5,4.7404,21.0
+Solar Energy Project 373,31186.0,14.0,9.0,9,Solar Energy,South America,1,3465.11,0.4489,14.0
+Geothermal Energy Project 374,265795.0,24.0,5.0,36,Geothermal Energy,North America,0,7383.19,0.0903,3.33
+Tree Planting Project 375,62651.0,1.0,3.0,3,Tree Planting,Europe,1,20883.67,0.016,1.0
+Recycling Hub Project 376,14894.0,3.0,2.0,6,Recycling Hub,North America,0,2482.33,0.2014,1.0
+Recycling Hub Project 377,93102.0,19.0,2.0,48,Recycling Hub,North America,1,1939.62,0.2041,0.79
+Tree Planting Project 378,13498.0,26.0,3.0,18,Tree Planting,Asia,0,749.89,1.9262,4.33
+Solar Energy Project 379,1908.0,36.0,2.0,3,Solar Energy,South America,0,636.0,18.8679,24.0
+Tree Planting Project 380,6570.0,13.0,4.0,12,Tree Planting,North America,0,547.5,1.9787,4.33
+Geothermal Energy Project 381,2333.0,47.0,2.0,18,Geothermal Energy,Europe,0,129.61,20.1457,5.22
+Green Building Project 382,14446.0,78.0,10.0,6,Green Building,Oceania,1,2407.67,5.3994,130.0
+Recycling Hub Project 383,22518.0,60.0,9.0,6,Recycling Hub,North America,1,3753.0,2.6645,90.0
+Composting Project 384,164674.0,1.0,2.0,9,Composting,Asia,0,18297.11,0.0061,0.22
+Composting Project 385,32607.0,26.0,9.0,18,Composting,Europe,1,1811.5,0.7974,13.0
+Geothermal Energy Project 386,16934.0,4.0,6.0,9,Geothermal Energy,North America,0,1881.56,0.2362,2.67
+Wind Farm Project 387,59592.0,11.0,1.0,3,Wind Farm,Europe,1,19864.0,0.1846,3.67
+Water Conservation Project 388,1550.0,172.0,4.0,24,Water Conservation,South America,1,64.58,110.9677,28.67
+Tree Planting Project 389,29223.0,6.0,1.0,24,Tree Planting,Oceania,1,1217.62,0.2053,0.25
+Tree Planting Project 390,55549.0,27.0,6.0,24,Tree Planting,North America,1,2314.54,0.4861,6.75
+Wind Farm Project 391,3735.0,38.0,4.0,18,Wind Farm,Europe,0,207.5,10.174,8.44
+Wind Farm Project 392,86899.0,48.0,3.0,24,Wind Farm,Europe,1,3620.79,0.5524,6.0
+Geothermal Energy Project 393,33063.0,32.0,3.0,3,Geothermal Energy,North America,1,11021.0,0.9678,32.0
+Geothermal Energy Project 394,13381.0,1.0,9.0,9,Geothermal Energy,Europe,1,1486.78,0.0747,1.0
+Wind Farm Project 395,47067.0,15.0,6.0,18,Wind Farm,Europe,1,2614.83,0.3187,5.0
+Recycling Hub Project 396,335988.0,29.0,9.0,9,Recycling Hub,Asia,1,37332.0,0.0863,29.0
+Geothermal Energy Project 397,27398.0,3.0,5.0,18,Geothermal Energy,North America,0,1522.11,0.1095,0.83
+Green Building Project 398,29669.0,17.0,2.0,9,Green Building,Europe,0,3296.56,0.573,3.78
+Geothermal Energy Project 399,12692.0,1.0,8.0,6,Geothermal Energy,Africa,0,2115.33,0.0788,1.33
+Tree Planting Project 400,7944.0,3.0,5.0,9,Tree Planting,Europe,0,882.67,0.3776,1.67
+Geothermal Energy Project 401,59659.0,20.0,2.0,24,Geothermal Energy,Oceania,1,2485.79,0.3352,1.67
+Recycling Hub Project 402,7884.0,5.0,4.0,6,Recycling Hub,North America,0,1314.0,0.6342,3.33
+Wind Farm Project 403,24001.0,33.0,9.0,9,Wind Farm,Africa,1,2666.78,1.3749,33.0
+Tree Planting Project 404,12416.0,46.0,4.0,18,Tree Planting,South America,1,689.78,3.7049,10.22
+Geothermal Energy Project 405,39135.0,64.0,4.0,18,Geothermal Energy,Asia,0,2174.17,1.6354,14.22
+Recycling Hub Project 406,32872.0,8.0,2.0,48,Recycling Hub,Oceania,0,684.83,0.2434,0.33
+Green Building Project 407,76500.0,7.0,6.0,18,Green Building,Europe,0,4250.0,0.0915,2.33
+Geothermal Energy Project 408,11943.0,4.0,2.0,12,Geothermal Energy,Oceania,0,995.25,0.3349,0.67
+Recycling Hub Project 409,15933.0,40.0,7.0,3,Recycling Hub,North America,0,5311.0,2.5105,93.33
+Green Building Project 410,6805.0,49.0,3.0,18,Green Building,North America,0,378.06,7.2006,8.17
+Wind Farm Project 411,12924.0,1.0,3.0,6,Wind Farm,North America,1,2154.0,0.0774,0.5
+Geothermal Energy Project 412,34639.0,110.0,5.0,48,Geothermal Energy,South America,0,721.65,3.1756,11.46
+Green Building Project 413,54632.0,2.0,3.0,18,Green Building,Europe,0,3035.11,0.0366,0.33
+Tree Planting Project 414,7283.0,31.0,2.0,12,Tree Planting,South America,0,606.92,4.2565,5.17
+Wind Farm Project 415,62537.0,49.0,10.0,24,Wind Farm,South America,1,2605.71,0.7835,20.42
+Tree Planting Project 416,112057.0,81.0,9.0,6,Tree Planting,Asia,1,18676.17,0.7228,121.5
+Composting Project 417,36174.0,50.0,2.0,12,Composting,Asia,1,3014.5,1.3822,8.33
+Solar Energy Project 418,209432.0,64.0,2.0,24,Solar Energy,North America,1,8726.33,0.3056,5.33
+Geothermal Energy Project 419,8703.0,16.0,8.0,36,Geothermal Energy,North America,1,241.75,1.8384,3.56
+Green Building Project 420,4946.0,67.0,9.0,36,Green Building,Europe,1,137.39,13.5463,16.75
+Solar Energy Project 421,2605.0,3.0,7.0,6,Solar Energy,Europe,1,434.17,1.1516,3.5
+Solar Energy Project 422,132621.0,90.0,3.0,9,Solar Energy,Europe,1,14735.67,0.6786,30.0
+Green Building Project 423,48302.0,31.0,9.0,3,Green Building,North America,1,16100.67,0.6418,93.0
+Wind Farm Project 424,20605.0,67.0,3.0,48,Wind Farm,Europe,0,429.27,3.2516,4.19
+Geothermal Energy Project 425,30821.0,24.0,5.0,3,Geothermal Energy,Oceania,1,10273.67,0.7787,40.0
+Composting Project 426,5706.0,41.0,9.0,12,Composting,South America,0,475.5,7.1854,30.75
+Tree Planting Project 427,414530.0,29.0,3.0,24,Tree Planting,North America,1,17272.08,0.07,3.62
+Recycling Hub Project 428,25721.0,52.0,7.0,3,Recycling Hub,South America,1,8573.67,2.0217,121.33
+Tree Planting Project 429,25116.0,3.0,1.0,24,Tree Planting,Europe,1,1046.5,0.1194,0.12
+Recycling Hub Project 430,52623.0,2.0,4.0,24,Recycling Hub,North America,1,2192.62,0.038,0.33
+Tree Planting Project 431,39230.0,11.0,4.0,12,Tree Planting,South America,0,3269.17,0.2804,3.67
+Green Building Project 432,28815.0,6.0,7.0,12,Green Building,North America,1,2401.25,0.2082,3.5
+Composting Project 433,8530.0,82.0,8.0,12,Composting,North America,1,710.83,9.6131,54.67
+Geothermal Energy Project 434,38783.0,9.0,1.0,3,Geothermal Energy,Oceania,0,12927.67,0.2321,3.0
+Recycling Hub Project 435,210750.0,148.0,5.0,36,Recycling Hub,Africa,1,5854.17,0.7023,20.56
+Geothermal Energy Project 436,110691.0,16.0,7.0,12,Geothermal Energy,South America,1,9224.25,0.1445,9.33
+Geothermal Energy Project 437,149018.0,8.0,4.0,48,Geothermal Energy,South America,0,3104.54,0.0537,0.67
+Geothermal Energy Project 438,11926.0,62.0,4.0,3,Geothermal Energy,South America,1,3975.33,5.1987,82.67
+Water Conservation Project 439,6717.0,43.0,4.0,12,Water Conservation,Europe,0,559.75,6.4017,14.33
+Wind Farm Project 440,18940.0,27.0,6.0,18,Wind Farm,North America,1,1052.22,1.4256,9.0
+Tree Planting Project 441,23549.0,32.0,7.0,24,Tree Planting,Europe,0,981.21,1.3589,9.33
+Geothermal Energy Project 442,81881.0,50.0,2.0,48,Geothermal Energy,North America,0,1705.85,0.6106,2.08
+Tree Planting Project 443,2890.0,10.0,5.0,12,Tree Planting,South America,0,240.83,3.4602,4.17
+Geothermal Energy Project 444,138062.0,200.0,4.0,6,Geothermal Energy,Europe,1,23010.33,1.4486,133.33
+Recycling Hub Project 445,18222.0,147.0,3.0,24,Recycling Hub,Oceania,0,759.25,8.0672,18.38
+Wind Farm Project 446,13196.0,42.0,7.0,24,Wind Farm,Africa,0,549.83,3.1828,12.25
+Wind Farm Project 447,6538.0,8.0,6.0,12,Wind Farm,Asia,1,544.83,1.2236,4.0
+Green Building Project 448,3023.0,45.0,7.0,36,Green Building,South America,0,83.97,14.8859,8.75
+Water Conservation Project 449,59148.0,2.0,5.0,9,Water Conservation,Africa,1,6572.0,0.0338,1.11
+Green Building Project 450,24052.0,1.0,6.0,36,Green Building,Europe,0,668.11,0.0416,0.17
+Green Building Project 451,4684.0,11.0,5.0,12,Green Building,Asia,1,390.33,2.3484,4.58
+Green Building Project 452,4655.0,24.0,7.0,24,Green Building,Europe,1,193.96,5.1557,7.0
+Green Building Project 453,14721.0,81.0,2.0,48,Green Building,Asia,0,306.69,5.5023,3.38
+Green Building Project 454,163215.0,51.0,5.0,6,Green Building,Europe,1,27202.5,0.3125,42.5
+Composting Project 455,16130.0,54.0,6.0,48,Composting,Africa,0,336.04,3.3478,6.75
+Wind Farm Project 456,3627.0,22.0,6.0,48,Wind Farm,Africa,0,75.56,6.0656,2.75
+Green Building Project 457,16401.0,16.0,5.0,24,Green Building,Europe,0,683.38,0.9756,3.33
+Geothermal Energy Project 458,15878.0,18.0,10.0,36,Geothermal Energy,North America,0,441.06,1.1336,5.0
+Wind Farm Project 459,865.0,175.0,7.0,6,Wind Farm,Oceania,1,144.17,202.3121,204.17
+Wind Farm Project 460,20637.0,1.0,10.0,3,Wind Farm,North America,1,6879.0,0.0485,3.33
+Solar Energy Project 461,16695.0,80.0,8.0,18,Solar Energy,Africa,1,927.5,4.7919,35.56
+Composting Project 462,50789.0,34.0,7.0,24,Composting,South America,1,2116.21,0.6694,9.92
+Green Building Project 463,202551.0,23.0,5.0,12,Green Building,North America,1,16879.25,0.1136,9.58
+Tree Planting Project 464,85125.0,51.0,1.0,3,Tree Planting,Europe,1,28375.0,0.5991,17.0
+Recycling Hub Project 465,15951.0,26.0,5.0,18,Recycling Hub,Europe,0,886.17,1.63,7.22
+Water Conservation Project 466,5838.0,82.0,10.0,12,Water Conservation,Asia,1,486.5,14.0459,68.33
+Geothermal Energy Project 467,483125.0,92.0,2.0,48,Geothermal Energy,North America,1,10065.1,0.1904,3.83
+Tree Planting Project 468,23648.0,21.0,5.0,9,Tree Planting,South America,1,2627.56,0.888,11.67
+Composting Project 469,22397.0,12.0,5.0,12,Composting,North America,1,1866.42,0.5358,5.0
+Recycling Hub Project 470,21397.0,35.0,2.0,6,Recycling Hub,South America,1,3566.17,1.6357,11.67
+Composting Project 471,27936.0,97.0,5.0,6,Composting,Africa,1,4656.0,3.4722,80.83
+Geothermal Energy Project 472,18522.0,9.0,4.0,9,Geothermal Energy,Oceania,0,2058.0,0.4859,4.0
+Wind Farm Project 473,11065.0,39.0,1.0,3,Wind Farm,North America,0,3688.33,3.5246,13.0
+Recycling Hub Project 474,11427.0,39.0,3.0,18,Recycling Hub,Asia,1,634.83,3.413,6.5
+Wind Farm Project 475,21177.0,52.0,1.0,12,Wind Farm,Asia,0,1764.75,2.4555,4.33
+Geothermal Energy Project 476,11474.0,5.0,5.0,6,Geothermal Energy,South America,1,1912.33,0.4358,4.17
+Tree Planting Project 477,9363.0,50.0,4.0,3,Tree Planting,Oceania,1,3121.0,5.3402,66.67
+Geothermal Energy Project 478,25027.0,95.0,7.0,9,Geothermal Energy,Europe,1,2780.78,3.7959,73.89
+Tree Planting Project 479,16220.0,7.0,5.0,36,Tree Planting,Europe,1,450.56,0.4316,0.97
+Recycling Hub Project 480,133892.0,10.0,10.0,24,Recycling Hub,Africa,1,5578.83,0.0747,4.17
+Recycling Hub Project 481,914.0,142.0,4.0,36,Recycling Hub,North America,1,25.39,155.3611,15.78
+Green Building Project 482,81618.0,7.0,2.0,36,Green Building,Asia,0,2267.17,0.0858,0.39
+Composting Project 483,98253.0,77.0,4.0,6,Composting,Africa,1,16375.5,0.7837,51.33
+Green Building Project 484,1829.0,27.0,2.0,48,Green Building,Europe,0,38.1,14.7622,1.12
+Composting Project 485,14599.0,11.0,8.0,48,Composting,Africa,0,304.15,0.7535,1.83
+Green Building Project 486,14104.0,81.0,3.0,9,Green Building,North America,0,1567.11,5.7431,27.0
+Wind Farm Project 487,4068.0,23.0,9.0,12,Wind Farm,South America,1,339.0,5.6539,17.25
+Recycling Hub Project 488,8661.0,28.0,4.0,48,Recycling Hub,South America,0,180.44,3.2329,2.33
+Tree Planting Project 489,5809.0,17.0,6.0,36,Tree Planting,Africa,0,161.36,2.9265,2.83
+Composting Project 490,180362.0,35.0,10.0,48,Composting,Europe,0,3757.54,0.1941,7.29
+Geothermal Energy Project 491,67698.0,7.0,5.0,36,Geothermal Energy,North America,0,1880.5,0.1034,0.97
+Composting Project 492,101302.0,19.0,10.0,18,Composting,Asia,1,5627.89,0.1876,10.56
+Tree Planting Project 493,52365.0,139.0,1.0,6,Tree Planting,Asia,1,8727.5,2.6544,23.17
+Green Building Project 494,5682.0,11.0,9.0,6,Green Building,Asia,1,947.0,1.9359,16.5
+Composting Project 495,11737.0,42.0,1.0,12,Composting,Europe,0,978.08,3.5784,3.5
+Water Conservation Project 496,39626.0,15.0,8.0,48,Water Conservation,Europe,0,825.54,0.3785,2.5
+Wind Farm Project 497,5081.0,59.0,9.0,48,Wind Farm,North America,1,105.85,11.6119,11.06
+Recycling Hub Project 498,51823.0,5.0,9.0,24,Recycling Hub,Asia,0,2159.29,0.0965,1.88
+Tree Planting Project 499,16508.0,140.0,1.0,3,Tree Planting,Europe,1,5502.67,8.4807,46.67
+Recycling Hub Project 500,14047.0,24.0,2.0,18,Recycling Hub,Europe,0,780.39,1.7085,2.67
+auto_20260406_173334,75000.0,30.0,6.0,18,Unknown,Unknown,1,,,
+,50000.0,25.0,5.0,12,,,1,,,
+,200000.0,10.0,3.0,36,,,0,,,
+,120000.0,60.0,8.0,18,,,1,,,
+auto_20260407_080643,100000.0,500.0,50.0,12,Unknown,Unknown,1,,,
+auto_20260407_080822,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_080937,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_081330,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_081832,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_081951,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_082001,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_082224,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_082234,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_082400,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_082410,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_082606,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_082706,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_083048,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_083059,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_084404,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_084414,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_160547,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_160550,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_160729,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_160732,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_160839,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_160843,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_161201,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_161209,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_161413,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_161428,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_161630,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_161815,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_161830,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_170719,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_170751,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_171324,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_171407,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_171844,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_171938,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_174332,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_174449,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_181410,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_181447,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_181927,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_182007,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_182132,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_182209,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_182513,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_182549,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_182826,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_182902,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_183538,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_183614,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_184145,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_184223,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_184526,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_184604,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_190049,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_190128,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_190826,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_190904,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_191408,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_191447,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,
+auto_20260407_211243,50000.0,100.0,5.0,6,Unknown,Unknown,0,,,
+auto_20260407_211321,100000.0,500.0,5.0,12,Unknown,Unknown,1,,,

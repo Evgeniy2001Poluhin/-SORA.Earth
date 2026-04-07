@@ -1,5 +1,5 @@
 {
-  "retrained_at": "20260406_120942",
+  "retrained_at": "20260407_211319",
   "algorithm": "RandomForestClassifier",
   "n_estimators": 200,
   "max_depth": 10,
@@ -10,7 +10,9 @@
     "duration_months",
     "budget_per_month",
     "co2_per_dollar",
-    "efficiency_score"
+    "efficiency_score",
+    "year",
+    "quarter"
   ],
-  "total_samples": 500
+  "total_samples": 565
 }

@@ -165,3 +165,37 @@ async def prometheus_metrics():
     for st, count in m["requests_by_status"].items():
         lines.append(f'sora_requests_by_status{{status="{st}"}} {count}')
     return PlainTextResponse("\n".join(lines))
+
+# --- Redis Cache ---
+from app.redis_cache import cache_stats as redis_stats, cache_get, cache_set, REDIS_AVAILABLE
+
+@router.get('/cache/redis', summary='Redis cache stats')
+def get_redis_stats():
+    return redis_stats()
+
+@router.get('/cache/redis/test', summary='Test Redis cache')
+def test_redis():
+    cache_set('test_key', {'status': 'ok', 'source': 'sora'}, ttl=60)
+    result = cache_get('test_key')
+    return {'redis_available': REDIS_AVAILABLE, 'test_result': result}
+
+@router.delete('/cache/redis/invalidate', summary='Invalidate all prediction cache')
+def invalidate_cache():
+    from app.redis_cache import redis_client
+    if not REDIS_AVAILABLE:
+        return {'cleared': 0, 'error': 'Redis unavailable'}
+    keys = redis_client.keys('sora:*')
+    if keys:
+        redis_client.delete(*keys)
+    return {'cleared': len(keys), 'keys': keys}
+
+@router.delete('/cache/redis/invalidate/{prefix}', summary='Invalidate cache by prefix')
+def invalidate_cache_prefix(prefix: str):
+    from app.redis_cache import redis_client
+    if not REDIS_AVAILABLE:
+        return {'cleared': 0, 'error': 'Redis unavailable'}
+    pattern = 'sora:' + prefix + ':*'
+    keys = redis_client.keys(pattern)
+    if keys:
+        redis_client.delete(*keys)
+    return {'cleared': len(keys), 'prefix': prefix, 'keys': keys}

@@ -1,3 +1,5 @@
+from fastapi import Depends
+from app.auth import require_admin
 """Model retraining and metrics API."""
 import os, csv, pickle, json, time
 from datetime import datetime
@@ -9,7 +11,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, classification_report
 import torch
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from app.auth import require_api_key
 
 router = APIRouter(prefix="/model", tags=["ml-ops"])
@@ -24,19 +26,16 @@ _retrain_history = []
 
 @router.get("/metrics")
 def model_metrics():
-    """Current model performance metrics from training."""
     metrics_path = os.path.join(MODELS_DIR, "metrics.json")
     if not os.path.exists(metrics_path):
         raise HTTPException(404, "No metrics file found")
     with open(metrics_path) as f:
         metrics = json.load(f)
-
     meta_path = os.path.join(MODELS_DIR, "meta.json")
     meta = {}
     if os.path.exists(meta_path):
         with open(meta_path) as f:
             meta = json.load(f)
-
     return {
         "metrics": metrics,
         "meta": meta,
@@ -46,7 +45,6 @@ def model_metrics():
 
 @router.get("/status")
 def model_status():
-    """Current model status and retrain history."""
     from app.main import best_threshold, model_meta
     return {
         "current_threshold": best_threshold,
@@ -56,13 +54,8 @@ def model_status():
     }
 
 
-@router.post("/retrain")
-def retrain_model(min_samples: int = 50):
-    """
-    Retrain RandomForest on accumulated data.
-    Uses projects.csv + predictions_log.csv as training signal.
-    """
-    # Load base training data
+def _do_retrain(min_samples: int = 50):
+    """Actual retrain logic — NO decorator, called by endpoint or internally."""
     if not os.path.exists(PROJECTS_CSV):
         raise HTTPException(400, "No training data (projects.csv) found")
 
@@ -72,14 +65,10 @@ def retrain_model(min_samples: int = 50):
     if missing:
         raise HTTPException(400, f"Missing columns in projects.csv: {missing}")
 
-    # Enrich with prediction log feedback if available
     if os.path.exists(PRED_LOG):
         try:
             log_df = pd.read_csv(PRED_LOG)
-            if len(log_df) > 0 and "prediction" in log_df.columns:
-                enrichment_count = len(log_df)
-            else:
-                enrichment_count = 0
+            enrichment_count = len(log_df) if len(log_df) > 0 and "prediction" in log_df.columns else 0
         except Exception:
             enrichment_count = 0
     else:
@@ -88,28 +77,34 @@ def retrain_model(min_samples: int = 50):
     if len(df) < min_samples:
         raise HTTPException(400, f"Need at least {min_samples} samples, have {len(df)}")
 
-    # Feature engineering (same as make_features)
+    from datetime import datetime as _dt
     df["budget_per_month"] = df["budget"] / df["duration_months"].clip(lower=1)
-    df["co2_per_dollar"] = df["co2_reduction"] / df["budget"].clip(lower=1) * 1000
+    df["co2_per_dollar"]   = df["co2_reduction"] / df["budget"].clip(lower=1) * 1000
     df["efficiency_score"] = (df["co2_reduction"] * df["social_impact"]) / df["duration_months"].clip(lower=1)
+    df["year"]             = _dt.utcnow().year
+    df["quarter"]          = (_dt.utcnow().month - 1) // 3 + 1
 
     feature_cols = ["budget", "co2_reduction", "social_impact", "duration_months",
-                    "budget_per_month", "co2_per_dollar", "efficiency_score"]
+                    "budget_per_month", "co2_per_dollar", "efficiency_score",
+                    "year", "quarter"]
 
     X = df[feature_cols].values
     y = df["success"].values
-
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-    # Scale
     from sklearn.preprocessing import StandardScaler
     scaler = StandardScaler()
     X_train_s = scaler.fit_transform(X_train)
     X_test_s = scaler.transform(X_test)
 
-    # Train RF
     rf = RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42, n_jobs=-1)
     rf.fit(X_train_s, y_train)
+
+    from sklearn.calibration import CalibratedClassifierCV
+    rf_cal = CalibratedClassifierCV(rf, cv="prefit", method="isotonic")
+    rf_cal.fit(X_test_s, y_test)
+    with open(os.path.join(MODELS_DIR, "rf_model_cal.pkl"), "wb") as fc:
+        pickle.dump(rf_cal, fc)
 
     y_pred = rf.predict(X_test_s)
     y_proba = rf.predict_proba(X_test_s)[:, 1]
@@ -121,7 +116,6 @@ def retrain_model(min_samples: int = 50):
     except Exception:
         auc = None
 
-    # Find best threshold
     best_t, best_f1 = 0.5, f1
     for t in np.arange(0.3, 0.8, 0.01):
         preds_t = (y_proba >= t).astype(int)
@@ -130,7 +124,6 @@ def retrain_model(min_samples: int = 50):
             best_f1 = round(f1_t, 4)
             best_t = round(t, 2)
 
-    # Save models
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
     with open(os.path.join(MODELS_DIR, "model.pkl"), "wb") as f:
@@ -158,7 +151,6 @@ def retrain_model(min_samples: int = 50):
     with open(os.path.join(MODELS_DIR, "meta.json"), "w") as f:
         json.dump(new_meta, f, indent=2)
 
-    # Reload in-memory models
     try:
         from app import main as m
         m.rf_model = rf
@@ -168,7 +160,7 @@ def retrain_model(min_samples: int = 50):
         m.model_metrics = new_metrics
         m.explainer_shap = __import__("shap").TreeExplainer(rf)
         reloaded = True
-    except Exception as e:
+    except Exception:
         reloaded = False
 
     result = {
@@ -178,13 +170,30 @@ def retrain_model(min_samples: int = 50):
         "models_reloaded": reloaded,
         "timestamp": timestamp,
     }
+    try:
+        from app.mlflow_tracking import log_model_registry
+        log_model_registry(rf, "RandomForest_retrain", {"auc": auc or 0, "f1": f1, "accuracy": acc})
+    except Exception:
+        pass
     _retrain_history.append(result)
     return result
 
 
+@router.post("/retrain")
+def retrain_model(background_tasks: BackgroundTasks, current_user=Depends(require_admin), min_samples: int = 50, sync: bool = False):
+    """Retrain RF. Default=async, ?sync=true for synchronous."""
+    if sync:
+        return _do_retrain(min_samples)
+    background_tasks.add_task(_do_retrain, min_samples)
+    return {
+        "status": "accepted",
+        "message": "Retrain started in background",
+        "check_status": "/model/status",
+    }
+
+
 @router.get("/feature-importance")
-def feature_importance(current_user=Depends(require_api_key), ):
-    """Current RF model feature importances."""
+def feature_importance(current_user=Depends(require_api_key)):
     from app.main import rf_model, FEATURE_COLS
     importances = rf_model.feature_importances_
     pairs = sorted(zip(FEATURE_COLS, importances.tolist()), key=lambda x: -x[1])
@@ -193,7 +202,6 @@ def feature_importance(current_user=Depends(require_api_key), ):
 
 @router.get("/prediction-log/stats")
 def prediction_log_stats():
-    """Stats about accumulated prediction log."""
     if not os.path.exists(PRED_LOG):
         return {"total": 0, "file_exists": False}
     try:
@@ -216,3 +224,85 @@ def _count_predictions() -> int:
             return sum(1 for _ in f) - 1
     except Exception:
         return 0
+
+
+@router.post("/data/refresh")
+def data_refresh(
+    budget: float,
+    co2_reduction: float,
+    social_impact: float,
+    duration_months: int,
+    success: int,
+    auto_retrain_threshold: int = 20, current_user=Depends(require_admin),
+):
+    """Append a labeled data point. Auto-retrain when threshold reached."""
+    if success not in (0, 1):
+        raise HTTPException(400, "success must be 0 or 1")
+
+    new_row = {
+        "budget": budget,
+        "co2_reduction": co2_reduction,
+        "social_impact": social_impact,
+        "duration_months": duration_months,
+        "success": success,
+        "name": f"auto_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+        "category": "Unknown",
+        "region": "Unknown",
+    }
+
+    df_existing = pd.read_csv(PROJECTS_CSV)
+    df_new = pd.concat([df_existing, pd.DataFrame([new_row])], ignore_index=True)
+    df_new.to_csv(PROJECTS_CSV, index=False)
+
+    last_retrain_samples = _retrain_history[-1]["meta"]["total_samples"] if _retrain_history else 0
+    new_since_retrain = len(df_new) - last_retrain_samples
+
+    triggered = False
+    retrain_result = None
+    if new_since_retrain >= auto_retrain_threshold:
+        try:
+            retrain_result = _do_retrain(min_samples=50)
+            triggered = True
+        except Exception as e:
+            retrain_result = {"error": str(e)}
+
+    return {
+        "status": "added",
+        "total_samples": len(df_new),
+        "new_since_last_retrain": new_since_retrain,
+        "auto_retrain_triggered": triggered,
+        "retrain_result": retrain_result,
+    }
+
+
+@router.post("/data/bulk-upload")
+def data_bulk_upload(file_path: str, auto_retrain: bool = False):
+    """Upload CSV with columns: budget,co2_reduction,social_impact,duration_months,success"""
+    if not os.path.exists(file_path):
+        raise HTTPException(400, f"File not found: {file_path}")
+    try:
+        df_new = pd.read_csv(file_path)
+    except Exception as e:
+        raise HTTPException(400, f"CSV parse error: {e}")
+    required = ["budget", "co2_reduction", "social_impact", "duration_months", "success"]
+    missing = [c for c in required if c not in df_new.columns]
+    if missing:
+        raise HTTPException(400, f"Missing columns: {missing}")
+    invalid = df_new[~df_new["success"].isin([0, 1])]
+    if len(invalid) > 0:
+        raise HTTPException(400, f"{len(invalid)} rows have invalid success values (must be 0 or 1)")
+    df_existing = pd.read_csv(PROJECTS_CSV)
+    df_merged = pd.concat([df_existing, df_new], ignore_index=True)
+    df_merged.to_csv(PROJECTS_CSV, index=False)
+    result = {
+        "status": "uploaded",
+        "rows_added": len(df_new),
+        "total_samples": len(df_merged),
+    }
+    if auto_retrain:
+        try:
+            retrain_result = _do_retrain(min_samples=50)
+            result["retrain"] = retrain_result["metrics"]
+        except Exception as e:
+            result["retrain_error"] = str(e)
+    return result
