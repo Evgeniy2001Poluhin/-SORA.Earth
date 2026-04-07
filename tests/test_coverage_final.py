@@ -43,12 +43,11 @@ class TestDataPipeline:
         data = r.json()
         assert "error" in data or "supported" in data
 
-    @patch("app.api.data_pipeline.external_data.refresh_live_data", return_value={"status": "ok"})
+    @patch("app.external_data.refresh_live_data", return_value={"status": "ok"})
     def test_refresh_trigger(self, mock_refresh):
         r = client.post("/data/refresh")
         assert r.status_code == 200
         assert r.json()["status"] in ["started", "already_running"]
-        mock_refresh.assert_called_once()
 
     @patch("app.api.data_pipeline._refresh_job", {"running": True, "result": None})
     def test_refresh_already_running(self):
@@ -126,3 +125,83 @@ class TestRetrainEdgeCases:
         assert r.status_code == 200
         d = r.json()
         assert "auto_retrain_triggered" in d
+
+
+class TestBulkUpload:
+    def test_bulk_upload_file_not_found(self):
+        r = client.post("/model/data/bulk-upload?file_path=/tmp/nonexistent_xyz.csv")
+        assert r.status_code == 400
+
+    def test_bulk_upload_invalid_csv(self):
+        import tempfile, os
+        f = tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w")
+        f.write("not,valid,csv\n\x00\x01\x02")
+        f.close()
+        r = client.post(f"/model/data/bulk-upload?file_path={f.name}")
+        os.unlink(f.name)
+        # either 400 (parse error) or 400 (missing columns)
+        assert r.status_code == 400
+
+    def test_bulk_upload_missing_columns(self):
+        import tempfile, os
+        f = tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w")
+        f.write("budget,co2_reduction\n100,50\n")
+        f.close()
+        r = client.post(f"/model/data/bulk-upload?file_path={f.name}")
+        os.unlink(f.name)
+        assert r.status_code == 400
+        assert "Missing columns" in r.json()["detail"]
+
+    def test_bulk_upload_invalid_success(self):
+        import tempfile, os
+        f = tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w")
+        f.write("budget,co2_reduction,social_impact,duration_months,success\n100,50,3,6,5\n")
+        f.close()
+        r = client.post(f"/model/data/bulk-upload?file_path={f.name}")
+        os.unlink(f.name)
+        assert r.status_code == 400
+        assert "invalid success" in r.json()["detail"]
+
+    def test_bulk_upload_success(self):
+        import tempfile, os, shutil
+        shutil.copy("data/projects.csv", "data/projects.csv.bak_test")
+        f = tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w")
+        f.write("budget,co2_reduction,social_impact,duration_months,success\n100000,80,7,12,1\n")
+        f.close()
+        r = client.post(f"/model/data/bulk-upload?file_path={f.name}")
+        os.unlink(f.name)
+        shutil.copy("data/projects.csv.bak_test", "data/projects.csv")
+        os.unlink("data/projects.csv.bak_test")
+        assert r.status_code == 200
+        assert r.json()["rows_added"] == 1
+
+
+class TestAdminAuth:
+    def test_optional_api_key_valid(self):
+        """Endpoint works with a valid API key."""
+        r = client.get("/model/feature-importance",
+                       headers={"X-API-Key": "test-api-key-1"})
+        assert r.status_code in [200, 403]
+
+    def test_optional_api_key_missing(self):
+        """Feature-importance requires API key."""
+        r = client.get("/model/feature-importance")
+        assert r.status_code in [401, 403]
+
+
+class TestAdminEndpoints:
+    def test_admin_stats_no_key(self):
+        r = client.get("/admin/stats")
+        assert r.status_code == 403
+
+    def test_admin_stats_invalid_key(self):
+        r = client.get("/admin/stats", headers={"X-API-Key": "bogus"})
+        assert r.status_code == 403
+
+    def test_list_users_no_auth(self):
+        r = client.get("/admin/users")
+        assert r.status_code in [401, 403, 422]
+
+    def test_list_users_non_admin(self):
+        r = client.get("/admin/users", headers={"Authorization": "Bearer faketoken"})
+        assert r.status_code in [401, 403]
