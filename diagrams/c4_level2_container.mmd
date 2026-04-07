@@ -1,0 +1,18 @@
+graph TB
+    subgraph dc["Docker Compose"]
+    stAPI App<br/>Python 3.11 | Uvicorn<br/>84 endpoints | JWT Auth"]
+        ML["🤖 ML Models<br/>RF + XGB + Stacking<br/>SHAP + Calibration"]
+        PG["🗄️ PostgreSQL 16<br/>Evaluations, Audit"]
+        RD["⚡ Redis 7<br/>Cache TTL 300s"]
+        PR["📈 Prometheus<br/>Metrics scraping"]
+        GR["📊 Grafana<br/>Dashboards"]
+        NG["🌐 Nginx<br/>Reverse proxy"]
+        MLF["📊 MLflow<br/>Tracking"]
+    end
+    APP --> PG
+    APP --> RD
+    APP --> ML
+    APP --> MLF
+    PR --> APP
+    GR --> PR
+    NG --> APP
