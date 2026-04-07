@@ -1,0 +1,5 @@
+Method,Name,Error,Occurrences
+GET,/health,"ConnectionResetError(104, 'Connection reset by peer')",3
+POST,/predict,"ConnectionResetError(104, 'Connection reset by peer')",2
+POST,/evaluate,"ConnectionResetError(104, 'Connection reset by peer')",1
+GET,/model/metrics,"ConnectionResetError(104, 'Connection reset by peer')",3

@@ -29,6 +29,8 @@ from app.api import system as system_api
 from app.api import infra as infra_api
 from app.api import explain as explain_api
 from app.api import calibration as calibration_api
+from app.api import scheduler_routes
+from app.api import drift_monitor
 from app.api import ab_comparison as ab_comparison_api
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("sora")
@@ -376,7 +378,7 @@ _all_routers = [
     analytics_api.router, system_api.router, infra_api.router,
     data_api.router, retrain_api.router, drift_api.router,
     compare_api.router, ab_api.router, explain_api.router,
-    calibration_api.router, ab_comparison_api.router,
+    calibration_api.router, ab_comparison_api.router, scheduler_routes.router, drift_monitor.router,
 ]
 
 # Include all routers with /api/v1 prefix + backward-compatible original paths
@@ -445,7 +447,11 @@ async def startup_event():
     global _executor
     _executor = ProcessPoolExecutor(max_workers=4)
     app.state.executor = _executor
+    from app.scheduler import init_scheduler
+    init_scheduler()
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    from app.scheduler import shutdown_scheduler
+    shutdown_scheduler()
     app.state.executor.shutdown(wait=True)

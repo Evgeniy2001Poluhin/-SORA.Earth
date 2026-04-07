@@ -2,6 +2,7 @@
 import time, os, platform
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 router = APIRouter(tags=["System"])
 START_TIME = time.time()
@@ -9,7 +10,7 @@ VERSION = "2.0.0"
 
 def _check_models():
     try:
-        from app.main import rf_model, xgb_model, nn_model, DB_PATH
+        from app.main import rf_model, xgb_model, nn_model
         ok = all([rf_model is not None, xgb_model is not None, nn_model is not None])
         return {"status": "healthy" if ok else "degraded", "loaded": ok}
     except Exception as e:
@@ -17,11 +18,11 @@ def _check_models():
 
 def _check_db():
     try:
-        import sqlite3
-        conn = sqlite3.connect(DB_PATH, timeout=2)  # pragma: no cover
-        conn.execute("SELECT 1")  # pragma: no cover
-        conn.close()  # pragma: no cover
-        return {"status": "healthy"}  # pragma: no cover
+        from app.database import SessionLocal
+        db = SessionLocal()
+        db.execute(text("SELECT 1"))
+        db.close()
+        return {"status": "healthy"}
     except Exception as e:
         return {"status": "degraded", "error": str(e)}
 
@@ -56,7 +57,7 @@ async def health_check():
 async def readiness():
     m = _check_models()
     if m["status"] != "healthy":
-        return JSONResponse({"status": "not_ready", "reason": m}, status_code=503)  # pragma: no cover
+        return JSONResponse({"status": "not_ready", "reason": m}, status_code=503)
     return {"status": "ready", "version": VERSION}
 
 @router.get("/ping", include_in_schema=False)
