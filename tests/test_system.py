@@ -15,9 +15,7 @@ def test_check_models_unhealthy():
     assert result["status"] == "unhealthy"
 
 def test_check_db_degraded():
-    mock_main = MagicMock(rf_model=MagicMock(), xgb_model=MagicMock(), nn_model=MagicMock(),
-                          DB_PATH="/nonexistent/path/db.sqlite")
-    with patch.dict("sys.modules", {"app.main": mock_main}):
+    with patch("app.database.SessionLocal", return_value=MagicMock(execute=MagicMock(side_effect=Exception("DB down")))):
         result = _check_db()
     assert result["status"] == "degraded"
 
