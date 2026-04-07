@@ -59,7 +59,7 @@ def single_country(name: str):
         if merged:
             return {"country": name.strip().title(), "indicators": merged, "source": "merged"}
         return {"country": name.strip().title(), "error": f"Country '{name}' not found", "supported": external_data.get_supported_countries()}
-    return context
+    context.setdefault("country", name.strip().title()); return context
 
 
 @router.get("/countries/supported")
