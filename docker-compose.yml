@@ -1,43 +1,53 @@
 version: "3.9"
-
 services:
   app:
     build: .
-    container_name: sora_earth_app
     ports:
       - "8000:8000"
+    env_file: .env
     volumes:
       - ./data:/app/data
-      - ./logs:/app/logs
-    environment:
-      - PYTHONUNBUFFERED=1
-      - SORA_ENV=production
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:alpine
-    container_name: sora_earth_nginx
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./models:/app/models
     depends_on:
-      app:
-        condition: service_healthy
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
     restart: unless-stopped
 
-  mlflow:
-    image: python:3.9-slim
-    container_name: sora_earth_mlflow
-    command: >
-      bash -c "pip install mlflow && mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow.db"
+  prometheus:
+    image: prom/prometheus:latest
     ports:
-      - "5000:5000"
+      - "9090:9090"
     volumes:
-      - ./mlruns:/mlruns
+      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - app
     restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-sora2026}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  grafana_data:
