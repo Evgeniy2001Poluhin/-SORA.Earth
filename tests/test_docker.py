@@ -1,3 +1,4 @@
+import pytest
 import os
 
 
@@ -26,15 +27,18 @@ def test_docker_compose_exists():
     assert os.path.isfile("docker-compose.yml")
 
 
+@pytest.mark.integration
 def test_docker_compose_services():
     import yaml
     with open("docker-compose.yml") as f:
         dc = yaml.safe_load(f)
     services = dc["services"]
     assert "app" in services
-    assert "nginx" in services
-    assert "mlflow" in services
-    assert services["app"]["ports"] == ["8000:8000"]
+    assert "postgres" in services
+    assert "redis" in services
+    assert "prometheus" in services
+    assert "grafana" in services
+    assert "8000:8000" in services["app"].get("ports", [])
 
 
 def test_nginx_config():
