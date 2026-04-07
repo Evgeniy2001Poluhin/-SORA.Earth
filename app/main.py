@@ -14,7 +14,7 @@ import platform
 import torch
 import torch.nn as tnn
 import warnings
-import sqlite3
+# import sqlite3  # replaced by SQLAlchemy
 import csv
 import sentry_sdk
 
@@ -27,7 +27,9 @@ from app.api import predict as predict_api
 from app.api import analytics as analytics_api
 from app.api import system as system_api
 from app.api import infra as infra_api
-
+from app.api import explain as explain_api
+from app.api import calibration as calibration_api
+from app.api import ab_comparison as ab_comparison_api
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("sora")
 
@@ -38,24 +40,24 @@ PRED_LOG = os.path.join(ROOT_DIR, "data", "predictions_log.csv")
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """SQLAlchemy session generator (use as dependency or context manager)."""
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def get_db_sync():
+    """Non-generator version for direct use (not as FastAPI Depends)."""
+    from app.database import SessionLocal
+    return SessionLocal()
 
 
 def init_db():
-    conn = get_db()
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS evaluations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT, budget REAL, co2_reduction REAL, social_impact REAL,
-        duration_months INTEGER, total_score REAL, environment_score REAL,
-        social_score REAL, economic_score REAL, success_probability REAL,
-        recommendation TEXT, risk_level TEXT, created_at TEXT,
-        region TEXT DEFAULT 'Europe', lat REAL DEFAULT 50.0, lon REAL DEFAULT 10.0)"""
-    )
-    conn.commit()
-    conn.close()
+    from app.database import init_db as _init
+    _init()
 
 
 def log_prediction(endpoint, input_data, result):
@@ -92,6 +94,17 @@ app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(MetricsMiddleware)
 
+# /v1/ prefix support: rewrite path before routing
+@app.middleware("http")
+async def v1_prefix_rewrite(request, call_next):
+    if request.url.path.startswith("/v1/") or request.url.path == "/v1":
+        request.scope["path"] = request.scope["path"][3:] or "/"
+        if "raw_path" in request.scope:
+            rp = request.scope["raw_path"]
+            if rp.startswith(b"/v1"):
+                request.scope["raw_path"] = rp[3:] or b"/"
+    return await call_next(request)
+
 # Static
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
@@ -120,14 +133,16 @@ try:
         cat_encodings = json.load(_f)
     with open(os.path.join(ROOT_DIR, "models", "scaler_v2.pkl"), "rb") as _f:
         scaler_v2 = pickle.load(_f)
-    with open(os.path.join(ROOT_DIR, "models", "ensemble_model_v2.pkl"), "rb") as _f:
+    _cal = os.path.join(ROOT_DIR, "models", "ensemble_model_v2_cal.pkl")
+    _ens = os.path.join(ROOT_DIR, "models", "ensemble_model_v2.pkl")
+    with open(_cal if os.path.exists(_cal) else _ens, "rb") as _f:
         ensemble_model_v2 = pickle.load(_f)
     FEATURE_COLS_V2 = ["budget","co2_reduction","social_impact","duration_months",
                        "budget_per_month","co2_per_dollar","efficiency_score",
                        "impact_ratio","budget_efficiency","category_enc","region_enc"]
     logger.info("ensemble_model_v2 loaded OK (CV AUC=0.82)")
 except Exception as _e:
-    ensemble_model_v2 = None;caler_v2 = None; FEATURE_COLS_V2 = []
+    ensemble_model_v2 = None; scaler_v2 = None; FEATURE_COLS_V2 = []
     logger.warning(f"ensemble_model_v2 not loaded: {_e}")
 if os.path.exists(ENS_PATH):
     with open(ENS_PATH, "rb") as f:
@@ -138,7 +153,7 @@ class SoraNet(tnn.Module):
     def __init__(self):
         super().__init__()
         self.net = tnn.Sequential(
-            tnn.Linear(7, 64), tnn.ReLU(), tnn.BatchNorm1d(64), tnn.Dropout(0.3),
+            tnn.Linear(9, 64), tnn.ReLU(), tnn.BatchNorm1d(64), tnn.Dropout(0.3),
             tnn.Linear(64, 32), tnn.ReLU(), tnn.BatchNorm1d(32), tnn.Dropout(0.2),
             tnn.Linear(32, 16), tnn.ReLU(), tnn.Linear(16, 1), tnn.Sigmoid(),
         )
@@ -155,10 +170,61 @@ if os.path.exists(NN_PATH):
 
 init_db()
 logger.info("SORA.Earth AI Platform started")
+
+from apscheduler.schedulers.background import BackgroundScheduler as _BGS
+_scheduler = _BGS(timezone="UTC")
+
+def _scheduled_retrain():
+    try:
+        import pandas as pd, pickle, shap as _shap
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.model_selection import train_test_split
+        from sklearn.metrics import roc_auc_score, f1_score, accuracy_score
+        from datetime import datetime as _dt
+        _df = pd.read_csv(os.path.join(ROOT_DIR, "data", "projects.csv"))
+        _df["budget_per_month"] = _df["budget"] / _df["duration_months"].clip(lower=1)
+        _df["co2_per_dollar"]   = _df["co2_reduction"] / _df["budget"].clip(lower=1) * 1000
+        _df["efficiency_score"] = (_df["co2_reduction"] * _df["social_impact"]) / _df["duration_months"].clip(lower=1)
+        _n = _dt.utcnow()
+        _df["year"] = _n.year; _df["quarter"] = (_n.month - 1) // 3 + 1
+        _cols = ["budget","co2_reduction","social_impact","duration_months","budget_per_month","co2_per_dollar","efficiency_score","year","quarter"]
+        _X = _df[_cols].values; _y = _df["success"].values
+        _Xtr, _Xte, _ytr, _yte = train_test_split(_X, _y, test_size=0.2, random_state=42, stratify=_y)
+        _sc = StandardScaler(); _Xtr_s = _sc.fit_transform(_Xtr); _Xte_s = _sc.transform(_Xte)
+        _rf = RandomForestClassifier(n_estimators=200, max_depth=10, min_samples_leaf=2, random_state=42, n_jobs=-1)
+        _rf.fit(_Xtr_s, _ytr)
+        _auc = round(roc_auc_score(_yte, _rf.predict_proba(_Xte_s)[:,1]), 4)
+        _f1  = round(f1_score(_yte, _rf.predict(_Xte_s)), 4)
+        _mdir = os.path.join(ROOT_DIR, "models")
+        # Backup + AUC guard
+        import shutil as _sh
+        _rf_path = os.path.join(_mdir, "random_forest.pkl")
+        _sc_path = os.path.join(_mdir, "scaler.pkl")
+        if os.path.exists(_rf_path):
+            _sh.copy2(_rf_path, _rf_path + ".bak")
+            _sh.copy2(_sc_path, _sc_path + ".bak")
+        if _auc < 0.75:
+            logger.warning(f"Retrain REJECTED: AUC={_auc} < 0.75, keeping previous model")
+            return
+        with open(_rf_path, "wb") as _fh: pickle.dump(_rf, _fh)
+        with open(os.path.join(_mdir, "scaler.pkl"), "wb") as _fh: pickle.dump(_sc, _fh)
+        global rf_model, scaler, explainer_shap
+        rf_model = _rf; scaler = _sc; explainer_shap = _shap.TreeExplainer(_rf)
+        from app.mlflow_tracking import log_model_registry
+        log_model_registry(_rf, "RandomForest_auto", {"auc": _auc, "f1": _f1})
+        logger.info(f"Scheduled retrain OK: AUC={_auc}")
+    except Exception as _e:
+        logger.error(f"Scheduled retrain FAILED: {_e}")
+
+_scheduler.add_job(_scheduled_retrain, "interval", hours=24, id="auto_retrain", replace_existing=True)
+_scheduler.start()
+logger.info("APScheduler started: auto_retrain every 24h")
+
 explainer_shap = shap.TreeExplainer(rf_model)
 
 # ===== SHARED FUNCTIONS =====
-FEATURE_COLS = ["budget", "co2_reduction", "social_impact", "duration_months", "budget_per_month", "co2_per_dollar", "efficiency_score"]
+FEATURE_COLS = ["budget", "co2_reduction", "social_impact", "duration_months", "budget_per_month", "co2_per_dollar", "efficiency_score", "year", "quarter"]
 
 
 def log_evaluation(project_name, esg_scores, risk_level):
@@ -174,7 +240,10 @@ def make_features(data):
     co2_per_dollar = data.co2_reduction / max(data.budget, 1) * 1000
     efficiency_score = (data.co2_reduction * data.social_impact) / max(data.duration_months, 1)
     df = pd.DataFrame(
-        [[data.budget, data.co2_reduction, data.social_impact, data.duration_months, budget_per_month, co2_per_dollar, efficiency_score]],
+        [[data.budget, data.co2_reduction, data.social_impact, data.duration_months,
+          budget_per_month, co2_per_dollar, efficiency_score,
+          __import__("datetime").datetime.utcnow().year,
+          (__import__("datetime").datetime.utcnow().month - 1) // 3 + 1]],
         columns=FEATURE_COLS,
     )
     return pd.DataFrame(scaler.transform(df), columns=FEATURE_COLS)
@@ -294,17 +363,36 @@ def _sanitize_pdf(text):
 
 
 # ===== ROUTERS =====
-app.include_router(auth_api.router)
-app.include_router(evaluate_api.router)
-app.include_router(predict_api.router)
-app.include_router(analytics_api.router)
-app.include_router(system_api.router)
-app.include_router(infra_api.router)
+from fastapi import APIRouter as _APIRouter
 
 from app.api import data_pipeline as data_api
 from app.api import retrain as retrain_api
-app.include_router(data_api.router)
-app.include_router(retrain_api.router)
+from app.api import drift as drift_api
+from app.api import compare as compare_api
+from app.api import ab_test as ab_api
+
+_all_routers = [
+    auth_api.router, evaluate_api.router, predict_api.router,
+    analytics_api.router, system_api.router, infra_api.router,
+    data_api.router, retrain_api.router, drift_api.router,
+    compare_api.router, ab_api.router, explain_api.router,
+    calibration_api.router, ab_comparison_api.router,
+]
+
+# Include all routers with /api/v1 prefix + backward-compatible original paths
+from fastapi import APIRouter
+api_v1 = APIRouter(prefix="/api/v1")
+for _r in _all_routers:
+    api_v1.include_router(_r)
+from app.auth_routes import router as auth_router
+api_v1.include_router(auth_router)
+app.include_router(api_v1)
+
+# Backward compatibility: original paths (no prefix)
+for _r in _all_routers:
+    app.include_router(_r)
+app.include_router(auth_router)
+
 
 # Prometheus
 Instrumentator().instrument(app).expose(app)
