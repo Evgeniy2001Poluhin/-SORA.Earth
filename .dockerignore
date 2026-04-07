@@ -1,11 +1,6 @@
-venv/
-__pycache__/
+.git
+__pycache__
 *.pyc
-.git/
-.github/
-*.egg-info/
-.pytest_cache/
-mlruns/
-*.db
-logs/*.log
-.env
+venv/
+.pytest_cache
+htmlcov/
