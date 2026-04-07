@@ -123,7 +123,8 @@ def predict_compare(req: CompareRequest):
 def shap_explain(project: Project):
     from app.main import explainer_shap, make_features
     feats = make_features(_to_legacy(project))
-    shap_values = explainer_shap.shap_values(feats)
+    feats_np = feats.values
+    shap_values = explainer_shap.shap_values(feats_np)
     vals = shap_values[1][0].tolist() if isinstance(shap_values, list) else shap_values[0].tolist()
     feature_names = list(feats.columns)
     return {"shap_values": dict(zip(feature_names, vals)), "feature_names": feature_names}
@@ -147,7 +148,8 @@ def export_predictions_csv():
 def predict_explain(project: Project):
     import app.main as m
     feats = m.make_features(_to_legacy(project))
-    shap_values = m.explainer_shap.shap_values(feats)
+    feats_np = feats.values
+    shap_values = m.explainer_shap.shap_values(feats_np)
     if isinstance(shap_values, list):
         raw = shap_values[1][0].ravel()
     else:

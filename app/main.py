@@ -191,9 +191,9 @@ def _scheduled_retrain():
         _n = _dt.utcnow()
         _df["year"] = _n.year; _df["quarter"] = (_n.month - 1) // 3 + 1
         _cols = ["budget","co2_reduction","social_impact","duration_months","budget_per_month","co2_per_dollar","efficiency_score","year","quarter"]
-        _X = _df[_cols].values; _y = _df["success"].values
+        _X = _df[_cols]; _y = _df["success"].values
         _Xtr, _Xte, _ytr, _yte = train_test_split(_X, _y, test_size=0.2, random_state=42, stratify=_y)
-        _sc = StandardScaler(); _Xtr_s = _sc.fit_transform(_Xtr); _Xte_s = _sc.transform(_Xte)
+        _sc = StandardScaler(); _Xtr_s = pd.DataFrame(_sc.fit_transform(_Xtr), columns=_cols); _Xte_s = pd.DataFrame(_sc.transform(_Xte), columns=_cols)
         _rf = RandomForestClassifier(n_estimators=200, max_depth=10, min_samples_leaf=2, random_state=42, n_jobs=-1)
         _rf.fit(_Xtr_s, _ytr)
         _auc = round(roc_auc_score(_yte, _rf.predict_proba(_Xte_s)[:,1]), 4)
@@ -213,6 +213,8 @@ def _scheduled_retrain():
         with open(os.path.join(_mdir, "scaler.pkl"), "wb") as _fh: pickle.dump(_sc, _fh)
         global rf_model, scaler, explainer_shap
         rf_model = _rf; scaler = _sc; explainer_shap = _shap.TreeExplainer(_rf)
+        global FEATURE_COLS
+        FEATURE_COLS = _cols
         from app.mlflow_tracking import log_model_registry
         log_model_registry(_rf, "RandomForest_auto", {"auc": _auc, "f1": _f1})
         logger.info(f"Scheduled retrain OK: AUC={_auc}")
