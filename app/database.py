@@ -6,7 +6,6 @@ from datetime import datetime
 
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{os.path.join(os.path.dirname(__file__), '..', 'data', 'sora.db')}")
 
-# SQLite needs check_same_thread=False
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -33,6 +32,27 @@ class Evaluation(Base):
     lat = Column(Float, default=50.0)
     lon = Column(Float, default=10.0)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PredictionLog(Base):
+    __tablename__ = "predictions_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    request_id = Column(String(64), nullable=True)
+    endpoint = Column(String(50))
+    model_version = Column(String(50), default="v2.0")
+    budget = Column(Float)
+    co2_reduction = Column(Float)
+    social_impact = Column(Float)
+    duration_months = Column(Integer)
+    category = Column(String(100), nullable=True)
+    region = Column(String(100), nullable=True)
+    prediction = Column(Integer, nullable=True)
+    probability = Column(Float, nullable=True)
+    esg_total_score = Column(Float, nullable=True)
+    confidence = Column(Float, nullable=True)
+    latency_ms = Column(Float, nullable=True)
 
 
 def init_db():

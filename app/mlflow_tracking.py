@@ -1,7 +1,6 @@
 import os
 import mlflow
 import mlflow.sklearn
-import json
 from datetime import datetime
 
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
@@ -15,19 +14,91 @@ except Exception:
     pass
 
 
-def log_prediction(model_name: str, input_data: dict, prediction: float, probability: float, probability_v2: float = None):
+def _to_dict(input_data):
+    if input_data is None:
+        return {}
+    if isinstance(input_data, dict):
+        return input_data
+    if hasattr(input_data, "model_dump"):
+        return input_data.model_dump()
+    if hasattr(input_data, "dict"):
+        return input_data.dict()
+    return {}
+
+
+def _extract_probability(payload):
+    if isinstance(payload, dict):
+        for key in ("probability", "success_probability"):
+            if payload.get(key) is not None:
+                return payload.get(key)
+    return None
+
+
+def _extract_prediction(payload):
+    if isinstance(payload, dict):
+        return payload.get("prediction")
+    return payload
+
+
+def log_prediction(
+    model_name: str,
+    input_data,
+    prediction=None,
+    probability: float = None,
+    probability_v2: float = None,
+    latency_ms: float = None,
+    confidence=None,
+    esg_total_score: float = None,
+):
     try:
-        with mlflow.start_run(run_name=f"predict_{model_name}_{datetime.now().strftime(chr(37)+chr(72)+chr(37)+chr(77)+chr(37)+chr(83))}"):
-            mlflow.log_params({k: str(v)[:250] for k, v in input_data.items()})
-            metrics = {"prediction": prediction, "probability": probability}
-            if probability_v2 is not None:
-                metrics["probability_v2"] = probability_v2
-                metrics["ab_divergence"] = abs(probability - probability_v2)
-            mlflow.log_metrics(metrics)
+        params = _to_dict(input_data)
+
+        if isinstance(prediction, dict):
+            payload = prediction
+            pred_value = _extract_prediction(payload)
+            prob_value = probability if probability is not None else _extract_probability(payload)
+            prob_v2_value = probability_v2 if probability_v2 is not None else payload.get("probability_v2")
+            conf_value = confidence if confidence is not None else payload.get("confidence")
+            esg_value = esg_total_score if esg_total_score is not None else payload.get("total_score") or payload.get("esg_total_score")
+            latency_value = latency_ms if latency_ms is not None else payload.get("latency_ms")
+        else:
+            pred_value = prediction
+            prob_value = probability
+            prob_v2_value = probability_v2
+            conf_value = confidence
+            esg_value = esg_total_score
+            latency_value = latency_ms
+
+        with mlflow.start_run(
+            run_name=f"predict_{model_name}_{datetime.now().strftime('%H%M%S')}"
+        ):
+            if params:
+                mlflow.log_params({k: str(v)[:250] for k, v in params.items()})
+
+            metrics = {}
+            if pred_value is not None:
+                metrics["prediction"] = float(pred_value)
+            if prob_value is not None:
+                metrics["probability"] = float(prob_value)
+            if prob_v2_value is not None:
+                metrics["probability_v2"] = float(prob_v2_value)
+                if prob_value is not None:
+                    metrics["ab_divergence"] = abs(float(prob_value) - float(prob_v2_value))
+            if latency_value is not None:
+                metrics["latency_ms"] = float(latency_value)
+            if esg_value is not None:
+                metrics["esg_total_score"] = float(esg_value)
+
+            if metrics:
+                mlflow.log_metrics(metrics)
+
             mlflow.set_tag("model", model_name)
             mlflow.set_tag("type", "prediction")
+            if conf_value is not None:
+                mlflow.set_tag("confidence", str(conf_value))
     except Exception:
         pass
+
 
 def log_evaluation(project_name: str, esg_scores: dict, risk_level: str):
     try:

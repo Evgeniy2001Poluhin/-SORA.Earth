@@ -31,12 +31,22 @@ def evaluate_project(project: Project):
     if cached:
         return cached
 
+    start = time.perf_counter()
     cdata = COUNTRIES.get(
         project.region or "Germany",
         {"region": "Europe", "lat": 50.0, "lon": 10.0},
     )
     region_name = cdata.get("region", "Europe")
     result = calculate_esg(project, region_name)
+    latency_ms = round((time.perf_counter() - start) * 1000, 2)
+
+    from app.main import log_prediction
+    log_prediction(
+        "evaluate",
+        project,
+        result,
+        latency_ms=latency_ms,
+    )
 
     try:
         ctx = external_data.get_country_context(project.region or region_name)
