@@ -7,8 +7,9 @@ import numpy as np
 from fastapi import APIRouter, Query, HTTPException, Request, Depends
 from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/analytics", tags=["analytics"])
+from app.api.infra import admin_auth
 
+router = APIRouter(prefix="/analytics", tags=["analytics"])
 _executor = ProcessPoolExecutor(max_workers=os.cpu_count() or 4)
 
 _mc_limiter = None
@@ -206,7 +207,7 @@ def get_predictions_log(limit: int = 100):
 
 
 @router.get("/metrics/model-health")
-def model_health():
+def model_health(_: None = Depends(admin_auth)):
     from app.main import rf_model, xgb_model, nn_model, ensemble_model_v2, model_metrics
     from app.database import PredictionLog
     from app.main import get_db_sync
@@ -393,7 +394,7 @@ def data_health(window_hours: int = 24):
 
 
 @router.get("/summary")
-def analytics_summary(window_hours: int = 24):
+def analytics_summary(window_hours: int = 24, _: None = Depends(admin_auth)):
     from datetime import datetime, timedelta
     from sqlalchemy import func
     from app.main import get_db_sync, rf_model, xgb_model, nn_model, ensemble_model_v2, model_metrics
