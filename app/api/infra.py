@@ -149,23 +149,61 @@ async def get_system_metrics():
 @router.get("/metrics/prometheus")
 async def prometheus_metrics():
     import time
+
     METRICS["uptime_seconds"] = round(time.time() - START_TIME, 2)
     m = METRICS
+
     lines = [
+        "# HELP sora_requests_total Total HTTP requests",
+        "# TYPE sora_requests_total counter",
         f'sora_requests_total {m["requests_total"]}',
+
+        "# HELP sora_predictions_total Total predictions",
+        "# TYPE sora_predictions_total counter",
         f'sora_predictions_total {m["predictions_total"]}',
+
+        "# HELP sora_errors_total Total error responses",
+        "# TYPE sora_errors_total counter",
         f'sora_errors_total {m["errors_total"]}',
+
+        "# HELP sora_avg_response_time_ms Average response time in milliseconds",
+        "# TYPE sora_avg_response_time_ms gauge",
         f'sora_avg_response_time_ms {m["avg_response_time_ms"]}',
+
+        "# HELP sora_total_response_time_ms Total accumulated response time in milliseconds",
+        "# TYPE sora_total_response_time_ms counter",
+        f'sora_total_response_time_ms {m.get("total_response_time_ms", 0)}',
+
+        "# HELP sora_evaluations_total Total ESG evaluations",
+        "# TYPE sora_evaluations_total counter",
         f'sora_evaluations_total {m.get("evaluations_total", 0)}',
+
+        "# HELP sora_evaluations_avg_score Average ESG evaluation score",
+        "# TYPE sora_evaluations_avg_score gauge",
         f'sora_evaluations_avg_score {m.get("evaluations_avg_score", 0.0)}',
+
+        "# HELP sora_uptime_seconds Application uptime in seconds",
+        "# TYPE sora_uptime_seconds gauge",
         f'sora_uptime_seconds {m.get("uptime_seconds", 0.0)}',
     ]
-    for ep, count in m["requests_by_endpoint"].items():
-        lines.append(f'sora_requests_by_endpoint{{path="{ep}"}} {count}')
-    for st, count in m["requests_by_status"].items():
-        lines.append(f'sora_requests_by_status{{status="{st}"}} {count}')
-    return PlainTextResponse("\n".join(lines))
 
+    for ep, count in m["requests_by_endpoint"].items():
+        ep_escaped = str(ep).replace("\\", "\\\\").replace('"', '\\"')
+        lines += [
+            "# HELP sora_requests_by_endpoint Requests count by HTTP endpoint",
+            "# TYPE sora_requests_by_endpoint gauge",
+            f'sora_requests_by_endpoint{{path="{ep_escaped}"}} {count}',
+        ]
+
+    for st, count in m["requests_by_status"].items():
+        st_escaped = str(st).replace("\\", "\\\\").replace('"', '\\"')
+        lines += [
+            "# HELP sora_requests_by_status Requests count by HTTP status code",
+            "# TYPE sora_requests_by_status gauge",
+            f'sora_requests_by_status{{status="{st_escaped}"}} {count}',
+        ]
+
+    return PlainTextResponse("\n".join(lines), media_type="text/plain; version=0.0.4")
 # --- Redis Cache ---
 from app.redis_cache import cache_stats as redis_stats, cache_get, cache_set, REDIS_AVAILABLE
 
@@ -199,3 +237,4 @@ def invalidate_cache_prefix(prefix: str):
     if keys:
         redis_client.delete(*keys)
     return {'cleared': len(keys), 'prefix': prefix, 'keys': keys}
+
