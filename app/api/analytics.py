@@ -187,3 +187,368 @@ async def country_ranking(
         "offset": offset,
         "data":   [{"country": name, **data} for name, data in ranked[offset:offset + limit]],
     }
+
+@router.get("/predictions-log")
+def get_predictions_log(limit: int = 100):
+    from app.main import get_db_sync
+    from app.database import PredictionLog
+    db = get_db_sync()
+    try:
+        rows = db.query(PredictionLog).order_by(
+            PredictionLog.timestamp.desc()
+        ).limit(limit).all()
+        return [
+            {c.name: getattr(r, c.name) for c in PredictionLog.__table__.columns}
+            for r in rows
+        ]
+    finally:
+        db.close()
+
+
+@router.get("/metrics/model-health")
+def model_health():
+    from app.main import rf_model, xgb_model, nn_model, ensemble_model_v2, model_metrics
+    from app.database import PredictionLog
+    from app.main import get_db_sync
+    from datetime import datetime, timedelta
+    from sqlalchemy import func
+
+    db = get_db_sync()
+    try:
+        total_predictions = db.query(PredictionLog).count()
+
+        last_24h = db.query(PredictionLog).filter(
+            PredictionLog.timestamp >= datetime.utcnow() - timedelta(hours=24)
+        ).count()
+
+        avg_latency_overall = db.query(PredictionLog).filter(
+            PredictionLog.latency_ms.isnot(None)
+        ).with_entities(
+            func.avg(PredictionLog.latency_ms)
+        ).scalar()
+
+        def _avg_latency_for(endpoint: str):
+            q = db.query(PredictionLog).filter(
+                PredictionLog.endpoint == endpoint,
+                PredictionLog.latency_ms.isnot(None),
+            ).with_entities(func.avg(PredictionLog.latency_ms))
+            return q.scalar()
+
+        avg_latency_rf = _avg_latency_for("predict_rf")
+        avg_latency_nn = _avg_latency_for("predict_nn")
+        avg_latency_eval = _avg_latency_for("evaluate")
+
+        endpoint_counts = {
+            row.endpoint: row.count
+            for row in db.query(
+                PredictionLog.endpoint, func.count().label("count")
+            ).group_by(PredictionLog.endpoint)
+        }
+    finally:
+        db.close()
+
+    return {
+        "models": {
+            "random_forest": {"loaded": rf_model is not None, "type": "RandomForestClassifier"},
+            "xgboost": {"loaded": xgb_model is not None, "type": "XGBClassifier"},
+            "pytorch_mlp": {"loaded": nn_model is not None, "type": "SoraNet"},
+            "ensemble_v2": {"loaded": ensemble_model_v2 is not None, "type": "StackingClassifier"},
+        },
+        "training_metrics": model_metrics,
+        "predictions": {
+            "total": total_predictions,
+            "last_24h": last_24h,
+            "avg_latency_ms": round(avg_latency_overall, 2) if avg_latency_overall else None,
+            "avg_latency_ms_rf": round(avg_latency_rf, 2) if avg_latency_rf else None,
+            "avg_latency_ms_nn": round(avg_latency_nn, 2) if avg_latency_nn else None,
+            "avg_latency_ms_evaluate": round(avg_latency_eval, 2) if avg_latency_eval else None,
+            "endpoint_counts": endpoint_counts,
+        },
+        "status": "healthy",
+    }
+@router.get("/data-health")
+def data_health(window_hours: int = 24):
+    """Basic data & prediction quality summary over recent window.
+
+    - window_hours: how many hours back from now to analyze.
+    """
+    from datetime import datetime, timedelta
+    from sqlalchemy import func
+    from app.main import get_db_sync
+    from app.database import PredictionLog
+
+    db = get_db_sync()
+    try:
+        since = datetime.utcnow() - timedelta(hours=window_hours)
+
+        q = db.query(PredictionLog).filter(PredictionLog.timestamp >= since)
+        total = q.count()
+        if total == 0:
+            return {
+                "window_hours": window_hours,
+                "total": 0,
+                "null_rates": {},
+                "out_of_range_rates": {},
+                "prediction_distribution": {},
+            }
+
+        # Null rates for key features
+        def _null_rate(column):
+            return (
+                db.query(func.count())
+                .select_from(PredictionLog)
+                .filter(
+                    PredictionLog.timestamp >= since,
+                    column.is_(None),
+                )
+                .scalar()
+                / total
+            )
+
+        null_rates = {
+            "budget": _null_rate(PredictionLog.budget),
+            "co2_reduction": _null_rate(PredictionLog.co2_reduction),
+            "social_impact": _null_rate(PredictionLog.social_impact),
+            "duration_months": _null_rate(PredictionLog.duration_months),
+            "category": _null_rate(PredictionLog.category),
+            "region": _null_rate(PredictionLog.region),
+        }
+
+        # Out-of-range checks (simple heuristics)
+        def _oor_rate(condition):
+            return (
+                db.query(func.count())
+                .select_from(PredictionLog)
+                .filter(
+                    PredictionLog.timestamp >= since,
+                    condition,
+                )
+                .scalar()
+                / total
+            )
+
+        out_of_range_rates = {
+            "budget_le_0": _oor_rate(PredictionLog.budget <= 0),
+            "co2_not_0_100": _oor_rate(
+                (PredictionLog.co2_reduction < 0)
+                | (PredictionLog.co2_reduction > 100)
+            ),
+            "social_not_1_10": _oor_rate(
+                (PredictionLog.social_impact < 1)
+                | (PredictionLog.social_impact > 10)
+            ),
+            "duration_le_0": _oor_rate(PredictionLog.duration_months <= 0),
+        }
+
+        # Prediction distribution
+        preds_q = q.filter(PredictionLog.prediction.isnot(None))
+        preds_total = preds_q.count()
+        if preds_total == 0:
+            pred_dist = {}
+        else:
+            pos = preds_q.filter(PredictionLog.prediction == 1).count()
+            neg = preds_q.filter(PredictionLog.prediction == 0).count()
+
+            # Probability bins
+            bins = {
+                "0_20": 0,
+                "20_40": 0,
+                "40_60": 0,
+                "60_80": 0,
+                "80_100": 0,
+            }
+            for (prob,) in preds_q.with_entities(PredictionLog.probability):
+                if prob is None:
+                    continue
+                if prob < 20:
+                    bins["0_20"] += 1
+                elif prob < 40:
+                    bins["20_40"] += 1
+                elif prob < 60:
+                    bins["40_60"] += 1
+                elif prob < 80:
+                    bins["60_80"] += 1
+                else:
+                    bins["80_100"] += 1
+
+            pred_dist = {
+                "total_with_prediction": preds_total,
+                "positive_frac": pos / preds_total if preds_total else None,
+                "negative_frac": neg / preds_total if preds_total else None,
+                "probability_bins": {
+                    k: v / preds_total for k, v in bins.items()
+                },
+            }
+
+
+        return {
+            "window_hours": window_hours,
+            "total": total,
+            "null_rates": null_rates,
+            "out_of_range_rates": out_of_range_rates,
+            "prediction_distribution": pred_dist,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/summary")
+def analytics_summary(window_hours: int = 24):
+    from datetime import datetime, timedelta
+    from sqlalchemy import func
+    from app.main import get_db_sync, rf_model, xgb_model, nn_model, ensemble_model_v2, model_metrics
+    from app.database import PredictionLog
+
+    db = get_db_sync()
+    try:
+        since = datetime.utcnow() - timedelta(hours=window_hours)
+
+        total = db.query(PredictionLog).filter(
+            PredictionLog.timestamp >= since
+        ).count()
+
+        avg_latency = db.query(func.avg(PredictionLog.latency_ms)).filter(
+            PredictionLog.timestamp >= since,
+            PredictionLog.latency_ms.isnot(None)
+        ).scalar()
+
+        endpoint_counts = {
+            row.endpoint: row.count
+            for row in db.query(
+                PredictionLog.endpoint, func.count().label("count")
+            ).filter(
+                PredictionLog.timestamp >= since
+            ).group_by(PredictionLog.endpoint)
+        }
+
+        preds_q = db.query(PredictionLog).filter(
+            PredictionLog.timestamp >= since,
+            PredictionLog.prediction.isnot(None)
+        )
+        preds_total = preds_q.count()
+        positive = preds_q.filter(PredictionLog.prediction == 1).count()
+        negative = preds_q.filter(PredictionLog.prediction == 0).count()
+
+        positive_frac = round(positive / preds_total, 4) if preds_total else None
+        negative_frac = round(negative / preds_total, 4) if preds_total else None
+
+        null_budget = db.query(func.count()).filter(
+            PredictionLog.timestamp >= since,
+            PredictionLog.budget.is_(None)
+        ).scalar()
+
+        null_co2 = db.query(func.count()).filter(
+            PredictionLog.timestamp >= since,
+            PredictionLog.co2_reduction.is_(None)
+        ).scalar()
+
+        null_social = db.query(func.count()).filter(
+            PredictionLog.timestamp >= since,
+            PredictionLog.social_impact.is_(None)
+        ).scalar()
+
+        null_duration = db.query(func.count()).filter(
+            PredictionLog.timestamp >= since,
+            PredictionLog.duration_months.is_(None)
+        ).scalar()
+
+        null_rate_total = 0.0
+        if total > 0:
+            null_rate_total = round(
+                (null_budget + null_co2 + null_social + null_duration) / (total * 4),
+                4
+            )
+
+        models_loaded = all([
+            rf_model is not None,
+            xgb_model is not None,
+            nn_model is not None,
+            ensemble_model_v2 is not None,
+        ])
+
+        insights = []
+
+        if models_loaded:
+            insights.append("All core ML models are loaded and available for inference.")
+        else:
+            insights.append("One or more ML models are not loaded, reducing platform readiness.")
+
+        if avg_latency is not None:
+            if avg_latency < 250:
+                insights.append(f"Average inference latency is healthy at {round(avg_latency, 2)} ms.")
+            elif avg_latency < 600:
+                insights.append(f"Average inference latency is acceptable at {round(avg_latency, 2)} ms, but optimization headroom remains.")
+            else:
+                insights.append(f"Average inference latency is elevated at {round(avg_latency, 2)} ms and should be optimized before scale-up.")
+
+        if null_rate_total == 0:
+            insights.append("No missing values were detected in core production input fields during the selected window.")
+        else:
+            insights.append(f"Missing-value rate in core input fields is {null_rate_total * 100:.2f}% and requires data-quality controls.")
+
+        if preds_total:
+            if positive_frac is not None and positive_frac > 0.9:
+                insights.append("Prediction distribution is strongly skewed toward positive outcomes, which may indicate favorable traffic or model bias.")
+            elif positive_frac is not None and positive_frac < 0.1:
+                insights.append("Prediction distribution is strongly skewed toward negative outcomes, which may indicate adverse traffic or model bias.")
+            else:
+                insights.append("Prediction distribution appears reasonably balanced for the observed production window.")
+
+        if total >= 10:
+            insights.append("The platform has already processed live production-style requests and is suitable for monitored pilot deployment.")
+        else:
+            insights.append("Observed request volume is still small; additional live traffic is needed for stronger production confidence.")
+
+        readiness_score = 0
+        if models_loaded:
+            readiness_score += 30
+        if avg_latency is not None and avg_latency < 250:
+            readiness_score += 25
+        elif avg_latency is not None and avg_latency < 600:
+            readiness_score += 15
+        if null_rate_total == 0:
+            readiness_score += 20
+        if total >= 10:
+            readiness_score += 15
+        if preds_total > 0:
+            readiness_score += 10
+
+        if readiness_score >= 85:
+            readiness = "investor-demo ready"
+        elif readiness_score >= 70:
+            readiness = "pilot ready"
+        elif readiness_score >= 50:
+            readiness = "technical validation ready"
+        else:
+            readiness = "prototype stage"
+
+        return {
+            "window_hours": window_hours,
+            "readiness": readiness,
+            "readiness_score": readiness_score,
+            "models_loaded": {
+                "random_forest": rf_model is not None,
+                "xgboost": xgb_model is not None,
+                "pytorch_mlp": nn_model is not None,
+                "ensemble_v2": ensemble_model_v2 is not None,
+            },
+            "training_metrics": model_metrics,
+            "traffic": {
+                "total_events": total,
+                "endpoint_counts": endpoint_counts,
+            },
+            "performance": {
+                "avg_latency_ms": round(avg_latency, 2) if avg_latency is not None else None,
+            },
+            "prediction_quality_proxy": {
+                "total_predictions": preds_total,
+                "positive_fraction": positive_frac,
+                "negative_fraction": negative_frac,
+            },
+            "data_quality": {
+                "core_input_missing_rate": null_rate_total,
+            },
+            "insights": insights,
+        }
+    finally:
+        db.close()
