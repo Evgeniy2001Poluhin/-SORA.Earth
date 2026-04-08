@@ -62,18 +62,28 @@ def init_db():
     _init()
 
 
-def log_prediction(endpoint, input_data, result):
-    file_exists = os.path.exists(PRED_LOG)
-    with open(PRED_LOG, "a", newline="") as f:
-        w = csv.writer(f)
-        if not file_exists:
-            w.writerow(["timestamp", "endpoint", "budget", "co2_reduction", "social_impact", "duration_months", "prediction", "probability"])
-        w.writerow([
-            datetime.now().isoformat(), endpoint,
-            input_data.budget, input_data.co2_reduction, input_data.social_impact,
-            input_data.duration_months, result.get("prediction", ""), result.get("probability", ""),
-        ])
-
+def log_prediction(endpoint, input_data, result, latency_ms=None):
+    try:
+        from app.database import PredictionLog
+        db = get_db_sync()
+        log = PredictionLog(
+            endpoint=endpoint,
+            budget=input_data.budget,
+            co2_reduction=input_data.co2_reduction,
+            social_impact=input_data.social_impact,
+            duration_months=input_data.duration_months,
+            category=getattr(input_data, "category", None),
+            region=getattr(input_data, "region", None),
+            prediction=result.get("prediction"),
+            probability=result.get("probability") or result.get("success_probability"),
+            esg_total_score=result.get("total_score"),
+            latency_ms=latency_ms,
+        )
+        db.add(log)
+        db.commit()
+        db.close()
+    except Exception as e:
+        logger.error(f"log_prediction failed: {e}")
 
 # ===== APP =====
 app = FastAPI(
@@ -230,6 +240,8 @@ explainer_shap = shap.TreeExplainer(rf_model)
 # ===== SHARED FUNCTIONS =====
 FEATURE_COLS = ["budget", "co2_reduction", "social_impact", "duration_months", "budget_per_month", "co2_per_dollar", "efficiency_score", "year", "quarter"]
 
+FEATURE_COLS_BASE = ["budget", "co2_reduction", "social_impact", "duration_months",
+                     "budget_per_month", "co2_per_dollar", "efficiency_score"]
 
 def log_evaluation(project_name, esg_scores, risk_level):
     try:
@@ -252,6 +264,11 @@ def make_features(data):
     )
     return pd.DataFrame(scaler.transform(df), columns=FEATURE_COLS)
 
+
+def make_features_base(data):
+    """Returns 7-feature scaled DataFrame for RF/XGB/Ensemble (original training schema)."""
+    feats_full = make_features(data)
+    return feats_full[FEATURE_COLS_BASE]
 def make_features_v2(data, category: str = "Solar Energy", region: str = "Europe"):
     if scaler_v2 is None:
         return make_features(data)

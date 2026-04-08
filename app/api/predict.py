@@ -3,11 +3,11 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import csv, io, os, hashlib, json as _json
+import time
 import numpy as np
 import torch
 from app.schemas import ProjectInput as Project
 from app.validators import ProjectInput as LegacyProjectInput
-from app.mlflow_tracking import log_prediction
 from app.middleware import METRICS
 from app.redis_cache import cache_get, cache_set, REDIS_AVAILABLE
 
@@ -49,6 +49,7 @@ def predict_project(project: Project):
         cached["cached"] = True
         return cached
     import app.main as m
+    start = time.perf_counter()
     feats = m.make_features(_to_legacy(project))
     proba = float(m.rf_model.predict_proba(feats)[0][1])
     prediction = int(proba >= m.best_threshold)
@@ -56,10 +57,21 @@ def predict_project(project: Project):
     reg = getattr(project, "region", "Europe")
     prob_v2 = round(float(m.ensemble_model_v2.predict_proba(m.make_features_v2(_to_legacy(project), cat, reg))[0][1]) * 100, 2) if m.ensemble_model_v2 else round(proba*100, 2)
     _ci_low, _ci_high, _ci_label = _rf_confidence(m.rf_model, feats)
-    result = {"prediction": prediction, "probability": round(proba*100,2), "probability_v2": prob_v2, "model": "RandomForest", "threshold": m.best_threshold, "confidence_interval": [_ci_low, _ci_high], "confidence": _ci_label}
-    log_prediction("RandomForest", project.model_dump(), prediction, round(proba*100,2), prob_v2)
+    latency_ms = round((time.perf_counter() - start) * 1000, 2)
+    result = {
+        "prediction": prediction,
+        "probability": round(proba*100, 2),
+        "probability_v2": prob_v2,
+        "model": "RandomForest",
+        "threshold": m.best_threshold,
+        "confidence_interval": [_ci_low, _ci_high],
+        "confidence": _ci_label,
+        "latency_ms": latency_ms,
+    }
+    from app.main import log_prediction
+    log_prediction("predict_rf", project, result, latency_ms=latency_ms)
     cache_set(ck, result, ttl=300)
-    METRICS["predictions_total"] = METRICS.get("predictions_total",0)+1
+    METRICS["predictions_total"] = METRICS.get("predictions_total", 0) + 1
     return result
 
 @router.post("/predict/neural")
@@ -70,13 +82,22 @@ def predict_neural(project: Project):
         cached["cached"] = True
         return cached
     from app.main import nn_model, best_threshold, make_features
+    start = time.perf_counter()
     feats = make_features(_to_legacy(project))
     p = _nn_forward(nn_model, feats)
     prediction = int(p >= best_threshold)
-    result = {"prediction": prediction, "probability": round(p*100,2), "model": "NeuralNet", "threshold": best_threshold}
-    log_prediction("NeuralNet", project.model_dump(), prediction, round(p*100,2))
+    latency_ms = round((time.perf_counter() - start) * 1000, 2)
+    result = {
+        "prediction": prediction,
+        "probability": round(p*100, 2),
+        "model": "NeuralNet",
+        "threshold": best_threshold,
+        "latency_ms": latency_ms,
+    }
+    from app.main import log_prediction
+    log_prediction("predict_nn", project, result, latency_ms=latency_ms)
     cache_set(ck, result, ttl=300)
-    METRICS["predictions_total"] = METRICS.get("predictions_total",0)+1
+    METRICS["predictions_total"] = METRICS.get("predictions_total", 0) + 1
     return result
 
 @router.post("/predict/stacking")
@@ -87,19 +108,50 @@ def predict_stacking(project: Project):
         cached["cached"] = True
         return cached
     import app.main as m
+    start = time.perf_counter()
     feats = m.make_features(_to_legacy(project))
+
     rf_p = float(m.rf_model.predict_proba(feats)[0][1])
-    xgb_p = float(m.xgb_model.predict_proba(feats)[0][1])
+    feats7 = feats[m.FEATURE_COLS_BASE]
+    xgb_p = float(m.xgb_model.predict_proba(feats7)[0][1])
     nn_p = _nn_forward(m.nn_model, feats)
-    ens_p = float(m.ensemble_model.predict_proba(feats)[0][1])
+    ens_p = float(m.ensemble_model.predict_proba(feats7)[0][1])
     prediction = int(ens_p >= m.best_threshold)
+
     cat = getattr(project, "category", "Solar Energy")
     reg = getattr(project, "region", "Europe")
-    prob_v2 = round(float(m.ensemble_model_v2.predict_proba(m.make_features_v2(_to_legacy(project), cat, reg))[0][1]) * 100, 2) if m.ensemble_model_v2 else round(ens_p*100, 2)
-    result = {"prediction": prediction, "probability": round(ens_p*100,2), "probability_v2": prob_v2, "base_models": {"rf": round(rf_p*100,2), "xgb": round(xgb_p*100,2), "nn": round(nn_p*100,2)}, "threshold": m.best_threshold, "model": "StackingEnsemble"}
-    log_prediction("StackingEnsemble", project.model_dump(), prediction, round(ens_p*100,2), prob_v2)
+    prob_v2 = round(float(m.ensemble_model_v2.predict_proba(
+        m.make_features_v2(_to_legacy(project), cat, reg))[0][1]) * 100, 2) if m.ensemble_model_v2 else round(ens_p * 100, 2)
+
+    base_probs = [rf_p, xgb_p, nn_p]
+    base_preds = [int(p >= m.best_threshold) for p in base_probs]
+    agreement = sum(base_preds) / len(base_preds)
+    spread = round((max(base_probs) - min(base_probs)) * 100, 2)
+    agreement_label = "unanimous" if agreement in (0.0, 1.0) else "majority" if agreement >= 0.66 else "split"
+
+    latency_ms = round((time.perf_counter() - start) * 1000, 2)
+    result = {
+        "prediction": prediction,
+        "probability": round(ens_p * 100, 2),
+        "probability_v2": prob_v2,
+        "base_models": {
+            "rf": round(rf_p * 100, 2),
+            "xgb": round(xgb_p * 100, 2),
+            "nn": round(nn_p * 100, 2),
+        },
+        "model_agreement": {
+            "score": round(agreement, 2),
+            "label": agreement_label,
+            "probability_spread_pct": spread,
+        },
+        "threshold": m.best_threshold,
+        "model": "StackingEnsemble",
+        "latency_ms": latency_ms,
+    }
+    from app.main import log_prediction
+    log_prediction("predict_ensemble", project, result, latency_ms=latency_ms)
     cache_set(ck, result, ttl=300)
-    METRICS["predictions_total"] = METRICS.get("predictions_total",0)+1
+    METRICS["predictions_total"] = METRICS.get("predictions_total", 0) + 1
     return result
 
 @router.post("/predict/compare")
@@ -109,14 +161,30 @@ def predict_compare(req: CompareRequest):
     for p in req.projects:
         feats = m.make_features(_to_legacy(p))
         rf_p = float(m.rf_model.predict_proba(feats)[0][1])
-        xgb_p = float(m.xgb_model.predict_proba(feats)[0][1])
+        feats7 = feats[m.FEATURE_COLS_BASE]
+        xgb_p = float(m.xgb_model.predict_proba(feats7)[0][1])
         nn_p = _nn_forward(m.nn_model, feats)
-        ens_p = float(m.ensemble_model.predict_proba(feats)[0][1])
+        ens_p = float(m.ensemble_model.predict_proba(feats7)[0][1])
         prediction = int(ens_p >= m.best_threshold)
-        results.append({"name": p.name, "prediction": prediction, "probability": round(ens_p*100,2), "base_models": {"rf": round(rf_p*100,2), "xgb": round(xgb_p*100,2), "nn": round(nn_p*100,2)}})
+        results.append({
+            "name": p.name,
+            "prediction": prediction,
+            "probability": round(ens_p * 100, 2),
+            "base_models": {
+                "rf": round(rf_p * 100, 2),
+                "xgb": round(xgb_p * 100, 2),
+                "nn": round(nn_p * 100, 2),
+            }
+        })
     results_sorted = sorted(results, key=lambda x: x["probability"], reverse=True)
-    METRICS["predictions_total"] = METRICS.get("predictions_total",0)+len(req.projects)
-    out = {"projects": results_sorted, "RandomForest": {"results": [{"name": r["name"], "probability": r["base_models"]["rf"]} for r in results_sorted]}, "XGBoost": {"results": [{"name": r["name"], "probability": r["base_models"]["xgb"]} for r in results_sorted]}, "NeuralNet": {"results": [{"name": r["name"], "probability": r["base_models"]["nn"]} for r in results_sorted]}, "StackingEnsemble": {"results": [{"name": r["name"], "probability": r["probability"]} for r in results_sorted]}}
+    METRICS["predictions_total"] = METRICS.get("predictions_total", 0) + len(req.projects)
+    out = {
+        "projects": results_sorted,
+        "RandomForest": {"results": [{"name": r["name"], "probability": r["base_models"]["rf"]} for r in results_sorted]},
+        "XGBoost": {"results": [{"name": r["name"], "probability": r["base_models"]["xgb"]} for r in results_sorted]},
+        "NeuralNet": {"results": [{"name": r["name"], "probability": r["base_models"]["nn"]} for r in results_sorted]},
+        "StackingEnsemble": {"results": [{"name": r["name"], "probability": r["probability"]} for r in results_sorted]},
+    }
     return out
 
 @router.post("/shap")
