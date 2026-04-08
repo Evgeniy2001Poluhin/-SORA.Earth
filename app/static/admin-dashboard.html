@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SORA.Earth Admin Dashboard</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #121933;
+      --panel-2: #182142;
+      --text: #ecf1ff;
+      --muted: #9fb0d3;
+      --ok: #2ecc71;
+      --warn: #f1c40f;
+      --bad: #ff6b6b;
+      --accent: #4da3ff;
+      --border: rgba(255,255,255,0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: linear-gradient(180deg, #0a0f1d 0%, #10172d 100%);
+      color: var(--text);
+    }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 24px; }
+    h1, h2, h3, p { margin: 0; }
+    .topbar {
+      display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+      justify-content: space-between; margin-bottom: 20px;
+    }
+    .title p { color: var(--muted); margin-top: 6px; }
+    .auth { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    input {
+      min-width: 260px; padding: 12px 14px; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--panel); color: var(--text);
+    }
+    button {
+      padding: 12px 16px; border: 0; border-radius: 10px;
+      background: var(--accent); color: white; font-weight: 600; cursor: pointer;
+    }
+    .grid {
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px; margin-bottom: 16px;
+    }
+    .grid-2 {
+      display: grid; grid-template-columns: 1.2fr 1fr;
+      gap: 16px; margin-bottom: 16px;
+    }
+    .card {
+      background: rgba(18, 25, 51, 0.92);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+    }
+    .label {
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--muted); margin-bottom: 10px;
+    }
+    .value { font-size: 30px; font-weight: 700; }
+    .sub { margin-top: 8px; color: var(--muted); font-size: 14px; }
+    .status-ok { color: var(--ok); }
+    .status-warn { color: var(--warn); }
+    .status-bad { color: var(--bad); }
+    .models {
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px; margin-top: 14px;
+    }
+    .model {
+      padding: 14px; border-radius: 12px; background: var(--panel-2);
+      border: 1px solid var(--border);
+    }
+    .row {
+      display: flex; justify-content: space-between; gap: 12px;
+      padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .row:last-child { border-bottom: 0; }
+    .muted { color: var(--muted); }
+    ul { margin: 14px 0 0; padding-left: 18px; }
+    li { margin-bottom: 10px; }
+    .error {
+      display: none; margin-bottom: 16px; padding: 14px 16px;
+      background: rgba(255,107,107,0.12);
+      border: 1px solid rgba(255,107,107,0.35);
+      color: #ffd5d5; border-radius: 12px;
+    }
+    .footer-note { margin-top: 8px; color: var(--muted); font-size: 13px; }
+    @media (max-width: 980px) {
+      .grid, .grid-2 { grid-template-columns: 1fr; }
+      .models { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="title">
+        <h1>SORA.Earth Admin Dashboard</h1>
+        <p>Operational overview for health, readiness, models, traffic and latency.</p>
+      </div>
+      <div class="auth">
+        <input id="apiKey" type="password" placeholder="X-API-Key" value="sora-admin-123" />
+        <button id="loadBtn">Load dashboard</button>
+      </div>
+    </div>
+
+    <div id="errorBox" class="error"></div>
+
+    <section class="grid">
+      <div class="card">
+        <div class="label">Platform status</div>
+        <div id="platformStatus" class="value">—</div>
+        <div id="platformSub" class="sub">/health</div>
+      </div>
+      <div class="card">
+        <div class="label">Readiness score</div>
+        <div id="readinessScore" class="value">—</div>
+        <div id="readinessLabel" class="sub">—</div>
+      </div>
+      <div class="card">
+        <div class="label">Average latency</div>
+        <div id="avgLatency" class="value">—</div>
+        <div class="sub">Across recent production-style requests</div>
+      </div>
+      <div class="card">
+        <div class="label">Total events</div>
+        <div id="totalEvents" class="value">—</div>
+        <div id="eventsSub" class="sub">Last 24 hours</div>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <div class="card">
+        <h2>Models</h2>
+        <div class="models" id="modelsGrid"></div>
+        <div class="footer-note" id="trainingMetrics"></div>
+      </div>
+
+      <div class="card">
+        <h2>Prediction skew</h2>
+        <div class="row"><span class="muted">Positive fraction</span><strong id="positiveFraction">—</strong></div>
+        <div class="row"><span class="muted">Negative fraction</span><strong id="negativeFraction">—</strong></div>
+        <div class="row"><span class="muted">Data quality</span><strong id="dataQuality">—</strong></div>
+        <div class="row"><span class="muted">Summary window</span><strong id="summaryWindow">—</strong></div>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <div class="card">
+        <h2>Traffic by endpoint</h2>
+        <div id="endpointCounts"></div>
+      </div>
+      <div class="card">
+        <h2>Latency breakdown</h2>
+        <div id="latencyBreakdown"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Operational insights</h2>
+      <ul id="insightsList"></ul>
+    </section>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function setError(message) {
+      const box = $('errorBox');
+      box.style.display = message ? 'block' : 'none';
+      box.textContent = message || '';
+    }
+
+    function fmtMs(v) {
+      return v == null ? '—' : Number(v).toFixed(2) + ' ms';
+    }
+
+    function fmtPct(v) {
+      return v == null ? '—' : (Number(v) * 100).toFixed(1) + '%';
+    }
+
+    function statusClass(text) {
+      const t = String(text || '').toLowerCase();
+      if (t.includes('healthy') || t.includes('ok') || t.includes('ready')) return 'status-ok';
+      if (t.includes('warn')) return 'status-warn';
+      return 'status-bad';
+    }
+
+    async function fetchJson(url, apiKey) {
+      const res = await fetch(url, {
+        headers: apiKey ? { 'X-API-Key': apiKey } : {}
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || ('Request failed: ' + res.status));
+      return data;
+    }
+
+    function renderModels(models) {
+      const grid = $('modelsGrid');
+      grid.innerHTML = '';
+      Object.entries(models || {}).forEach(([name, info]) => {
+        const div = document.createElement('div');
+        div.className = 'model';
+        div.innerHTML =
+          '<div class="label">' + String(name).split('_').join(' ') + '</div>' +
+          '<div class="value ' + (info.loaded ? 'status-ok' : 'status-bad') + '" style="font-size:22px;">' +
+          (info.loaded ? 'Loaded' : 'Not loaded') +
+          '</div>' +
+          '<div class="sub">' + (info.type || 'Unknown type') + '</div>';
+        grid.appendChild(div);
+      });
+    }
+
+    function renderKeyValueRows(containerId, rows, formatter) {
+      const container = $(containerId);
+      container.innerHTML = '';
+      formatter = formatter || ((v) => v);
+      Object.entries(rows || {}).forEach(([key, value]) => {
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.innerHTML =
+          '<span class="muted">' + String(key).split('_').join(' ') + '</span>' +
+          '<strong>' + formatter(value, key) + '</strong>';
+        container.appendChild(row);
+      });
+    }
+
+    async function loadDashboard() {
+      const apiKey = $('apiKey').value.trim();
+      setError('');
+
+      try {
+        const [health, modelHealth, summary] = await Promise.all([
+          fetch('/health').then(r => r.json()),
+          fetchJson('/analytics/metrics/model-health', apiKey),
+          fetchJson('/analytics/summary', apiKey)
+        ]);
+
+        $('platformStatus').textContent = health.status || 'unknown';
+        $('platformStatus').className = 'value ' + statusClass(health.status);
+        const modelsLoaded = health.checks && health.checks.models && health.checks.models.loaded;
+        const countriesLoaded = health.checks && health.checks.external_data && health.checks.external_data.countries_loaded;
+        $('platformSub').textContent =
+          'Version ' + (health.version || '—') +
+          ' · modelsLoaded=' + (modelsLoaded === undefined || modelsLoaded === null ? '—' : String(modelsLoaded)) +
+          ' · countries=' + (countriesLoaded === undefined || countriesLoaded === null ? '—' : String(countriesLoaded));
+
+        $('readinessScore').textContent = (summary.readiness_score === undefined || summary.readiness_score === null ? '—' : summary.readiness_score);
+        $('readinessLabel').textContent = summary.readiness || '—';
+        $('readinessLabel').className = 'sub ' + statusClass(summary.readiness);
+
+        $('avgLatency').textContent = fmtMs(summary.performance && summary.performance.avg_latency_ms);
+        var te = (summary.traffic && summary.traffic.total_events); $("totalEvents").textContent = (te === undefined || te === null) ? "—" : te;
+        $('eventsSub').textContent = 'Window: ' + ((summary.window_hours === undefined || summary.window_hours === null) ? '—' : summary.window_hours) + 'h';
+
+        renderModels(modelHealth.models);
+
+        const tm = modelHealth.training_metrics || {};
+        $('trainingMetrics').textContent =
+          'Accuracy ' + ((tm.accuracy === undefined || tm.accuracy === null ? '—' : tm.accuracy)) +
+          ' · F1 ' + ((tm.f1_score === undefined || tm.f1_score === null ? '—' : tm.f1_score)) +
+          ' · ROC AUC ' + ((tm.roc_auc === undefined || tm.roc_auc === null ? '—' : tm.roc_auc)) +
+          ' · Best threshold ' + ((tm.best_threshold === undefined || tm.best_threshold === null ? '—' : tm.best_threshold));
+
+        const pq = summary.prediction_quality_proxy || {};
+        $('positiveFraction').textContent = fmtPct(pq.positive_fraction);
+        $('negativeFraction').textContent = fmtPct(pq.negative_fraction);
+
+        const dq = summary.data_quality || {};
+        $('dataQuality').textContent = fmtPct(dq.core_input_missing_rate);
+        $('summaryWindow').textContent = ((summary.window_hours === undefined || summary.window_hours === null) ? '—' : summary.window_hours) + 'h';
+
+        renderKeyValueRows('endpointCounts', summary.traffic && summary.traffic.endpoint_counts || {});
+        renderKeyValueRows(
+          'latencyBreakdown',
+          {
+            avg_latency_ms: modelHealth.predictions && modelHealth.predictions.avg_latency_ms,
+            avg_latency_ms_rf: modelHealth.predictions && modelHealth.predictions.avg_latency_ms_rf,
+            avg_latency_ms_nn: modelHealth.predictions && modelHealth.predictions.avg_latency_ms_nn,
+            avg_latency_ms_evaluate: modelHealth.predictions && modelHealth.predictions.avg_latency_ms_evaluate,
+            last_24h: modelHealth.predictions && modelHealth.predictions.last_24h,
+            total: modelHealth.predictions && modelHealth.predictions.total
+          },
+          (value, key) => key.indexOf('latency') !== -1 ? fmtMs(value) : (value === undefined || value === null ? '—' : value)
+        );
+
+        const insights = $('insightsList');
+        insights.innerHTML = '';
+        (summary.insights || []).forEach((item) => {
+          const li = document.createElement('li');
+          li.textContent = item;
+          insights.appendChild(li);
+        });
+      } catch (err) {
+        setError(err.message || 'Failed to load dashboard');
+        console.error(err);
+      }
+    }
+
+    $('loadBtn').addEventListener('click', loadDashboard);
+    loadDashboard();
+  </script>
+</body>
+</html>
