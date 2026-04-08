@@ -15,7 +15,7 @@ export const options = {
   },
 };
 
-const BASE = __ENV.BASE_URL || 'http://host.docker.internal:8000';
+const BASE = __ENV.BASE_URL || 'http://localhost:8000';
 
 const predictPayload = JSON.stringify({
   name: 'Load RF',
