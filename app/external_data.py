@@ -75,21 +75,28 @@ OECD_INDICATORS = {
 }
 
 def _fetch_oecd(iso3: str, key: str) -> Optional[float]:
-    import os
+    """Fetch from new OECD SDMX API (sdmx.oecd.org, replaces deprecated stats.oecd.org)."""
+    import os, csv, io
     if os.getenv("SORA_OFFLINE", "0") == "1":
         return None
-    path = OECD_INDICATORS.get(key)
-    if not path:
+    OECD_FLOWS = {
+        "gdp_per_capita": "OECD.SDD.NAD,DSD_NAAG@DF_NAAG_I/A.{iso3}.S1.GDP_CAP.V_USD.G",
+        "gini_index": "OECD.WISE.INE,DSD_WISE_IDD@DF_IDD/A.{iso3}.GINI.TOT_POP.D_MDEF.CURRENT",
+    }
+    flow = OECD_FLOWS.get(key)
+    if not flow:
         return None
-    url = f"https://sdmx.oecd.org/public/rest/data/OECD.SDD.TPS/{path}/{iso3}/all?startTime=2018&endTime=2025"
+    flow = flow.replace("{iso3}", iso3)
+    url = f"https://sdmx.oecd.org/public/rest/data/{flow}?startPeriod=2018&dimensionAtObservation=AllDimensions&format=csvfile"
     try:
-        resp = httpx.get(url, timeout=3, headers={"Accept": "application/json"})
-        if resp.status_code == 200:
-            data = resp.json()
-            obs = data.get("dataSets", [{}])[0].get("observations", {})
-            if obs:
-                last_key = sorted(obs.keys())[-1]
-                return round(float(obs[last_key][0]), 2)
+        resp = httpx.get(url, timeout=5, headers={"Accept": "text/csv"})
+        if resp.status_code == 200 and resp.text.strip():
+            reader = csv.DictReader(io.StringIO(resp.text))
+            rows = list(reader)
+            if rows:
+                val = rows[-1].get("OBS_VALUE")
+                if val:
+                    return round(float(val), 2)
     except Exception as e:
         logger.debug(f"OECD fallback error for {iso3}/{key}: {e}")
     return None
@@ -102,7 +109,7 @@ def _fetch_with_fallback(iso3: str, key: str, indicator_code: str,
     val = _fetch_indicator(iso3, indicator_code)
     if val is not None:
         return val
-    val = None  # OECD deprecated
+    val = _fetch_oecd(iso3, key)
     if val is not None:
         return val
     bench = BENCHMARKS.get(country_name, {})
