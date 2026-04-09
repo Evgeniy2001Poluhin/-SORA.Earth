@@ -19,6 +19,7 @@ import csv
 import sentry_sdk
 
 warnings.filterwarnings("ignore", message="X does not have valid feature names")
+warnings.filterwarnings("ignore", message="X has feature names, but")
 
 from app.schemas import ProjectInput as Project, GHGInput
 from app.api import auth as auth_api
@@ -186,6 +187,48 @@ logger.info("SORA.Earth AI Platform started")
 from apscheduler.schedulers.background import BackgroundScheduler as _BGS
 _scheduler = _BGS(timezone="UTC")
 
+
+
+def _scheduled_refresh_external_data():
+    """Lightweight ESG data refresh audit: just snapshot cache status into DB."""
+    from app.database import SessionLocal, DataRefreshLog
+    from app.external_data import get_refresh_status
+
+    db = SessionLocal()
+    try:
+        status = get_refresh_status() or {}
+        fetched = int(status.get("live_cached") or 0)
+        total = int(status.get("static_countries") or 0)
+
+        log = DataRefreshLog(
+            status="snapshot",
+            countries_fetched=fetched,
+            total_countries=total,
+            message=None,
+        )
+        db.add(log)
+        db.commit()
+        logger.info(
+            "Data refresh status snapshot stored: "
+            f"{fetched} live / {total} total"
+        )
+    except Exception as e:
+        db.rollback()
+        try:
+            log = DataRefreshLog(
+                status="failed",
+                countries_fetched=0,
+                total_countries=0,
+                message=str(e)[:500],
+            )
+            db.add(log)
+            db.commit()
+        except Exception:
+            pass
+        logger.error(f"Data refresh status snapshot FAILED: {e}")
+    finally:
+        db.close()
+
 def _scheduled_retrain():
     try:
         import pandas as pd, pickle, shap as _shap
@@ -231,17 +274,31 @@ def _scheduled_retrain():
     except Exception as _e:
         logger.error(f"Scheduled retrain FAILED: {_e}")
 
-_scheduler.add_job(_scheduled_retrain, "interval", hours=24, id="auto_retrain", replace_existing=True)
-_scheduler.start()
-logger.info("APScheduler started: auto_retrain every 24h")
+_scheduler.add_job(
+    _scheduled_retrain,
+    "interval",
+    hours=24,
+    id="auto_retrain",
+    replace_existing=True,
+)
 
+_scheduler.add_job(
+    _scheduled_refresh_external_data,
+    "interval",
+    hours=12,
+    id="auto_refresh_external_data",
+    replace_existing=True,
+)
+
+_scheduler.start()
+logger.info("APScheduler started: auto_retrain every 24h; auto_refresh_external_data every 12h")
 explainer_shap = shap.TreeExplainer(rf_model)
 
 # ===== SHARED FUNCTIONS =====
 FEATURE_COLS = ["budget", "co2_reduction", "social_impact", "duration_months", "budget_per_month", "co2_per_dollar", "efficiency_score", "year", "quarter"]
 
 FEATURE_COLS_BASE = ["budget", "co2_reduction", "social_impact", "duration_months",
-                     "budget_per_month", "co2_per_dollar", "efficiency_score"]
+                     "budget_per_month", "co2_per_dollar", "efficiency_score", "year", "quarter"]
 
 def log_evaluation(project_name, esg_scores, risk_level):
     try:

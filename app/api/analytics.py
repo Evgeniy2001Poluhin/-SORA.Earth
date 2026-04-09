@@ -30,7 +30,7 @@ def monte_carlo_dep(request: Request):
 class MonteCarloRequest(BaseModel):
     name: str = Field("Test Project")
     budget: float = Field(100000, gt=0)
-    co2_reduction: float = Field(50, gt=0, le=100)
+    co2_reduction: float = Field(50, gt=0)
     social_impact: float = Field(7, ge=1, le=10)
     duration_months: int = Field(24, ge=1, le=360)
     region: str = "Germany"
@@ -40,7 +40,7 @@ class MonteCarloRequest(BaseModel):
 class ModelCompareRequest(BaseModel):
     name: str = "Test Project"
     budget: float = Field(100000, gt=0)
-    co2_reduction: float = Field(50, gt=0, le=100)
+    co2_reduction: float = Field(50, gt=0)
     social_impact: float = Field(7, ge=1, le=10)
     duration_months: int = Field(24, ge=1, le=360)
     region: str = "Germany"

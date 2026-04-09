@@ -55,6 +55,19 @@ class PredictionLog(Base):
     latency_ms = Column(Float, nullable=True)
 
 
+
+class DataRefreshLog(Base):
+    __tablename__ = "data_refresh_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    job_name = Column(String(100), default="external_data_refresh")
+    status = Column(String(50), nullable=False)
+    countries_fetched = Column(Integer, default=0)
+    total_countries = Column(Integer, default=0)
+    message = Column(Text, nullable=True)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
 

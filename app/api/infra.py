@@ -250,3 +250,82 @@ def invalidate_cache_prefix(prefix: str):
         redis_client.delete(*keys)
     return {'cleared': len(keys), 'prefix': prefix, 'keys': keys}
 
+
+
+@router.get("/infra/data-refresh-status", tags=["Infrastructure"])
+def data_refresh_status():
+    """Return latest data refresh log entries for UI display."""
+    from app.database import SessionLocal, DataRefreshLog
+    from sqlalchemy import desc
+
+    db = SessionLocal()
+    try:
+        latest = (
+            db.query(DataRefreshLog)
+            .order_by(desc(DataRefreshLog.timestamp))
+            .limit(10)
+            .all()
+        )
+        return {
+            "count": len(latest),
+            "entries": [
+                {
+                    "id": r.id,
+                    "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+                    "status": r.status,
+                    "countries_fetched": r.countries_fetched,
+                    "total_countries": r.total_countries,
+                    "message": r.message,
+                }
+                for r in latest
+            ],
+        }
+    finally:
+        db.close()
+
+@router.post("/infra/data-refresh/run", tags=["Infrastructure"])
+def data_refresh_run():
+    """
+    Trigger full external ESG data refresh (World Bank/OECD + benchmarks).
+    Returns aggregated result and writes audit record to DB.
+    """
+    from app.external_data import refresh_live_data
+    from app.database import SessionLocal, DataRefreshLog
+
+    db = SessionLocal()
+    try:
+        result = refresh_live_data() or {}
+        fetched = int(result.get("fetched") or 0)
+        total = int(result.get("total") or 0)
+
+        log = DataRefreshLog(
+            status="success",
+            countries_fetched=fetched,
+            total_countries=total,
+            message=None,
+        )
+        db.add(log)
+        db.commit()
+
+        return {
+            "status": "ok",
+            "fetched": fetched,
+            "total": total,
+        }
+    except Exception as e:
+        db.rollback()
+        try:
+            log = DataRefreshLog(
+                status="failed",
+                countries_fetched=0,
+                total_countries=0,
+                message=str(e)[:500],
+            )
+            db.add(log)
+            db.commit()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"data refresh failed: {e}")
+    finally:
+        db.close()
+

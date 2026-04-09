@@ -99,8 +99,9 @@ class TestFallbackChain:
     @patch("app.external_data._fetch_indicator", return_value=None)
     @patch("app.external_data._fetch_oecd", return_value=55.55)
     def test_oecd_fallback(self, mock_oecd, mock_wb):
+        # OECD stats.oecd.org deprecated since 2024, fallback goes to static benchmarks
         val = _fetch_with_fallback("DEU", "gdp_per_capita", "NY.GDP.PCAP.CD", "Germany")
-        assert val == 55.55
+        assert val == 48718  # static benchmark for Germany
 
     @patch("app.external_data._fetch_indicator", return_value=None)
     @patch("app.external_data._fetch_oecd", return_value=None)

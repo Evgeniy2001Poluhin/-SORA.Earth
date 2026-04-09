@@ -57,7 +57,7 @@ def invalidate_cache(country: Optional[str] = None):
 def _fetch_indicator(iso3: str, indicator: str, mrv: int = 3) -> Optional[float]:
     url = f"{WB_BASE}/country/{iso3}/indicator/{indicator}?format=json&per_page={mrv}&mrv={mrv}"
     try:
-        resp = httpx.get(url, timeout=10)
+        resp = httpx.get(url, timeout=3)
         resp.raise_for_status()
         data = resp.json()
         if len(data) >= 2 and data[1]:
@@ -75,12 +75,15 @@ OECD_INDICATORS = {
 }
 
 def _fetch_oecd(iso3: str, key: str) -> Optional[float]:
+    import os
+    if os.getenv("SORA_OFFLINE", "0") == "1":
+        return None
     path = OECD_INDICATORS.get(key)
     if not path:
         return None
-    url = f"https://stats.oecd.org/restsdmx/sdmx.ashx/GetData/{path}/{iso3}/all?startTime=2018&endTime=2025"
+    url = f"https://sdmx.oecd.org/public/rest/data/OECD.SDD.TPS/{path}/{iso3}/all?startTime=2018&endTime=2025"
     try:
-        resp = httpx.get(url, timeout=10, headers={"Accept": "application/json"})
+        resp = httpx.get(url, timeout=3, headers={"Accept": "application/json"})
         if resp.status_code == 200:
             data = resp.json()
             obs = data.get("dataSets", [{}])[0].get("observations", {})
@@ -94,16 +97,20 @@ def _fetch_oecd(iso3: str, key: str) -> Optional[float]:
 
 def _fetch_with_fallback(iso3: str, key: str, indicator_code: str,
                          country_name: str) -> Optional[float]:
+    import os
+
     val = _fetch_indicator(iso3, indicator_code)
     if val is not None:
         return val
-    val = _fetch_oecd(iso3, key)
+    val = None  # OECD deprecated
     if val is not None:
         return val
     bench = BENCHMARKS.get(country_name, {})
     if key in bench:
         logger.info(f"Using static benchmark for {country_name}/{key}")
         return bench[key]
+    if os.getenv("SORA_OFFLINE", "0") == "1":
+        return GLOBAL_AVG.get(key)
     return None
 
 

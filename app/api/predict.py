@@ -112,10 +112,10 @@ def predict_stacking(project: Project):
     feats = m.make_features(_to_legacy(project))
 
     rf_p = float(m.rf_model.predict_proba(feats)[0][1])
-    feats7 = feats[m.FEATURE_COLS_BASE]
-    xgb_p = float(m.xgb_model.predict_proba(feats7)[0][1])
+    # feats7 removed — all models use 9 features
+    xgb_p = float(m.xgb_model.predict_proba(feats)[0][1])
     nn_p = _nn_forward(m.nn_model, feats)
-    ens_p = float(m.ensemble_model.predict_proba(feats7)[0][1])
+    ens_p = float(m.ensemble_model.predict_proba(feats)[0][1])
     prediction = int(ens_p >= m.best_threshold)
 
     cat = getattr(project, "category", "Solar Energy")
@@ -161,10 +161,10 @@ def predict_compare(req: CompareRequest):
     for p in req.projects:
         feats = m.make_features(_to_legacy(p))
         rf_p = float(m.rf_model.predict_proba(feats)[0][1])
-        feats7 = feats[m.FEATURE_COLS_BASE]
-        xgb_p = float(m.xgb_model.predict_proba(feats7)[0][1])
+        # feats7 removed — all models use 9 features
+        xgb_p = float(m.xgb_model.predict_proba(feats)[0][1])
         nn_p = _nn_forward(m.nn_model, feats)
-        ens_p = float(m.ensemble_model.predict_proba(feats7)[0][1])
+        ens_p = float(m.ensemble_model.predict_proba(feats)[0][1])
         prediction = int(ens_p >= m.best_threshold)
         results.append({
             "name": p.name,
