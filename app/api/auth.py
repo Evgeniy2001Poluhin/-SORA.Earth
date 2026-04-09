@@ -33,6 +33,8 @@ def list_users(user: UserInfo = Depends(require_admin)):
 
 @router.get("/auth/verify", tags=["auth"])
 def verify_key(user=Depends(require_api_key)):
+    if isinstance(user, str):
+        return {"authenticated": True, "user": user, "role": "api_key"}
     return {"authenticated": True, "user": user["name"], "role": user["role"]}
 
 @router.get("/admin/stats", tags=["admin"])

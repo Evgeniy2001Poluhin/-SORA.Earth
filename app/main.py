@@ -184,114 +184,6 @@ if os.path.exists(NN_PATH):
 init_db()
 logger.info("SORA.Earth AI Platform started")
 
-from apscheduler.schedulers.background import BackgroundScheduler as _BGS
-_scheduler = _BGS(timezone="UTC")
-
-
-
-def _scheduled_refresh_external_data():
-    """Lightweight ESG data refresh audit: just snapshot cache status into DB."""
-    from app.database import SessionLocal, DataRefreshLog
-    from app.external_data import get_refresh_status
-
-    db = SessionLocal()
-    try:
-        status = get_refresh_status() or {}
-        fetched = int(status.get("live_cached") or 0)
-        total = int(status.get("static_countries") or 0)
-
-        log = DataRefreshLog(
-            status="snapshot",
-            countries_fetched=fetched,
-            total_countries=total,
-            message=None,
-        )
-        db.add(log)
-        db.commit()
-        logger.info(
-            "Data refresh status snapshot stored: "
-            f"{fetched} live / {total} total"
-        )
-    except Exception as e:
-        db.rollback()
-        try:
-            log = DataRefreshLog(
-                status="failed",
-                countries_fetched=0,
-                total_countries=0,
-                message=str(e)[:500],
-            )
-            db.add(log)
-            db.commit()
-        except Exception:
-            pass
-        logger.error(f"Data refresh status snapshot FAILED: {e}")
-    finally:
-        db.close()
-
-def _scheduled_retrain():
-    try:
-        import pandas as pd, pickle, shap as _shap
-        from sklearn.ensemble import RandomForestClassifier
-        from sklearn.preprocessing import StandardScaler
-        from sklearn.model_selection import train_test_split
-        from sklearn.metrics import roc_auc_score, f1_score, accuracy_score
-        from datetime import datetime as _dt
-        _df = pd.read_csv(os.path.join(ROOT_DIR, "data", "projects.csv"))
-        _df["budget_per_month"] = _df["budget"] / _df["duration_months"].clip(lower=1)
-        _df["co2_per_dollar"]   = _df["co2_reduction"] / _df["budget"].clip(lower=1) * 1000
-        _df["efficiency_score"] = (_df["co2_reduction"] * _df["social_impact"]) / _df["duration_months"].clip(lower=1)
-        _n = _dt.utcnow()
-        _df["year"] = _n.year; _df["quarter"] = (_n.month - 1) // 3 + 1
-        _cols = ["budget","co2_reduction","social_impact","duration_months","budget_per_month","co2_per_dollar","efficiency_score","year","quarter"]
-        _X = _df[_cols]; _y = _df["success"].values
-        _Xtr, _Xte, _ytr, _yte = train_test_split(_X, _y, test_size=0.2, random_state=42, stratify=_y)
-        _sc = StandardScaler(); _Xtr_s = pd.DataFrame(_sc.fit_transform(_Xtr), columns=_cols); _Xte_s = pd.DataFrame(_sc.transform(_Xte), columns=_cols)
-        _rf = RandomForestClassifier(n_estimators=200, max_depth=10, min_samples_leaf=2, random_state=42, n_jobs=-1)
-        _rf.fit(_Xtr_s, _ytr)
-        _auc = round(roc_auc_score(_yte, _rf.predict_proba(_Xte_s)[:,1]), 4)
-        _f1  = round(f1_score(_yte, _rf.predict(_Xte_s)), 4)
-        _mdir = os.path.join(ROOT_DIR, "models")
-        # Backup + AUC guard
-        import shutil as _sh
-        _rf_path = os.path.join(_mdir, "random_forest.pkl")
-        _sc_path = os.path.join(_mdir, "scaler.pkl")
-        if os.path.exists(_rf_path):
-            _sh.copy2(_rf_path, _rf_path + ".bak")
-            _sh.copy2(_sc_path, _sc_path + ".bak")
-        if _auc < 0.75:
-            logger.warning(f"Retrain REJECTED: AUC={_auc} < 0.75, keeping previous model")
-            return
-        with open(_rf_path, "wb") as _fh: pickle.dump(_rf, _fh)
-        with open(os.path.join(_mdir, "scaler.pkl"), "wb") as _fh: pickle.dump(_sc, _fh)
-        global rf_model, scaler, explainer_shap
-        rf_model = _rf; scaler = _sc; explainer_shap = _shap.TreeExplainer(_rf)
-        global FEATURE_COLS
-        FEATURE_COLS = _cols
-        from app.mlflow_tracking import log_model_registry
-        log_model_registry(_rf, "RandomForest_auto", {"auc": _auc, "f1": _f1})
-        logger.info(f"Scheduled retrain OK: AUC={_auc}")
-    except Exception as _e:
-        logger.error(f"Scheduled retrain FAILED: {_e}")
-
-_scheduler.add_job(
-    _scheduled_retrain,
-    "interval",
-    hours=24,
-    id="auto_retrain",
-    replace_existing=True,
-)
-
-_scheduler.add_job(
-    _scheduled_refresh_external_data,
-    "interval",
-    hours=12,
-    id="auto_refresh_external_data",
-    replace_existing=True,
-)
-
-_scheduler.start()
-logger.info("APScheduler started: auto_retrain every 24h; auto_refresh_external_data every 12h")
 explainer_shap = shap.TreeExplainer(rf_model)
 
 # ===== SHARED FUNCTIONS =====
@@ -531,3 +423,11 @@ async def shutdown_event():
     from app.scheduler import shutdown_scheduler
     shutdown_scheduler()
     app.state.executor.shutdown(wait=True)
+
+from fastapi.responses import FileResponse
+import os
+
+@app.get("/admin", tags=["admin"])
+def admin_dashboard():
+    basedir = os.path.dirname(os.path.abspath(__file__))
+    return FileResponse(os.path.join(basedir, "static", "admin-dashboard.html"))
