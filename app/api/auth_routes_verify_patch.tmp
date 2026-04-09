@@ -1,0 +1,12 @@
+from fastapi import APIRouter, Depends
+from app.auth import require_api_key
+
+router = APIRouter()
+
+@router.get("/auth/verify", tags=["auth"])
+def verify_key(user = Depends(require_api_key)):
+    return {
+        "authenticated": True,
+        "user": user["name"],
+        "role": user["role"],
+    }

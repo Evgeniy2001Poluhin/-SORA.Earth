@@ -1,40 +1,74 @@
+_refresh_job = None
 """Data pipeline API — live data refresh, country data access."""
+from typing import List
+
 from fastapi import APIRouter, BackgroundTasks, Depends
-from app.auth import require_api_key
+from sqlalchemy.orm import Session
+
 from app import external_data
-
-router = APIRouter(prefix="/data", tags=["data-pipeline"])
-
-_refresh_job = {"running": False, "result": None}
+from app.auth import require_api_key
+from app.database import DataRefreshLog, get_db
 
 
-def _run_refresh():
-    _refresh_job["running"] = True
-    try:
-        _refresh_job["result"] = external_data.refresh_live_data()
-    except Exception as e:
-        _refresh_job["result"] = {"status": "error", "error": str(e)}
-    _refresh_job["running"] = False
+router = APIRouter(
+    prefix="/data",
+    tags=["data-pipeline"],
+    dependencies=[Depends(require_api_key)],
+)
 
 
 @router.post("/refresh")
 def refresh_data(bg: BackgroundTasks):
     """Trigger live data refresh from World Bank API (runs in background)."""
-    if _refresh_job["running"]:
-        return {"status": "already_running", "message": "Refresh is in progress, check /data/refresh-status"}
-    bg.add_task(_run_refresh)
-    return {"status": "started", "message": "Refresh started in background. Check /data/refresh-status for progress."}
+    status = external_data.get_refresh_status()
+    if status["status"] == "running":
+        return {
+            "status": "already_running",
+            "message": "Refresh is in progress, check /data/refresh-status",
+        }
+
+    bg.add_task(external_data.refresh_live_data)
+    return {
+        "status": "started",
+        "message": "Refresh started in background. Check /data/refresh-status for progress.",
+    }
+
+
+@router.get("/refresh/logs")
+def refresh_logs(limit: int = 50, db: Session = Depends(get_db)):
+    """Return recent data refresh log entries."""
+    rows: List[DataRefreshLog] = (
+        db.query(DataRefreshLog)
+        .order_by(DataRefreshLog.timestamp.desc())
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        {
+            "id": r.id,
+            "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+            "job_name": r.job_name,
+            "status": r.status,
+            "countries_fetched": r.countries_fetched,
+            "total_countries": r.total_countries,
+            "message": r.message,
+            "source": r.source,
+            "country_iso3": r.country_iso3,
+            "indicator": r.indicator,
+            "value": r.value,
+            "error_message": r.error_message,
+            "fetched_at": r.fetched_at.isoformat() if r.fetched_at else None,
+        }
+        for r in rows
+    ]
 
 
 @router.get("/refresh/status")
 @router.get("/refresh-status")
 def refresh_job_status():
     """Check background refresh job status."""
-    return {
-        "running": _refresh_job["running"],
-        "last_result": _refresh_job["result"],
-        **external_data.get_refresh_status(),
-    }
+    return external_data.get_refresh_status()
 
 
 @router.get("/status")
@@ -53,13 +87,25 @@ def all_countries():
 @router.get("/country/{name}")
 def single_country(name: str):
     """Single country ESG profile with full context."""
-    context = external_data.get_country_context(name)
+    country_name = name.strip().title()
+    context = external_data.get_country_context(country_name)
+
     if not context:
-        merged = external_data.get_merged_country_data(name)
+        merged = external_data.get_merged_country_data(country_name)
         if merged:
-            return {"country": name.strip().title(), "indicators": merged, "source": "merged"}
-        return {"country": name.strip().title(), "error": f"Country '{name}' not found", "supported": external_data.get_supported_countries()}
-    context.setdefault("country", name.strip().title()); return context
+            return {
+                "country": country_name,
+                "indicators": merged,
+                "source": "merged",
+            }
+        return {
+            "country": country_name,
+            "error": f"Country '{country_name}' not found",
+            "supported": external_data.get_supported_countries(),
+        }
+
+    context.setdefault("country", country_name)
+    return context
 
 
 @router.get("/countries/supported")
