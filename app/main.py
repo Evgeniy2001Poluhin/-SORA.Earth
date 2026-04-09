@@ -25,6 +25,7 @@ from app.schemas import ProjectInput as Project, GHGInput
 from app.api import auth as auth_api
 from app.api import evaluate as evaluate_api
 from app.api import predict as predict_api
+from app.api import admin_retrain_log
 from app.api import analytics as analytics_api
 from app.api import system as system_api
 from app.api import infra as infra_api
@@ -356,6 +357,7 @@ for _r in _all_routers:
     api_v1.include_router(_r)
 from app.auth_routes import router as auth_router
 api_v1.include_router(auth_router)
+api_v1.include_router(admin_retrain_log.router)
 app.include_router(api_v1)
 
 # Backward compatibility: original paths (no prefix)
