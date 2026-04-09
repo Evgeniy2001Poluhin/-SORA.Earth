@@ -41,6 +41,19 @@ def _prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+
+def _coerce_features_for_model(rf, X):
+    """Подгоняет матрицу признаков X под ожидаемое rf.n_features_in_."""
+    import numpy as np
+    n_need = getattr(rf, "n_features_in_", X.shape[1])
+    n_have = X.shape[1]
+    if n_have == n_need:
+        return X
+    if n_have > n_need:
+        return X[:, :n_need]
+    pad = np.zeros((X.shape[0], n_need - n_have))
+    return np.hstack([X, pad])
+
 def _score(rf, sc):
     df = pd.read_csv(DATA_CSV)
     df = _prepare_features(df)
