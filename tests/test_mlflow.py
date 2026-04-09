@@ -11,7 +11,11 @@ def test_mlflow_stats():
     assert "experiment" in data or "status" in data
 
 
-def test_evaluate_logs_to_mlflow():
+def test_evaluate_logs_to_mlflow(monkeypatch):
+    monkeypatch.setattr("app.external_data.get_country_context", lambda c: {
+        "co2_per_capita": 4.0, "renewable_share": 55.0, "life_expectancy": 83.0,
+        "gdp_per_capita": 55000, "gini_index": 28.0, "gov_effectiveness": 1.8
+    })
     resp = client.post("/evaluate", json={
         "name": "MLflow Test Project",
         "budget": 50000,

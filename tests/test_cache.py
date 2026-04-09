@@ -20,7 +20,11 @@ def test_cache_clear():
     assert resp.json()["status"] == "cache cleared"
 
 
-def test_cache_hit():
+def test_cache_hit(monkeypatch):
+    monkeypatch.setattr("app.external_data.get_country_context", lambda c: {
+        "co2_per_capita": 5.0, "renewable_share": 60.0, "life_expectancy": 82.0,
+        "gdp_per_capita": 50000, "gini_index": 27.0, "gov_effectiveness": 1.5
+    })
     payload = {"name": "Cache Test", "budget": 50000, "co2_reduction": 30, "social_impact": 5, "duration_months": 12, "region": "Norway"}
     r1 = client.post("/evaluate", json=payload)
     r2 = client.post("/evaluate", json=payload)

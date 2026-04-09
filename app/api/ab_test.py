@@ -3,9 +3,15 @@ from fastapi import APIRouter, Body
 from pydantic import BaseModel
 from collections import defaultdict
 
+
 router = APIRouter(prefix='/ab', tags=['a/b-testing'])
 _stats = defaultdict(lambda: {'requests': 0, 'total_prob': 0.0})
 _traffic_split = {'model_a': 0.5}
+
+
+def _clip_prob(p: float) -> float:
+    return min(max(float(p), 0.0001), 0.9799)
+
 
 class ABRequest(BaseModel):
     budget: float
@@ -18,6 +24,7 @@ class ABRequest(BaseModel):
     category: str = 'Solar Energy'
     region: str = 'Europe'
 
+
 @router.post('/predict')
 def ab_predict(data: ABRequest):
     from app.main import rf_model, ensemble_model_v2, make_features, make_features_v2
@@ -26,17 +33,20 @@ def ab_predict(data: ABRequest):
     try:
         if use_a or ensemble_model_v2 is None:
             feats = make_features(data)
-            prob = round(float(rf_model.predict_proba(feats)[0][1]), 4)
+            prob = float(rf_model.predict_proba(feats)[0][1])
             model_used = 'model_a_rf'
         else:
             feats = make_features_v2(data, data.category, data.region)
-            prob = round(float(ensemble_model_v2.predict_proba(feats)[0][1]), 4)
+            prob = float(ensemble_model_v2.predict_proba(feats)[0][1])
             model_used = 'model_b_ensemble_v2'
     except Exception as e:
         return {'error': str(e)}
+
+    prob = round(_clip_prob(prob), 4)
     latency = round((time.time() - t0) * 1000, 2)
     _stats[model_used]['requests'] += 1
     _stats[model_used]['total_prob'] += prob
+
     return {
         'model': model_used,
         'probability': prob,
@@ -44,6 +54,7 @@ def ab_predict(data: ABRequest):
         'latency_ms': latency,
         'traffic_split': dict(_traffic_split),
     }
+
 
 @router.get('/stats')
 def ab_stats():
@@ -55,6 +66,7 @@ def ab_stats():
         }
     result['traffic_split'] = dict(_traffic_split)
     return result
+
 
 @router.post('/split')
 def set_split(model_a_pct: float = Body(..., embed=True)):
