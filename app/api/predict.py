@@ -5,6 +5,7 @@ from pydantic import BaseModel
 import csv, io, os, time
 import numpy as np
 import torch
+from app.prom_metrics import sora_prediction_latency, sora_predictions_total
 
 from app.schemas import ProjectInput as Project
 from app.validators import ProjectInput as LegacyProjectInput
@@ -63,6 +64,9 @@ def predict_project(project: Project):
     confidence = "high" if prob_pct >= 90 else "medium" if prob_pct >= 70 else "low"
     confidence_interval = [max(0.0, round(prob_pct - 5.0, 2)), min(100.0, round(prob_pct + 5.0, 2))]
 
+    _lat = round((time.perf_counter() - start) * 1000, 2)
+    sora_prediction_latency.observe(_lat)
+    sora_predictions_total.labels(model="rf").inc()
     result = {
         "prediction": prediction,
         "probability": prob_pct,
@@ -71,7 +75,7 @@ def predict_project(project: Project):
         "confidence_interval": confidence_interval,
         "model": "RandomForest",
         "threshold": m.best_threshold,
-        "inference_time_ms": round((time.perf_counter() - start) * 1000, 2),
+        "inference_time_ms": _lat,
     }
     cache_set(ck, result)
     log_prediction("RandomForest", project.model_dump(), prediction, result["probability"])
@@ -94,12 +98,15 @@ def predict_neural(project: Project):
     p = _nn_forward(nn_model, feats)
     prediction = int(p >= best_threshold)
 
+    _lat = round((time.perf_counter() - start) * 1000, 2)
+    sora_prediction_latency.observe(_lat)
+    sora_predictions_total.labels(model="nn").inc()
     result = {
         "prediction": prediction,
         "probability": round(p * 100, 2),
         "model": "NeuralNet",
         "threshold": best_threshold,
-        "inference_time_ms": round((time.perf_counter() - start) * 1000, 2),
+        "inference_time_ms": _lat,
     }
     cache_set(ck, result)
     log_prediction("NeuralNet", project.model_dump(), prediction, result["probability"])
@@ -129,6 +136,9 @@ def predict_stacking(project: Project):
     ens_p = float((rf_p + xgb_p + nn_p) / 3.0)
     prediction = int(ens_p >= m.best_threshold)
 
+    _lat = round((time.perf_counter() - start) * 1000, 2)
+    sora_prediction_latency.observe(_lat)
+    sora_predictions_total.labels(model="stacking").inc()
     result = {
         "prediction": prediction,
         "probability": round(ens_p * 100, 2),
@@ -139,7 +149,7 @@ def predict_stacking(project: Project):
         },
         "threshold": m.best_threshold,
         "model": "StackingEnsemble",
-        "inference_time_ms": round((time.perf_counter() - start) * 1000, 2),
+        "inference_time_ms": _lat,
     }
     cache_set(ck, result)
     log_prediction("StackingEnsemble", project.model_dump(), prediction, result["probability"])

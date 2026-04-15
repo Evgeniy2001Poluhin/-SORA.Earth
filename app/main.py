@@ -410,7 +410,10 @@ app.include_router(api_v1)
 # app.include_router(auth_router)
 
 
-# Prometheus
+# --- MLOps domain metrics (Prometheus) ---
+from prometheus_client import Counter, Histogram, Gauge
+
+from app import prom_metrics  # noqa
 Instrumentator().instrument(app).expose(app)
 
 
