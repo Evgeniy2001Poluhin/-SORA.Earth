@@ -54,8 +54,8 @@
       <p>Operational overview — health, models, data refresh, retrain, drift, scheduler</p>
     </div>
     <div class="auth">
-      <input id="user" type="text" placeholder="Username" value="admin"/>
-      <input id="pass" type="password" placeholder="Password" value="sora2026"/>
+      <input id="user" type="text" placehnewer="Username" value="admin"/>
+      <input id="pass" type="password" placehnewer="Password" value="sora2026"/>
       <button id="loadBtn">Load</button>
       <button id="autoBtn" class="btn-sm">Auto-refresh: OFF</button>
     </div>
@@ -104,6 +104,13 @@
 
   <section class="card">
     <h2>Recent Timeline</h2>
+  <section class="grid">
+    <div class="card">
+      <h3>Latest Manual vs MLOps Auto</h3>
+      <div id="mlopsCompare" class="small muted">Loading...</div>
+    </div>
+  </section>
+
     <div id="timeline" style="max-height:300px;overflow-y:auto"></div>
   </section>
 </div>
@@ -117,7 +124,8 @@ function badge(text,type){return '<span class="badge badge-'+type+'">'+text+'</s
 function statusBadge(s){
   if(!s)return badge('unknown','warn');
   const l=s.toLowerCase();
-  if(l==='success'||l==='healthy'||l==='ok')return badge(s,'ok');
+  if(l==='success'||l==='healthy'||l==='ok'||l==='promoted')return badge(s,'ok');
+  if(l==='rejected')return badge(s,'bad');
   if(l==='running'||l==='started')return badge(s,'accent');
   if(l==='warning'||l==='degraded')return badge(s,'warn');
   return badge(s,'bad');
@@ -216,17 +224,49 @@ async function loadSnapshot(){
 async function loadTimeline(){
   try{
     const tl=await api('/api/v1/admin/timeline?hours=48');
+renderMlopsComparison(tl.events || []);
+
     const events=tl.events||tl||[];
     const c=$('timeline');
     if(!events.length){c.innerHTML='<div class="muted" style="padding:12px">No events in the last 48 hours</div>';return}
-    c.innerHTML=events.slice(0,30).map(e=>
-      '<div class="timeline-item"><span class="timeline-time">'+fmtTime(e.timestamp||e.started_at)+'</span> '+
-      statusBadge(e.status)+' <strong>'+(e.type||e.job_name||'event')+'</strong>'+
-      (e.trigger_source?' <span class="muted">via '+e.trigger_source+'</span>':'')+
-      (e.message?' — <span class="muted">'+e.message+'</span>':'')+
-      '</div>'
-    ).join('');
-  }catch(e){$('timeline').innerHTML='<div class="muted" style="padding:12px">Timeline unavailable</div>'}
+    c.innerHTML=events.slice(0,30).map(e=>{
+      let line='<div class="timeline-item"><span class="timeline-time">'+fmtTime(e.timestamp||e.started_at)+'</span> '+
+        statusBadge(e.status)+' <strong>'+(e.type||e.job_name||'event')+'</strong>'+
+        (e.trigger_source?' <span class="muted">via '+e.trigger_source+'</span>':'')+
+        (e.message?' — <span class="muted">'+e.message+'</span>':'');
+      if(e.metrics){
+        const m=e.metrics;
+        if(m.old_auc!=null&&m.new_auc!=null){
+          const arrow=m.new_auc>=m.old_auc?'↑':'↓';
+          const cls=m.new_auc>=m.old_auc?'ok':'bad';
+          line+=' <span class="badge badge-'+cls+'">AUC '+Number(m.old_auc).toFixed(3)+'→'+Number(m.new_auc).toFixed(3)+' '+arrow+'</span>';
+        }
+        if(m.auc!=null) line+=' <span class="badge badge-ok">AUC '+Number(m.auc).toFixed(3)+'</span>';
+        if(m.r2!=null) line+=' <span class="badge badge-accent">R² '+Number(m.r2).toFixed(3)+'</span>';
+        if(m.rmse!=null) line+=' <span class="badge badge-warn">RMSE '+Number(m.rmse).toFixed(2)+'</span>';
+      }
+      if(e.duration_sec!=null) line+=' <span class="muted">'+Number(e.duration_sec).toFixed(1)+'s</span>';
+
+      const decision = e.decision || e.promotion_decision || e.status_decision || e.metrics?.decision;
+      const oldAuc = toNum(e.old_auc ?? e.metrics?.old_auc);
+      const newAuc = toNum(e.new_auc ?? e.metrics?.new_auc);
+
+      if (decision === 'promoted') {
+        line += ' <span class="badge badge-ok">promoted</span>';
+      } else if (decision === 'rejected') {
+        line += ' <span class="badge badge-fail">rejected</span>';
+      }
+
+      if (oldAuc != null && newAuc != null) {
+        const diff = newAuc - oldAuc;
+        const arrow = diff > 0 ? '↑' : diff < 0 ? '↓' : '=';
+        const cls = diff > 0 ? 'ok' : diff < 0 ? 'fail' : 'accent';
+        line += ' <span class="badge badge-' + cls + '">AUC ' + oldAuc.toFixed(3) + '→' + newAuc.toFixed(3) + ' ' + arrow + '</span>';
+      }
+      line+='</div>';
+      return line;
+    }).join('');
+    }catch(e){console.error('loadTimeline failed', e); $('timeline').innerHTML='<div class="muted" style="padding:12px">Timeline unavailable</div>'}
 }
 
 async function load(){
@@ -265,6 +305,60 @@ $('triggerRetrain').addEventListener('click',async function(){
 });
 
 load();
+
+function pickMetric(m, ...keys){
+  if(!m) return null;
+  for(const k of keys){
+    const v = m[k];
+    
+  }
+  return null;
+}
+function toNum(v){
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function fmtDelta(v){
+  if (v == null) return 'n/a';
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 'n/a';
+  return (n > 0 ? '+' : '') + n.toFixed(3);
+}
+function renderMlopsComparison(events){
+  const el = document.getElementById('mlopsCompare');
+  if(!el) return;
+  const retrains = (events || []).filter(e => e && e.type === 'retrain' && e.status === 'success');
+  const latestManual = retrains.find(e => e.trigger_source === 'manual');
+  const latestMlops = retrains.find(e => e.trigger_source === 'mlops_auto');
+  if(!latestManual || !latestMlops){
+    el.innerHTML = '<span class="muted">Need at least one successful manual and one successful mlops_auto retrain</span>';
+    return;
+  }
+  const manualAuc = pickMetric(latestManual.metrics, 'roc_auc', 'auc', 'train_auc', 'ensemble_cv_auc');
+  const mlopsAuc = pickMetric(latestMlops.metrics, 'roc_auc', 'auc', 'train_auc', 'ensemble_cv_auc');
+  const manualAcc = pickMetric(latestManual.metrics, 'accuracy', 'train_accuracy');
+  const mlopsAcc = pickMetric(latestMlops.metrics, 'accuracy', 'train_accuracy');
+  const manualF1 = pickMetric(latestManual.metrics, 'f1_score', 'train_f1', 'best_f1');
+  const mlopsF1 = pickMetric(latestMlops.metrics, 'f1_score', 'train_f1', 'best_f1');
+  const aucDelta = (mlopsAuc != null && manualAuc != null) ? (mlopsAuc - manualAuc) : null;
+  const accDelta = (mlopsAcc != null && manualAcc != null) ? (mlopsAcc - manualAcc) : null;
+  const f1Delta  = (mlopsF1 != null && manualF1 != null) ? (mlopsF1 - manualF1) : null;
+  const aucArrow = aucDelta == null ? '' : (aucDelta > 0 ? '↑' : (aucDelta < 0 ? '↓' : '→'));
+  const accArrow = accDelta == null ? '' : (accDelta > 0 ? '↑' : (accDelta < 0 ? '↓' : '→'));
+  const f1Arrow  = f1Delta == null ? '' : (f1Delta > 0 ? '↑' : (f1Delta < 0 ? '↓' : '→'));
+  el.innerHTML = `
+    <div><strong>Manual:</strong> ${latestManual.timestamp || 'n/a'} · model ${latestManual.model_version || 'n/a'}</div>
+      <div><strong>MLOps:</strong> ${latestMlops.timestamp || 'n/a'} · model ${latestMlops.model_version || 'n/a'}</div>
+    <div style="margin-top:8px">
+      <span class="badge">AUC ${manualAuc?.toFixed?.(4) ?? 'n/a'} → ${mlopsAuc?.toFixed?.(4) ?? 'n/a'} ${aucArrow} (${fmtDelta(aucDelta)})</span>
+      <span class="badge">ACC ${manualAcc?.toFixed?.(4) ?? 'n/a'} → ${mlopsAcc?.toFixed?.(4) ?? 'n/a'} ${accArrow} (${fmtDelta(accDelta)})</span>
+      <span class="badge">F1 ${manualF1?.toFixed?.(4) ?? 'n/a'} → ${mlopsF1?.toFixed?.(4) ?? 'n/a'} ${f1Arrow} (${fmtDelta(f1Delta)})</span>
+    </div>
+  `;
+}
+
 </script>
 </body>
 </html>
