@@ -27,7 +27,7 @@ def refresh_data(bg: BackgroundTasks):
             "message": "Refresh is in progress, check /data/refresh-status",
         }
 
-    bg.add_task(external_data.refresh_live_data)
+    bg.add_task(external_data.refresh_live_data, trigger_source="api")
     return {
         "status": "started",
         "message": "Refresh started in background. Check /data/refresh-status for progress.",

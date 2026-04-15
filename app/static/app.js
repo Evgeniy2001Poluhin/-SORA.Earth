@@ -44,7 +44,7 @@ window.fillTemplate=function(key){
 
 window.evaluateProject=function(){
   var d={name:document.getElementById("e-name").value,budget:+document.getElementById("e-budget").value,co2_reduction:+document.getElementById("e-co2").value,social_impact:+document.getElementById("e-social").value,duration_months:+document.getElementById("e-duration").value,region:document.getElementById("e-country").value};
-  fetch("/evaluate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(j){
+  fetch("/api/v1/evaluate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(j){
     document.getElementById("eval-result").style.display="block";
     document.getElementById("eval-header").textContent=d.name+" — ESG "+j.total_score+", Risk "+j.risk_level+", Success "+j.success_probability+"%";
     document.getElementById("scoreNum").textContent=j.total_score;
@@ -70,7 +70,7 @@ function drawScoreRing(score){
 }
 
 function loadEvalHistory(){
-  fetch("/history").then(function(r){return r.json()}).then(function(rows){
+  fetch("/api/v1/history").then(function(r){return r.json()}).then(function(rows){
     var tb=document.getElementById("evalHistBody");if(!tb)return;
     var html="";
     rows.slice(0,10).forEach(function(r){
@@ -129,7 +129,7 @@ window.whatIf=function(){
 };
 
 function loadDashboard(){
-  fetch("/history").then(function(r){return r.json()}).then(function(rows){
+  fetch("/api/v1/history").then(function(r){return r.json()}).then(function(rows){
     var total=rows.length;
     var avgEsg=total>0?(rows.reduce(function(s,r){return s+r.total_score},0)/total).toFixed(1):0;
     var avgProb=total>0?(rows.reduce(function(s,r){return s+r.success_probability},0)/total).toFixed(1):0;
@@ -172,7 +172,7 @@ function initMap(){
   var el=document.getElementById("map");if(!el)return;
   leafletMap=L.map("map",{attributionControl:false,minZoom:2,maxBounds:[[-85,-180],[85,180]]}).setView([20,10],2);
   L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",{attribution:""}).addTo(leafletMap);
-  fetch("/history").then(function(r){return r.json()}).then(function(rows){
+  fetch("/api/v1/history").then(function(r){return r.json()}).then(function(rows){
     var regions={};
     rows.forEach(function(r){
       var lat=r.lat||50,lon=r.lon||10,reg=r.region||"Europe";
@@ -194,7 +194,7 @@ window.compareProjects=function(){
     projects.push({name:inps[0].value,budget:+inps[1].value,co2_reduction:+inps[2].value,social_impact:+inps[3].value,duration_months:+inps[4].value,region:inps[5]?inps[5].value:"Germany"});
   });
   Promise.all(projects.map(function(p){
-    return fetch("/evaluate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)}).then(function(r){return r.json()});
+    return fetch("/api/v1/evaluate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)}).then(function(r){return r.json()});
   })).then(function(results){
     var winner=results.reduce(function(best,r,i){return r.total_score>best.score?{score:r.total_score,idx:i}:best},{score:0,idx:0});
     var html="<div class='card' style='text-align:center;background:rgba(0,229,160,0.08);border-color:rgba(0,229,160,0.3)'><div style='color:#8892a8;font-size:12px;text-transform:uppercase'>Winner</div><div style='font-size:28px;font-weight:700;color:#00e5a0;margin:8px 0'>"+projects[winner.idx].name+"</div><div style='color:#8892a8'>ESG: "+results[winner.idx].total_score+" | Success: "+results[winner.idx].success_probability+"%</div></div>";
@@ -306,7 +306,7 @@ window.compareModels=function(){
 
 });
 
-fetch("/countries").then(function(r){return r.json()}).then(function(c){
+fetch("/api/v1/countries").then(function(r){return r.json()}).then(function(c){
   var sel=document.getElementById("e-country");if(!sel)return;
   sel.innerHTML="";
   var countries=Object.keys(c).sort();
@@ -349,7 +349,7 @@ window.compareAllModels=function(){
   }).catch(function(e){console.error("compare",e)});
 };
 
-fetch("/countries").then(function(r){return r.json()}).then(function(c){
+fetch("/api/v1/countries").then(function(r){return r.json()}).then(function(c){
   var sel=document.getElementById("e-country");if(sel){sel.innerHTML="";
   Object.keys(c).sort().forEach(function(n){var o=document.createElement("option");o.value=n;o.textContent=n;if(n==="Germany")o.selected=true;sel.appendChild(o)})}
 });

@@ -13,8 +13,8 @@ def test_calibration_predict():
     assert r.status_code in (200, 404, 422, 500)
 
 def test_calibration_history():
-    r = client.get("/calibration/history")
-    if r.status_code == 404: r = client.get("/analytics/calibration/history")
+    r = client.get("/api/v1/calibration/history")
+    if r.status_code == 404: r = client.get("/api/v1/analytics/calibration/history")
     assert r.status_code in (200, 404)
 
 def test_calibration_compare():

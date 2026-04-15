@@ -15,7 +15,7 @@ def _clear_overrides():
 ADMIN = {"username": "admin", "password": "sora2026"}
 
 def _token(c):
-    r = c.post("/auth/login", json=ADMIN)
+    r = c.post("/api/v1/auth/login", json=ADMIN)
     assert r.status_code == 200, f"Login fail: {r.status_code} {r.text[:200]}"
     return r.json()
 
@@ -131,27 +131,27 @@ class TestAuthRoutesDirect:
 class TestAuthHTTP:
     def test_me(self):
         c = TestClient(app, raise_server_exceptions=False)
-        r = c.get("/auth/me", headers=_auth(c))
+        r = c.get("/api/v1/auth/me", headers=_auth(c))
         assert r.status_code == 200
 
     def test_admin_stats(self):
         c = TestClient(app, raise_server_exceptions=False)
-        r = c.get("/admin/stats", headers=_auth(c))
+        r = c.get("/api/v1/admin/stats", headers=_auth(c))
         assert r.status_code in (200, 403)
 
     def test_verify_key(self):
         c = TestClient(app, raise_server_exceptions=False)
-        r = c.get("/auth/verify", headers=_auth(c))
+        r = c.get("/api/v1/auth/verify", headers=_auth(c))
         assert r.status_code in (200, 403)
 
     def test_audit_log_filter(self):
         c = TestClient(app, raise_server_exceptions=False)
-        r = c.get("/audit/log?limit=5&user=admin", headers=_auth(c))
+        r = c.get("/api/v1/audit/log?limit=5&user=admin", headers=_auth(c))
         assert r.status_code == 200
 
     def test_list_users(self):
         c = TestClient(app, raise_server_exceptions=False)
-        r = c.get("/admin/users", headers=_auth(c))
+        r = c.get("/api/v1/admin/users", headers=_auth(c))
         assert r.status_code == 200
 
 
@@ -160,12 +160,12 @@ class TestAuthHTTP:
 class TestCalibration:
     def test_reliability_diagram(self):
         c = TestClient(app, raise_server_exceptions=False)
-        r = c.get("/model/reliability-diagram", headers=_auth(c))
+        r = c.get("/api/v1/model/reliability-diagram", headers=_auth(c))
         assert r.status_code in (200, 404, 500)
 
     def test_predict_uncertainty(self):
         c = TestClient(app, raise_server_exceptions=False)
-        r = c.post("/predict/uncertainty",
+        r = c.post("/api/v1/predict/uncertainty",
             json={"budget": 50000, "co2_reduction": 30,
                   "social_impact": 7, "duration_months": 18},
             headers=_auth(c))
@@ -182,7 +182,7 @@ class TestCalibration:
 class TestABComparison:
     def test_ab_comparison_json(self):
         c = TestClient(app, raise_server_exceptions=False)
-        r = c.get("/model/ab-comparison", headers=_auth(c))
+        r = c.get("/api/v1/model/ab-comparison", headers=_auth(c))
         assert r.status_code in (200, 404, 500)
         if r.status_code == 200:
             d = r.json()
@@ -191,7 +191,7 @@ class TestABComparison:
 
     def test_ab_comparison_plot(self):
         c = TestClient(app, raise_server_exceptions=False)
-        r = c.get("/model/ab-comparison/plot", headers=_auth(c))
+        r = c.get("/api/v1/model/ab-comparison/plot", headers=_auth(c))
         assert r.status_code in (200, 404, 500)
 
 

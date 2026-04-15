@@ -1,0 +1,1 @@
+chromadb>=0.5.0\nclick>=8.0\nrich>=13.0\n

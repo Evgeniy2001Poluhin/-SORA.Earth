@@ -6,7 +6,7 @@ client = TestClient(app)
 
 
 def test_country_benchmark_known():
-    resp = client.get("/analytics/country-benchmark/Germany")
+    resp = client.get("/api/v1/analytics/country-benchmark/Germany")
     assert resp.status_code == 200
     data = resp.json()
     assert data["country"] == "Germany"
@@ -15,14 +15,14 @@ def test_country_benchmark_known():
 
 
 def test_country_benchmark_unknown():
-    resp = client.get("/analytics/country-benchmark/Atlantis")
+    resp = client.get("/api/v1/analytics/country-benchmark/Atlantis")
     assert resp.status_code == 200
     data = resp.json()
     assert data["benchmarks"]["co2_per_capita"] == 4.7
 
 
 def test_country_ranking():
-    resp = client.get("/analytics/country-ranking")
+    resp = client.get("/api/v1/analytics/country-ranking")
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert len(data) == 20
@@ -39,6 +39,6 @@ def test_pdf_report():
         "social_impact": 7.5,
         "duration_months": 12
     }
-    resp = client.post("/report/pdf", json=payload)
+    resp = client.post("/api/v1/report/pdf", json=payload)
     assert resp.status_code == 200
     assert len(resp.content) > 100

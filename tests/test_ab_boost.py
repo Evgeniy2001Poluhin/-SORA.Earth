@@ -11,19 +11,19 @@ PROJECT = {
 }
 
 def test_ab_predict():
-    r = client.post("/ab/predict", json=PROJECT)
+    r = client.post("/api/v1/ab/predict", json=PROJECT)
     assert r.status_code in [200, 422, 500]
     if r.status_code == 200:
         assert isinstance(r.json(), dict)
 
 def test_ab_stats():
-    r = client.get("/ab/stats")
+    r = client.get("/api/v1/ab/stats")
     assert r.status_code in [200, 404]
     if r.status_code == 200:
         assert isinstance(r.json(), dict)
 
 def test_ab_split():
-    r = client.post("/ab/split", json=PROJECT)
+    r = client.post("/api/v1/ab/split", json=PROJECT)
     assert r.status_code in [200, 422, 500]
     if r.status_code == 200:
         assert isinstance(r.json(), dict)

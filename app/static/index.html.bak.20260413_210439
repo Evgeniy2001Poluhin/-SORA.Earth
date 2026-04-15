@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SORA.Earth — ESG Evaluator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #0b1020; color: #f5f5f5; }
+    header { padding: 16px 24px; background: #12182b; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #222a3d; }
+    .logo { font-weight: 600; letter-spacing: 0.04em; }
+    .tag { font-size: 12px; opacity: 0.7; }
+    main { max-width: 1100px; margin: 24px auto 40px; padding: 0 16px; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 24px; }
+    h1 { margin: 0 0 8px; font-size: 24px; }
+    h2 { margin: 24px 0 8px; font-size: 18px; }
+    h3 { margin: 16px 0 8px; font-size: 16px; }
+    .card { background: #151b30; border-radius: 8px; padding: 16px 18px; border: 1px solid #222a3d; }
+    label { display: ock; margin: 8px 0 4px; font-size: 13px; }
+    input, select, textarea { width: 100%; box-sizing: border-box; padding: 7px 9px; border-radius: 4px; border: 1px solid #2b3550; background: #0f1424; color: #f5f5f5; font-size: 13px; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: #3c84ff; }
+    button { cursor: pointer; padding: 8px 14px; border-radius: 4px; border: none; background: #3c84ff; color: #fff; font-weight: 500; font-size: 13px; }
+    button:disabled { opacity: 0.6; cursor: default; }
+    .row { display: flex; gap: 10px; }
+    .row > div { flex: 1; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background: #1e253a; margin-right: 4px; }
+    .pill.low { background: #145c32; }
+    .pill.medium { background: #805a13; }
+    .pill.high { background: #7a1c1c; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; }
+    pre { margin: 8px 0 0; padding: 8px; border-radius: 4px; background: #0f1424; overflow: auto; }
+    .small { font-size: 12px; opacity: 0.8; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
+    .metric { background: #11172a; border-radius: 6px; padding: 8px 10px; border: 1px solid #222a3d; }
+    .metric-label { font-size: 11px; opacity: 0.75; margin-bottom: 2px; }
+    .metric-value { font-size: 14px; font-weight: 500; }
+    .muted { opacity: 0.7; font-size: 11px; }
+    @media (max-width: 900px) {
+      main { grid-template-columns: minmax(0, 1fr); }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <div class="logo">SORA.Earth ESG Platform</div>
+    <div class="tag">AI‑assisted ESG evaluation & analytics</div>
+  </div>
+  <div class="small mono">/health · /metrics · /batch</div>
+</header>
+
+<main>
+  <section>
+    <div class="card">
+      <h1>Evaluate a project</h1>
+      <p class="small">Fill in the parameters and send them to <span class="mono">POST /evaluatean>.</p>
+
+      <form id="eval-form">
+        <label>Project name</label>
+        <input name="name" placeholder="Solar Farm Alpha" required />
+
+        <div class="row">
+          <div>
+            <label>Budget (USD)</label>
+            <input name="budget" type="number" step="1" min="0" value="100000" required />
+          </div>
+          <div>
+            <label>Duration (months)</label>
+            <input name="duration_months" type="number" step="1" min="1" value="24" required />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>CO₂ reduction (tons/year)</label>
+            <input name="co2_reduction" type="number" step="1" min="0" value="60" required />
+          </div>
+          <div>
+            <label>Social impact (0–10)</label>
+            <input name="social_impact" type="number" step="1" min="0" max="10" value="8" required />
+          </div>
+        </div>
+
+        <label>Region / Country</label>
+        <input name="region" placeholder="Germany" />
+
+    <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
+          <button type="submit" id="eval-btn">Evaluate ESG</button>
+          <span id="eval-status" class="small muted"></span>
+        </div>
+      </form>
+    </div>
+
+    <div class="card" style="margin-top: 16px;">
+      <h2>Result</h2>
+      <div id="result-empty" class="small muted">No evaluation yet. Submit the form to see ESG scores.</div>
+      <div id="result-view" style="display:none;">
+        <div style="margin-bottom: 8px;">
+          <span class="pill" id="risk-pill">Risk: –</span>
+          <span class="pill" id="prob-pill">Success: <span id="prob-val">–</span>%</span>
+        </div>
+        <div class="row">
+          <div>
+            <div class="metric">
+              <div class="metric-label">Total ESG score</div>
+              <div class="metric-value" id="score-total">–</div>
+            </div>
+          </div>
+          <div>
+            <div class="metric">
+              <div class="metric-label">Envit / Social / Economic</div>
+              <div class="metric-value" id="score-breakdown">–</div>
+            </div>
+          </div>
+        </div>
+
+        <h3>Recommendations</h3>
+        <ul id="recs-list" class="small"></ul>
+
+        <h3 style="margin-top: 16px;">Raw response</h3>
+        <pre class="mono" id="raw-json"></pre>
+      </div>
+    </div>
+  </section>
+
+  <aside>
+    <div class="card">
+      <h2>Live metrics</h2>
+      <p class="small">Values from <span class="mono">GET /metrics</span>, updated every 10 seconds.</p>
+      <div class="metrics-grid">
+        <div class="metric">
+          <div class="metric-label">HTTP requests total</div>
+          <div class="metric-value" id="m-requests">–</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Errors total</div>
+          <div class="metric-value" id="m-errors">–</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Uptime (s)</div>
+          <div class="metric-value" id="m-uptime">–</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Avg req duration (ms)</div>
+          <div class="metric-value" id="m-rt">–</div>
+        </div>
+      </div>
+      <div class="muted" style="margin-top: 8px;" id="metrics-status"></div>
+    </div>
+
+    <div class="card" style="margin-top: 16px;">
+      <h2>Batch evaluation</h2>
+      <p class="small">Use <span class="mono">POST /batch/evaluate</span> with JSON array of projects (see example below).</p>
+      <pre class="mono small">
+curl -X POST http://localhost:8000/batch/evaluate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "projects": [
+      {"name": "Solar A", "budget": 100000, "co2_reduction": 60,
+       "social_impact": 8, "duration_months": 24, "region": "Germany"}
+    ]
+  }'</pre>
+    </div>
+  </aside>
+</main>
+
+<script>
+  async function evaluateProject(event) {
+  event.preventDefault();
+  const form = event.target;
+  const btn = document.getElementById("eval-btn");
+  const statusEl = document.getElementById("eval-status");
+  const payload = {
+    name: form.name.value || "Untitled project",
+    budget: Number(form.budget.value),
+    co2_reduction: Number(form.co2_reduction.value),
+    social_impact: Number(form.social_impact.value),
+    duration_months: Number(form.duration_months.value),
+    region: form.region.value || null
+  };
+
+  btn.disabled = true;
+  statusEl.textContent = "Sending request…";
+
+  try {
+    const res = await fetch("/evaluate", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "Request failed");
+    }
+    renderResult(data);
+    statusEl.textContent = "OK";
+  } catch (err) {
+    statusEl.textContent = "Error: " + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderResult(data) {
+  document.getElementById("result-empty").style.display = "none";
+  document.getElementById("result-view").style.display = "block";
+
+  document.getElementById("score-total").textContent =
+    data.total_score !== undefined ? data.total_score.toFixed(2) : "–";
+
+  if (data.environment_score !== undefined && data.social_score !== undefined && data.economic_score !== undefined) {
+    document.getElementById("score-breakdown").textContent =
+      `${data.environment_score.toFixed(1)} / ${data.social_score.toFixed(1)} / ${data.economic_score.toFixed(1)}`;
+  } else {
+    document.getElementById("score-breakdown").textContent = "–";
+  }
+
+  const prob = data.success_probability !== undefined ? (data.success_probability * 100).toFixed(1) : null;
+  document.getElementById("prob-val").textContent = prob !== null ? prob : "–";
+
+  const risk = (data.risk_level || "").toLowerCase();
+  const pill = document.getElementById("risk-pill");
+  pill.textContent = data.risk_level ? `Risk: ${data.risk_level}` : "Risk: –";
+  pill.classList.remove("low", "medium", "high");
+  if (risk === "low") pill.classList.add("low");
+  else if (risk === "medium") pill.classList.add("medium");
+  else if (risk === "high") pill.classList.add("high");
+
+  const recsUl = document.getElementById("recs-list");
+  recsUl.innerHTML = "";
+  if (Array.isArray(data.recommendations)) {
+    data.recommendations.forEach((r) => {
+      const li = document.createElement("li");
+      li.textContent = r;
+      recsUl.appendChild(li);
+    });
+  } else if (typeof data.recommendations === "string") {
+    const li = document.createElement("li");
+    li.textContent = data.recommendations;
+    recsUl.appendChild(li);
+  }
+
+  document.getElementById("raw-json").textContent = JSON.stringify(data, null, 2);
+}
+
+async function fetchMetrics() {
+  const statusEl = document.getElementById("metrics-status");
+  try {
+    const res = await fetch("/metrics");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    const counters = data.counters || {};
+    document.getElementById("m-requests").textContent = counters.http_requests_total ?? "0";
+    const errors = (Number(counters.http_400 || 0) + Number(counters.http_500 || 0)) || (counters.errors_total ?? 0);
+    document.getElementById("m-errors").textContent = errors;
+    document.getElementById("m-uptime").textContent = data.uptime_seconds ?? "–";
+    document.getElementById("m-rt").textContent = data.request_duration_avg_ms ?? "–";
+    statusEl.textContent = "";
+  } catch (err) {
+    statusEl.textContent = "Failed to load metrics: " + err.message;
+  }
+}
+
+document.getElementById("eval-form").addEventListener("submit", evaluateProject);
+fetchMetrics();
+setInterval(fetchMetrics, 10000);
+
+function initFromQueryString() {
+  const params = new URLSearchParams(window.location.search);
+  if ([...params.keys()].length === 0) return;
+
+  const form = document.getElementById("eval-form");
+  if (!form) return;
+
+  const map = {
+    name: "name",
+    budget: "budget",
+    duration_months: "duration_months",
+    co2_reduction: "co2_reduction",
+    social_impact: "social_impact",
+    region: "region",
+  };
+
+  let hasAny = false;
+
+  Object.entries(map).forEach(([queryKey, fieldName]) => {
+    const val = params.get(queryKey);
+    if (val !== null && form[fieldName]) {
+      form[fieldName].value = val;
+      hasAny = true;
+    }
+  });
+
+  if (hasAny) {
+    evaluateProject(new Event("submit", { cancelable: true, bubbles: true }));
+  }
+}
+
+initFromQueryString();
+</script>
+</body>
+</html>

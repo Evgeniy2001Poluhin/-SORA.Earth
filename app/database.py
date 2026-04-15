@@ -74,6 +74,10 @@ class DataRefreshLog(Base):
     countries_fetched = Column(Integer, default=0)
     total_countries = Column(Integer, default=0)
     message = Column(Text, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    duration_sec = Column(Float, nullable=True)
+    trigger_source = Column(String(50), nullable=True, default="manual")
 
 
 class CountryIndicatorHistory(Base):
@@ -109,7 +113,7 @@ class RetrainLog(Base):
 
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=engine, checkfirst=True)
 
 
 def get_db():

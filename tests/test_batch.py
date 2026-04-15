@@ -11,7 +11,7 @@ SAMPLE_PROJECTS = [
 
 
 def test_batch_evaluate():
-    resp = client.post("/batch/evaluate", json={"projects": SAMPLE_PROJECTS})
+    resp = client.post("/api/v1/batch/evaluate", json={"projects": SAMPLE_PROJECTS})
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 3
@@ -23,7 +23,7 @@ def test_batch_evaluate():
 
 def test_batch_with_invalid():
     projects = SAMPLE_PROJECTS + [{"name": "Bad", "budget": -100, "co2_reduction": 0, "social_impact": 0, "duration_months": 0}]
-    resp = client.post("/batch/evaluate", json={"projects": projects})
+    resp = client.post("/api/v1/batch/evaluate", json={"projects": projects})
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 4
@@ -31,32 +31,32 @@ def test_batch_with_invalid():
 
 
 def test_batch_get_by_id():
-    resp = client.post("/batch/evaluate", json={"projects": SAMPLE_PROJECTS[:1]})
+    resp = client.post("/api/v1/batch/evaluate", json={"projects": SAMPLE_PROJECTS[:1]})
     batch_id = resp.json()["batch_id"]
-    resp2 = client.get(f"/batch/{batch_id}")
+    resp2 = client.get(f"/api/v1/batch/{batch_id}")
     assert resp2.status_code == 200
     assert resp2.json()["batch_id"] == batch_id
 
 
 def test_batch_not_found():
-    resp = client.get("/batch/nonexistent")
+    resp = client.get("/api/v1/batch/nonexistent")
     assert resp.status_code == 404
 
 
 def test_list_batches():
-    resp = client.get("/batch")
+    resp = client.get("/api/v1/batch")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
 
 def test_ws_status():
-    resp = client.get("/ws/status")
+    resp = client.get("/api/v1/ws/status")
     assert resp.status_code == 200
     assert "active_connections" in resp.json()
 
 
 def test_websocket_connect():
-    with client.websocket_connect("/ws/live?token=demo-key-2026") as ws:
+    with client.websocket_connect("/api/v1/ws/live?token=demo-key-2026") as ws:
         ws.send_text("hello")
         data = ws.receive_json()
         assert data["echo"] == "hello"
@@ -64,7 +64,7 @@ def test_websocket_connect():
 
 
 def test_batch_processing_time():
-    resp = client.post("/batch/evaluate", json={"projects": SAMPLE_PROJECTS})
+    resp = client.post("/api/v1/batch/evaluate", json={"projects": SAMPLE_PROJECTS})
     data = resp.json()
     assert data["processing_time_ms"] > 0
     assert data["processing_time_ms"] < 10000

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from app.auth import require_admin
 from fastapi.responses import PlainTextResponse
 
 from app.batch import BatchRequest, batch_history, generate_batch_id
@@ -283,6 +284,76 @@ def data_refresh_status():
     finally:
         db.close()
 
+
+@router.post("/mlops/auto-retrain", tags=["Infrastructure"])
+def auto_retrain_on_drift(
+    window: int = 50,
+    min_samples: int = 50,
+    force: bool = False,
+    current_user=Depends(require_admin),
+):
+    """
+    Closed-loop helper:
+    1) check drift
+    2) if drift detected (or force=true) -> run synchronous retrain
+    3) return unified orchestration result
+    """
+    from app.api.drift import check_drift as drift_check
+    from app.api.retrain import _do_retrain
+
+    drift = drift_check(window=window)
+
+    drift_detected = bool(drift.get("drift_detected", False))
+    should_retrain = force or drift_detected
+
+    if not should_retrain:
+        return {
+            "status": "ok",
+            "drift_detected": False,
+            "drift_result": drift,
+            "retrained": False,
+            "reason": "drift_not_detected",
+        }
+
+    # capture old AUC before retrain
+    from app.api.retrain import _get_current_metrics
+    old_metrics = _get_current_metrics()
+    old_auc = old_metrics.get("auc_roc") or old_metrics.get("roc_auc")
+
+    retrain_result = _do_retrain(min_samples=min_samples, trigger_source="mlops_auto")
+    new_metrics = retrain_result.get("metrics", {}) if isinstance(retrain_result, dict) else {}
+    new_auc = new_metrics.get("auc_roc") or new_metrics.get("roc_auc")
+
+    # validate: reject if AUC dropped > 2%
+    promoted = True
+    reject_reason = None
+    if old_auc is not None and new_auc is not None:
+        auc_delta = float(new_auc) - float(old_auc)
+        if auc_delta < -0.02:
+            promoted = False
+            reject_reason = "AUC degraded: %.4f -> %.4f (delta=%+.4f)" % (float(old_auc), float(new_auc), auc_delta)
+
+    return {
+        "status": "ok",
+        "drift_detected": drift_detected,
+        "drift_result": drift,
+        "retrained": True,
+        "forced": force,
+        "promoted": promoted,
+        "old_auc": float(old_auc) if old_auc else None,
+        "new_auc": float(new_auc) if new_auc else None,
+        "reject_reason": reject_reason,
+        "retrain_result": retrain_result,
+    }
+
+
+@router.post("/mlops/full-pipeline", tags=["Infrastructure"])
+def run_full_pipeline(current_user=Depends(require_admin)):
+    """Full MLOps pipeline: refresh → drift → retrain → AUC validate → promote/reject."""
+    from app.scheduler import full_pipeline_run
+    return full_pipeline_run(trigger_source="api_full_pipeline")
+
+
 @router.post("/infra/data-refresh/run", tags=["Infrastructure"])
 def data_refresh_run():
     """
@@ -294,7 +365,7 @@ def data_refresh_run():
 
     db = SessionLocal()
     try:
-        result = refresh_live_data() or {}
+        result = refresh_live_data(trigger_source="manual") or {}
         fetched = int(result.get("fetched") or 0)
         total = int(result.get("total") or 0)
 

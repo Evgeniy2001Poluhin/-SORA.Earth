@@ -38,3 +38,11 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if 'integration' in item.keywords:
             item.add_marker(skip_mark)
+
+import os
+import pytest
+
+@pytest.fixture
+def admin_token_headers(monkeypatch):
+    monkeypatch.setenv("SORA_ADMIN_TOKEN", "test-admin-token")
+    return {"X-API-Key": "test-admin-token"}

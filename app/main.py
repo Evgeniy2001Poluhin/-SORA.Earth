@@ -190,8 +190,7 @@ explainer_shap = shap.TreeExplainer(rf_model)
 # ===== SHARED FUNCTIONS =====
 FEATURE_COLS = ["budget", "co2_reduction", "social_impact", "duration_months", "budget_per_month", "co2_per_dollar", "efficiency_score", "year", "quarter"]
 
-FEATURE_COLS_BASE = ["budget", "co2_reduction", "social_impact", "duration_months",
-                     "budget_per_month", "co2_per_dollar", "efficiency_score", "year", "quarter"]
+FEATURE_COLS_BASE = ["budget", "co2_reduction", "social_impact", "duration_months", "budget_per_month", "co2_per_dollar", "impact_per_month"]
 
 def log_evaluation(project_name, esg_scores, risk_level):
     try:
@@ -202,23 +201,59 @@ def log_evaluation(project_name, esg_scores, risk_level):
 
 
 def make_features(data):
+    """Returns 9-feature DataFrame consistent with retrain feature_cols."""
+    from datetime import datetime as _dt
+
     budget_per_month = data.budget / max(data.duration_months, 1)
     co2_per_dollar = data.co2_reduction / max(data.budget, 1) * 1000
     efficiency_score = (data.co2_reduction * data.social_impact) / max(data.duration_months, 1)
-    df = pd.DataFrame(
-        [[data.budget, data.co2_reduction, data.social_impact, data.duration_months,
-          budget_per_month, co2_per_dollar, efficiency_score,
-          __import__("datetime").datetime.utcnow().year,
-          (__import__("datetime").datetime.utcnow().month - 1) // 3 + 1]],
-        columns=FEATURE_COLS,
-    )
-    return pd.DataFrame(scaler.transform(df), columns=FEATURE_COLS)
+    year = _dt.utcnow().year
+    quarter = (_dt.utcnow().month - 1) // 3 + 1
 
+    df9 = pd.DataFrame(
+        [[
+            data.budget,
+            data.co2_reduction,
+            data.social_impact,
+            data.duration_months,
+            budget_per_month,
+            co2_per_dollar,
+            efficiency_score,
+            year,
+            quarter,
+        ]],
+        columns=[
+            "budget",
+            "co2_reduction",
+            "social_impact",
+            "duration_months",
+            "budget_per_month",
+            "co2_per_dollar",
+            "efficiency_score",
+            "year",
+            "quarter",
+        ],
+    )
+
+    scaled = pd.DataFrame(scaler.transform(df9), columns=df9.columns)
+    return scaled[FEATURE_COLS]
+
+def make_features_xgb(data):
+    """7-feature unscaled DataFrame for legacy XGBoost."""
+    budget_per_month = data.budget / max(data.duration_months, 1)
+    co2_per_dollar = data.co2_reduction / max(data.budget, 1) * 1000
+    impact_per_month = data.social_impact / max(data.duration_months, 1)
+    return pd.DataFrame(
+        [[data.budget, data.co2_reduction, data.social_impact,
+          data.duration_months, budget_per_month, co2_per_dollar,
+          impact_per_month]],
+        columns=FEATURE_COLS_BASE,
+    )
 
 def make_features_base(data):
-    """Returns 7-feature scaled DataFrame for RF/XGB/Ensemble (original training schema)."""
-    feats_full = make_features(data)
-    return feats_full[FEATURE_COLS_BASE]
+    """Alias for make_features (9 features)."""
+    return make_features(data)
+
 def make_features_v2(data, category: str = "Solar Energy", region: str = "Europe"):
     if scaler_v2 is None:
         return make_features(data)
@@ -341,6 +376,10 @@ from app.api import retrain as retrain_api
 from app.api import drift as drift_api
 from app.api import compare as compare_api
 from app.api import ab_test as ab_api
+from app.api import admin_snapshot
+from app.api import admin_timeline
+from app.api import admin_diagnostics
+from app.api import admin_ai_control
 
 _all_routers = [
     auth_api.router, evaluate_api.router, predict_api.router,
@@ -358,12 +397,17 @@ for _r in _all_routers:
 from app.auth_routes import router as auth_router
 api_v1.include_router(auth_router)
 api_v1.include_router(admin_retrain_log.router)
+api_v1.include_router(admin_snapshot.router)
+api_v1.include_router(admin_timeline.router)
+api_v1.include_router(admin_diagnostics.router)
+api_v1.include_router(admin_ai_control.router)
 app.include_router(api_v1)
 
 # Backward compatibility: original paths (no prefix)
-for _r in _all_routers:
-    app.include_router(_r)
-app.include_router(auth_router)
+# DISABLED to avoid duplicate route registration / duplicate OpenAPI operation IDs
+# for _r in _all_routers:
+#     app.include_router(_r)
+# app.include_router(auth_router)
 
 
 # Prometheus

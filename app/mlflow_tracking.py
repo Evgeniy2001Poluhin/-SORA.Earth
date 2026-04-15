@@ -137,10 +137,18 @@ def get_experiment_stats():
         if not experiment:
             return {"status": "no experiment found"}
         runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], max_results=100)
-        return {
+        result = {
             "experiment": EXPERIMENT_NAME,
             "total_runs": len(runs),
             "tracking_uri": MLFLOW_TRACKING_URI,
         }
+        if not runs.empty:
+            for key in ["rf_cv_auc", "xgb_cv_auc", "ensemble_cv_auc"]:
+                col = f"metrics.{key}"
+                if col in runs.columns:
+                    vals = runs[col].dropna()
+                    if not vals.empty:
+                        result[key] = round(float(vals.iloc[0]), 4)
+        return result
     except Exception as e:
         return {"status": "error", "detail": str(e)}

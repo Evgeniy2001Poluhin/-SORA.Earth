@@ -181,7 +181,7 @@ curl -X POST http://localhost:8000/batch/evaluate \
   statusEl.textContent = "Sending request…";
 
   try {
-    const res = await fetch("/evaluate", {
+    const res = await fetch("/api/v1/evaluate", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payload)

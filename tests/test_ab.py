@@ -15,11 +15,11 @@ SAMPLE = {
 }
 
 def test_ab_predict_status():
-    r = client.post('/ab/predict', json=SAMPLE)
+    r = client.post('/api/v1/ab/predict', json=SAMPLE)
     assert r.status_code == 200
 
 def test_ab_predict_schema():
-    r = client.post('/ab/predict', json=SAMPLE)
+    r = client.post('/api/v1/ab/predict', json=SAMPLE)
     body = r.json()
     assert 'model' in body
     assert 'probability' in body
@@ -27,16 +27,16 @@ def test_ab_predict_schema():
     assert 'latency_ms' in body
 
 def test_ab_predict_probability_calibrated():
-    r = client.post('/ab/predict', json=SAMPLE)
+    r = client.post('/api/v1/ab/predict', json=SAMPLE)
     prob = r.json()['probability']
     assert 0.0 < prob < 0.98, 'Probability looks uncalibrated: ' + str(prob)
 
 def test_ab_predict_prediction_values():
-    r = client.post('/ab/predict', json=SAMPLE)
+    r = client.post('/api/v1/ab/predict', json=SAMPLE)
     assert r.json()['prediction'] in ('approved', 'rejected')
 
 def test_ab_predict_low_budget():
-    r = client.post('/ab/predict', json={
+    r = client.post('/api/v1/ab/predict', json={
         'budget': 100,
         'co2_reduction': 0,
         'social_impact': 0,
@@ -46,24 +46,24 @@ def test_ab_predict_low_budget():
     assert r.json()['probability'] < 0.7
 
 def test_ab_predict_missing_field():
-    r = client.post('/ab/predict', json={'budget': 75000})
+    r = client.post('/api/v1/ab/predict', json={'budget': 75000})
     assert r.status_code == 422
 
 def test_ab_stats_status():
-    r = client.get('/ab/stats')
+    r = client.get('/api/v1/ab/stats')
     assert r.status_code == 200
 
 def test_health_status():
-    r = client.get('/health')
+    r = client.get('/api/v1/health')
     assert r.status_code == 200
 
 def test_health_all_checks():
-    body = client.get('/health').json()
+    body = client.get('/api/v1/health').json()
     assert body['status'] == 'healthy'
     checks = body.get('checks', {})
     assert checks.get('models', {}).get('status') == 'healthy'
     assert checks.get('database', {}).get('status') == 'healthy'
 
 def test_health_models_loaded():
-    body = client.get('/health').json()
+    body = client.get('/api/v1/health').json()
     assert body['checks']['models']['loaded'] is True
