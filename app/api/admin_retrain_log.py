@@ -1,5 +1,6 @@
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -66,3 +67,49 @@ def list_retrain_log(
         .all()
     )
     return RetrainLogPage(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/timeline")
+def admin_timeline(
+    hours: int = Query(48, ge=1, le=24 * 30),
+    limit: int = Query(50, ge=1, le=200),
+    db=Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    since = datetime.utcnow() - timedelta(hours=hours)
+
+    rows = (
+        db.query(RetrainLog)
+        .filter(RetrainLog.started_at >= since)
+        .order_by(RetrainLog.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    events = []
+    for r in rows:
+        metrics = None
+        try:
+            metrics = json.loads(r.metrics_json) if r.metrics_json else None
+        except Exception:
+            metrics = None
+
+        events.append({
+            "type": "retrain",
+            "timestamp": r.started_at.isoformat() if r.started_at else None,
+            "status": r.status,
+            "trigger_source": r.trigger_source,
+            "job_name": r.job_name,
+            "duration_sec": r.duration_sec,
+            "model_version": r.model_version,
+            "data_version": r.data_version,
+            "message": r.message,
+            "error_message": r.error_message,
+            "metrics": metrics,
+        })
+
+    return {
+        "events": events,
+        "count": len(events),
+        "hours": hours,
+    }

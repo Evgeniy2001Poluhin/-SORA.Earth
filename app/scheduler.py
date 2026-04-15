@@ -398,6 +398,15 @@ def init_scheduler():
         replace_existing=True,
     )
 
+    scheduler.add_job(
+        full_pipeline_run,
+        CronTrigger(day_of_week="sun", hour=3, minute=30),
+        kwargs={"trigger_source": "auto_full_pipeline_weekly"},
+        id="auto_full_pipeline_weekly",
+        name="Weekly full pipeline: refresh -> drift -> retrain -> validate at Sun 03:30 UTC",
+        replace_existing=True,
+    )
+
     scheduler.start()
     logger.info(
         "Scheduler started with %d jobs: %s",
