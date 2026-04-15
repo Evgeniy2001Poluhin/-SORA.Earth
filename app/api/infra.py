@@ -333,6 +333,43 @@ def auto_retrain_on_drift(
             promoted = False
             reject_reason = "AUC degraded: %.4f -> %.4f (delta=%+.4f)" % (float(old_auc), float(new_auc), auc_delta)
 
+    try:
+        from app.database import SessionLocal, RetrainLog
+        from sqlalchemy import desc
+        import json
+
+        db = SessionLocal()
+        try:
+            row = (
+                db.query(RetrainLog)
+                .filter(RetrainLog.trigger_source == "mlops_auto")
+                .order_by(desc(RetrainLog.id))
+                .first()
+            )
+            if row:
+                existing = {}
+                try:
+                    existing = json.loads(row.metrics_json) if row.metrics_json else {}
+                except Exception:
+                    existing = {}
+                existing.update({
+                    "old_auc": float(old_auc) if old_auc is not None else None,
+                    "new_auc": float(new_auc) if new_auc is not None else None,
+                    "promoted": promoted,
+                    "reject_reason": reject_reason,
+                    "auc": float(new_auc) if new_auc is not None else existing.get("auc"),
+                })
+                row.metrics_json = json.dumps(existing, ensure_ascii=False)
+                if promoted:
+                    row.status = "promoted"
+                else:
+                    row.status = "rejected"
+                db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass
+
     return {
         "status": "ok",
         "drift_detected": drift_detected,
