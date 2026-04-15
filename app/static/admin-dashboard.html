@@ -1,306 +1,270 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>SORA.Earth Admin Dashboard</title>
   <style>
-    :root {
-      --bg: #0b1020;
-      --panel: #121933;
-      --panel-2: #182142;
-      --text: #ecf1ff;
-      --muted: #9fb0d3;
-      --ok: #2ecc71;
-      --warn: #f1c40f;
-      --bad: #ff6b6b;
-      --accent: #4da3ff;
-      --border: rgba(255,255,255,0.08);
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: linear-gradient(180deg, #0a0f1d 0%, #10172d 100%);
-      color: var(--text);
-    }
-    .wrap { max-width: 1280px; margin: 0 auto; padding: 24px; }
-    h1, h2, h3, p { margin: 0; }
-    .topbar {
-      display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
-      justify-content: space-between; margin-bottom: 20px;
-    }
-    .title p { color: var(--muted); margin-top: 6px; }
-    .auth { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    input {
-      min-width: 260px; padding: 12px 14px; border-radius: 10px;
-      border: 1px solid var(--border); background: var(--panel); color: var(--text);
-    }
-    button {
-      padding: 12px 16px; border: 0; border-radius: 10px;
-      background: var(--accent); color: white; font-weight: 600; cursor: pointer;
-    }
-    .grid {
-      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 16px; margin-bottom: 16px;
-    }
-    .grid-2 {
-      display: grid; grid-template-columns: 1.2fr 1fr;
-      gap: 16px; margin-bottom: 16px;
-    }
-    .card {
-      background: rgba(18, 25, 51, 0.92);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 18px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.18);
-    }
-    .label {
-      font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
-      color: var(--muted); margin-bottom: 10px;
-    }
-    .value { font-size: 30px; font-weight: 700; }
-    .sub { margin-top: 8px; color: var(--muted); font-size: 14px; }
-    .status-ok { color: var(--ok); }
-    .status-warn { color: var(--warn); }
-    .status-bad { color: var(--bad); }
-    .models {
-      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px; margin-top: 14px;
-    }
-    .model {
-      padding: 14px; border-radius: 12px; background: var(--panel-2);
-      border: 1px solid var(--border);
-    }
-    .row {
-      display: flex; justify-content: space-between; gap: 12px;
-      padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
-    }
-    .row:last-child { border-bottom: 0; }
-    .muted { color: var(--muted); }
-    ul { margin: 14px 0 0; padding-left: 18px; }
-    li { margin-bottom: 10px; }
-    .error {
-      display: none; margin-bottom: 16px; padding: 14px 16px;
-      background: rgba(255,107,107,0.12);
-      border: 1px solid rgba(255,107,107,0.35);
-      color: #ffd5d5; border-radius: 12px;
-    }
-    .footer-note { margin-top: 8px; color: var(--muted); font-size: 13px; }
-    @media (max-width: 980px) {
-      .grid, .grid-2 { grid-template-columns: 1fr; }
-      .models { grid-template-columns: 1fr; }
-    }
+    :root{--bg:#0b1020;--panel:#121933;--panel-2:#182142;--text:#ecf1ff;--muted:#9fb0d3;--ok:#2ecc71;--warn:#f1c40f;--bad:#ff6b6b;--accent:#4da3ff;--border:rgba(255,255,255,0.08)}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,-apple-system,sans-serif;background:linear-gradient(180deg,#0a0f1d,#10172d);color:var(--text);min-height:100vh}
+    .wrap{max-width:1320px;margin:0 auto;padding:24px}
+    h1,h2,h3,p{margin:0}
+    .topbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:20px}
+    .title p{color:var(--muted);margin-top:6px}
+    .auth{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    input{min-width:120px;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--panel);color:var(--text);font-size:14px}
+    button{padding:10px 18px;border:0;border-radius:10px;background:var(--accent);color:white;font-weight:600;cursor:pointer;font-size:14px;transition:opacity .15s}
+    button:hover{opacity:.85}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .btn-sm{padding:8px 14px;font-size:13px;border-radius:8px}
+    .btn-warn{background:#e67e22}
+    .btn-ok{background:#27ae60}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px}
+    .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px}
+    .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+    .card{background:rgba(18,25,51,0.92);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:0 8px 24px rgba(0,0,0,0.15)}
+    .card-full{grid-column:1/-1}
+    .label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px}
+    .value{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}
+    .sub{margin-top:6px;color:var(--muted);font-size:13px}
+    .ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.accent{color:var(--accent)}
+    .row{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,0.05)}
+    .row:last-child{border-bottom:0}
+    .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600}
+    .badge-ok{background:rgba(46,204,113,0.15);color:var(--ok)}
+    .badge-bad{background:rgba(255,107,107,0.15);color:var(--bad)}
+    .badge-warn{background:rgba(241,196,15,0.15);color:var(--warn)}
+    .badge-accent{background:rgba(77,163,255,0.15);color:var(--accent)}
+    .error{display:none;margin-bottom:16px;padding:14px;background:rgba(255,107,107,0.12);border:1px solid rgba(255,107,107,0.35);color:#ffd5d5;border-radius:12px}
+    .actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+    .timeline-item{padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
+    .timeline-item:last-child{border-bottom:0}
+    .timeline-time{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+    .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.2);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @media(max-width:900px){.grid,.grid-3,.grid-2{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="topbar">
-      <div class="title">
-        <h1>SORA.Earth Admin Dashboard</h1>
-        <p>Operational overview for health, readiness, models, traffic and latency.</p>
-      </div>
-      <div class="auth">
-        <input id="apiKey" type="password" placeholder="X-API-Key" value="sora-admin-123" />
-        <button id="loadBtn">Load dashboard</button>
+<div class="wrap">
+  <div class="topbar">
+    <div class="title">
+      <h1>🌍 SORA.Earth Admin Dashboard</h1>
+      <p>Operational overview — health, models, data refresh, retrain, drift, scheduler</p>
+    </div>
+    <div class="auth">
+      <input id="user" type="text" placeholder="Username" value="admin"/>
+      <input id="pass" type="password" placeholder="Password" value="sora2026"/>
+      <button id="loadBtn">Load</button>
+      <button id="autoBtn" class="btn-sm">Auto-refresh: OFF</button>
+    </div>
+  </div>
+  <div id="errorBox" class="error"></div>
+  <div id="lastUpdate" class="sub" style="margin-bottom:14px"></div>
+
+  <section class="grid">
+    <div class="card"><div class="label">Platform Health</div><div id="health" class="value">—</div><div id="healthSub" class="sub"></div></div>
+    <div class="card"><div class="label">Last Refresh</div><div id="refreshStatus" class="value">—</div><div id="refreshSub" class="sub"></div></div>
+    <div class="card"><div class="label">Last Retrain</div><div id="retrainStatus" class="value">—</div><div id="retrainSub" class="sub"></div></div>
+    <div class="card"><div class="label">Drift</div><div id="driftStatus" class="value">—</div><div id="driftSub" class="sub"></div></div>
+  </section>
+
+  <section class="grid-2">
+    <div class="card">
+      <h2>Data Refresh</h2>
+      <div id="refreshDetails"></div>
+      <div class="actions">
+        <button class="btn-sm btn-warn" id="triggerRefresh">⟳ Trigger Refresh</button>
       </div>
     </div>
-
-    <div id="errorBox" class="error"></div>
-
-    <section class="grid">
-      <div class="card">
-        <div class="label">Platform status</div>
-        <div id="platformStatus" class="value">—</div>
-        <div id="platformSub" class="sub">/health</div>
+    <div class="card">
+      <h2>Retrain Log</h2>
+      <div id="retrainDetails"></div>
+      <div class="actions">
+        <button class="btn-sm btn-warn" id="triggerRetrain">⟳ Trigger Retrain</button>
       </div>
-      <div class="card">
-        <div class="label">Readiness score</div>
-        <div id="readinessScore" class="value">—</div>
-        <div id="readinessLabel" class="sub">—</div>
-      </div>
-      <div class="card">
-        <div class="label">Average latency</div>
-        <div id="avgLatency" class="value">—</div>
-        <div class="sub">Across recent production-style requests</div>
-      </div>
-      <div class="card">
-        <div class="label">Total events</div>
-        <div id="totalEvents" class="value">—</div>
-        <div id="eventsSub" class="sub">Last 24 hours</div>
-      </div>
-    </section>
+    </div>
+  </section>
 
-    <section class="grid-2">
-      <div class="card">
-        <h2>Models</h2>
-        <div class="models" id="modelsGrid"></div>
-        <div class="footer-note" id="trainingMetrics"></div>
-      </div>
+  <section class="grid-3">
+    <div class="card">
+      <h2>ML Models</h2>
+      <div id="modelDetails"></div>
+    </div>
+    <div class="card">
+      <h2>Scheduler</h2>
+      <div id="schedulerDetails"></div>
+    </div>
+    <div class="card">
+      <h2>Drift Detection</h2>
+      <div id="driftDetails"></div>
+    </div>
+  </section>
 
-      <div class="card">
-        <h2>Prediction skew</h2>
-        <div class="row"><span class="muted">Positive fraction</span><strong id="positiveFraction">—</strong></div>
-        <div class="row"><span class="muted">Negative fraction</span><strong id="negativeFraction">—</strong></div>
-        <div class="row"><span class="muted">Data quality</span><strong id="dataQuality">—</strong></div>
-        <div class="row"><span class="muted">Summary window</span><strong id="summaryWindow">—</strong></div>
-      </div>
-    </section>
+  <section class="card">
+    <h2>Recent Timeline</h2>
+    <div id="timeline" style="max-height:300px;overflow-y:auto"></div>
+  </section>
+</div>
 
-    <section class="grid-2">
-      <div class="card">
-        <h2>Traffic by endpoint</h2>
-        <div id="endpointCounts"></div>
-      </div>
-      <div class="card">
-        <h2>Latency breakdown</h2>
-        <div id="latencyBreakdown"></div>
-      </div>
-    </section>
+<script>
+const $=id=>document.getElementById(id);
+let JWT='';
+let autoTimer=null;
 
-    <section class="card">
-      <h2>Operational insights</h2>
-      <ul id="insightsList"></ul>
-    </section>
-  </div>
+function badge(text,type){return '<span class="badge badge-'+type+'">'+text+'</span>'}
+function statusBadge(s){
+  if(!s)return badge('unknown','warn');
+  const l=s.toLowerCase();
+  if(l==='success'||l==='healthy'||l==='ok')return badge(s,'ok');
+  if(l==='running'||l==='started')return badge(s,'accent');
+  if(l==='warning'||l==='degraded')return badge(s,'warn');
+  return badge(s,'bad');
+}
+function statusClass(s){
+  if(!s)return 'warn';
+  const l=s.toLowerCase();
+  if(l==='success'||l==='healthy'||l==='ok')return 'ok';
+  if(l==='running')return 'accent';
+  if(l.includes('warn')||l==='degraded')return 'warn';
+  return 'bad';
+}
+function row(label,val){return '<div class="row"><span class="muted">'+label+'</span><strong>'+(val??'—')+'</strong></div>'}
+function fmtTime(t){if(!t)return '—';try{return new Date(t).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'})}catch(e){return t}}
+function fmtSec(v){return v==null?'—':Number(v).toFixed(1)+'s'}
 
-  <script>
-    const $ = (id) => document.getElementById(id);
+async function doLogin(){
+  const r=await fetch('/api/v1/auth/login-json',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('user').value,password:$('pass').value})});
+  if(!r.ok){const e=await r.json();throw new Error(e.detail||'Login failed')}
+  const d=await r.json();
+  JWT=d.access_token;
+}
 
-    function setError(message) {
-      const box = $('errorBox');
-      box.style.display = message ? 'block' : 'none';
-      box.textContent = message || '';
-    }
+async function api(url){
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+JWT}});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Error '+r.status);
+  return d;
+}
 
-    function fmtMs(v) {
-      return v == null ? '—' : Number(v).toFixed(2) + ' ms';
-    }
+async function apiPost(url){
+  const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+JWT,'Content-Type':'application/json'}});
+  return r.json();
+}
 
-    function fmtPct(v) {
-      return v == null ? '—' : (Number(v) * 100).toFixed(1) + '%';
-    }
+function setError(m){const b=$('errorBox');b.style.display=m?'block':'none';b.textContent=m||''}
 
-    function statusClass(text) {
-      const t = String(text || '').toLowerCase();
-      if (t.includes('healthy') || t.includes('ok') || t.includes('ready')) return 'status-ok';
-      if (t.includes('warn')) return 'status-warn';
-      return 'status-bad';
-    }
+async function loadSnapshot(){
+  const snap=await api('/api/v1/admin/snapshot');
+  const d=snap.data,r=snap.retrain_log_summary,m=snap.model,dr=snap.drift,sc=snap.scheduler;
 
-    async function fetchJson(url, apiKey) {
-      const res = await fetch(url, {
-        headers: apiKey ? { 'X-API-Key': apiKey } : {}
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || ('Request failed: ' + res.status));
-      return data;
-    }
+  const hRes=await fetch('/health').then(x=>x.json()).catch(()=>({status:'error'}));
+  $('health').textContent=hRes.status||'error';
+  $('health').className='value '+statusClass(hRes.status);
+  $('healthSub').textContent='v'+(hRes.version||'?');
 
-    function renderModels(models) {
-      const grid = $('modelsGrid');
-      grid.innerHTML = '';
-      Object.entries(models || {}).forEach(([name, info]) => {
-        const div = document.createElement('div');
-        div.className = 'model';
-        div.innerHTML =
-          '<div class="label">' + String(name).split('_').join(' ') + '</div>' +
-          '<div class="value ' + (info.loaded ? 'status-ok' : 'status-bad') + '" style="font-size:22px;">' +
-          (info.loaded ? 'Loaded' : 'Not loaded') +
-          '</div>' +
-          '<div class="sub">' + (info.type || 'Unknown type') + '</div>';
-        grid.appendChild(div);
-      });
-    }
+  $('refreshStatus').innerHTML=statusBadge(d.last_refresh_status);
+  $('refreshSub').innerHTML=fmtTime(d.last_refresh_at)+(d.last_refresh_duration_sec!=null?' · '+fmtSec(d.last_refresh_duration_sec):'')+(d.last_refresh_trigger?' · '+d.last_refresh_trigger:'');
 
-    function renderKeyValueRows(containerId, rows, formatter) {
-      const container = $(containerId);
-      container.innerHTML = '';
-      formatter = formatter || ((v) => v);
-      Object.entries(rows || {}).forEach(([key, value]) => {
-        const row = document.createElement('div');
-        row.className = 'row';
-        row.innerHTML =
-          '<span class="muted">' + String(key).split('_').join(' ') + '</span>' +
-          '<strong>' + formatter(value, key) + '</strong>';
-        container.appendChild(row);
-      });
-    }
+  $('retrainStatus').innerHTML=statusBadge(r.last_status);
+  $('retrainSub').innerHTML=fmtTime(r.last_run_at)+(r.last_model_version?' · '+r.last_model_version:'');
 
-    async function loadDashboard() {
-      const apiKey = $('apiKey').value.trim();
-      setError('');
+  $('driftStatus').textContent=dr.drift_detected?'DETECTED':'Clean';
+  $('driftStatus').className='value '+(dr.drift_detected?'bad':'ok');
+  $('driftSub').textContent=(dr.drift_score!=null?'Score: '+Number(dr.drift_score).toFixed(3):'')+(dr.drifted_features_count?' · '+dr.drifted_features_count+' features':'');
 
-      try {
-        const [health, modelHealth, summary] = await Promise.all([
-          fetch('/health').then(r => r.json()),
-          fetchJson('/analytics/metrics/model-health', apiKey),
-          fetchJson('/analytics/summary', apiKey)
-        ]);
+  $('refreshDetails').innerHTML=
+    row('Total refreshes',d.refresh_log_total)+
+    row('Successful',d.refresh_success_count)+
+    row('Failed',d.refresh_failed_count)+
+    row('Countries refreshed',d.countries_refreshed)+
+    row('Static countries',d.static_countries)+
+    row('Last trigger',d.last_refresh_trigger)+
+    row('Last duration',fmtSec(d.last_refresh_duration_sec));
 
-        $('platformStatus').textContent = health.status || 'unknown';
-        $('platformStatus').className = 'value ' + statusClass(health.status);
-        const modelsLoaded = health.checks && health.checks.models && health.checks.models.loaded;
-        const countriesLoaded = health.checks && health.checks.external_data && health.checks.external_data.countries_loaded;
-        $('platformSub').textContent =
-          'Version ' + (health.version || '—') +
-          ' · modelsLoaded=' + (modelsLoaded === undefined || modelsLoaded === null ? '—' : String(modelsLoaded)) +
-          ' · countries=' + (countriesLoaded === undefined || countriesLoaded === null ? '—' : String(countriesLoaded));
+  $('retrainDetails').innerHTML=
+    row('Total retrains',r.total)+
+    row('Successful',r.success_count)+
+    row('Failed',r.failed_count)+
+    row('Last status',r.last_status)+
+    row('Last model version',r.last_model_version)+
+    row('Last run',fmtTime(r.last_run_at));
 
-        $('readinessScore').textContent = (summary.readiness_score === undefined || summary.readiness_score === null ? '—' : summary.readiness_score);
-        $('readinessLabel').textContent = summary.readiness || '—';
-        $('readinessLabel').className = 'sub ' + statusClass(summary.readiness);
+  $('modelDetails').innerHTML=
+    row('Experiment',m.experiment)+
+    row('Total MLflow runs',m.total_runs)+
+    row('RF AUC',m.rf_cv_auc!=null?Number(m.rf_cv_auc).toFixed(4):'—')+
+    row('XGB AUC',m.xgb_cv_auc!=null?Number(m.xgb_cv_auc).toFixed(4):'—')+
+    row('Ensemble AUC',m.ensemble_cv_auc!=null?Number(m.ensemble_cv_auc).toFixed(4):'—')+
+    row('Model version',m.model_version);
 
-        $('avgLatency').textContent = fmtMs(summary.performance && summary.performance.avg_latency_ms);
-        var te = (summary.traffic && summary.traffic.total_events); $("totalEvents").textContent = (te === undefined || te === null) ? "—" : te;
-        $('eventsSub').textContent = 'Window: ' + ((summary.window_hours === undefined || summary.window_hours === null) ? '—' : summary.window_hours) + 'h';
+  $('schedulerDetails').innerHTML=
+    row('Running',sc.running?'<span class="ok">Yes</span>':'<span class="bad">No</span>')+
+    row('Enabled',sc.enabled?'Yes':'No')+
+    row('Jobs',sc.jobs_count)+
+    row('Next run',fmtTime(sc.next_run_at));
 
-        renderModels(modelHealth.models);
+  $('driftDetails').innerHTML=
+    row('Status',dr.status)+
+    row('Drift detected',dr.drift_detected?'<span class="bad">Yes</span>':'<span class="ok">No</span>')+
+    row('Drift score',dr.drift_score!=null?Number(dr.drift_score).toFixed(4):'—')+
+    row('Observations',dr.observations)+
+    row('Drifted features',dr.drifted_features_count??'0');
+}
 
-        const tm = modelHealth.training_metrics || {};
-        $('trainingMetrics').textContent =
-          'Accuracy ' + ((tm.accuracy === undefined || tm.accuracy === null ? '—' : tm.accuracy)) +
-          ' · F1 ' + ((tm.f1_score === undefined || tm.f1_score === null ? '—' : tm.f1_score)) +
-          ' · ROC AUC ' + ((tm.roc_auc === undefined || tm.roc_auc === null ? '—' : tm.roc_auc)) +
-          ' · Best threshold ' + ((tm.best_threshold === undefined || tm.best_threshold === null ? '—' : tm.best_threshold));
+async function loadTimeline(){
+  try{
+    const tl=await api('/api/v1/admin/timeline?hours=48');
+    const events=tl.events||tl||[];
+    const c=$('timeline');
+    if(!events.length){c.innerHTML='<div class="muted" style="padding:12px">No events in the last 48 hours</div>';return}
+    c.innerHTML=events.slice(0,30).map(e=>
+      '<div class="timeline-item"><span class="timeline-time">'+fmtTime(e.timestamp||e.started_at)+'</span> '+
+      statusBadge(e.status)+' <strong>'+(e.type||e.job_name||'event')+'</strong>'+
+      (e.trigger_source?' <span class="muted">via '+e.trigger_source+'</span>':'')+
+      (e.message?' — <span class="muted">'+e.message+'</span>':'')+
+      '</div>'
+    ).join('');
+  }catch(e){$('timeline').innerHTML='<div class="muted" style="padding:12px">Timeline unavailable</div>'}
+}
 
-        const pq = summary.prediction_quality_proxy || {};
-        $('positiveFraction').textContent = fmtPct(pq.positive_fraction);
-        $('negativeFraction').textContent = fmtPct(pq.negative_fraction);
+async function load(){
+  setError('');
+  $('loadBtn').disabled=true;
+  $('loadBtn').innerHTML='<span class="spinner"></span>Loading…';
+  try{
+    await doLogin();
+    await Promise.all([loadSnapshot(),loadTimeline()]);
+    $('lastUpdate').textContent='Last updated: '+new Date().toLocaleTimeString('ru-RU');
+  }catch(e){setError(e.message)}
+  finally{$('loadBtn').disabled=false;$('loadBtn').textContent='Load'}
+}
 
-        const dq = summary.data_quality || {};
-        $('dataQuality').textContent = fmtPct(dq.core_input_missing_rate);
-        $('summaryWindow').textContent = ((summary.window_hours === undefined || summary.window_hours === null) ? '—' : summary.window_hours) + 'h';
+$('loadBtn').addEventListener('click',load);
 
-        renderKeyValueRows('endpointCounts', summary.traffic && summary.traffic.endpoint_counts || {});
-        renderKeyValueRows(
-          'latencyBreakdown',
-          {
-            avg_latency_ms: modelHealth.predictions && modelHealth.predictions.avg_latency_ms,
-            avg_latency_ms_rf: modelHealth.predictions && modelHealth.predictions.avg_latency_ms_rf,
-            avg_latency_ms_nn: modelHealth.predictions && modelHealth.predictions.avg_latency_ms_nn,
-            avg_latency_ms_evaluate: modelHealth.predictions && modelHealth.predictions.avg_latency_ms_evaluate,
-            last_24h: modelHealth.predictions && modelHealth.predictions.last_24h,
-            total: modelHealth.predictions && modelHealth.predictions.total
-          },
-          (value, key) => key.indexOf('latency') !== -1 ? fmtMs(value) : (value === undefined || value === null ? '—' : value)
-        );
+$('autoBtn').addEventListener('click',function(){
+  if(autoTimer){clearInterval(autoTimer);autoTimer=null;this.textContent='Auto-refresh: OFF';this.className='btn-sm'}
+  else{autoTimer=setInterval(load,15000);this.textContent='Auto-refresh: ON';this.className='btn-sm btn-ok';load()}
+});
 
-        const insights = $('insightsList');
-        insights.innerHTML = '';
-        (summary.insights || []).forEach((item) => {
-          const li = document.createElement('li');
-          li.textContent = item;
-          insights.appendChild(li);
-        });
-      } catch (err) {
-        setError(err.message || 'Failed to load dashboard');
-        console.error(err);
-      }
-    }
+$('triggerRefresh').addEventListener('click',async function(){
+  if(!confirm('Trigger data refresh via AI Control Layer?'))return;
+  this.disabled=true;
+  try{if(!JWT)await doLogin();const r=await apiPost('/api/v1/admin/ai/refresh');alert('Refresh: '+(r.status||JSON.stringify(r)));load()}
+  catch(e){alert('Error: '+e.message)}
+  finally{this.disabled=false}
+});
 
-    $('loadBtn').addEventListener('click', loadDashboard);
-    loadDashboard();
-  </script>
+$('triggerRetrain').addEventListener('click',async function(){
+  if(!confirm('Trigger model retrain via AI Control Layer?'))return;
+  this.disabled=true;
+  try{if(!JWT)await doLogin();const r=await apiPost('/api/v1/admin/ai/retrain');alert('Retrain: '+(r.status||JSON.stringify(r)));load()}
+  catch(e){alert('Error: '+e.message)}
+  finally{this.disabled=false}
+});
+
+load();
+</script>
 </body>
 </html>

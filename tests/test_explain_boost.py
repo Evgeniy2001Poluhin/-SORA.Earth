@@ -11,22 +11,22 @@ PROJECT = {
 }
 
 def test_shap_endpoint():
-    r = client.post("/shap", json=PROJECT)
+    r = client.post("/api/v1/shap", json=PROJECT)
     assert r.status_code in [200, 422, 500]
     if r.status_code == 200:
         assert isinstance(r.json(), dict)
 
 def test_predict_explain():
-    r = client.post("/predict/explain", json=PROJECT)
+    r = client.post("/api/v1/predict/explain", json=PROJECT)
     assert r.status_code in [200, 422, 500]
     if r.status_code == 200:
         data = r.json()
         assert isinstance(data, dict)
 
 def test_explain_waterfall():
-    r = client.post("/predict/explain/waterfall", json=PROJECT)
+    r = client.post("/api/v1/predict/explain/waterfall", json=PROJECT)
     assert r.status_code in [200, 404, 422, 500]
 
 def test_explain_beeswarm():
-    r = client.get("/explain/beeswarm")
+    r = client.get("/api/v1/explain/beeswarm")
     assert r.status_code in [200, 404, 500]

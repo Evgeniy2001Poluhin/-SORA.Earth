@@ -311,13 +311,25 @@ def generate_pdf_report(project: Project):
     cdata = COUNTRIES.get(project.region or "Germany", {"region": "Europe"})
     pdf_region = cdata.get("region", "Europe")
     esg = calculate_esg(project, pdf_region)
-    feats = make_features(
-        ValidatorProject(
-            budget=project.budget, co2_reduction=project.co2_reduction,
-            social_impact=project.social_impact, duration_months=project.duration_months,
-        )
+    legacy = ValidatorProject(
+        budget=project.budget,
+        co2_reduction=project.co2_reduction,
+        social_impact=project.social_impact,
+        duration_months=project.duration_months,
     )
-    prob = float(ensemble_model.predict_proba(feats)[0][1])
+    feats_9 = make_features(legacy)
+    from app.main import rf_model, xgb_model, nn_model, make_features_xgb
+
+    feats_7 = make_features_xgb(legacy)
+    rf_p = float(rf_model.predict_proba(feats_9)[0][1])
+    xgb_p = float(xgb_model.predict_proba(feats_7)[0][1])
+    import torch
+    def _nn_forward(model, feats):
+        x = torch.tensor(feats.values, dtype=torch.float32)
+        return float(model(x).detach().numpy()[0][0])
+    nn_p = _nn_forward(nn_model, feats_9)
+
+    prob = float((rf_p + xgb_p + nn_p) / 3.0)
     prediction = int(prob >= best_threshold)
     risk = "Low" if esg["total_score"] >= 70 else "Medium" if esg["total_score"] >= 40 else "High"
 

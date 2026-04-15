@@ -10,19 +10,19 @@ def test_health_check():
 
 
 def test_prometheus_metrics():
-    resp = client.get("/metrics")
+    resp = client.get("/api/v1/metrics")
     assert resp.status_code == 200
 
 
 def test_mlops_readiness():
-    resp = client.get("/mlops/health")
+    resp = client.get("/api/v1/mlops/health")
     assert resp.status_code == 200
     data = resp.json()
     assert "model_status" in data
 
 
 def test_drift_endpoint():
-    resp = client.get("/mlops/drift")
+    resp = client.get("/api/v1/mlops/drift")
     assert resp.status_code == 200
 
 

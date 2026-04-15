@@ -32,6 +32,26 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
                  request.client.host if request.client else "unknown")
     return Token(access_token=access, refresh_token=refresh)
 
+
+class JsonLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/auth/login-json", response_model=Token, tags=["auth"])
+def login_json(request: Request, body: JsonLoginRequest):
+    user = USERS_DB.get(body.username)
+    if not user or not verify_password(body.password, user["hashed_password"]):
+        record_audit(body.username, "login_failed", "/auth/login-json", "POST",
+                     request.client.host if request.client else "unknown")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token_data = {"sub": user["username"], "role": user["role"]}
+    access = create_access_token(token_data)
+    refresh = create_refresh_token(token_data)
+    record_audit(user["username"], "login", "/auth/login-json", "POST",
+                 request.client.host if request.client else "unknown")
+    return Token(access_token=access, refresh_token=refresh)
+
 @router.post("/auth/refresh", response_model=Token, tags=["auth"])
 def refresh_token(request: Request, body: RefreshRequest):
     try:

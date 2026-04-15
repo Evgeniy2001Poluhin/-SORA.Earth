@@ -6,7 +6,7 @@ client = TestClient(app)
 
 
 def test_cache_stats():
-    resp = client.get("/cache/stats")
+    resp = client.get("/api/v1/cache/stats")
     assert resp.status_code == 200
     data = resp.json()
     assert "hits" in data
@@ -15,7 +15,7 @@ def test_cache_stats():
 
 
 def test_cache_clear():
-    resp = client.post("/cache/clear")
+    resp = client.post("/api/v1/cache/clear")
     assert resp.status_code == 200
     assert resp.json()["status"] == "cache cleared"
 
@@ -26,10 +26,10 @@ def test_cache_hit(monkeypatch):
         "gdp_per_capita": 50000, "gini_index": 27.0, "gov_effectiveness": 1.5
     })
     payload = {"name": "Cache Test", "budget": 50000, "co2_reduction": 30, "social_impact": 5, "duration_months": 12, "region": "Norway"}
-    r1 = client.post("/evaluate", json=payload)
-    r2 = client.post("/evaluate", json=payload)
+    r1 = client.post("/api/v1/evaluate", json=payload)
+    r2 = client.post("/api/v1/evaluate", json=payload)
     assert r1.json()["total_score"] == r2.json()["total_score"]
-    stats = client.get("/cache/stats").json()
+    stats = client.get("/api/v1/cache/stats").json()
     assert stats["hits"] >= 1
 
 

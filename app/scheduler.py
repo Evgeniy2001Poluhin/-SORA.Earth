@@ -1,3 +1,57 @@
+from typing import Optional
+
+
+def _start_retrain_log(trigger_source: str = "manual", job_name: str = "model_retrain"):
+    from app.database import SessionLocal, RetrainLog
+    from datetime import datetime
+    db = SessionLocal()
+    try:
+        row = RetrainLog(
+            started_at=datetime.utcnow(),
+            status="running",
+            trigger_source=trigger_source,
+            job_name=job_name,
+            message="Retraining started",
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row.id
+    finally:
+        db.close()
+
+
+def _finish_retrain_log(
+    log_id: int,
+    status: str,
+    message: Optional[str] = None,
+    model_version: Optional[str] = None,
+    data_version: Optional[str] = None,
+    metrics: Optional[dict] = None,
+    error_message: Optional[str] = None,
+):
+    from app.database import SessionLocal, RetrainLog
+    from datetime import datetime
+    import json
+    db = SessionLocal()
+    try:
+        row = db.query(RetrainLog).filter(RetrainLog.id == log_id).first()
+        if not row:
+            return
+        finished_at = datetime.utcnow()
+        row.finished_at = finished_at
+        row.duration_sec = (finished_at - row.started_at).total_seconds() if row.started_at else None
+        row.status = status
+        row.message = message
+        row.model_version = model_version
+        row.data_version = data_version
+        row.metrics_json = json.dumps(metrics, ensure_ascii=False) if metrics else None
+        row.error_message = error_message
+        db.commit()
+    finally:
+        db.close()
+
+import json
 import os
 import logging
 import time
@@ -10,64 +64,73 @@ from apscheduler.triggers.interval import IntervalTrigger
 logger = logging.getLogger(__name__)
 
 scheduler = BackgroundScheduler(timezone="UTC")
-_retrain_log = []
 
 
-def retrain_models():
+def retrain_models(trigger_source: str = "manual"):
     """Auto-retrain all ML models, invalidate cache, and persist retrain log to DB."""
     from app.locks import RedisLock
-    from app.database import SessionLocal, RetrainLog
 
+    log_id = _start_retrain_log(trigger_source=trigger_source, job_name="model_retrain")
     lock = RedisLock(key="sora:lock:model_retrain", timeout=600)
+
     if not lock.acquire():
         logger.warning("Retrain skipped: another retrain is already running")
+        _finish_retrain_log(
+            log_id=log_id,
+            status="skipped",
+            message="Retrain skipped: lock already held",
+            metrics={"status": "skipped", "reason": "lock_held"},
+        )
         return {"status": "skipped", "reason": "lock_held"}
 
-    db = SessionLocal()
     started_at = datetime.utcnow()
-    log_row = RetrainLog(
-        started_at=started_at,
-        status="running",
-        trigger_source="scheduler",
-        job_name="model_retrain",
-    )
-    db.add(log_row)
-    db.commit()
-    db.refresh(log_row)
-
     start_time = time.time()
     logger.info("=== AUTO-RETRAIN started at %s ===", started_at.isoformat())
+
     status = {
         "started_at": started_at.isoformat(),
         "status": "running",
-        "retrain_id": log_row.id,
+        "retrain_id": log_id,
     }
 
     try:
-        from app.training import retrain_pipeline
+        from app.api.retrain import _do_retrain
 
-        metrics = retrain_pipeline() or {}
+        result = _do_retrain(min_samples=50, trigger_source=trigger_source)
+        metrics = result.get("metrics", {}) if isinstance(result, dict) else {}
         status["metrics"] = metrics
         status["status"] = "success"
 
-        log_row.status = "success"
-        log_row.metrics_json = str(metrics)[:4000]
+        _finish_retrain_log(
+            log_id=log_id,
+            status="success",
+            message="Retraining completed successfully",
+            metrics=metrics,
+        )
         logger.info("Retrain completed: %s", metrics)
 
     except ImportError:
         status["status"] = "skipped"
         status["reason"] = "training module not found"
 
-        log_row.status = "skipped"
-        log_row.message = "training module not found"
+        _finish_retrain_log(
+            log_id=log_id,
+            status="skipped",
+            message="training module not found",
+            metrics={"status": "skipped", "reason": "training_module_not_found"},
+        )
         logger.warning("Retrain skipped: training module not available")
 
     except Exception as e:
         status["status"] = "error"
         status["error"] = str(e)
 
-        log_row.status = "error"
-        log_row.error_message = str(e)[:2000]
+        _finish_retrain_log(
+            log_id=log_id,
+            status="failed",
+            message="Retraining failed",
+            error_message=str(e),
+        )
         logger.exception("Retrain failed: %s", e)
 
     try:
@@ -92,22 +155,19 @@ def retrain_models():
     status["finished_at"] = finished_at.isoformat()
 
     try:
-        log_row.duration_sec = duration
-        log_row.finished_at = finished_at
-        db.add(log_row)
-        db.commit()
+        _finish_retrain_log(
+            log_id=log_id,
+            status="success" if status["status"] == "success" else ("skipped" if status["status"] == "skipped" else "failed"),
+            message="Retraining completed successfully" if status["status"] == "success" else status.get("reason", "Retraining failed"),
+            metrics=status.get("metrics"),
+            error_message=status.get("error"),
+        )
     except Exception:
-        db.rollback()
+        pass
     finally:
-        db.close()
+        lock.release()
 
-    _retrain_log.append(status)
-    if len(_retrain_log) > 50:
-        _retrain_log.pop(0)
-
-    lock.release()
     return status
-
 
 def scheduled_refresh_external_data():
     """Refresh external ESG data with distributed lock and DB logging."""
@@ -122,7 +182,7 @@ def scheduled_refresh_external_data():
     db = SessionLocal()
     try:
         from app.external_data import refresh_live_data
-        result = refresh_live_data() or {}
+        result = refresh_live_data(trigger_source="auto_scheduler") or {}
 
         log = DataRefreshLog(
             status=result.get("status", "success"),
@@ -167,9 +227,43 @@ def scheduled_refresh_external_data():
         lock.release()
         db.close()
 
+def get_retrain_log(limit: int = 20):
+    from app.database import SessionLocal, RetrainLog
+    import json
 
-def get_retrain_log():
-    return list(_retrain_log)
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(RetrainLog)
+            .order_by(RetrainLog.started_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+        result = []
+        for r in rows:
+            try:
+                metrics = json.loads(r.metrics_json) if r.metrics_json else None
+            except Exception:
+                metrics = r.metrics_json
+
+            result.append({
+                "id": r.id,
+                "started_at": r.started_at.isoformat() if r.started_at else None,
+                "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+                "duration_sec": r.duration_sec,
+                "status": r.status,
+                "trigger_source": r.trigger_source,
+                "job_name": r.job_name,
+                "model_version": r.model_version,
+                "data_version": r.data_version,
+                "message": r.message,
+                "error_message": r.error_message,
+                "metrics": metrics,
+            })
+        return result
+    finally:
+        db.close()
 
 
 def get_scheduler_status():
@@ -185,9 +279,98 @@ def get_scheduler_status():
         "running": scheduler.running,
         "enabled": os.getenv("SORA_SCHEDULER", "1") == "1",
         "jobs": jobs,
-        "retrain_history_count": len(_retrain_log),
+        "retrain_history_count": (
+            __import__("app.database", fromlist=["SessionLocal", "RetrainLog"]).SessionLocal().query(
+                __import__("app.database", fromlist=["SessionLocal", "RetrainLog"]).RetrainLog
+            ).count()
+        ),
     }
 
+
+def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
+    from app.locks import RedisLock
+    lock = RedisLock(key="sora:lock:closed_loop", timeout=600)
+    if not lock.acquire():
+        logger.warning("Closed loop skipped: lock held")
+        return {"status": "skipped", "reason": "lock_held"}
+    try:
+        from app.api.drift import check_drift
+        drift_result = check_drift(window=50)
+        drift_detected = bool(drift_result.get("drift_detected", False))
+        if not drift_detected:
+            logger.info("Closed loop: no drift, skipping retrain")
+            return {"status": "ok", "drift_detected": False, "retrained": False, "reason": "drift_not_detected"}
+        old_auc = None
+        try:
+            from app.api.retrain import _get_current_metrics
+            old_m = _get_current_metrics()
+            old_auc = old_m.get("auc_roc") or old_m.get("roc_auc")
+        except Exception:
+            pass
+        from app.api.retrain import _do_retrain
+        result = _do_retrain(min_samples=50, trigger_source=trigger_source)
+        new_metrics = result.get("metrics", {}) if isinstance(result, dict) else {}
+        new_auc = new_metrics.get("auc_roc") or new_metrics.get("roc_auc")
+        promoted = True
+        reject_reason = None
+        if old_auc is not None and new_auc is not None:
+            auc_delta = float(new_auc) - float(old_auc)
+            if auc_delta < -0.02:
+                promoted = False
+                reject_reason = "AUC degraded: %.4f -> %.4f (delta=%+.4f)" % (old_auc, new_auc, auc_delta)
+                logger.warning("Closed loop: model REJECTED - %s", reject_reason)
+            else:
+                logger.info("Closed loop: model PROMOTED - AUC %.4f -> %.4f (delta=%+.4f)", float(old_auc), float(new_auc), auc_delta)
+        else:
+            logger.info("Closed loop: old AUC unavailable, auto-promoting")
+        log_id = _start_retrain_log(trigger_source=trigger_source, job_name="closed_loop")
+        _finish_retrain_log(
+            log_id=log_id,
+            status="promoted" if promoted else "rejected",
+            message="Closed loop: %s" % ("promoted" if promoted else "rejected"),
+            metrics={"old_auc": float(old_auc) if old_auc else None, "new_auc": float(new_auc) if new_auc else None, "promoted": promoted, "reject_reason": reject_reason},
+        )
+        return {"status": "ok", "drift_detected": True, "retrained": True, "promoted": promoted, "old_auc": float(old_auc) if old_auc else None, "new_auc": float(new_auc) if new_auc else None, "reject_reason": reject_reason}
+    except Exception as e:
+        logger.exception("Closed loop failed: %s", e)
+        return {"status": "error", "error": str(e)}
+    finally:
+        lock.release()
+
+
+def full_pipeline_run(trigger_source="full_pipeline"):
+    """
+    Complete MLOps pipeline: refresh → drift → retrain → AUC validate → promote/reject.
+    """
+    from app.locks import RedisLock
+    lock = RedisLock(key="sora:lock:full_pipeline", timeout=900)
+    if not lock.acquire():
+        logger.warning("Full pipeline skipped: lock held")
+        return {"status": "skipped", "reason": "lock_held"}
+    try:
+        logger.info("Full pipeline: step 1 — refresh external data")
+        refresh_result = {}
+        try:
+            from app.external_data import refresh_live_data
+            refresh_result = refresh_live_data(trigger_source=trigger_source) or {}
+        except Exception as e:
+            logger.warning("Full pipeline: refresh failed (%s), continuing", e)
+            refresh_result = {"status": "error", "error": str(e)}
+
+        logger.info("Full pipeline: step 2 — closed loop (drift → retrain → validate)")
+        loop_result = closed_loop_retrain(trigger_source=trigger_source)
+
+        return {
+            "status": "ok",
+            "pipeline": "full",
+            "refresh_result": refresh_result,
+            "closed_loop_result": loop_result,
+        }
+    except Exception as e:
+        logger.exception("Full pipeline failed: %s", e)
+        return {"status": "error", "error": str(e)}
+    finally:
+        lock.release()
 
 def init_scheduler():
     """Call from app startup."""
@@ -200,10 +383,10 @@ def init_scheduler():
         return
 
     scheduler.add_job(
-        retrain_models,
+        closed_loop_retrain,
         CronTrigger(hour=3, minute=0),
-        id="auto_retrain_daily",
-        name="Daily model retrain at 03:00 UTC",
+        id="auto_closed_loop_daily",
+        name="Daily closed-loop: drift -> retrain -> validate at 03:00 UTC",
         replace_existing=True,
     )
 

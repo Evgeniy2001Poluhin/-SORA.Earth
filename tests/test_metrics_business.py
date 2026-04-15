@@ -17,7 +17,7 @@ def test_evaluations_metrics_fields_exist_and_numeric():
 
 
 def test_system_metrics_json_contains_business_fields():
-    r = client.get("/system/metrics")
+    r = client.get("/api/v1/system/metrics")
     assert r.status_code == 200
     data = r.json()
 

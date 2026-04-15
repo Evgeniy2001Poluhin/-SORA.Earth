@@ -1,4 +1,5 @@
 from typing import List, Optional
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -12,8 +13,8 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 class RetrainLogItem(BaseModel):
     id: int
-    started_at: Optional[str] = None
-    finished_at: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
     duration_sec: Optional[float] = None
     status: str
     trigger_source: Optional[str] = None
@@ -21,6 +22,8 @@ class RetrainLogItem(BaseModel):
     model_version: Optional[str] = None
     data_version: Optional[str] = None
     message: Optional[str] = None
+    error_message: Optional[str] = None
+    metrics_json: Optional[str] = None
 
     class Config:
         from_attributes = True

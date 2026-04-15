@@ -9,21 +9,21 @@ client = TestClient(app)
 
 class TestModelCompare:
     def test_compare_returns_200(self):
-        r = client.get("/model/compare")
+        r = client.get("/api/v1/model/compare")
         assert r.status_code == 200
         data = r.json()
         assert "current" in data
         assert "winner" in data
 
     def test_compare_current_fields(self):
-        r = client.get("/model/compare")
+        r = client.get("/api/v1/model/compare")
         data = r.json()
         if data["current"] and isinstance(data["current"], dict):
             for k in ["auc", "f1", "accuracy", "n_estimators", "n_features"]:
                 assert k in data["current"]
 
     def test_compare_winner_logic(self):
-        r = client.get("/model/compare")
+        r = client.get("/api/v1/model/compare")
         data = r.json()
         if data["current"] and data["backup"] and isinstance(data["backup"], dict):
             assert data["winner"] in ["current", "backup"]
@@ -34,7 +34,7 @@ class TestModelCompare:
 
     @patch("app.api.compare._load_model", return_value=(None, None))
     def test_compare_no_models(self, mock_load):
-        r = client.get("/model/compare")
+        r = client.get("/api/v1/model/compare")
         data = r.json()
         assert data["current"] is None
 
@@ -47,12 +47,12 @@ class TestModelCompare:
 
 class TestDrift:
     def test_drift_returns_200(self):
-        r = client.get("/model/drift")
+        r = client.get("/api/v1/model/drift")
         assert r.status_code == 200
         assert "status" in r.json()
 
     def test_drift_ok_fields(self):
-        r = client.get("/model/drift")
+        r = client.get("/api/v1/model/drift")
         data = r.json()
         if data["status"] == "ok":
             assert "drift_detected" in data
@@ -60,13 +60,13 @@ class TestDrift:
             assert "features" in data
 
     def test_drift_custom_window(self):
-        r = client.get("/model/drift?window=100")
+        r = client.get("/api/v1/model/drift?window=100")
         data = r.json()
         if data["status"] == "ok":
             assert data["window"] == 100
 
     def test_drift_features_structure(self):
-        r = client.get("/model/drift")
+        r = client.get("/api/v1/model/drift")
         data = r.json()
         if data["status"] == "ok" and "features" in data:
             for col, info in data["features"].items():
@@ -76,14 +76,14 @@ class TestDrift:
 
     @patch("app.api.drift.HAS_SCIPY", False)
     def test_drift_no_scipy(self):
-        r = client.get("/model/drift")
+        r = client.get("/api/v1/model/drift")
         assert r.json()["status"] == "scipy_not_installed"
 
     @patch("app.api.drift.os.path.exists", return_value=False)
     def test_drift_no_log(self, mock_exists):
-        r = client.get("/model/drift")
+        r = client.get("/api/v1/model/drift")
         assert r.json()["status"] in ["no_log", "ok", "insufficient_data"]
 
     def test_drift_small_window(self):
-        r = client.get("/model/drift?window=5")
+        r = client.get("/api/v1/model/drift?window=5")
         assert r.status_code == 200

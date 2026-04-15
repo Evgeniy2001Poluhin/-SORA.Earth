@@ -35,10 +35,10 @@ from app.main import app as _app
 _client = TestClient(_app)
 
 def test_ping():
-    r = _client.get("/ping")
+    r = _client.get("/api/v1/ping")
     assert r.status_code == 200
     assert r.json()["pong"] is True
 
 def test_readiness_ok():
-    r = _client.get("/ready")
+    r = _client.get("/api/v1/ready")
     assert r.status_code in (200, 503)  # 503 если модели не загружены в тестах
