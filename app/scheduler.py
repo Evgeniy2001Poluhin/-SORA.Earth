@@ -63,6 +63,11 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 logger = logging.getLogger(__name__)
 
+
+def should_run_scheduler() -> bool:
+    import os
+    return os.getenv("RUN_SCHEDULER", "false").lower() == "true"
+
 scheduler = BackgroundScheduler(timezone="UTC")
 
 
@@ -373,6 +378,10 @@ def full_pipeline_run(trigger_source="full_pipeline"):
         lock.release()
 
 def init_scheduler():
+    if not should_run_scheduler():
+        logger.info("RUN_SCHEDULER is false, scheduler will not be started in this process")
+        return
+
     """Call from app startup."""
     if os.getenv("SORA_SCHEDULER", "1") != "1":
         logger.info("Scheduler disabled by SORA_SCHEDULER")
