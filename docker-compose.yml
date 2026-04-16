@@ -1,12 +1,14 @@
 services:
   app:
     build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
     env_file:
       - .env
     environment:
       - SORA_ADMIN_TOKEN=${SORA_ADMIN_TOKEN}
+      - RUN_SCHEDULER=false
     volumes:
       - ./data:/app/data
       - ./models:/app/models
@@ -19,6 +21,22 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  scheduler:
+    build: .
+    command: python3 run_scheduler.py
+    env_file:
+      - .env
+    environment:
+      - SORA_ADMIN_TOKEN=${SORA_ADMIN_TOKEN}
+      - RUN_SCHEDULER=true
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -47,7 +65,8 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-sora2026}
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./infra/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
     depends_on:
       - postgres
       - prometheus

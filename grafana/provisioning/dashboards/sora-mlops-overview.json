@@ -1,0 +1,108 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {"type": "row", "title": "Platform Overview", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}, "collapsed": false},
+    {
+      "type": "stat", "title": "App Version",
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
+      "targets": [{"expr": "sora_app_info", "legendFormat": "{{version}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"1": {"text": "v2.0.0", "color": "green"}}}], "thresholds": {"steps": [{"color": "green", "value": null}]}}}
+    },
+    {
+      "type": "stat", "title": "HTTP Requests/sec",
+      "gridPos": {"h": 4, "w": 5, "x": 4, "y": 1},
+      "targets": [{"expr": "sum(rate(http_requests_total[5m]))", "legendFormat": "RPS", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqps", "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 10}, {"color": "red", "value": 50}]}}}
+    },
+    {
+      "type": "stat", "title": "Total Predictions",
+      "gridPos": {"h": 4, "w": 5, "x": 9, "y": 1},
+      "targets": [{"expr": "sum(sora_predictions_total)", "legendFormat": "total", "refId": "A"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "blue", "value": null}]}}}
+    },
+    {
+      "type": "gauge", "title": "Current Model AUC",
+      "gridPos": {"h": 4, "w": 5, "x": 14, "y": 1},
+      "targets": [{"expr": "sora_model_auc", "legendFormat": "AUC", "refId": "A"}],
+      "fieldConfig": {"defaults": {"min": 0, "max": 1, "thresholds": {"steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.7}, {"color": "green", "value": 0.85}]}}}
+    },
+    {
+      "type": "gauge", "title": "Current Model Accuracy",
+      "gridPos": {"h": 4, "w": 5, "x": 19, "y": 1},
+      "targets": [{"expr": "sora_model_accuracy", "legendFormat": "Accuracy", "refId": "A"}],
+      "fieldConfig": {"defaults": {"min": 0, "max": 1, "thresholds": {"steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.7}, {"color": "green", "value": 0.85}]}}}
+    },
+    {"type": "row", "title": "HTTP Metrics", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5}, "collapsed": false},
+    {
+      "type": "timeseries", "title": "HTTP Request Rate (by status)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+      "targets": [{"expr": "sum by (status) (rate(http_requests_total[5m]))", "legendFormat": "{{status}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 15}}}
+    },
+    {
+      "type": "timeseries", "title": "HTTP Request Duration (p50 / p95 / p99)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "B"},
+        {"expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "p99", "refId": "C"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}}}
+    },
+    {"type": "row", "title": "ML Predictions", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14}, "collapsed": false},
+    {
+      "type": "timeseries", "title": "Prediction Rate (by model)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15},
+      "targets": [{"expr": "sum by (model) (rate(sora_predictions_total[5m]))", "legendFormat": "{{model}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "bars", "lineWidth": 1, "fillOpacity": 50}}}
+    },
+    {
+      "type": "timeseries", "title": "Prediction Latency (p50 / p95 / p99)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum by (le) (rate(sora_prediction_latency_ms_bucket[5m])))", "legendFormat": "p50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(sora_prediction_latency_ms_bucket[5m])))", "legendFormat": "p95", "refId": "B"},
+        {"expr": "histogram_quantile(0.99, sum by (le) (rate(sora_prediction_latency_ms_bucket[5m])))", "legendFormat": "p99", "refId": "C"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ms", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 15}}}
+    },
+    {"type": "row", "title": "MLOps Lifecycle", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23}, "collapsed": false},
+    {
+      "type": "stat", "title": "Drift Events",
+      "gridPos": {"h": 5, "w": 4, "x": 0, "y": 24},
+      "targets": [{"expr": "sora_drift_detected_total", "legendFormat": "drift", "refId": "A"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}, {"color": "red", "value": 5}]}}}
+    },
+    {
+      "type": "stat", "title": "Models Promoted",
+      "gridPos": {"h": 5, "w": 5, "x": 4, "y": 24},
+      "targets": [{"expr": "sora_model_promoted_total", "legendFormat": "promoted", "refId": "A"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "green", "value": null}]}}}
+    },
+    {
+      "type": "stat", "title": "Models Rejected",
+      "gridPos": {"h": 5, "w": 5, "x": 9, "y": 24},
+      "targets": [{"expr": "sora_model_rejected_total", "legendFormat": "rejected", "refId": "A"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}}
+    },
+    {
+      "type": "timeseries", "title": "Model AUC Over Time",
+      "gridPos": {"h": 5, "w": 10, "x": 14, "y": 24},
+      "targets": [{"expr": "sora_model_auc", "legendFormat": "AUC", "refId": "A"}],
+      "fieldConfig": {"defaults": {"min": 0, "max": 1, "unit": "percentunit", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "gradientMode": "scheme"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.7}, {"color": "green", "value": 0.85}]}, "color": {"mode": "thresholds"}}}
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["sora", "mlops", "fastapi"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "SORA MLOps Overview",
+  "uid": "sora-mlops-overview",
+  "version": 1
+}

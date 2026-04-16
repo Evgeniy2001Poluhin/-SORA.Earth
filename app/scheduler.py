@@ -63,6 +63,15 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 logger = logging.getLogger(__name__)
 
+try:
+    from app.main import (sora_retrain_total, sora_refresh_total,
+                          sora_full_pipeline_total, sora_drift_detected_total,
+                          sora_model_promoted_total, sora_model_rejected_total)
+except ImportError:
+    sora_retrain_total = sora_refresh_total = sora_full_pipeline_total = None
+    sora_drift_detected_total = sora_model_promoted_total = sora_model_rejected_total = None
+
+
 
 def should_run_scheduler() -> bool:
     import os
@@ -113,6 +122,7 @@ def retrain_models(trigger_source: str = "manual"):
             metrics=metrics,
         )
         logger.info("Retrain completed: %s", metrics)
+        if sora_retrain_total: sora_retrain_total.labels(status="success").inc()
 
     except ImportError:
         status["status"] = "skipped"
@@ -323,8 +333,10 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
             if auc_delta < -0.02:
                 promoted = False
                 reject_reason = "AUC degraded: %.4f -> %.4f (delta=%+.4f)" % (old_auc, new_auc, auc_delta)
+                if sora_model_rejected_total: sora_model_rejected_total.inc()
                 logger.warning("Closed loop: model REJECTED - %s", reject_reason)
             else:
+                if sora_model_promoted_total: sora_model_promoted_total.inc()
                 logger.info("Closed loop: model PROMOTED - AUC %.4f -> %.4f (delta=%+.4f)", float(old_auc), float(new_auc), auc_delta)
         else:
             logger.info("Closed loop: old AUC unavailable, auto-promoting")
@@ -343,16 +355,17 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         lock.release()
 
 
-def full_pipeline_run(trigger_source="full_pipeline"):
+def full_pipeline_run(trigger_source="full_pipeline", force: bool = False):
     """
     Complete MLOps pipeline: refresh → drift → retrain → AUC validate → promote/reject.
     """
     from app.locks import RedisLock
     lock = RedisLock(key="sora:lock:full_pipeline", timeout=900)
-    if not lock.acquire():
+    if not lock.acquire() and not force:
         logger.warning("Full pipeline skipped: lock held")
         return {"status": "skipped", "reason": "lock_held"}
     try:
+        if sora_full_pipeline_total: sora_full_pipeline_total.labels(status="started").inc()
         logger.info("Full pipeline: step 1 — refresh external data")
         refresh_result = {}
         try:

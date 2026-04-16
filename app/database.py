@@ -112,6 +112,25 @@ class RetrainLog(Base):
     message = Column(Text, nullable=True)
 
 
+
+
+class BatchResultDB(Base):
+    __tablename__ = "batch_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(String(64), unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    job_type = Column(String(50), nullable=False, default="batch_evaluate")
+    total = Column(Integer, nullable=False)
+    successful = Column(Integer, nullable=False, default=0)
+    failed = Column(Integer, nullable=False, default=0)
+    duration_ms = Column(Float, nullable=True)
+    status = Column(String(50), nullable=False, default="completed")
+    error_message = Column(Text, nullable=True)
+    results_json = Column(Text, nullable=True)
+    trigger_source = Column(String(50), nullable=False, default="manual")
+
+
 def init_db():
     Base.metadata.create_all(bind=engine, checkfirst=True)
 

@@ -1,10 +1,10 @@
 {
-  "accuracy": 0.8425,
-  "f1_score": 0.8553,
-  "best_f1": 0.8642,
-  "roc_auc": 0.9229,
+  "accuracy": 0.8356,
+  "f1_score": 0.85,
+  "best_f1": 0.8659,
+  "roc_auc": 0.9188,
   "best_threshold": 0.46,
-  "train_samples": 580,
+  "train_samples": 581,
   "test_samples": 146,
   "enrichment_from_log": 94
 }
