@@ -59,3 +59,13 @@ POSTGRES_PASSWORD=sora2026
 SORA_ADMIN_TOKEN=your-secret-token
 GRAFANA_PASSWORD=sora2026
 SECRET_KEY=your-jwt-secret
+
+---
+
+## Документация
+
+Дополнительные материалы проекта:
+
+- [Архитектура](docs/ARCHITECTURE.md)
+- [DEMO-сценарий](docs/DEMO.md)
+- [API обзор](docs/API.md)
