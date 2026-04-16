@@ -359,6 +359,24 @@ function renderMlopsComparison(events){
   `;
 }
 
+
+async function triggerFullPipeline() {
+  const btn = document.getElementById('btnFullPipeline');
+  btn.disabled = true; btn.textContent = '⏳ Running...';
+  try {
+    const res = await fetch('/api/v1/mlops/full-pipeline', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast('Full pipeline: ' + (data.decision || data.status || 'done'), 'success');
+    } else {
+      showToast('Pipeline error: ' + (data.detail || res.status), 'error');
+    }
+  } catch (e) { showToast('Pipeline failed: ' + e.message, 'error'); }
+  finally { btn.disabled = false; btn.textContent = '⚡ Full Pipeline'; loadTimeline(); loadSnapshot(); }
+}
 </script>
 </body>
 </html>

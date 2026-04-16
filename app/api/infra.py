@@ -1,8 +1,12 @@
+from app.prom_metrics import sora_retrain_total, sora_refresh_total, sora_full_pipeline_total
 from fastapi import APIRouter, HTTPException, Request, Depends
 from app.auth import require_admin
 from fastapi.responses import PlainTextResponse
 
-from app.batch import BatchRequest, batch_history, generate_batch_id
+from app.batch import BatchRequest, generate_batch_id
+from app.database import get_db, BatchResultDB
+from sqlalchemy.orm import Session
+from datetime import datetime
 from app.websocket import manager, WebSocket, WebSocketDisconnect
 from app.cache import cache
 from app.drift_detection import drift_detector
@@ -30,7 +34,7 @@ router = APIRouter()
 
 # ===== BATCH =====
 @router.post("/batch/evaluate", tags=["batch"])
-def batch_evaluate(req: BatchRequest):
+def batch_evaluate(req: BatchRequest, db: Session = Depends(get_db)):
     from app.main import COUNTRIES, calculate_esg
 
     batch_id = generate_batch_id()
@@ -52,7 +56,24 @@ def batch_evaluate(req: BatchRequest):
             results.append({"project_name": p.get("name", "unknown"), "status": "error", "error": str(e)})
             fail += 1
     elapsed = round((time.time() - start) * 1000, 2)
-    batch_result = {
+    status = "completed" if fail == 0 else ("partial" if success > 0 else "failed")
+
+    import json as _json
+    db_record = BatchResultDB(
+        batch_id=batch_id,
+        created_at=datetime.utcnow(),
+        total=len(req.projects),
+        successful=success,
+        failed=fail,
+        duration_ms=elapsed,
+        status=status,
+        results_json=_json.dumps(results),
+        trigger_source="manual",
+    )
+    db.add(db_record)
+    db.commit()
+
+    return {
         "batch_id": batch_id,
         "total": len(req.projects),
         "successful": success,
@@ -60,22 +81,45 @@ def batch_evaluate(req: BatchRequest):
         "results": results,
         "processing_time_ms": elapsed,
     }
-    batch_history[batch_id] = batch_result
-    return batch_result
 
 
 @router.get("/batch/{batch_id}", tags=["batch"])
-def get_batch(batch_id: str):
-    if batch_id not in batch_history:
+def get_batch(batch_id: str, db: Session = Depends(get_db)):
+    import json as _json
+    record = db.query(BatchResultDB).filter(BatchResultDB.batch_id == batch_id).first()
+    if not record:
         raise HTTPException(status_code=404, detail="Batch not found")
-    return batch_history[batch_id]
+    return {
+        "batch_id": record.batch_id,
+        "total": record.total,
+        "successful": record.successful,
+        "failed": record.failed,
+        "results": _json.loads(record.results_json) if record.results_json else [],
+        "processing_time_ms": record.duration_ms,
+        "status": record.status,
+        "created_at": record.created_at.isoformat(),
+    }
 
 
 @router.get("/batch", tags=["batch"])
-def list_batches():
+def list_batches(limit: int = 20, db: Session = Depends(get_db)):
+    records = (
+        db.query(BatchResultDB)
+        .order_by(BatchResultDB.created_at.desc())
+        .limit(limit)
+        .all()
+    )
     return [
-        {"batch_id": k, "total": v["total"], "successful": v["successful"]}
-        for k, v in batch_history.items()
+        {
+            "batch_id": r.batch_id,
+            "total": r.total,
+            "successful": r.successful,
+            "failed": r.failed,
+            "status": r.status,
+            "created_at": r.created_at.isoformat(),
+            "duration_ms": r.duration_ms,
+        }
+        for r in records
     ]
 
 

@@ -2,6 +2,6 @@ global:
   scrape_interval: 15s
 scrape_configs:
   - job_name: "sora-app"
-    metrics_path: /metrics/prometheus
+    metrics_path: /metrics
     static_configs:
       - targets: ["app:8000"]
