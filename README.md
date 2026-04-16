@@ -1,124 +1,61 @@
 # SORA.Earth AI Platform
 
-SORA.Earth AI Platform — это полнофункциональный backend-сервис для оценки ESG-проектов: от одиночных предиктов до batch-оценки, аналитики по странам, мониторинга и PDF-отчетов.
+SORA.Earth AI Platform — полнофункциональная платформа для ESG‑оценки проектов, объяснимых ML‑предсказаний, страновой аналитики и автономного MLOps‑контурa с мониторингом и алертингом. [file:892]
 
-## Features
+Платформа собирает вместе FastAPI, PostgreSQL, Redis, APScheduler, Prometheus, Grafana и Docker Compose в единый production‑стек: отдельный scheduler‑процесс, персистентные логи, AI‑агент, админ‑панель и готовый к развёртыванию docker‑композ. [file:892]
 
-- **ESG-оценка проектов**
-  - Оценка проекта по трём компонентам: Environment / Social / Economic.
-  - Итоговый ESG-score, вероятность успеха, риск-профиль и текстовые рекомендации.
-  - Поддержка регионального контекста (страна / регион).
+---
 
-- **Модели и ML-логика**
-  - Ансамбль моделей (Random Forest, Gradient Boosting, нейросеть, stacking-ensemble).
-  - SHAP-объяснения вклада признаков.
-  - Монте‑Карло симуляции и сценарнme.
-  - Prometheus-метрики (`/metrics/prometheus`) для подключения Grafana/Prometheus.
+## Возможности
+
+- **ESG‑оценка проектов**
+  - Оценка по трём компонентам: Environment / Social / Economic.
+  - Итоговый ESG‑score, вероятность успеimpact. [file:892]
+  - What‑if анализ и предсказания с учётом неопределённости.
 
 - **Аналитика и страновые данные**
-  - `/analytics/country-ranking` — ESG/климатический рейтинг стран.
-  - `/analytics/country-benchmark/{country}` — бенчмарк выбранной страны vs глобальное среднее.
+  - `/api/v1/analytics/country-benchmark/{country}` — ESG‑бенчмарк страны против глобального контекста. [file:892]
+  - `/api/v1/analytics/country-ranking` — глобальный ESG‑рейтинг стран с пагинацией. [file:892]
+  - Монте‑Карло симуляции, сравнение моделей, калькулятор GHG Scope 1/2/3. [file:892]
 
-- **Отчётность и мониторинг качества**
-  - Генерация PDF-отчёта по проекту.
-  - Логирование предиктов в MLflow.
-  - Кэширование ответов для повторяющихся запросов.
+- **MLOps и пайплайны**
+  - Drift detection (KS‑test) по ключевым фичам. [file:892]
+  - Закрытый контур: drift → retrain → AUC‑валидация → promote / reject с decision log в PostgreSQL. [file:892]
+  - Полный пайплайн: refresh внешних данных → drift → retrain → validate → promote. [file:892]
 
-## Quick start (локальный запуск)
+- **Operations / Admin*тформу и инициирует действия. [file:892]
 
-### 1. Клонировать репозиторий и создать окружение
+- **Наблюдаемость и прод**
+  - Prometheus‑метрики (`/api/v1/metrics/prometheus`), HTTP + доменные `sora_*` метрики. [file:892][web:1033]
+  - Grafana‑дашборд “SORA MLOps Overview” и 5 алертов (drift, retrain fail, AUC drop, latency, app down). [file:892]
+  - Nginx reverse proxy (порт 80) с rate limiting, security‑заголовками, gzip и WebSocket‑проксированием. [file:892]
 
-```bash
-git clone <URL_ТВОЕГО_РЕПОЗИТОРИЯ>.git
+---
+
+## Архитектура
+
+```text
+┌─────────────┐     ┌──────────────────────────────────────────────────┐
+│   Nginx     │────▶│              FastAPI Application                 │
+│   :80       │     │                                                  │
+│ rate limit  │     │  /api/v1/evaluate /predict /predict/ex   │
+                    └──────────┬───────────────┬───────────────────────┘
+                               │               │
+                     ┌─────────▼──────┐  ┌────▼─────┐
+                     │ PostgreSQL     │  │ Redis    │
+                     │ логи/состояние │  │ кэш/локи │
+                     └─────────┬──────┘  └────┬─────┘
+                               │              │
+                        ┌──────▼──────┐  ┌────▼─────────┐
+                        │ Scheduler   │  │ Prometheus   │
+                        │ отдельный   │  │ + Grafana    │
+                        │ процесс     │  │ дашборды     │
+                   _ai_platform.git
 cd sora_earth_ai_platform
 
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-2. Запуск приложМетрики в формате Prometheus:
-http://localhost:8000/metrics/prometheus
-
-Core API
-Ниже — ключевые эндпоинты (полное описание см. в /docs / /redoc).
-
-Оценка проекта
-
-POST /evaluate
-Тело запроса (пример):
-
-json
-{
-  "name": "Solar Farm Alpha",
-  "budget": 100000,
-  "co2_reduction": 60,
-  "social_impact": 8,
-  "duration_months": 24,
-  "region": "Germany"
-}
-Ответ включает:
-
-total_score — итоговый ESG-score;
-
-environment_score, social_score, economic_score;
-
-success_probability — вероятность успеха (0–1);
-
-risk_level — "Low" / "Medium" / "High";
-
-recommendations — список текстовых советов.
-
-POST /batch/evaluate
-Принимает массив проектов в поле projects и возвращает список оценок.
-
-Аналитика по странам
-
-GET /analytics/country-ranking
-Возвращает список стран с показат:
-
-json
-{
-  "uptime_seconds": 1451.19,
-  "counters": {
-    "http_requests_total": 53,
-    "http_200": 50,
-    "http_404": 3
-  },
-  "request_duration_count": 53,
-  "request_duration_avg_ms": 10.26,
-  "request_duration_max_ms": 217.72
-}
-GET /metrics/prometheus
-Те же данные в текстовом формате, совместимом с Prometheus / Grafana.
-
-Frontend (минимальный UI)
-Внутри приложения есть лёгкий HTML‑интерфейс (без фреймворков):
-
-форма для оценки проекта;
-
-блок с результатами (ESG-score, риск, рекомендации);
-
-блок live‑метрик из /metrics;
-
-поддержка авто‑оценки через параметры URL, например:
-
-text
-http://localhost:8000/?name=Test&budget=120000&duration_months=18&co2_reduction=70&social_impact=9&region=France
-При переходе по такой ссылке форма заполняется параметрактурные элементы (OpenAPI-схема, метрики, health check).
-
-Roadmap (frontend)
-Этот репозиторий фокусируется на бэкенде. Поверх него можно развивать отдельный полноценный frontend (React/Vue) с разделами:
-
-Evaluate / Dashboard
-
-Stacking AI / SHAP
-
-Compare Projects
-
-World Map / Country analytics
-
-GHG Calculator
-
-Trends
-
-System Metrics
-
+# .env с минимальными настройками
+cat > .env << EOF
+POSTGRES_PASSWORD=sora2026
+SORA_ADMIN_TOKEN=your-secret-token
+GRAFANA_PASSWORD=sora2026
+SECRET_KEY=your-jwt-secret
