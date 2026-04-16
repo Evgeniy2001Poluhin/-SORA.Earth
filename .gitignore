@@ -26,3 +26,8 @@ train_model_backup.py
 
 # Model binaries (опционально — если модели большие)
 # models/*.pkl
+
+# Backup files
+*.bak
+*.bak.*
+*.bak[0-9]*

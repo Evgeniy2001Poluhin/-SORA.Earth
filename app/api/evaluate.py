@@ -1,6 +1,6 @@
 from typing import List
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse, FileResponse
 
 from app.schemas import ProjectInput as Project, GHGInput
@@ -22,11 +22,87 @@ import tempfile
 router = APIRouter()
 
 
+def _clamp(x, lo=0.0, hi=100.0):
+    return max(lo, min(hi, float(x)))
+
+
+def _macro_esg_from_payload(payload: dict):
+    co2 = float(payload.get("co2_per_capita", 7.5) or 7.5)
+    renewable = float(payload.get("renewable_share", 35.0) or 35.0)
+    gdp = float(payload.get("gdp_per_capita", 20000) or 20000)
+    forest = float(payload.get("forest_area", 30.0) or 30.0)
+    industrial = float(payload.get("industrial_share", 25.0) or 25.0)
+    energy_intensity = float(payload.get("energy_intensity", 3.0) or 3.0)
+    political = float(payload.get("political_stability", 0.5) or 0.5)
+    rule = float(payload.get("rule_of_law", 1.0) or 1.0)
+
+    env = (
+        35
+        + max(0, 20 - co2) * 1.2
+        + renewable * 0.45
+        + forest * 0.20
+        + max(0, 8 - energy_intensity) * 2.5
+        - industrial * 0.10
+    )
+    social = (
+        40
+        + ((political + 2.5) / 5.0) * 30
+        + ((rule + 2.5) / 5.0) * 30
+    )
+    economic = (
+        30
+        + min(gdp / 1000.0, 45)
+        - industrial * 0.15
+        + renewable * 0.10
+    )
+
+    env = round(_clamp(env), 2)
+    social = round(_clamp(social), 2)
+    economic = round(_clamp(economic), 2)
+    total = round(0.4 * env + 0.3 * social + 0.3 * economic, 2)
+
+    if total >= 70:
+        risk = "Low"
+    elif total >= 45:
+        risk = "Medium"
+    else:
+        risk = "High"
+
+    success_probability = round(_clamp(total * 1.15 + 20), 2)
+    success_probability_v2 = round(_clamp(total * 1.10 + 18), 2)
+
+    recs = []
+    if co2 > 8:
+        recs.append(f"Reduce CO2 intensity from {co2:.1f} t/cap toward < 8.0 to improve environmental performance")
+    if renewable < 40:
+        recs.append(f"Increase renewable energy share from {renewable:.1f}% toward 40%+")
+    if rule < 1.0 or political < 0.5:
+        recs.append("Strengthen governance stability and rule of law factors to improve social resilience")
+    if gdp < 15000:
+        recs.append("Low GDP per capita reduces economic readiness; strengthen financing and productivity assumptions")
+    if not recs:
+        recs.append("Current macro profile is balanced; focus on execution quality and maintaining governance strength")
+
+    return {
+        "total_score": total,
+        "environment_score": env,
+        "social_score": social,
+        "economic_score": economic,
+        "success_probability": success_probability,
+        "success_probability_v2": success_probability_v2,
+        "recommendations": recs[:3],
+        "risk_level": risk,
+        "esg_weights": {"environment": 0.4, "social": 0.3, "economic": 0.3},
+    }
+
+
 @router.post("/evaluate")
-def evaluate_project(project: Project):
+async def evaluate_project(request: Request, project: Project):
     from app.main import calculate_esg, get_db_sync, COUNTRIES, _sanitize_pdf
 
-    cache_key = cache.make_key("eval", project.model_dump())
+    raw_payload = await request.json()
+    payload = dict(raw_payload) if isinstance(raw_payload, dict) else project.model_dump()
+    cache_key = cache.make_key("eval", payload)
     cached = cache.get(cache_key)
     if cached:
         return cached
@@ -37,7 +113,18 @@ def evaluate_project(project: Project):
         {"region": "Europe", "lat": 50.0, "lon": 10.0},
     )
     region_name = cdata.get("region", "Europe")
-    result = calculate_esg(project, region_name)
+
+    macro_keys = {
+        "co2_per_capita", "renewable_share", "gdp_per_capita", "population_density",
+        "forest_area", "industrial_share", "energy_intensity",
+        "political_stability", "rule_of_law"
+    }
+
+    if any(k in payload and payload.get(k) is not None for k in macro_keys):
+        result = _macro_esg_from_payload(payload)
+    else:
+        result = calculate_esg(project, region_name)
+
     latency_ms = round((time.perf_counter() - start) * 1000, 2)
 
     from app.main import log_prediction
@@ -196,7 +283,6 @@ def export_csv():
     )
 
 
-# ===== WHAT-IF =====
 @router.post("/what-if")
 def what_if(project: Project):
     from app.main import COUNTRIES, calculate_esg
@@ -233,7 +319,6 @@ def what_if(project: Project):
     return {"base": base, "variations": variations}
 
 
-# ===== GHG =====
 @router.post("/ghg-calculate")
 def ghg_calculate(data: GHGInput):
     scope1 = round(
@@ -267,7 +352,6 @@ def ghg_calculate(data: GHGInput):
     }
 
 
-# ===== TRENDS / REGIONS / COUNTRIES =====
 @router.get("/trends")
 def trends():
     from app.main import get_db_sync
@@ -299,7 +383,6 @@ def countries_list():
     return {k: v["region"] for k, v in COUNTRIES.items()}
 
 
-# ===== PDF REPORT =====
 @router.post("/report/pdf")
 def generate_pdf_report(project: Project):
     from app.main import (

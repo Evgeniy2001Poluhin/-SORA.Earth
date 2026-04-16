@@ -1,5 +1,7 @@
 from app import cache, external_data
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.rate_limit import limiter, rate_limit_handler, SlowAPIMiddleware, RateLimitExceeded
 from app.logging_config import setup_logging
@@ -94,6 +96,34 @@ app = FastAPI(
     title="SORA.Earth AI Platform",
     version="2.0.0",
 )
+
+origins = [
+    "http://localhost:8081",
+    "http://127.0.0.1:8081",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+origins = [
+    "http://localhost:8081",
+    "http://127.0.0.1:8081",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # Sentry
 if os.getenv("SENTRY_DSN"):
@@ -423,6 +453,11 @@ Instrumentator().instrument(app).expose(app)
 @app.get("/")
 def read_root():
     return FileResponse(os.path.join(BASE_DIR, "static", "index.html"))
+@app.get("/dev")
+async def dev_page():
+    basedir = os.path.dirname(os.path.abspath(__file__))
+    return FileResponse(os.path.join(basedir, "static", "dev.html"))
+
 
 
 @app.get("/health")
