@@ -1,0 +1,5 @@
+Method,Name,Error,Occurrences
+GET,/api/v1/countries,RemoteDisconnected('Remote end closed connection without response'),1
+POST,/evaluate,RemoteDisconnected('Remote end closed connection without response'),2
+GET,/health,RemoteDisconnected('Remote end closed connection without response'),4
+POST,/predict,RemoteDisconnected('Remote end closed connection without response'),1
