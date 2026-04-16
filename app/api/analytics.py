@@ -154,9 +154,16 @@ async def model_compare(project: ModelCompareRequest):
 @router.get("/country-benchmark/{country}", summary="ESG benchmark data for a country")
 async def country_benchmark(country: str):
     from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
-    bench = BENCHMARKS.get(country, GLOBAL_AVG)
+    from app.external_data import COUNTRY_ISO3
+
+    iso3_to_name = {v: k for k, v in COUNTRY_ISO3.items()}
+    normalized = country.strip()
+    country_name = iso3_to_name.get(normalized.upper(), normalized)
+
+    bench = BENCHMARKS.get(country_name, GLOBAL_AVG)
     return {
-        "country": country if country in BENCHMARKS else "Global Average",
+        "country": country_name if country_name in BENCHMARKS else "Global Average",
+        "requested": country,
         "benchmarks": bench,
     }
 

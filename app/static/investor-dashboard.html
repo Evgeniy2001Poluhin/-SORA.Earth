@@ -286,7 +286,7 @@ body{font-family:var(--font-body);font-size:var(--text-base);color:var(--text);b
 </div>
 
 <script>
-const API = '';
+const API = 'http://localhost:8000';
 let TOKEN = null;
 
 async function auth() {
@@ -304,6 +304,7 @@ auth();
 
 function getPayload() {
   return {
+      ...collectMacroFields(),
     country: document.getElementById('f-country').value,
     year: +document.getElementById('f-year').value,
     co2_emissions: +document.getElementById('f-co2').value,
@@ -347,6 +348,64 @@ function riskClass(risk) {
   if (r.includes('high') || r.includes('critical')) return 'risk-high';
   return 'risk-medium';
 }
+
+
+// ── Country → macro-fields auto-fill ──
+  async function onCountryChangeForEvaluate() {
+    var sel = document.getElementById("eval-country") || document.getElementById("country") || document.getElementById("f-country");
+    if (!sel) return;
+    var country = sel.value;
+    if (!country) return;
+    try {
+      var r = await fetch(API + "/api/v1/analytics/country-benchmark/" + encodeURIComponent(country));
+      var d = await r.json();
+      var m = d.metrics || d.benchmark || d.benchmarks || d;
+      var ind = (m.indicators || {});
+      var MAP = {
+        "f-co2":        m.co2_per_capita || ind.co2_per_capita,
+        "f-renewable":  m.renewable_share || ind.renewable_share,
+        "f-gdp":        m.gdp_per_capita || ind.gdp_per_capita,
+        "f-pop":        m.population_density || ind.population_density,
+        "f-forest":     m.forest_area || ind.forest_area,
+        "f-industrial": m.industrial_share || ind.industrial_share,
+        "f-energy":     m.energy_intensity || ind.energy_intensity,
+        "f-political":  m.political_stability || ind.political_stability,
+        "f-law":        m.rule_of_law || ind.rule_of_law
+      };
+      for (var id in MAP) {
+        var el = document.getElementById(id);
+        if (el && MAP[id] != null) {
+          el.value = typeof MAP[id] === "number"
+            ? (Number.isInteger(MAP[id]) ? MAP[id] : MAP[id].toFixed(2))
+            : MAP[id];
+        }
+      }
+      console.log("Country profile loaded -> f-* fields:", country, MAP);
+    } catch (e) {
+      console.error("country benchmark load failed", e);
+    }
+  }
+  (function() {
+  var el = document.getElementById("f-country") || document.getElementById("eval-country") || document.getElementById("country");
+  if (el) el.addEventListener("change", onCountryChangeForEvaluate);
+})();
+
+// ── Helper: collect macro fields from inputs ──
+function collectMacroFields() {
+  var ids = [
+    "co2_per_capita", "renewable_share", "gdp_per_capita",
+    "population_density", "forest_area", "industrial_share",
+    "energy_intensity", "political_stability", "rule_of_law"
+  ];
+  var out = {};
+  ids.forEach(function(k) {
+    var el = document.getElementById("input-" + k.replace(/_/g, "-"));
+    if (el && el.value !== "") out[k] = parseFloat(el.value);
+  });
+  return out;
+}
+// ── END macro helpers ──
+
 
 async function runEvaluate() {
   const el = document.getElementById('eval-result');
@@ -399,16 +458,27 @@ async function runPredict() {
     const vClass = verdict.toLowerCase().includes('positive') || verdict.toLowerCase().includes('good') ? 'verdict-positive'
                   : verdict.toLowerCase().includes('negative') || verdict.toLowerCase().includes('bad') ? 'verdict-negative' : 'verdict-caution';
 
-    const topFeatures = d.top_features ?? [];
+    const topFeatures = Array.isArray(d.explanation) && d.explanation.length ? d.explanation : (Array.isArray(d.all_features) ? d.all_features : []);
+    const FEATURE_LABELS = {
+      efficiency_score: 'Overall efficiency',
+      budget_per_month: 'Budget per month',
+      duration_months: 'Project duration',
+      budget: 'Project budget',
+      co2_reduction: 'CO₂ reduction',
+      co2_per_dollar: 'CO₂ per dollar',
+      social_impact: 'Social impact',
+      year: 'Year',
+      quarter: 'Quarter'
+    };
     const maxAbs = Math.max(...topFeatures.map(f => Math.abs(f.value ?? f.shap_value ?? 0)), 0.01);
 
     const featuresHtml = topFeatures.map(f => {
-      const val = f.value ?? f.shap_value ?? 0;
+      const val = f.shap_value ?? f.value ?? 0;
       const pct = Math.min(100, (Math.abs(val) / maxAbs) * 100);
-      const dir = f.direction ?? (val >= 0 ? 'up' : 'down');
+      const dir = (f.direction === 'positive' ? 'up' : f.direction === 'negative' ? 'down' : (val >= 0 ? 'up' : 'down'));
       const impact = f.impact ?? (val >= 0 ? 'increases score' : 'decreases score');
       return `<div class="feature-bar">
-        <div class="feature-name">${f.feature ?? f.name}</div>
+        <div class="feature-name">${FEATURE_LABELS[f.feature ?? f.name] ?? (f.feature ?? f.name)}</div>
         <div class="feature-bar-track"><div class="feature-bar-fill ${val >= 0 ? 'positive' : 'negative'}" style="width:${pct}%"></div></div>
         <div class="feature-value">${val >= 0 ? '+' : ''}${val.toFixed(4)}</div>
         <div class="feature-direction ${dir === 'up' ? 'dir-up' : 'dir-down'}">${dir === 'up' ? '↑' : '↓'} ${impact}</div>
@@ -447,10 +517,29 @@ async function runBenchmark() {
           <div class="bench-label">${m.indicator ?? m.metric ?? m.name}</div>
           <div class="bench-val" style="color:var(--accent)">${cv.toFixed(1)}</div>
           <div class="bench-val" style="color:var(--text-faint)">${gv.toFixed(1)}</div>
-          <div><div class="bench-bar-wrap"><div class="bench-bar" style="width:${(cv/maxV*100).toFixed(0)}%;background:var(--accent)"></div></div><div class="bench-bar-wrap" style="margin-top:3px"><div class="bench-bar" style="width:${(gv/maxV*100).toFixed(0)}%;background:var(--text-faint)"></div></div></div>
+          <div><div class="bench-bar-wrap"><div class="bench-bar" style="width:${(cv/maxV*100).toFixed(0)}ckground:var(--accent)"></div></div><div class="bench-bar-wrap" style="margin-top:3px"><div class="bench-bar" style="width:${(gv/maxV*100).toFixed(0)}%;background:var(--text-faint)"></div></div></div>
         </div>`;
       });
       html += '<div style="display:flex;gap:var(--space-6);margin-top:var(--space-4);font-size:var(--text-xs);color:var(--text-faint)"><span><span style="color:var(--accent)">■</span> Country</span><span>■ Global Average</span></div>';
+    } else if (metrics && metrics.benchmarks) {
+      const labels = {
+        co2_per_capita: 'CO₂ per capita',
+        renewable_share: 'Renewable share',
+        esg_rank: 'ESG rank',
+        hdi: 'HDI',
+        gdp_per_capita: 'GDP per capita',
+        gini_index: 'Gini index',
+        gov_effectiveness: 'Government effectiveness'
+      };
+      Object.entries(metrics.benchmarks).forEach(([k, v]) => {
+        html += `<div class="bench-row">
+          <div class="bench-label">${labels[k] ?? k}</div>
+          <div class="bench-val" style="col(--accent)">${Number(v).toFixed(1)}</div>
+          <div class="bench-val" style="color:var(--text-faint)">Global</div>
+          <div><div class="bench-bar-wrap"><div class="bench-bar" style="width:${Math.min(100, Math.max(8, Number(v)))}%;background:var(--accent)"></div></div></div>
+        </div>`;
+      });
+      html += '<div style="margin-top:var(--space-4);font-size:var(--text-xs);color:var(--text-faint)">Source returned benchmark object rather than pairwise country/global rows.</div>';
     } else {
       html += '<pre style="font-size:var(--text-xs);color:var(--text-muted);overflow-x:auto">' + JSON.stringify(metrics, null, 2) + '</pre>';
     }
@@ -505,6 +594,72 @@ async function runTeammate(mode) {
     el.innerHTML = `<div class="card" style="color:var(--red);margin-top:var(--space-4)">Error: ${e.message}. Auth required.</div>`;
   }
 }
+
+
+
 </script>
+
+<script>
+(function () {
+  var sel = document.getElementById("f-country");
+  if (!sel) {
+    console.warn("Benchmark binder: f-country not found");
+    return;
+  }
+
+  function applyCountryBenchmark() {
+    var country = sel.value;
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", "/api/v1/analytics/country-benchmark/" + encodeURIComponent(country), true);
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState !== 4) return;
+      if (xhr.status !== 200) {
+        console.error("Benchmark request failed:", xhr.status, xhr.responseText);
+        return;
+      }
+
+      try {
+        var d = JSON.parse(xhr.responseText);
+        var m = d.metrics || d.benchmark || d.benchmarks || d;
+        var ind = (m && m.indicators) || {};
+
+        var map = {
+          "f-co2":        m.co2_per_capita != null ? m.co2_per_capita : ind.co2_per_capita,
+          "f-renewable":  m.renewable_share != null ? m.renewable_share : ind.renewable_share,
+          "f-gdp":        m.gdp_per_capita != null ? m.gdp_per_capita : ind.gdp_per_capita,
+          "f-pop":        m.population_density != null ? m.population_density : ind.population_density,
+          "f-forest":     m.forest_area != null ? m.forest_area : ind.forest_area,
+          "f-industrial": m.industrial_share != null ? m.industrial_share : ind.industrial_share,
+          "f-energy":     m.energy_intensity != null ? m.energy_intensity : ind.energy_intensity,
+          "f-political":  m.political_stability != null ? m.political_stability : ind.political_stability,
+          "f-law":        m.rule_of_law != null ? m.rule_of_law : ind.rule_of_law
+        };
+
+        for (var id in map) {
+          var el = document.getElementById(id);
+          var val = map[id];
+          if (el && val != null) {
+            if (typeof val === "number") {
+              el.value = Number.isInteger(val) ? String(val) : String(Number(val.toFixed(2)));
+            } else {
+              el.value = String(val);
+            }
+          }
+        }
+
+        console.log("Benchmark applied:", country, map);
+      } catch (e) {
+        console.error("Benchmark parse/apply failed:", e);
+      }
+    };
+    xhr.send();
+  }
+
+  sel.addEventListener("change", applyCountryBenchmark);
+  window.applyCountryBenchmark = applyCountryBenchmark;
+  console.log("Benchmark binder OK");
+})();
+</script>
+
 </body>
 </html>
