@@ -380,6 +380,7 @@ from app.api import admin_snapshot
 from app.api import admin_timeline
 from app.api import admin_diagnostics
 from app.api import admin_ai_control
+from app.api import ai_teammate_routes
 
 _all_routers = [
     auth_api.router, evaluate_api.router, predict_api.router,
@@ -408,6 +409,7 @@ app.include_router(api_v1)
 # for _r in _all_routers:
 #     app.include_router(_r)
 # app.include_router(auth_router)
+app.include_router(ai_teammate_routes.router, prefix="/api/v1")
 
 
 # --- MLOps domain metrics (Prometheus) ---
