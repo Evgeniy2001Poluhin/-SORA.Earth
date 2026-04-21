@@ -182,29 +182,50 @@ class AITeammate:
                 ))
 
     def _check_drift(self, db):
+        """Drift check via DriftDetector.check_drift() (replaces legacy .detect())."""
         try:
             from app.drift_detection import drift_detector
-            result = drift_detector.detect()
-            if result.get("drift_detected"):
-                drifted = result.get("drifted_features", [])
-                self.observations.append(Observation(
-                    category="drift", severity="warning",
-                    message=f"Drift detected on features: {drifted}",
-                    metric_name="drifted_features_count",
-                    metric_value=len(drifted)
-                ))
-            else:
-                self.observations.append(Observation(
-                    category="drift", severity="info",
-                    message="No drift detected"
-                ))
+            result = drift_detector.check_drift()
         except Exception as e:
             self.observations.append(Observation(
                 category="drift", severity="info",
-                message=f"Drift check unavailable: {str(e)[:100]}"
+                message=f"Drift check unavailable: {type(e).__name__}: {str(e)[:100]}"
             ))
+            return
 
-    # ---- Decision Phase ----
+        if not isinstance(result, dict):
+            self.observations.append(Observation(
+                category="drift", severity="info",
+                message=f"Drift check returned non-dict result: {type(result).__name__}"
+            ))
+            return
+
+        status = result.get("status", "ok")
+        if status == "insufficient_data":
+            self.observations.append(Observation(
+                category="drift", severity="info",
+                message=f"Drift check skipped: insufficient data "
+                        f"(ref={result.get('reference_samples', 0)}, "
+                        f"cur={result.get('current_samples', 0)})"
+            ))
+            return
+
+        drift_flag = bool(result.get("drift_detected") or result.get("is_drift"))
+        drift_score = float(result.get("drift_score") or 0.0)
+
+        if drift_flag:
+            drifted = result.get("drifted_features") or result.get("features") or []
+            self.observations.append(Observation(
+                category="drift", severity="warning",
+                message=f"Drift detected on features: {drifted} (score={drift_score:.4f})",
+                metric_name="drifted_features_count",
+                metric_value=len(drifted),
+            ))
+        else:
+            self.observations.append(Observation(
+                category="drift", severity="info",
+                message=f"No drift detected (score={drift_score:.4f})",
+            ))
 
     def decide(self) -> List[Decision]:
         """Based on observations, produce decisions."""

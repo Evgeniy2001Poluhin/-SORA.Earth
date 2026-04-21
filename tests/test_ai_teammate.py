@@ -78,7 +78,14 @@ class TestAITeammateAPI:
         for d in data['decisions']:
             assert d['executed'] is False
 
-    def test_teammate_run_auto(self):
+    def test_teammate_run_auto(self, monkeypatch):
+        # Prevent network calls to World Bank when AI teammate triggers refresh
+        import app.external_data as ext
+        monkeypatch.setattr(ext, "refresh_all_countries",
+                            lambda: {"fetched": 32, "total": 32, "countries": []})
+        monkeypatch.setattr(ext, "refresh_live_data",
+                            lambda trigger_source="test": {"fetched": 32, "total": 32, "countries": []})
+
         token = self._admin_token()
         r = self.client.post('/api/v1/admin/ai-teammate/run?mode=auto',
                              headers={'Authorization': f'Bearer {token}'})
