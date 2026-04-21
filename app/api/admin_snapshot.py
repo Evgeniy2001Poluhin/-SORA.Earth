@@ -1,5 +1,5 @@
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -36,7 +36,7 @@ class DataSnapshot(BaseModel):
     refresh_failed_count: Optional[int] = None
     last_refresh_status: Optional[str] = None
     last_refresh_at: Optional[str] = None
-    last_ron_sec: Optional[float] = None
+    last_duration_sec: Optional[float] = None
     last_refresh_trigger: Optional[str] = None
 
 
@@ -178,8 +178,22 @@ def get_admin_snapshot(
     jobs = sched.get("jobs") or []
     next_run_at = jobs[0].get("next_run") if jobs else None
 
+    # DB-fallback: scheduler may run in a separate container (RUN_SCHEDULER=false here)
+    # Detect liveness via recent DataRefreshLog entries within 48h window
+    from datetime import timedelta
+    sched_running = sched.get("running")
+    if not sched_running:
+        cutoff = datetime.utcnow() - timedelta(hours=48)
+        recent = (
+            db.query(DataRefreshLog)
+            .filter(DataRefreshLog.started_at > cutoff)
+            .first()
+        )
+        if recent:
+            sched_running = True
+
     scheduler_snapshot = SchedulerSnapshot(
-        running=sched.get("running"),
+        running=sched_running,
         enabled=sched.get("enabled"),
         jobs_count=len(jobs),
         retrain_history_count=sched.get("retrain_history_count"),

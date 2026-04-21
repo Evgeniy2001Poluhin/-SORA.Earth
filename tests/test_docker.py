@@ -43,6 +43,6 @@ def test_docker_compose_services():
 
 def test_nginx_config():
     content = open("nginx/nginx.conf").read()
-    assert "upstream sora_app" in content
+    assert "upstream sora_backend" in content
     assert "proxy_pass" in content
     assert "websocket" in content.lower() or "upgrade" in content.lower()

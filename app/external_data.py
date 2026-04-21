@@ -308,55 +308,42 @@ def refresh_all_countries() -> Dict:
 
 
 def refresh_live_data(trigger_source: str = "manual") -> Dict:
-    """Background refresh: fetch all countries + write DataRefreshLog."""
+    """Background refresh with try/finally guarantee."""
     db = SessionLocal()
     _start = datetime.utcnow()
     log = DataRefreshLog(
-        status="running",
-        countries_fetched=0,
-        total_countries=len(COUNTRY_ISO3),
-        message=None,
-        job_name="external_data_refresh",
-        source="world_bank_oecd",
-        started_at=_start,
-        trigger_source=trigger_source,
+        status="running", countries_fetched=0,
+        total_countries=len(COUNTRY_ISO3), message=None,
+        job_name="external_data_refresh", source="world_bank_oecd",
+        started_at=_start, trigger_source=trigger_source,
     )
-    db.add(log)
-    db.commit()
-    db.refresh(log)
-
+    db.add(log); db.commit(); db.refresh(log)
+    result = None; exc = None
     try:
         _refresh_status["status"] = "running"
         result = refresh_all_countries()
-
         _refresh_status["last_refresh"] = datetime.utcnow().isoformat()
         _refresh_status["countries_refreshed"] = result["fetched"]
-        _refresh_status["status"] = "idle"
-
-        _end = datetime.utcnow()
         log.status = "success"
         log.countries_fetched = result["fetched"]
         log.total_countries = result["total"]
         log.message = "OK"
+    except Exception as e:
+        exc = e
+        log.status = "error"
+        log.message = str(e)[:500]
+        logger.exception("refresh_live_data failed: %s", e)
+    finally:
+        _refresh_status["status"] = "idle"
+        _end = datetime.utcnow()
         log.fetched_at = _end
         log.finished_at = _end
         log.duration_sec = round((_end - _start).total_seconds(), 2)
-        db.commit()
-        return result
-
-    except Exception as e:
-        _refresh_status["status"] = "idle"
-        _end = datetime.utcnow()
-        log.status = "error"
-        log.message = str(e)[:500]
-        log.finished_at = _end
-        log.duration_sec = round((_end - _start).total_seconds(), 2)
-        db.commit()
-        logger.exception("refresh_live_data failed: %s", e)
-        raise
-    finally:
-        db.close()
-
+        try: db.commit()
+        except Exception: db.rollback()
+        finally: db.close()
+    if exc is not None: raise exc
+    return result
 
 def get_refresh_status() -> Dict:
     """Current cache and refresh status — persisted via DataRefreshLog."""
