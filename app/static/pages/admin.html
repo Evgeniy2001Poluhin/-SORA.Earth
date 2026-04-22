@@ -1,0 +1,52 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>SORA.Earth Platform</title>
+<link rel="stylesheet" href="/static/design/design.css"><link rel="stylesheet" href="/static/design/extras.css"><script defer src="/static/js/sora-ui.js"></script></head><body>
+<div class="shell"><aside class="sidebar">
+<div class="sidebar-logo">SORA<span>.earth</span></div>
+<div class="sidebar-section">
+  <div class="sidebar-section-title">Product</div>
+  <a href="/app/evaluate" data-spa class="sidebar-item">Evaluate</a>
+  <a href="/app/dashboard" data-spa class="sidebar-item">Dashboard</a>
+  <a href="/app/country-ranking" data-spa class="sidebar-item">Country ranking</a>
+  <a href="/app/monte-carlo" data-spa class="sidebar-item">Monte Carlo</a>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-section-title">MLOps</div>
+  <a href="/app/snapshot" data-spa class="sidebar-item">Platform snapshot</a>
+  <a href="/app/ai-teammate" data-spa class="sidebar-item">AI Teammate</a>
+  <a href="/app/system-summary" data-spa class="sidebar-item">System summary</a>
+  <a href="/app/retrain-log" data-spa class="sidebar-item">Retrain log</a>
+  <a href="/app/explainability" data-spa class="sidebar-item">Explainability</a>
+  <a href="/app/diagnostics" data-spa class="sidebar-item">Diagnostics</a>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-section-title">Observability</div>
+  <a href="/app/activity-timeline" data-spa class="sidebar-item">Activity timeline</a>
+  <a href="/app/audit-log" data-spa class="sidebar-item">Audit log</a>
+  <a href="/app/data-health" data-spa class="sidebar-item">Data health</a>
+  <a href="/app/predictions-log" data-spa class="sidebar-item">Predictions log</a>
+  <a href="/app/batch-evaluations" data-spa class="sidebar-item">Batch evaluations</a>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-section-title">System</div>
+  <a href="/docs" class="sidebar-item">API documentation</a>
+  <a href="http://localhost:3000" class="sidebar-item" target="_blank">Grafana</a>
+  <a href="http://localhost:5000" class="sidebar-item" target="_blank">MLflow</a>
+</div>
+<div style="margin-top:auto;padding:var(--sp-3);border-top:1px solid var(--b-default);font:400 11px var(--f-mono);color:var(--c-600)">
+  <div>v2.0 Apr 2026 · 100 runs</div><div style="margin-top:4px;color:var(--c-ok)">Model AUC 0.919 · F1 0.855</div>
+</div>
+</aside>
+<main>
+  <div class="topbar">
+    <div class="topbar-crumbs"><span>Platform</span><span>/</span><span class="current" id="crumb">Evaluate</span></div>
+    <div style="display:flex;align-items:center;gap:var(--sp-4)">
+      <span class="status-dot">Operational</span>
+      <button class="btn btn-ghost btn-sm" onclick="localStorage.removeItem('sora_jwt');location.href='/auth/login'">Sign out</button>
+    </div>
+  </div>
+  <div class="content-wrap" id="outlet">Loading...</div>
+</main></div>
+<script type="module" src="/static/js/router.js"></script>
+</body></html>

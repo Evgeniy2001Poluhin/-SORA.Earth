@@ -126,6 +126,7 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
         else:
             enrichment_count = 0
 
+        min_samples = max(10, min(min_samples, 100000))  # safety clamp
         if len(df) < min_samples:
             raise HTTPException(400, f"Need at least {min_samples} samples, have {len(df)}")
 

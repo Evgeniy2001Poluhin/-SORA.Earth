@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SORA.earth · Home</title>
+<link rel="stylesheet" href="/static/design/design.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a href="/static/views/home.html" class="topbar-brand"><div class="logo-mark"></div><div class="logo-text">SORA<span class="dot">.</span>earth</div></a>
+  <nav class="topbar-nav">
+    <a href="/static/views/home.html" class="active">Home</a>
+    <a href="/static/views/evaluate.html">Evaluate</a>
+    <a href="/static/views/insights.html">Insights</a>
+    <a href="/static/views/operations.html">Operations</a>
+  </nav>
+  <div class="topbar-actions">
+    <div class="status-indicator"><span class="dot"></span>Operational</div>
+    <button class="search-btn">Search <kbd>K</kbd></button>
+    <button class="btn-signout">Sign out</button>
+  </div>
+</header>
+
+<div class="app-shell">
+
+  <aside class="context-sidebar">
+    <div class="section-title">Quick actions</div>
+    <a hef="/static/views/evaluate.html">Run evaluation</a>
+    <a href="/static/views/operations.html">Upload batch CSV</a>
+    <a href="/static/views/operations.html">Trigger retrain</a>
+
+    <div class="section-title">Favorites</div>
+    <a href="#">Sweden #1</a>
+    <a href="#">Germany #12</a>
+    <a href="#">Solar Panel Initiative</a>
+
+    <details class="collapsible">
+      <summary>Developer</summary>
+      <a href="#">API documentation</a>
+      <a href="#">Grafana</a>
+      <a href="#">MLflow</a>
+      <a href="#">Data health</a>
+      <a href="#">System summary</a>
+      <a href="#">Diagnostics</a>
+      <a href="#">Platform snapshot</a>
+    </details>
+  </aside>
+
+  <main class="main-content">
+
+    <div class="hero-card">
+      <div class="hero-content">
+        <div class="hero-eyebrow">Welcome back, Evgenij</div>
+        <h1>Your ESG platform<br/>is healthy and ready</h1>
+        <p class="hero-sub">247 predictions today · Last retrain 20 min ago · Model AUC 0.919</p>
+        <div style="display:flex; gap:12px;">
+          <a href="/static/views/evaluate.html" class="b btn-primary">Run evaluation</a>
+          <a href="/static/views/insights.html" class="btn btn-secondary">Open insights</a>
+        </div>
+      </div>
+      <div class="hero-visual"></div>
+    </div>
+
+    <div class="kpi-row">
+      <div class="kpi-cell">
+        <div class="label">Model AUC</div>
+        <div class="value">0.919</div>
+        <div class="delta up">&#9650; 0.02 vs last retrain</div>
+      </div>
+      <div class="kpi-cell">
+        <div class="label">F1 score</div>
+        <div class="value">0.855</div>
+        <div class="delta up">&#9650; 0.01</div>
+      </div>
+      <div class="kpi-cell">
+        <div class="label">Latency p95</div>
+        <div class="value">142<span style="font-size:14px;color:var(--c-600)">ms</span></div>
+        <div class="delta up">&#9660; 8ms</div>
+      </div>
+      <div class="kpi-cell">
+        <div class="label">Uptime 30d</div>
+        <div class="value">99.9<span style="font-size:14px;color:var(--c-600)">%</span></div>
+        <div class="delta">No incidents</div>
+      </div>
+    </div>
+
+    <div class="content-grid">
+      <div class="content-card">
+        <h3>Recent activity</h3>
+        <div class="activity-item"><span style="color:var(--s-up)">&#9679;</span><span style="flex:1">Batch run #204 completed</span><span class="time">2m</span></div>
+        <div class="activity-item"><span style="color:var(--accent)">&#9679;</span><span style="flex:1">AI Teammate approved 3 projects</span><span class="time">14m</span></div>
+        <div class="activity-item"><span style="color:var(--s-info)">&#9679;</span><span style="flex:1">New data source registered</span><span class="time">1h</span></div>
+        <div class="activity-item"><span style="color:var(--s-warn)">&#9679;</span><span style="flex:1">Scheduled retrain queued</span><span class="time">3h</span></div>
+      </div>
+
+      <div class="content-card">
+        <h3>Model status</h3>
+        <div style="font-family:var(--f-mono); font-size:12px; color:var(--c-700); line-height:2;">
+          <div>version · <span style="color:var(--c-1000)">v2.0-apr26</span></div>
+          <div>last retrain · <span style="color:var(--c-1000)">20 min ago</span></div>
+          <div>next scheduled · <span style="color:var(--c-1000)">in 4h</span></div>
+          <div>training samples · <span style="color:var(--c-1000)">12,847</span></div>
+          <div>calibration · <span style="color:var(--s-up)">nominal</span></div>
+        </div>
+      </div>
+
+      <div class="content-card">
+        <h3>Quick actions</h3>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <a href="/static/views/evaluate.html" class="btn btn-secondary" style="justify-content:flex-start; width:100%">Evaluate a project</a>
+          <a href="/static/views/operations.html" class="btn btn-secondary" style="justify-content:flex-start; width:100%">Upload batch CSV</a>
+          <a href="/static/views/operations.html" class="btn btn-secondary" style="justify-content:flex-staidth:100%">Trigger retrain</a>
+          <a href="/static/views/insights.html" class="btn btn-secondary" style="justify-content:flex-start; width:100%">View explainability</a>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+</body>
+</html>

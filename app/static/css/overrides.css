@@ -1,0 +1,38 @@
+
+
+/* === SORA overrides === */
+.hero, .page-hero, .evaluate-hero, .card.hero {
+  padding: 28px 32px !important;
+}
+.hero h1, .page-hero h1, .evaluate-hero h1 {
+  font-size: clamp(22px, 2.2vw, 30px) !important;
+  letter-spacing: -0.02em !important;
+  margin: 4px 0 6px !important;
+}
+.hero p, .page-hero p, .evaluate-hero p {
+  font-size: 14px !important;
+  color: var(--c-600) !important;
+  margin: 0 !important;
+}
+.hero .eyebrow, .page-hero .eyebrow {
+  font-size: 11px !important;
+  letter-spacing: .18em !imptant;
+}
+
+/* Nav buttons bigger + visible */
+header nav a, .topnav a, .nav a {
+  padding: 10px 16px !important;
+  font-size: 15px !important;
+  font-weight: 500 !important;
+  border-radius: 10px !important;
+  transition: background .15s ease, color .15s ease;
+}
+header nav a:hover, .topnav a:hover, .nav a:hover {
+  background: rgba(255,255,255,.06) !important;
+  color: #fff !important;
+}
+header nav a.active, .topnav a.active, .nav a.active {
+  background: rgba(55,211,153,.12) !important;
+  color: #7ef0bf !important;
+}
+/* === end overrides === */

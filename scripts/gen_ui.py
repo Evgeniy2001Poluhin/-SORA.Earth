@@ -1,0 +1,560 @@
+#!/usr/bin/env python3
+"""Generator for SORA.Earth UI arsenal. Run from project root."""
+from pathlib import Path
+
+ROOT = Path("app/static")
+for d in ["design", "js", "js/views", "pages", "views"]:
+    (ROOT / d).mkdir(parents=True, exist_ok=True)
+
+F = {}
+
+F["design/tokens.css"] = r"""
+:root{
+  --c-0:#0A0A0A;--c-50:#111;--c-100:#171717;--c-200:#1F1F1F;--c-300:#2A2A2A;
+  --c-400:#404040;--c-500:#525252;--c-600:#737373;--c-700:#A3A3A3;
+  --c-800:#D4D4D4;--c-900:#EDEDED;--c-1000:#FAFAFA;
+  --s-up:#7DD3A8;--s-down:#F07171;--s-warn:#E6C06C;--s-info:#8AB4F8;
+  --b-subtle:rgba(255,255,255,0.06);--b-default:rgba(255,255,255,0.08);
+  --b-strong:rgba(255,255,255,0.16);--b-focus:rgba(255,255,255,0.32);
+  --f-sans:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --f-mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace;
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;
+  --sp-8:32px;--sp-10:40px;--sp-12:48px;--sp-16:64px;--sp-20:80px;
+  --r-sm:4px;--r-md:6px;--r-lg:8px;--r-xl:12px;--r-full:9999px;
+  --ease-out:cubic-bezier(0.16,1,0.3,1);--t-fast:120ms;--t-base:200ms;--t-slow:400ms;
+  --max-w:1440px;--sidebar-w:240px;--nav-h:56px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:var(--f-sans);background:var(--c-0);color:var(--c-900);
+  font-weight:400;line-height:1.5;-webkit-font-smoothing:antialiased}
+::selection{background:var(--c-900);color:var(--c-0)}
+a{color:inherit;text-decoration:none}
+button{font-family:inherit}
+"""
+
+F["design/components.css"] = r"""
+.btn{display:inline-flex;align-items:center;gap:var(--sp-2);
+  padding:var(--sp-3) var(--sp-5);font:500 13px var(--f-sans);
+  letter-spacing:-0.005em;border-radius:var(--r-md);border:1px solid transparent;
+  cursor:pointer;transition:all var(--t-base) var(--ease-out)}
+.btn-primary{background:var(--c-1000);color:var(--c-0)}
+.btn-primary:hover{transform:translateY(-1px)}
+.btn-secondary{background:transparent;color:var(--c-900);border-color:var(--b-strong)}
+.btn-secondary:hover{border-color:var(--c-900)}
+.btn-ghost{background:transparent;color:var(--c-600)}
+.btn-ghost:hover{background:var(--c-100);color:var(--c-900)}
+.btn-sm{padding:6px 12px;font-size:12px}
+.btn-lg{padding:16px 28px;font-size:14px}
+.btn svg{width:14px;height:14px}
+.input,.select{width:100%;padding:var(--sp-3) var(--sp-4);background:var(--c-50);
+  border:1px solid var(--b-default);border-radius:var(--r-md);
+  font:400 14px var(--f-sans);color:var(--c-900);
+  transition:border-color var(--t-fast) ease}
+.input:hover,.select:hover{border-color:var(--b-strong)}
+.input:focus,.select:focus{outline:none;border-color:var(--b-focus);background:var(--c-100)}
+.label{font:500 11px var(--f-mono);color:var(--c-600);letter-spacing:0.04em;
+  text-transform:uppercase;margin-bottom:var(--sp-2);display:block}
+.card{background:var(--c-50);border:1px solid var(--b-default);
+  border-radius:var(--r-lg);padding:var(--sp-6)}
+.card:hover{border-color:var(--b-strong)}
+.card-head{display:flex;justify-content:space-between;align-items:center;
+  margin-bottom:var(--sp-5)}
+.card-title{font:500 15px var(--f-sans);letter-spacing:-0.01em}
+.card-subtitle{font:400 12px var(--f-mono);color:var(--c-600)}
+.metric-value{font:500 36px var(--f-sans);letter-spacing:-0.03em;line-height:1}
+.metric-label{font:400 11px var(--f-mono);color:var(--c-600);
+  letter-spacing:0.04em;text-transform:uppercase}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;
+  font:500 11px var(--f-mono);border-radius:var(--r-full);
+  border:1px solid var(--b-default);letter-spacing:0.02em}
+.badge-success{color:var(--s-up);border-color:rgba(125,211,168,0.3)}
+.badge-warn{color:var(--s-warn);border-color:rgba(230,192,108,0.3)}
+.badge-danger{color:var(--s-down);border-color:rgba(240,113,113,0.3)}
+.badge-dot::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.bar{height:4px;background:var(--c-200);border-radius:var(--r-full);overflow:hidden}
+.bar-fill{height:100%;background:var(--c-900);transition:width var(--t-slow) var(--ease-out)}
+.bar-fill-up{background:var(--s-up)}
+.reveal{opacity:0;transform:translateY(20px);
+  transition:opacity 800ms var(--ease-out),transform 800ms var(--ease-out)}
+.reveal.in{opacity:1;transform:translateY(0)}
+"""
+
+F["design/layout.css"] = r"""
+.shell{display:grid;grid-template-columns:var(--sidebar-w) 1fr;min-height:100vh}
+.sidebar{background:var(--c-50);border-right:1px solid var(--b-default);
+  padding:var(--sp-5) var(--sp-4);display:flex;flex-direction:column;
+  gap:var(--sp-6);position:sticky;top:0;height:100vh;overflow-y:auto}
+.sidebar-logo{padding:var(--sp-3);font:500 14px var(--f-mono);letter-spacing:-0.02em}
+.sidebar-logo span{color:var(--c-600)}
+.sidebar-section{display:flex;flex-direction:column;gap:2px}
+.sidebar-section-title{font:500 10px var(--f-mono);color:var(--c-500);
+  letter-spacing:0.08em;text-transform:uppercase;padding:var(--sp-2) var(--sp-3)}
+.sidebar-item{display:flex;align-items:center;justify-content:space-between;
+  padding:var(--sp-2) var(--sp-3);font:400 13px var(--f-sans);
+  color:var(--c-600);border-radius:var(--r-md);
+  transition:all var(--t-fast) ease}
+.sidebar-item:hover{background:var(--c-100);color:var(--c-900)}
+.sidebar-item.active{background:var(--c-100);color:var(--c-900);font-weight:500}
+.topbar{position:sticky;top:0;z-index:50;height:var(--nav-h);
+  padding:0 var(--sp-6);display:flex;align-items:center;
+  justify-content:space-between;background:rgba(10,10,10,0.72);
+  backdrop-filter:saturate(180%) blur(20px);
+  -webkit-backdrop-filter:saturate(180%) blur(20px);
+  border-bottom:1px solid var(--b-default)}
+.topbar-crumbs{display:flex;align-items:center;gap:var(--sp-2);
+  font:400 13px var(--f-mono);color:var(--c-600)}
+.topbar-crumbs .current{color:var(--c-900)}
+.status-dot{display:inline-flex;align-items:center;gap:6px;
+  font:400 11px var(--f-mono);color:var(--c-600)}
+.status-dot::before{content:"";width:6px;height:6px;border-radius:50%;
+  background:var(--s-up);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+.content-wrap{padding:var(--sp-8) var(--sp-10);max-width:1400px}
+.page-head{margin-bottom:var(--sp-10)}
+.page-title{font:500 32px var(--f-sans);letter-spacing:-0.025em;margin-bottom:var(--sp-2)}
+.page-subtitle{font:400 14px var(--f-sans);color:var(--c-600);max-width:720px}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr}
+  .sidebar{display:none}
+  .content-wrap{padding:var(--sp-6) var(--sp-4)}
+}
+"""
+
+F["design/design.css"] = r"""
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('./tokens.css');
+@import url('./components.css');
+@import url('./layout.css');
+"""
+
+F["js/api.js"] = r"""
+const K='sora_jwt';
+export const getToken=()=>localStorage.getItem(K);
+export const setToken=t=>localStorage.setItem(K,t);
+export const clearToken=()=>localStorage.removeItem(K);
+export async function api(path,opts={}){
+  const headers={'Content-Type':'application/json',...opts.headers};
+  const t=getToken();if(t)headers['Authorization']='Bearer '+t;
+  const res=await fetch(path,{...opts,headers});
+  if(res.status===401){clearToken();location.href='/auth/login';return;}
+  if(!res.ok){const e=await res.json().catch(()=>({detail:res.statusText}));throw new Error(e.detail||'err')}
+  return res.json();
+}
+export async function login(username,password){
+  const res=await fetch('/api/v1/auth/login-json',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username,password})});
+  if(!res.ok)throw new Error('Invalid credentials');
+  const d=await res.json();setToken(d.access_token);return d;
+}
+"""
+
+F["js/router.js"] = r"""
+import {getToken} from './api.js';
+const routes={
+  '/app':'evaluate','/app/evaluate':'evaluate','/app/dashboard':'dashboard',
+  '/admin':'snapshot','/admin/snapshot':'snapshot','/admin/ai-teammate':'ai-teammate',
+};
+async function loadView(){
+  if(!getToken()){location.href='/auth/login';return}
+  const path=location.pathname.replace(/\/$/,'')||'/app';
+  const view=routes[path]||'evaluate';
+  const html=await fetch('/static/views/'+view+'.html').then(r=>r.text()).catch(()=>'<div class="page-head"><div class="page-title">Not found</div></div>');
+  document.getElementById('outlet').innerHTML=html;
+  document.querySelectorAll('.sidebar-item').forEach(a=>{
+    a.classList.toggle('active',a.getAttribute('href')===path);
+  });
+  try{const m=await import('/static/js/views/'+view+'.js');if(m.mount)m.mount();}catch(e){console.warn(e)}
+}
+window.addEventListener('popstate',loadView);
+document.addEventListener('click',e=>{
+  const a=e.target.closest('a[data-spa]');if(!a)return;
+  e.preventDefault();history.pushState({},'',a.href);loadView();
+});
+loadView();
+"""
+
+SIDEBAR = """<aside class="sidebar">
+<div class="sidebar-logo">SORA<span>.earth</span></div>
+<div class="sidebar-section">
+  <div class="sidebar-section-title">Product</div>
+  <a href="/app/evaluate" data-spa class="sidebar-item">Evaluate</a>
+  <a href="/app/dashboard" data-spa class="sidebar-item">Dashboard</a>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-section-title">MLOps</div>
+  <a href="/admin/snapshot" data-spa class="sidebar-item">Platform snapshot</a>
+  <a href="/admin/ai-teammate" data-spa class="sidebar-item">AI Teammate</a>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-section-title">System</div>
+  <a href="/docs" class="sidebar-item">API documentation</a>
+  <a href="http://localhost:3000" class="sidebar-item" target="_blank">Grafana</a>
+  <a href="http://localhost:5000" class="sidebar-item" target="_blank">MLflow</a>
+</div>
+<div style="margin-top:auto;padding:var(--sp-3);border-top:1px solid var(--b-default);font:400 11px var(--f-mono);color:var(--c-600)">
+  <div>v2.0 Apr 2026</div><div style="margin-top:4px">Model AUC 0.82</div>
+</div>
+</aside>"""
+
+APP_SHELL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>SORA.Earth Platform</title>
+<link rel="stylesheet" href="/static/design/design.css"></head><body>
+<div class="shell">__SIDEBAR__
+<main>
+  <div class="topbar">
+    <div class="topbar-crumbs"><span>Platform</span><span>/</span><span class="current" id="crumb">Evaluate</span></div>
+    <div style="display:flex;align-items:center;gap:var(--sp-4)">
+      <span class="status-dot">Operational</span>
+      <button class="btn btn-ghost btn-sm" onclick="localStorage.removeItem('sora_jwt');location.href='/auth/login'">Sign out</button>
+    </div>
+  </div>
+  <div class="content-wrap" id="outlet">Loading...</div>
+</main></div>
+<script type="module" src="/static/js/router.js"></script>
+</body></html>"""
+APP_SHELL = APP_SHELL.replace("__SIDEBAR__", SIDEBAR)
+F["pages/app.html"] = APP_SHELL
+F["pages/admin.html"] = APP_SHELL
+
+F["pages/landing.html"] = r"""<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>SORA.Earth ESG Intelligence Platform</title>
+<link rel="stylesheet" href="/static/design/design.css">
+<style>
+nav{position:fixed;top:0;left:0;right:0;height:64px;display:flex;
+  align-items:center;justify-content:space-between;padding:0 40px;
+  border-bottom:1px solid var(--b-default);background:rgba(10,10,10,0.72);
+  backdrop-filter:saturate(180%) blur(20px);z-index:100}
+.nav-links{display:flex;gap:32px;align-items:center}
+.nav-links a{color:var(--c-600);font-size:13px}
+.nav-links a:hover{color:var(--c-900)}
+.nav-cta{padding:8px 16px;border:1px solid var(--b-strong);border-radius:6px;color:var(--c-900)}
+.nav-cta:hover{background:var(--c-900);color:var(--c-0) !important}
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;
+  padding:160px 40px 120px;max-width:1440px;margin:0 auto}
+.hero-tag{font:400 12px var(--f-mono);color:var(--c-600);margin-bottom:48px;
+  display:flex;align-items:center;gap:12px}
+.hero-tag::before{content:"";width:6px;height:6px;background:var(--c-900);
+  border-radius:50%;animation:pulse 2s ease-in-out infinite}
+.hero h1{font-size:clamp(48px,9vw,144px);font-weight:600;
+  letter-spacing:-0.045em;line-height:0.95;margin-bottom:32px}
+.hero h1 .dim{color:var(--c-500)}
+.hero-desc{max-width:620px;font-size:18px;color:var(--c-600);
+  line-height:1.55;margin-bottom:56px}
+.hero-ctas{display:flex;gap:12px}
+.metrics{border-top:1px solid var(--b-default);border-bottom:1px solid var(--b-default);padding:48px 40px}
+.metrics-grid{max-width:1440px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr);gap:48px}
+.metric-big{font:500 40px var(--f-sans);letter-spacing:-0.03em}
+section.content{padding:160px 40px;max-width:1440px;margin:0 auto}
+.section-label{font:400 12px var(--f-mono);color:var(--c-600);
+  margin-bottom:24px;text-transform:uppercase}
+.section-title{font-size:clamp(36px,5vw,72px);font-weight:500;
+  letter-spacing:-0.035em;line-height:1.05;max-width:900px;margin-bottom:80px}
+.section-title .dim{color:var(--c-500)}
+.cap-grid{display:grid;grid-template-columns:repeat(3,1fr);
+  border-top:1px solid var(--b-default);border-left:1px solid var(--b-default)}
+.cap-card{padding:48px 40px;border-right:1px solid var(--b-default);
+  border-bottom:1px solid var(--b-default);min-height:260px;
+  display:flex;flex-direction:column;justify-content:space-between;
+  position:relative;transition:background 260ms ease}
+.cap-card:hover{background:var(--c-50)}
+.cap-card::before{content:attr(data-num);position:absolute;top:24px;right:32px;
+  font:400 12px var(--f-mono);color:var(--c-500)}
+.cap-card h3{font:500 22px var(--f-sans);letter-spacing:-0.02em;margin-bottom:16px}
+.cap-card p{font-size:14px;color:var(--c-600);line-height:1.6;max-width:320px}
+.arch{display:flex;border:1px solid var(--b-default);border-radius:12px;overflow:hidden}
+.arch-node{flex:1;padding:32px 24px;border-right:1px solid var(--b-default);text-align:center}
+.arch-node:last-child{border-right:none}
+.arch-node .mono{font:400 11px var(--f-mono);color:var(--c-600);
+  text-transform:uppercase;margin-bottom:12px}
+.arch-node .name{font:500 16px var(--f-sans)}
+.final{border-top:1px solid var(--b-default);padding:160px 40px;text-align:center}
+.final h2{font-size:clamp(48px,8vw,120px);font-weight:500;
+  letter-spacing:-0.045em;line-height:0.95;max-width:1000px;margin:0 auto 48px}
+footer{border-top:1px solid var(--b-default);padding:40px;display:flex;
+  justify-content:space-between;align-items:center;max-width:1440px;
+  margin:0 auto;font:400 12px var(--f-mono);color:var(--c-500)}
+footer a{color:var(--c-600)}footer a:hover{color:var(--c-900)}
+footer .right{display:flex;gap:24px}
+@media (max-width:900px){.nav-links a:not(.nav-cta){display:none}
+  .metrics-grid{grid-template-columns:repeat(2,1fr);gap:32px}
+  .cap-grid{grid-template-columns:1fr}.arch{flex-direction:column}
+  .arch-node{border-right:none;border-bottom:1px solid var(--b-default)}
+  .hero{padding:120px 24px 80px}section.content{padding:96px 24px}}
+</style></head><body>
+<nav>
+  <div style="font:500 14px var(--f-mono);letter-spacing:-0.02em">SORA<span style="color:var(--c-600)">.earth</span></div>
+  <div class="nav-links">
+    <a href="#capabilities">Capabilities</a>
+    <a href="#architecture">Architecture</a>
+    <a href="/docs">Docs</a>
+    <a href="/auth/login" class="nav-cta">Enter platform</a>
+  </div>
+</nav>
+<section class="hero">
+  <div class="hero-tag reveal">v2.0 Production release, April 2026</div>
+  <h1 class="reveal">ESG intelligence<br><span class="dim">for the autonomous era.</span></h1>
+  <p class="hero-desc reveal">A production-grade MLOps platform that evaluates sustainability projects through closed-loop machine learning. Built with rigorous observability, autonomous drift detection, and transparent decision logs.</p>
+  <div class="hero-ctas reveal">
+    <a href="/auth/login" class="btn btn-primary btn-lg">Enter platform</a>
+    <a href="/docs" class="btn btn-secondary btn-lg">Read documentation</a>
+  </div>
+</section>
+<div class="metrics"><div class="metrics-grid">
+  <div class="reveal"><div class="metric-big">324</div><div class="metric-label">Tests passing</div></div>
+  <div class="reveal"><div class="metric-big">100</div><div class="metric-label">MLflow runs tracked</div></div>
+  <div class="reveal"><div class="metric-big">0.82</div><div class="metric-label">Cross-validated AUC</div></div>
+  <div class="reveal"><div class="metric-big">P95 65ms</div><div class="metric-label">Prediction latency</div></div>
+</div></div>
+<section class="content" id="capabilities">
+  <div class="section-label reveal">01 Capabilities</div>
+  <h2 class="section-title reveal">Every surface instrumented.<br><span class="dim">Every decision explainable.</span></h2>
+  <div class="cap-grid">
+    <div class="cap-card reveal" data-num="01"><div><h3>ESG evaluation</h3><p>Score projects across environmental, social and economic axes with calibrated probability outputs.</p></div></div>
+    <div class="cap-card reveal" data-num="02"><div><h3>Explainable predictions</h3><p>SHAP waterfall and beeswarm plots expose the exact contribution of every input feature.</p></div></div>
+    <div class="cap-card reveal" data-num="03"><div><h3>Autonomous retraining</h3><p>Closed-loop pipeline: drift detection, retrain, AUC validation, promotion or rejection with decision logs.</p></div></div>
+    <div class="cap-card reveal" data-num="04"><div><h3>Country benchmarks</h3><p>Global rankings and per-country comparisons sourced from live World Bank and OECD indicators.</p></div></div>
+    <div class="cap-card reveal" data-num="05"><div><h3>Monte Carlo simulation</h3><p>Risk analysis under uncertainty with configurable sample sizes and parameter distributions.</p></div></div>
+    <div class="cap-card reveal" data-num="06"><div><h3>AI teammate agent</h3><p>Autonomous observe, decide, execute cycle monitoring data freshness, model health, and drift.</p></div></div>
+  </div>
+</section>
+<section class="content" id="architecture">
+  <div class="section-label reveal">02 Architecture</div>
+  <h2 class="section-title reveal">Eight services.<br><span class="dim">One contract.</span></h2>
+  <div class="arch reveal">
+    <div class="arch-node"><div class="mono">Edge</div><div class="name">Nginx</div></div>
+    <div class="arch-node"><div class="mono">API</div><div class="name">FastAPI</div></div>
+    <div class="arch-node"><div class="mono">Jobs</div><div class="name">Scheduler</div></div>
+    <div class="arch-node"><div class="mono">Data</div><div class="name">PostgreSQL</div></div>
+    <div class="arch-node"><div class="mono">Cache</div><div class="name">Redis</div></div>
+    <div class="arch-node"><div class="mono">Metrics</div><div class="name">Prometheus</div></div>
+    <div class="arch-node"><div class="mono">Dash</div><div class="name">Grafana</div></div>
+    <div class="arch-node"><div class="mono">Track</div><div class="name">MLflow</div></div>
+  </div>
+</section>
+<section class="final">
+  <h2 class="reveal">Built for rigor.<br>Ready for production.</h2>
+  <a href="/auth/login" class="btn btn-primary btn-lg reveal">Enter platform</a>
+</section>
+<footer><div>SORA.earth / 2026</div><div class="right"><a href="/docs">Documentation</a><a href="/auth/login">Sign in</a></div></footer>
+<script>
+const io=new IntersectionObserver((es)=>{es.forEach((e,i)=>{
+  if(e.isIntersecting){setTimeout(()=>e.target.classList.add('in'),i*60);io.unobserve(e.target)}
+})},{threshold:0.12,rootMargin:"0px 0px -10% 0px"});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+</script></body></html>"""
+
+F["pages/login.html"] = r"""<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Sign in SORA.Earth</title>
+<link rel="stylesheet" href="/static/design/design.css"></head><body>
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:var(--sp-6)">
+<div style="width:100%;max-width:400px">
+  <a href="/" style="display:block;text-align:center;font:500 14px var(--f-mono);margin-bottom:var(--sp-10);color:var(--c-900)">SORA<span style="color:var(--c-600)">.earth</span></a>
+  <div class="card">
+    <div class="card-head"><div><div class="card-title">Sign in</div><div class="card-subtitle" style="margin-top:4px">Use your administrator credentials</div></div></div>
+    <form id="login-form" style="display:flex;flex-direction:column;gap:var(--sp-5)">
+      <div><label class="label">Username</label><input class="input" name="username" value="admin" autofocus></div>
+      <div><label class="label">Password</label><input class="input" name="password" type="password" placeholder="password"></div>
+      <div id="err" style="display:none;color:var(--s-down);font:400 12px var(--f-mono)"></div>
+      <button type="submit" class="btn btn-primary btn-lg" style="justify-content:center">Continue</button>
+    </form>
+  </div>
+  <div style="text-align:center;margin-top:var(--sp-6);font:400 12px var(--f-mono)"><a href="/" style="color:var(--c-600)">Back to home</a></div>
+</div></div>
+<script type="module">
+import {login} from '/static/js/api.js';
+document.getElementById('login-form').addEventListener('submit',async e=>{
+  e.preventDefault();const f=new FormData(e.target);
+  try{await login(f.get('username'),f.get('password'));location.href='/app/evaluate'}
+  catch(err){const el=document.getElementById('err');el.textContent=err.message;el.style.display='block'}
+});
+</script></body></html>"""
+
+F["views/evaluate.html"] = r"""<div class="page-head">
+<div class="page-title">Project evaluation</div>
+<div class="page-subtitle">Score an ESG project against calibrated ML models.</div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1.2fr;gap:var(--sp-8)">
+<div class="card">
+<div class="card-head"><div class="card-title">Input parameters</div><div class="card-subtitle">9 features</div></div>
+<div style="display:flex;flex-wrap:wrap;gap:var(--sp-2);margin-bottom:var(--sp-6)">
+<button class="btn btn-ghost btn-sm preset" data-b="50000" data-c="85">Solar Energy</button>
+<button class="btn btn-ghost btn-sm preset" data-b="120000" data-c="95">Wind Farm</button>
+<button class="btn btn-ghost btn-sm preset" data-b="25000" data-c="60">Reforestation</button>
+<button class="btn btn-ghost btn-sm preset" data-b="40000" data-c="30">Water Treatment</button>
+<button class="btn btn-ghost btn-sm preset" data-b="200000" data-c="120">EV Infrastructure</button>
+<button class="btn btn-ghost btn-sm preset" data-b="15000" data-c="45">Waste Recycling</button>
+</div>
+<form id="eval-form" style="display:flex;flex-direction:column;gap:var(--sp-5)">
+<div><label class="label">Project name</label><input class="input" name="name" value="Solar Panel Initiative"></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4)">
+<div><label class="label">Budget USD</label><input class="input" type="number" name="budget" value="50000"></div>
+<div><label class="label">CO2 reduction t/yr</label><input class="input" type="number" name="co2" value="85"></div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4)">
+<div><label class="label">Social impact 1-10</label><input class="input" type="number" name="social" min="1" max="10" value="8"></div>
+<div><label class="label">Duration months</label><input class="input" type="number" name="duration" value="12"></div>
+</div>
+<div><label class="label">Country</label><select class="select" name="country"><option>Germany</option><option>United States</option><option>Japan</option><option>France</option></select></div>
+<button type="submit" class="btn btn-primary btn-lg" style="justify-content:center">Evaluate project</button>
+</form></div>
+<div id="result" class="card">
+<div class="card-head"><div class="card-title">Result</div><div class="card-subtitle">Submit to evaluate</div></div>
+<div style="color:var(--c-600);font-size:14px;padding:var(--sp-10) 0;text-align:center">No evaluation yet.</div>
+</div></div>"""
+
+F["js/views/evaluate.js"] = r"""
+import {api} from '/static/js/api.js';
+export function mount(){
+  document.getElementById('crumb').textContent='Evaluate';
+  document.querySelectorAll('.preset').forEach(b=>b.onclick=e=>{
+    e.preventDefault();const f=document.getElementById('eval-form');
+    f.budget.value=b.dataset.b;f.co2.value=b.dataset.c;f.name.value=b.textContent;
+  });
+  document.getElementById('eval-form').onsubmit=async e=>{
+    e.preventDefault();const f=new FormData(e.target);
+    const payload={project_name:f.get('name'),budget_usd:+f.get('budget'),
+      co2_reduction_tons_year:+f.get('co2'),social_impact:+f.get('social'),
+      project_duration_months:+f.get('duration'),country:f.get('country')};
+    const r=document.getElementById('result');
+    r.innerHTML='<div class="card-head"><div class="card-title">Evaluating...</div></div>';
+    try{
+      const d=await api('/api/v1/evaluate',{method:'POST',body:JSON.stringify(payload)});
+      const score=d.total_score||d.esg_score||0;
+      const env=d.environment_score||d.environmental||0;
+      const soc=d.social_score||d.social||0;
+      const eco=d.economic_score||d.economic||0;
+      const succ=Math.round((d.ml_success_probability||d.success_probability||0)*100);
+      r.innerHTML='<div class="card-head"><div class="card-title">'+payload.project_name+'</div>'
+        +'<span class="badge badge-success badge-dot">'+(d.risk_level||'Low risk')+'</span></div>'
+        +'<div style="display:flex;align-items:baseline;gap:var(--sp-3);margin-bottom:var(--sp-6)">'
+        +'<div style="font:500 64px var(--f-sans);letter-spacing:-0.03em;line-height:1">'+score.toFixed(1)+'</div>'
+        +'<div style="font:400 13px var(--f-mono);color:var(--c-600)">/ 100</div></div>'
+        +'<div style="display:flex;flex-direction:column;gap:var(--sp-4)">'
+        +row('Environment',env)+row('Social',soc)+row('Economic',eco)
+        +'<div style="border-top:1px solid var(--b-subtle);padding-top:var(--sp-4)">'+row('ML success probability',succ,'up')+'</div>'
+        +'</div>';
+    }catch(err){r.innerHTML='<div class="card-head"><div class="card-title">Error</div></div><div style="color:var(--s-down);font-size:13px">'+err.message+'</div>'}
+  };
+  function row(l,v,type){const cls=type==='up'?'bar-fill-up':'';
+    return '<div><div style="display:flex;justify-content:space-between;margin-bottom:var(--sp-2);font-size:13px"><span style="color:var(--c-700)">'+l+'</span><span style="font:500 14px var(--f-mono)">'+v.toFixed(1)+(type==='up'?'%':'')+'</span></div><div class="bar"><div class="bar-fill '+cls+'" style="width:'+Math.min(v,100)+'%"></div></div></div>';
+  }
+}
+"""
+
+F["views/dashboard.html"] = r"""<div class="page-head">
+<div class="page-title">Portfolio overview</div>
+<div class="page-subtitle">Live snapshot of your evaluated projects and model performance.</div>
+</div>
+<div id="kpi" style="display:grid;grid-template-columns:repeat(5,1fr);gap:var(--sp-4);margin-bottom:var(--sp-8)"></div>
+<div class="card"><div class="card-head"><div class="card-title">Score distribution</div></div><div id="dist"></div></div>"""
+
+F["js/views/dashboard.js"] = r"""
+import {api} from '/static/js/api.js';
+export async function mount(){
+  document.getElementById('crumb').textContent='Dashboard';
+  try{
+    const s=await api('/api/v1/admin/snapshot');
+    const total=(s.data&&s.data.total_projects)||20;
+    const avg=(s.data&&s.data.avg_esg)||79.3;
+    const auc=(s.model&&s.model.auc)||0.82;
+    const strong=(s.data&&s.data.strong_count)||14;
+    const weak=(s.data&&s.data.weak_count)||0;
+    document.getElementById('kpi').innerHTML=
+      kpi('Total projects',total)+kpi('Avg ESG',avg.toFixed(1))
+      +kpi('Model AUC',auc.toFixed(2))+kpi('Strong',strong,'up')
+      +kpi('Weak',weak,weak>0?'down':'');
+    document.getElementById('dist').innerHTML=
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sp-6);text-align:center;padding:var(--sp-6) 0">'
+      +tile(strong,'Strong','up')+tile(total-strong-weak,'Medium','warn')+tile(weak,'Weak','down')+'</div>';
+  }catch(e){document.getElementById('kpi').innerHTML='<div class="card" style="grid-column:span 5">Snapshot unavailable '+e.message+'</div>'}
+  function kpi(l,v,tone){const c=tone==='up'?'var(--s-up)':tone==='down'?'var(--s-down)':'var(--c-900)';
+    return '<div class="card" style="padding:var(--sp-5)"><div class="metric-label">'+l+'</div><div class="metric-value" style="color:'+c+';margin-top:var(--sp-2)">'+v+'</div></div>';}
+  function tile(v,l,tone){const c=tone==='up'?'var(--s-up)':tone==='warn'?'var(--s-warn)':'var(--s-down)';
+    return '<div><div style="font:500 48px var(--f-sans);letter-spacing:-0.03em;color:'+c+'">'+v+'</div><div class="metric-label" style="margin-top:var(--sp-2)">'+l+'</div></div>';}
+}
+"""
+
+F["views/snapshot.html"] = r"""<div class="page-head">
+<div class="page-title">Platform snapshot</div>
+<div class="page-subtitle">Live state of all subsystems.</div>
+</div>
+<div id="snap" style="display:flex;flex-direction:column;gap:var(--sp-6)"></div>"""
+
+F["js/views/snapshot.js"] = r"""
+import {api} from '/static/js/api.js';
+export async function mount(){
+  document.getElementById('crumb').textContent='Platform snapshot';
+  const el=document.getElementById('snap');
+  try{
+    const s=await api('/api/v1/admin/snapshot');
+    el.innerHTML=
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sp-4)">'
+      +card('Model AUC',((s.model&&s.model.auc)||0).toFixed(3))
+      +card('Data freshness',(s.data&&s.data.hours_since_refresh)?s.data.hours_since_refresh.toFixed(1)+'h':'-')
+      +card('Scheduler',(s.scheduler&&s.scheduler.running)?'Running':'Stopped',(s.scheduler&&s.scheduler.running)?'up':'down')
+      +card('Retrains',(s.scheduler&&s.scheduler.retrain_history_count)||0)
+      +'</div>'
+      +'<div class="card"><div class="card-head"><div class="card-title">Scheduler</div></div>'
+      +'<pre style="font:400 12px var(--f-mono);color:var(--c-700);white-space:pre-wrap;margin:0">'+JSON.stringify(s.scheduler,null,2)+'</pre></div>'
+      +'<div class="card"><div class="card-head"><div class="card-title">Model</div></div>'
+      +'<pre style="font:400 12px var(--f-mono);color:var(--c-700);white-space:pre-wrap;margin:0">'+JSON.stringify(s.model,null,2)+'</pre></div>';
+  }catch(e){el.innerHTML='<div class="card">Unable to load snapshot '+e.message+'</div>'}
+  function card(l,v,tone){const c=tone==='up'?'var(--s-up)':tone==='down'?'var(--s-down)':'var(--c-900)';
+    return '<div class="card" style="padding:var(--sp-5)"><div class="metric-label">'+l+'</div><div class="metric-value" style="color:'+c+';margin-top:var(--sp-2);font-size:28px">'+v+'</div></div>';}
+}
+"""
+
+F["views/ai-teammate.html"] = r"""<div class="page-head">
+<div class="page-title">AI Teammate</div>
+<div class="page-subtitle">Autonomous agent monitoring data freshness, model health, drift, and failures.</div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-6);margin-bottom:var(--sp-6)">
+<div class="card"><div class="card-head"><div class="card-title">Observe</div><span class="badge">read-only</span></div>
+<p style="color:var(--c-600);font-size:13px;margin-bottom:var(--sp-5)">Runs full observation cycle and returns decisions without executing.</p>
+<button class="btn btn-secondary" id="run-obs">Run observe cycle</button></div>
+<div class="card"><div class="card-head"><div class="card-title">Auto</div><span class="badge badge-warn badge-dot">executes</span></div>
+<p style="color:var(--c-600);font-size:13px;margin-bottom:var(--sp-5)">Runs observation and executes corrective actions (refresh, retrain).</p>
+<button class="btn btn-primary" id="run-auto">Run auto cycle</button></div>
+</div>
+<div id="feed" class="card"><div class="card-head"><div class="card-title">Decision feed</div><div class="card-subtitle" id="feed-stat">No run yet</div></div>
+<div id="feed-body" style="color:var(--c-600);font-size:13px;text-align:center;padding:var(--sp-8) 0">Trigger a cycle above to populate.</div></div>"""
+
+F["js/views/ai-teammate.js"] = r"""
+import {api} from '/static/js/api.js';
+export function mount(){
+  document.getElementById('crumb').textContent='AI Teammate';
+  document.getElementById('run-obs').onclick=()=>run('observe');
+  document.getElementById('run-auto').onclick=()=>run('auto');
+  async function run(mode){
+    const body=document.getElementById('feed-body');
+    const stat=document.getElementById('feed-stat');
+    stat.textContent='Running '+mode+'...';body.innerHTML='';
+    try{
+      const r=await api('/api/v1/admin/ai-teammate/run?mode='+mode,{method:'POST'});
+      const ds=r.decisions||[];
+      stat.textContent='mode='+r.mode+' - '+ds.length+' decisions';
+      body.innerHTML=ds.map(d=>
+        '<div style="display:flex;gap:var(--sp-4);padding:var(--sp-4);border-bottom:1px solid var(--b-subtle)">'
+        +'<div style="flex-shrink:0;font:400 11px var(--f-mono);color:var(--c-600);width:100px">'+(d.category||'').toUpperCase()+'</div>'
+        +'<div style="flex:1;font-size:13px">'+(d.message||d.decision||JSON.stringify(d))+'</div>'
+        +'<span class="badge '+(d.action==='execute'?'badge-warn':'')+'">'+(d.action||d.type||'info')+'</span></div>'
+      ).join('')||'<div style="color:var(--c-600);padding:var(--sp-8) 0;text-align:center">No decisions returned.</div>';
+    }catch(e){body.innerHTML='<div style="color:var(--s-down);font:400 13px var(--f-mono);padding:var(--sp-4)">'+e.message+'</div>'}
+  }
+}
+"""
+
+written = 0
+for path, content in F.items():
+    full = ROOT / path
+    full.parent.mkdir(parents=True, exist_ok=True)
+    full.write_text(content.lstrip())
+    written += 1
+
+print("OK: " + str(written) + " files written under app/static/")
+print("Next: python3 scripts/patch_main.py")

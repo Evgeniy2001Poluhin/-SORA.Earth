@@ -24,7 +24,7 @@ services:
 
   scheduler:
     build: .
-    command: python3 run_scheduler.py
+    command: python3 -u run_scheduler.py
     env_file:
       - .env
     environment:
