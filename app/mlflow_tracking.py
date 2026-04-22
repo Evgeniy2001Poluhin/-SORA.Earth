@@ -132,23 +132,45 @@ def log_model_registry(model, model_name: str, metrics: dict):
 
 
 def get_experiment_stats():
+    import sqlite3, json
+    result = {
+        "experiment": EXPERIMENT_NAME,
+        "tracking_uri": MLFLOW_TRACKING_URI,
+        "total_runs": 0,
+    }
+    try:
+        con = sqlite3.connect("data/sora.db")
+        row = con.execute(
+            "SELECT metrics_json, model_version, started_at FROM retrain_log "
+            "WHERE status='success' AND metrics_json IS NOT NULL "
+            "AND metrics_json != '' ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        con.close()
+        if row and row[0]:
+            m = json.loads(row[0])
+            roc = m.get("roc_auc") or m.get("auc")
+            result["roc_auc"] = roc
+            result["ensemble_cv_auc"] = m.get("ensemble_cv_auc") or roc
+            result["rf_cv_auc"] = m.get("rf_cv_auc") or roc
+            result["xgb_cv_auc"] = m.get("xgb_cv_auc") or roc
+            result["f1_score"] = m.get("f1_score") or m.get("f1")
+            result["accuracy"] = m.get("accuracy")
+            result["best_f1"] = m.get("best_f1")
+            result["best_threshold"] = m.get("best_threshold")
+            result["train_samples"] = m.get("train_samples")
+            result["test_samples"] = m.get("test_samples")
+            result["model_version"] = row[1] or ""
+            result["last_retrain_at"] = str(row[2])
+            result["_source"] = "retrain_log"
+    except Exception as e:
+        result["_sqlite_error"] = str(e)
     try:
         experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
-        if not experiment:
-            return {"status": "no experiment found"}
-        runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], max_results=100)
-        result = {
-            "experiment": EXPERIMENT_NAME,
-            "total_runs": len(runs),
-            "tracking_uri": MLFLOW_TRACKING_URI,
-        }
-        if not runs.empty:
-            for key in ["rf_cv_auc", "xgb_cv_auc", "ensemble_cv_auc"]:
-                col = f"metrics.{key}"
-                if col in runs.columns:
-                    vals = runs[col].dropna()
-                    if not vals.empty:
-                        result[key] = round(float(vals.iloc[0]), 4)
-        return result
-    except Exception as e:
-        return {"status": "error", "detail": str(e)}
+        if experiment:
+            runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], max_results=100)
+            result["total_runs"] = len(runs)
+    except Exception:
+        pass
+    return result
+
+

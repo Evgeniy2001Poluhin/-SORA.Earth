@@ -1,0 +1,49 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Sign in SORA.Earth</title>
+<link rel="stylesheet" href="/static/design/design.css"></head><body>
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:var(--sp-6)">
+<div style="width:100%;max-width:400px">
+  <a href="/" style="display:block;text-align:center;font:500 14px var(--f-mono);margin-bottom:var(--sp-10);color:var(--c-900)">SORA<span style="color:var(--c-600)">.earth</span></a>
+  <div class="card">
+    <div class="card-head"><div><div class="card-title">Sign in</div><div class="card-subtitle" style="margin-top:4px">Use your administrator credentials</div></div></div>
+    <form id="login-form" style="display:flex;flex-direction:column;gap:var(--sp-5)">
+      <div><label class="label">Username</label><input class="input" name="username" value="admin" autofocus></div>
+      <div><label class="label">Password</label><input class="input" name="password" type="password" placeholder="password"></div>
+      <div id="err" style="display:none;color:var(--s-down);font:400 12px var(--f-mono)"></div>
+      <button type="submit" class="btn btn-primary btn-lg" style="justify-content:center">Continue</button>
+    </form>
+  </div>
+  <div style="text-align:center;margin-top:var(--sp-6);font:400 12px var(--f-mono)"><a href="/" style="color:var(--c-600)">Back to home</a></div>
+</div></div>
+<script type="module">
+document.addEventListener("DOMContentLoaded", () => {
+  const form = document.querySelector("form");
+  if (!form) { console.error("no form on login page"); return; }
+  const userInput = form.querySelector('input[type="text"], input[name="username"], input[id*="user" i]');
+  const passInput = form.querySelector('input[type="password"]');
+  const btn = form.querySelector('button[type="submit"], button');
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!userInput || !passInput) { alert("Form inputs not found"); return; }
+    const u = userInput.value, pw = passInput.value;
+    if (btn) { btn.disabled = true; btn.textContent = "Signing in..."; }
+    try {
+      const r = await fetch("/api/v1/auth/login-json", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({username: u, password: pw})
+      });
+      if (!r.ok) throw new Error("Login failed: " + r.status);
+      const d = await r.json();
+      localStorage.setItem("sora_jwt", d.access_token);
+      const ret = new URLSearchParams(location.search).get("return") || "/app/home";
+      location.href = ret;
+    } catch (err) {
+      alert(err.message);
+      if (btn) { btn.disabled = false; btn.textContent = "Continue"; }
+    }
+  });
+});
+</script></body></html>

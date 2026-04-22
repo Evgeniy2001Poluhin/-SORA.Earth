@@ -1,0 +1,32 @@
+<div class="page-head">
+<div class="page-title">Project evaluation</div>
+<div class="page-subtitle">Score an ESG project against calibrated ML models.</div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1.2fr;gap:var(--sp-8)">
+<div class="card">
+<div class="card-head"><div class="card-title">Input parameters</div><div class="card-subtitle">9 features</div></div>
+<div style="display:flex;flex-wrap:wrap;gap:var(--sp-2);margin-bottom:var(--sp-6)">
+<button class="btn btn-ghost btn-sm preset" data-b="50000" data-c="85">Solar Energy</button>
+<button class="btn btn-ghost btn-sm preset" data-b="120000" data-c="95">Wind Farm</button>
+<button class="btn btn-ghost btn-sm preset" data-b="25000" data-c="60">Reforestation</button>
+<button class="btn btn-ghost btn-sm preset" data-b="40000" data-c="30">Water Treatment</button>
+<button class="btn btn-ghost btn-sm preset" data-b="200000" data-c="120">EV Infrastructure</button>
+<button class="btn btn-ghost btn-sm preset" data-b="15000" data-c="45">Waste Recycling</button>
+</div>
+<form id="eval-form" style="display:flex;flex-direction:column;gap:var(--sp-5)">
+<div><label class="label">Project name</label><input class="input" name="name" value="Solar Panel Initiative"></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4)">
+<div><label class="label">Budget USD</label><input class="input" type="number" name="budget" value="50000"></div>
+<div><label class="label">CO2 reduction t/yr</label><input class="input" type="number" name="co2" value="85"></div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4)">
+<div><label class="label">Social impact 1-10</label><input class="input" type="number" name="social" min="1" max="10" value="8"></div>
+<div><label class="label">Duration months</label><input class="input" type="number" name="duration" value="12"></div>
+</div>
+<div><label class="label">Country</label><select class="select" name="country"><option>Germany</option><option>United States</option><option>Japan</option><option>France</option></select></div>
+<button type="submit" class="btn btn-primary btn-lg" style="justify-content:center">Evaluate project</button>
+</form></div>
+<div id="result" class="card">
+<div class="card-head"><div class="card-title">Result</div><div class="card-subtitle">Submit to evaluate</div></div>
+<div style="color:var(--c-600);font-size:14px;padding:var(--sp-10) 0;text-align:center">No evaluation yet.</div>
+</div></div>

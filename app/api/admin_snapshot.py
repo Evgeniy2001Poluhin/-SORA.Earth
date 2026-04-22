@@ -23,6 +23,15 @@ class ModelSnapshot(BaseModel):
     ensemble_cv_auc: Optional[float] = None
     rf_cv_auc: Optional[float] = None
     xgb_cv_auc: Optional[float] = None
+    roc_auc: Optional[float] = None
+    f1_score: Optional[float] = None
+    accuracy: Optional[float] = None
+    best_f1: Optional[float] = None
+    best_threshold: Optional[float] = None
+    train_samples: Optional[int] = None
+    test_samples: Optional[int] = None
+    last_retrain_at: Optional[str] = None
+    source: Optional[str] = None
 
 
 class DataSnapshot(BaseModel):
@@ -121,6 +130,15 @@ def get_admin_snapshot(
         ensemble_cv_auc=model_stats.get("ensemble_cv_auc"),
         rf_cv_auc=model_stats.get("rf_cv_auc"),
         xgb_cv_auc=model_stats.get("xgb_cv_auc"),
+        roc_auc=model_stats.get("roc_auc"),
+        f1_score=model_stats.get("f1_score"),
+        accuracy=model_stats.get("accuracy"),
+        best_f1=model_stats.get("best_f1"),
+        best_threshold=model_stats.get("best_threshold"),
+        train_samples=model_stats.get("train_samples"),
+        test_samples=model_stats.get("test_samples"),
+        last_retrain_at=model_stats.get("last_retrain_at"),
+        source=model_stats.get("_source"),
     )
 
     refresh = {}
