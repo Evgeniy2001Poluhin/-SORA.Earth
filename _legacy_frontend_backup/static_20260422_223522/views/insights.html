@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SORA.earth - Insights</title>
+<link rel="stylesheet" href="/static/design/design.css">
+</head>
+<body>
+<header class="topbar">
+  <a href="/static/views/home.html" class="topbar-brand"><div class="logo-mark"></div><div class="logo-text">SORA<span class="dot">.</span>earth</div></a>
+  <nav class="topbar-nav">
+    <a href="/static/views/home.html">Home</a>
+    <a href="/static/views/evaluate.html">Evaluate</a>
+    <a href="/static/views/insights.html" class="active">Insights</a>
+    <a href="/static/views/operations.html">Operations</a>
+  </nav>
+  <div class="topbar-actions">
+    <div class="status-indicator"><span class="dot"></span>Operational</div>
+    <button class="search-btn">Search <kbd>K</kbd></button>
+    <button class="btn-signout">Sign out</button>
+  </div>
+</header>
+<div class="app-shell">
+<aside class="context-sidebar">
+  <div class="section-title">Quick actions</div>
+  <a href="/static/views/evaluate.html">Run evaluation</a>
+  <a href="/static/views/operations.html">Upload batch CSV</a>
+  <a href="/static/views/operations.html">Trigger retrain</a>
+  <div class="section-title">Favorites</div>
+  <a href="#">Sweden #1</a>
+  <a href="#">Germany #12</a>
+  <a href="#">Solar Panel Initiative</a>
+  <details class="collapsible">
+    <summary>Developer</summary>
+    <a href="#">API docs</a>
+    <a href="#">Grafana</a>
+    <a href="#">MLflow</a>
+    <a href="#">Data health</a>
+    <a href="#">Diagnostics</a>
+  </details>
+</aside>
+<main class="main-content">
+
+  <div class="hero-card">
+    <div class="hero-content">
+      <div class="hero-eyebrow">Analytics</div>
+      <h1>Insights and explainability</h1>
+      <p class="hero-sub">Dashboard metrics, SHAP explainability, and predictions log.</p>
+    </div>
+    <div class="hero-visual"></div>
+  </div>
+
+  <div class="tabs-nav"><div class="tab active">Dashboard</div><div class="tab">Explainability</div><div class="tab">Predictions log</div></div>
+
+<div class="kpi-row">
+          <div class="kpi-cell"><div class="label">Predictions today</div><div class="value">247</div><div class="delta up">&#9650; 18 vs yesterday</div></div>
+          <div class="kpi-cell"><div class="label">Avg confidence</div><div class="value">0.87</div><div class="delta up">&#9650; 0.03</div></div>
+          <div class="kpi-cell"><div class="label">Top country</div><div class="value" style="font-size:22px">Sweden</div><div class="delta">ESG 0.947</div></div>
+          <div class="kpi-cell"><div class="label">Model version</div><div class="value" style="font-size:20px">v2.0</div><div class="delta">apr26</div></div>
+        </div>
+        <div class="content-grid">
+          <div class="content-card">
+            <h3>Top features (SHAP)</h3>
+            <div class="activity-item"><span style="flex:1">HDI</span><span class="time">0.31</span></div>
+            <div class="activity-item"><span style="flex:1">Renewable %</span><span class="time">0.24</span></div>
+            <div class="activity-item"><span style="flex:1">GDP/cap</span><span class="time">0.18</span></div>
+            <div class="activity-item"><span style="flex:1">CO2/cap</span><span class="time">0.14</span></div>
+          </div>
+          <div class="content-card">
+            <h3>Model drift</h3>
+            <p style="color:var(--c-600);font-size:13px">No significant drift detected over last 7 days. PSI = 0.08.</p>
+          </div>
+        </div>
+
+</main>
+</div>
+</body>
+</html>

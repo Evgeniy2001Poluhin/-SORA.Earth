@@ -307,6 +307,12 @@ COUNTRIES = {
     "Argentina": {"lat": -38.4, "lon": -63.6, "region": "South America"},
     "Australia": {"lat": -25.3, "lon": 133.8, "region": "Oceania"},
     "Austria": {"lat": 47.5, "lon": 14.6, "region": "Europe"},
+    "Sweden": {"lat": 60.1, "lon": 18.6, "region": "Europe"},
+    "Norway": {"lat": 60.5, "lon": 8.5, "region": "Europe"},
+    "Denmark": {"lat": 56.3, "lon": 9.5, "region": "Europe"},
+    "Finland": {"lat": 61.9, "lon": 25.7, "region": "Europe"},
+    "Netherlands": {"lat": 52.1, "lon": 5.3, "region": "Europe"},
+    "Switzerland": {"lat": 46.8, "lon": 8.2, "region": "Europe"},
     "Brazil": {"lat": -14.2, "lon": -51.9, "region": "South America"},
     "Canada": {"lat": 56.1, "lon": -106.3, "region": "North America"},
     "China": {"lat": 35.9, "lon": 104.2, "region": "Asia"},
@@ -337,7 +343,8 @@ REGIONAL_FACTORS = {
 
 def calculate_esg(project, region_name: str = "Europe"):
     rf = REGIONAL_FACTORS.get(region_name, REGIONAL_FACTORS["Europe"])
-    score_env = min(project.co2_reduction / 100.0 * rf["env_mult"] + rf["renewable_bonus"], 1.0)
+    co2_norm = min(project.co2_reduction / 500.0, 1.0)
+    score_env = min(co2_norm * rf["env_mult"] + rf["renewable_bonus"], 1.0)
     score_soc = min(project.social_impact / 10.0 * rf["soc_mult"], 1.0)
     score_eco = min(1.0 / (1.0 + math.exp(-0.00005 * (project.budget - 50000))) * rf["eco_mult"], 1.0)
     duration_factor = 0.9 if project.duration_months > 48 else (0.95 if project.duration_months > 36 else 1.0)
@@ -546,4 +553,30 @@ async def _admin_shell(path: str = ""):
 from fastapi.responses import FileResponse as _FR
 @app.get("/favicon.ico", include_in_schema=False)
 def _favicon(): return _FR("app/static/favicon.ico")
+
+# ===== SORA_SPA_MOUNT =====
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from fastapi import HTTPException
+from pathlib import Path as _P
+
+_SPA_DIR = _P(__file__).parent / "static"
+_SPA_INDEX = _SPA_DIR / "index.html"
+_SPA_ASSETS = _SPA_DIR / "assets"
+
+if _SPA_ASSETS.exists():
+    app.mount("/assets", StaticFiles(directory=_SPA_ASSETS), name="spa_assets")
+
+if _SPA_INDEX.exists():
+    @app.get("/{spa_path:path}", include_in_schema=False)
+    async def _sora_spa(spa_path: str):
+        blocked = ("api/", "admin/", "health", "metrics",
+                   "docs", "openapi.json", "redoc")
+        if spa_path.startswith(blocked):
+            raise HTTPException(status_code=404)
+        candidate = _SPA_DIR / spa_path
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_SPA_INDEX)
+# ===== /SORA_SPA_MOUNT =====
 

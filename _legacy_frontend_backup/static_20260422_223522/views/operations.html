@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SORA.earth - Operations</title>
+<link rel="stylesheet" href="/static/design/design.css">
+</head>
+<body>
+<header class="topbar">
+  <a href="/static/views/home.html" class="topbar-brand"><div class="logo-mark"></div><div class="logo-text">SORA<span class="dot">.</span>earth</div></a>
+  <nav class="topbar-nav">
+    <a href="/static/views/home.html">Home</a>
+    <a href="/static/views/evaluate.html">Evaluate</a>
+    <a href="/static/views/insights.html">Insights</a>
+    <a href="/static/views/operations.html" class="active">Operations</a>
+  </nav>
+  <div class="topbar-actions">
+    <div class="status-indicator"><span class="dot"></span>Operational</div>
+    <button class="search-btn">Search <kbd>K</kbd></button>
+    <button class="btn-signout">Sign out</button>
+  </div>
+</header>
+<div class="app-shell">
+<aside class="context-sidebar">
+  <div class="section-title">Quick actions</div>
+  <a href="/static/views/evaluate.html">Run evaluation</a>
+  <a href="/static/views/operations.html">Upload batch CSV</a>
+  <a href="/static/views/operations.html">Trigger retrain</a>
+  <div class="section-title">Favorites</div>
+  <a href="#">Sweden #1</a>
+  <a href="#">Germany #12</a>
+  <a href="#">Solar Panel Initiative</a>
+  <details class="collapsible">
+    <summary>Developer</summary>
+    <a href="#">API docs</a>
+    <a href="#">Grafana</a>
+    <a href="#">MLflow</a>
+    <a href="#">Data health</a>
+    <a href="#">Diagnostics</a>
+  </details>
+</aside>
+<main class="main-content">
+
+  <div class="hero-card">
+    <div class="hero-content">
+      <div class="hero-eyebrow">MLOps</div>
+      <h1>Operations and audit</h1>
+      <p class="hero-sub">AI Teammate decisions, retrain log, batch jobs, and audit trail.</p>
+    </div>
+    <div class="hero-visual"></div>
+  </div>
+
+  <div class="tabs-nav"><div class="tab active">AI Teammate</div><div class="tab">Retrain log</div><div class="tab">Batch jobs</div><div class="tab">Audit</div><div class="tab">Activity</div></div>
+
+<div class="content-grid">
+          <div class="content-card">
+            <h3>AI Teammate</h3>
+            <p style="color:var(--c-600);font-size:13px;line-height:1.6">Autonomous agent approved 3 projects in last 14 minutes. No policy flags raised.</p>
+            <div style="margin-top:12px;font-family:var(--f-mono);font-size:12px;color:var(--c-700)">status - <span style="color:var(--s-up)">active</span></div>
+          </div>
+          <div class="content-card">
+            <h3>Retrain</h3>
+            <p style="color:var(--c-600);font-size:13px">Last retrain 20 minutes ago. Next scheduled in 4 hours.</p>
+            <a href="#" class="btn btn-secondary" style="margin-top:12px">Trigger now</a>
+          </div>
+          <div class="content-card">
+            <h3>Batch jobs</h3>
+            <div class="activity-item"><span style="color:var(--s-up)">&#9679;</span><span style="flex:1">Run #204 completed</span><span class="time">2m</span></div>
+            <div class="activity-item"><span style="color:var(--accent)">&#9679;</span><span style="flex:1">Run #205 queued</span><span class="time">-</span></div>
+            <a href="#" class="btn btn-primary" style="margin-top:12px">Upload CSV</a>
+          </div>
+        </div>
+
+</main>
+</div>
+</body>
+</html>
