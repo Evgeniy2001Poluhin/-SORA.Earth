@@ -1,12 +1,14 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 
 class ProjectInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str = "Project"
-    budget: float = Field(default=50000, ge=0, description="Budget in USD")
-    co2_reduction: float = Field(default=50, ge=0, description="CO2 reduction tons/year")
-    social_impact: float = Field(default=5, ge=1, le=10, description="Social impact score 1-10")
-    duration_months: int = Field(default=12, ge=1, le=120, description="Duration in months")
+    budget: float = Field(default=50000, ge=0, alias="budget_usd", description="Budget in USD")
+    co2_reduction: float = Field(default=50, ge=0, alias="co2_reduction_tons_per_year", description="CO2 reduction tons/year")
+    social_impact: float = Field(default=5, ge=1, le=10, alias="social_impact_score", description="Social impact score 1-10")
+    duration_months: int = Field(default=12, ge=1, le=120, alias="project_duration_months", description="Duration in months")
     category: Optional[str] = "Solar Energy"
     region: Optional[str] = "Europe"
     lat: Optional[float] = 50.0

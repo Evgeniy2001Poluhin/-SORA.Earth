@@ -1,0 +1,161 @@
+<style>
+.ev2{--bg:#0b1220;--card:#0f1a2e;--card2:#0c1526;--bd:rgba(255,255,255,.07);--tx:#e6edf3;--mut:#8b95a1;--ac:#25d9a6;--ac2:#6be3b6;color:var(--tx);max-width:1200px;margin:0 auto;padding:8px 4px 32px;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:18px;align-items:start;font-family:-apple-system,system-ui,sans-serif}
+.ev2 *{box-sizing:border-box}
+.ev2-col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.ev2-card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:20px 22px}
+.ev2-card.dark{background:#07101f}
+.ev2-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
+.ev2-kicker{font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--mut);margin-bottom:6px}
+.ev2-title{font:600 18px/1.25 -apple-system,system-ui,sans-serif;letter-spacing:-.01em;color:#fff;margin:0}
+.ev2-sub{font:400 13px/1.5 -apple-system,system-ui,sans-serif;color:var(--mut);margin:6px 0 0}
+.ev2-badge{font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;padding:6px 10px;border-radius:999px;border:1px solid var(--bd);color:var(--mut);white-space:nowrap}
+.ev2-badge.ok{color:var(--ac2);background:rgba(107,227,182,.08);border-color:rgba(107,227,182,.22)}
+.ev2-score{display:grid;grid-template-columns:auto 1fr auto;gap:22px;align-items:center;padding:18px 20px;border:1px solid var(--bd);border-radius:12px;background:rgba(0,0,0,.25)}
+.ev2-score-num{font:600 56px/1 -apple-system,system-ui,sans-serif;letter-spacing:-.04em;color:#fff}
+.ev2-score-lbl{font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);margin-bottom:4px}
+.ev2-score-desc{font:400 13px/1.5 -apple-system,system-ui,sans-serif;color:#c9d1d9;max-width:40ch}
+.ev2-prob{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.ev2-prob-num{font:600 26px/1 -apple-system,system-ui,sans-serif;color:var(--ac2);letter-spacing:-.02em}
+.ev2-bars{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:16px}
+.ev2-bhead{display:flex;justify-content:space-between;margin-bottom:6px;font:400 12px -apple-system,system-ui,sans-serif}
+.ev2-bhead .l{color:#c9d1d9}
+.ev2-bhead .v{font:500 13px ui-monospace,Menlo,monospace;color:#fff}
+.ev2-bar{height:5px;background:rgba(255,255,255,.07);border-radius:999px;overflow:hidden}
+.ev2-bfill{height:100%;background:linear-gradient(90deg,#4fd1c5,var(--ac2));border-radius:999px;transition:width .6s cubic-bezier(.16,1,.3,1)}
+.ev2-shap img{width:100%;display:block;margin:0 auto;background:#fff;border-radius:10px;padding:8px}
+.ev2-form-row{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+.ev2-form-row>span{font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}
+.ev2-form-row input,.ev2-form-row select{width:100%;padding:9px 11px;border:1px solid var(--bd);background:rgba(0,0,0,.35);color:#fff;border-radius:8px;font:400 13px ui-monospace,Menlo,monospace}
+.ev2-form-row input:focus,.ev2-form-row select:focus{outline:none;border-color:rgba(107,227,182,.5)}
+.ev2-presets{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+.ev2-presets button{padding:6px 10px;border:1px solid var(--bd);background:transparent;border-radius:999px;color:#c9d1d9;font:500 11px -apple-system,system-ui,sans-serif;cursor:pointer}
+.ev2-presets button:hover{border-color:rgba(107,227,182,.4);color:#fff;background:rgba(107,227,182,.06)}
+.ev2-btn{width:100%;padding:11px;border:none;border-radius:10px;background:var(--ac);color:#06241c;font:600 13px -apple-system,system-ui,sans-serif;cursor:pointer;margin-top:6px}
+.ev2-btn:hover{background:var(--ac2)}
+.ev2-empty{padding:28px 20px;text-align:center;color:var(--mut);font:400 13px -apple-system,system-ui,sans-serif}
+@media(max-width:900px){.ev2{grid-template-columns:1fr}.ev2-score{grid-template-columns:1fr}.ev2-prob{text-align:left;align-items:flex-start}.ev2-bars{grid-template-columns:1fr}}
+</style>
+
+<div class="ev2">
+  <div class="ev2-col">
+    <section id="ev2-result" class="ev2-card">
+      <div class="ev2-head">
+        <div>
+          <div class="ev2-kicker">Latest evaluation</div>
+          <h2 class="ev2-title">Run an evaluation to see results</h2>
+          <p class="ev2-sub">The ESG score, sub-scores, ML probability and SHAP explanation will appear here.</p>
+        </div>
+        <span class="ev2-badge">Idle</span>
+      </div>
+      <div class="ev2-empty">Pick a preset on the right, or edit parameters and press Run.</div>
+    </section>
+
+    <section id="ev2-shap-wrap" class="ev2-card dark ev2-shap" style="display:none">
+      <div class="ev2-head">
+        <div>
+          <div class="ev2-kicker">Explainability</div>
+          <h2 class="ev2-title">SHAP waterfall</h2>
+          <p class="ev2-sub">Feature contributions behind the score.</p>
+        </div>
+      </div>
+      <img id="ev2-shap-img" alt="SHAP waterfall">
+    </section>
+  </div>
+
+  <aside class="ev2-col">
+    <section class="ev2-card">
+      <div class="ev2-head">
+        <div>
+          <div class="ev2-kicker">Project parameters</div>
+          <h2 class="ev2-title">Configure</h2>
+        </div>
+      </div>
+
+      <div class="ev2-presets">
+        <button type="button" data-p="Solar Energy">Solar</button>
+        <button type="button" data-p="Wind Farm">Wind</button>
+        <button type="button" data-p="Reforestation">Forest</button>
+        <button type="button" data-p="Water Treatment">Water</button>
+        <button type="button" data-p="EV Infrastructure">EV</button>
+        <button type="button" data-p="Waste Recycling">Waste</button>
+      </div>
+
+      <form id="ev2-form" onsubmit="return false">
+        <label class="ev2-form-row"><span>Project name</span><input name="name" value="Solar Farm"></label>
+        <label class="ev2-form-row"><span>Country</span><select name="country"></select></label>
+        <label class="ev2-form-row"><span>Budget (USD)</span><input name="budget" type="number" value="150000" step="1000"></label>
+        <label class="ev2-form-row"><span>CO2 (t/yr)</span><input name="co2" type="number" value="120"></label>
+        <label class="ev2-form-row"><span>Social impact</span><input name="social" type="number" value="9" min="1" max="10"></label>
+        <label class="ev2-form-row"><span>Duration (months)</span><input name="duration" type="number" value="18"></label>
+        <button id="ev2-go" class="ev2-btn" type="button">Run evaluation</button>
+      </form>
+    </section>
+  </aside>
+</div>
+
+<script>
+(function(){
+  const PRESETS={"Solar Energy":{n:"Solar Farm",b:150000,c:120,s:9,d:18},"Wind Farm":{n:"Wind Farm",b:120000,c:95,s:8,d:12},"Reforestation":{n:"Reforestation",b:80000,c:200,s:7,d:36},"Water Treatment":{n:"Water Plant",b:200000,c:40,s:9,d:24},"EV Infrastructure":{n:"EV Network",b:180000,c:150,s:8,d:18},"Waste Recycling":{n:"Recycling Hub",b:90000,c:60,s:7,d:15}};
+  const COUNTRIES=["Germany","France","Spain","Italy","Netherlands","Belgium","Poland","Sweden","Norway","Finland","Denmark","Austria","Portugal","Greece","Czech Republic","Ireland","United Kingdom","United States","Canada","Japan","South Korea","Australia","New Zealand","Brazil","India","China","Mexico","Turkey","Switzerland","Romania"];
+  const f=document.getElementById("ev2-form");
+  const sel=f.querySelector("[name=country]");
+  sel.innerHTML=COUNTRIES.map(c=>`<option>${c}</option>`).join("");
+  sel.value="Sweden";
+
+  document.querySelectorAll(".ev2-presets button").forEach(b=>b.onclick=()=>{
+    const p=PRESETS[b.dataset.p];if(!p)return;
+    f.name.value=p.n;f.budget.value=p.b;f.co2.value=p.c;f.social.value=p.s;f.duration.value=p.d;
+  });
+
+  function bar(l,v,suf){
+    const x=Number.isFinite(v)?v:0;
+    const w=Math.max(0,Math.min(100,x));
+    return `<div><div class="ev2-bhead"><span class="l">${l}</span><span class="v">${x.toFixed(1)}${suf||""}</span></div><div class="ev2-bar"><div class="ev2-bfill" style="width:${w}%"></div></div></div>`;
+  }
+
+  async function callEval(payload){
+    const r=await fetch("/api/v1/evaluate",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer super-secret-demo-token"},body:JSON.stringify(payload)});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    return r.json();
+  }
+
+  document.getElementById("ev2-go").onclick=async()=>{
+    const payload={project_name:f.name.value,budget_usd:+f.budget.value,co2_reduction_tons_year:+f.co2.value,social_impact:+f.social.value,project_duration_months:+f.duration.value,country:f.country.value};
+    const res=document.getElementById("ev2-result");
+    res.innerHTML=`<div class="ev2-head"><div><div class="ev2-kicker">Evaluating</div><h2 class="ev2-title">Running ML ensemble…</h2></div><span class="ev2-badge">Running</span></div>`;
+    try{
+      const d=await callEval(payload);
+      const score=d.total_score??d.esg_score??0;
+      const env=d.environment_score??0, soc=d.socialcore??0, eco=d.economic_score??0;
+      const p=d.ml_success_probability??d.success_probability??0;
+      const succ=p>1?Math.round(p):Math.round(p*100);
+      res.innerHTML=`
+        <div class="ev2-head">
+          <div>
+            <div class="ev2-kicker">${payload.country} · ${payload.project_duration_months} mo · $${payload.budget_usd.toLocaleString()}</div>
+            <h2 class="ev2-title">${payload.project_name}</h2>
+            <p class="ev2-sub">Weighted ESG index across environment, social and economic axes.</p>
+          </div>
+          <span class="ev2-badge ok">${d.risk_level||"Low risk"}</span>
+        </div>
+        <div class="ev2-score">
+          <div class="ev2-score-num">${score.toFixed(1)}</div>
+          <div><div class="ev2-score-lbl">/ 100 ESG score</div><div class="ev2-score-desc">Composite rating from the calibrated ensemble.</div></div>
+          <div class="ev2-prob"><div class="ev2-prob-num">${succ}%</div><div class="ev2-score-lbl">Success prob.</div></div>
+        </div>
+      <div class="ev2-bars">${bar("Environment",env)}${bar("Social",soc)}${bar("Economic",eco)}</div>
+      `;
+      try{
+        const r=await fetch("/api/v1/predict/explain/waterfall",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer super-secret-demo-token"},body:JSON.stringify(payload)});
+        if(r.ok){
+          const url=URL.createObjectURL(await r.blob());
+          document.getElementById("ev2-shap-img").src=url;
+          document.getElementById("ev2-shap-wrap").style.display="";
+        }
+      }catch(_){}
+    }catch(e){
+      res.innerHTML=`<div class="ev2-head"><div><div class="ev2-kicker">Error</div><h2 class="ev2-title">Evaluation failed</h2><p class="ev2-sub">${e.message}</p></div></div>`;
+    }
+  };
+})();
+</script>
