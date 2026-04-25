@@ -23,6 +23,48 @@
     },
     {
       "country": "Sweden",
+      "preset": "Wind",
+      "payload": {
+        "project_name": "Wind",
+        "country": "Sweden",
+        "co2_reduction_tons_per_year": 400,
+        "budget_usd": 250000,
+        "social_impact_score": 7,
+        "project_duration_months": 30
+      },
+      "expected": {
+        "total_score": 78.95,
+        "environment_score": 81.4,
+        "social_score": 69.6,
+        "economic_score": 85.0,
+        "success_probability": 95.5,
+        "success_probability_v2": 83.45,
+        "risk_level": "Low"
+      }
+    },
+    {
+      "country": "Sweden",
+      "preset": "Hydro",
+      "payload": {
+        "project_name": "Hydro",
+        "country": "Sweden",
+        "co2_reduction_tons_per_year": 600,
+        "budget_usd": 400000,
+        "social_impact_score": 6,
+        "project_duration_months": 48
+      },
+      "expected": {
+        "total_score": 76.77,
+        "environment_score": 93.5,
+        "social_score": 59.7,
+        "economic_score": 85.0,
+        "success_probability": 84.5,
+        "success_probability_v2": 81.92,
+        "risk_level": "Low"
+      }
+    },
+    {
+      "country": "Sweden",
       "preset": "Reforestation",
       "payload": {
         "project_name": "Reforestation",
@@ -107,6 +149,48 @@
     },
     {
       "country": "Germany",
+      "preset": "Wind",
+      "payload": {
+        "project_name": "Wind",
+        "country": "Germany",
+        "co2_reduction_tons_per_year": 400,
+        "budget_usd": 250000,
+        "social_impact_score": 7,
+        "project_duration_months": 30
+      },
+      "expected": {
+        "total_score": 74.88,
+        "environment_score": 71.5,
+        "social_score": 69.2,
+        "economic_score": 85.0,
+        "success_probability": 95.5,
+        "success_probability_v2": 83.45,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "Germany",
+      "preset": "Hydro",
+      "payload": {
+        "project_name": "Hydro",
+        "country": "Germany",
+        "co2_reduction_tons_per_year": 600,
+        "budget_usd": 400000,
+        "social_impact_score": 6,
+        "project_duration_months": 48
+      },
+      "expected": {
+        "total_score": 72.92,
+        "environment_score": 83.6,
+        "social_score": 59.3,
+        "economic_score": 85.0,
+        "success_probability": 84.5,
+        "success_probability_v2": 81.92,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "Germany",
       "preset": "Reforestation",
       "payload": {
         "project_name": "Reforestation",
@@ -169,6 +253,132 @@
       }
     },
     {
+      "country": "UK",
+      "preset": "Solar",
+      "payload": {
+        "project_name": "Solar",
+        "country": "UK",
+        "co2_reduction_tons_per_year": 250,
+        "budget_usd": 150000,
+        "social_impact_score": 8,
+        "project_duration_months": 24
+      },
+      "expected": {
+        "total_score": 71.31,
+        "environment_score": 56.0,
+        "social_score": 78.0,
+        "economic_score": 85.0,
+        "success_probability": 95.0,
+        "success_probability_v2": 86.56,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "UK",
+      "preset": "Wind",
+      "payload": {
+        "project_name": "Wind",
+        "country": "UK",
+        "co2_reduction_tons_per_year": 400,
+        "budget_usd": 250000,
+        "social_impact_score": 7,
+        "project_duration_months": 30
+      },
+      "expected": {
+        "total_score": 75.64,
+        "environment_score": 74.1,
+        "social_score": 68.3,
+        "economic_score": 85.0,
+        "success_probability": 95.5,
+        "success_probability_v2": 83.45,
+        "risk_level": "Low"
+      }
+    },
+    {
+      "country": "UK",
+      "preset": "Hydro",
+      "payload": {
+        "project_name": "Hydro",
+        "country": "UK",
+        "co2_reduction_tons_per_year": 600,
+        "budget_usd": 400000,
+        "social_impact_score": 6,
+        "project_duration_months": 48
+      },
+      "expected": {
+        "total_score": 73.68,
+        "environment_score": 86.2,
+        "social_score": 58.5,
+        "economic_score": 85.0,
+        "success_probability": 84.5,
+        "success_probability_v2": 81.92,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "UK",
+      "preset": "Reforestation",
+      "payload": {
+        "project_name": "Reforestation",
+        "country": "UK",
+        "co2_reduction_tons_per_year": 500,
+        "budget_usd": 80000,
+        "social_impact_score": 9,
+        "project_duration_months": 36
+      },
+      "expected": {
+        "total_score": 72.11,
+        "environment_score": 86.2,
+        "social_score": 87.8,
+        "economic_score": 37.6,
+        "success_probability": 93.47,
+        "success_probability_v2": 85.29,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "UK",
+      "preset": "EV_charging",
+      "payload": {
+        "project_name": "EV_charging",
+        "country": "UK",
+        "co2_reduction_tons_per_year": 180,
+        "budget_usd": 200000,
+        "social_impact_score": 7,
+        "project_duration_months": 18
+      },
+      "expected": {
+        "total_score": 64.99,
+        "environment_score": 47.5,
+        "social_score": 68.3,
+        "economic_score": 85.0,
+        "success_probability": 98.5,
+        "success_probability_v2": 86.36,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "UK",
+      "preset": "Water",
+      "payload": {
+        "project_name": "Water",
+        "country": "UK",
+        "co2_reduction_tons_per_year": 50,
+        "budget_usd": 60000,
+        "social_impact_score": 9,
+        "project_duration_months": 12
+      },
+      "expected": {
+        "total_score": 45.16,
+        "environment_score": 31.8,
+        "social_score": 87.8,
+        "economic_score": 20.4,
+        "success_probability": 97.62,
+        "success_probability_v2": 86.73,
+        "risk_level": "Medium"
+      }
+    },
+    {
       "country": "USA",
       "preset": "Solar",
       "payload": {
@@ -186,6 +396,48 @@
         "economic_score": 52.6,
         "success_probability": 95.0,
         "success_probability_v2": 86.56,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "USA",
+      "preset": "Wind",
+      "payload": {
+        "project_name": "Wind",
+        "country": "USA",
+        "co2_reduction_tons_per_year": 400,
+        "budget_usd": 250000,
+        "social_impact_score": 7,
+        "project_duration_months": 30
+      },
+      "expected": {
+        "total_score": 67.88,
+        "environment_score": 55.2,
+        "social_score": 67.7,
+        "economic_score": 85.0,
+        "success_probability": 95.5,
+        "success_probability_v2": 83.45,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "USA",
+      "preset": "Hydro",
+      "payload": {
+        "project_name": "Hydro",
+        "country": "USA",
+        "co2_reduction_tons_per_year": 600,
+        "budget_usd": 400000,
+        "social_impact_score": 6,
+        "project_duration_months": 48
+      },
+      "expected": {
+        "total_score": 66.33,
+        "environment_score": 67.3,
+        "social_score": 58.0,
+        "economic_score": 85.0,
+        "success_probability": 84.5,
+        "success_probability_v2": 81.92,
         "risk_level": "Medium"
       }
     },
@@ -275,6 +527,48 @@
     },
     {
       "country": "Brazil",
+      "preset": "Wind",
+      "payload": {
+        "project_name": "Wind",
+        "country": "Brazil",
+        "co2_reduction_tons_per_year": 400,
+        "budget_usd": 250000,
+        "social_impact_score": 7,
+        "project_duration_months": 30
+      },
+      "expected": {
+        "total_score": 73.78,
+        "environment_score": 94.1,
+        "social_score": 47.5,
+        "economic_score": 73.0,
+        "success_probability": 95.5,
+        "success_probability_v2": 83.45,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "Brazil",
+      "preset": "Hydro",
+      "payload": {
+        "project_name": "Hydro",
+        "country": "Brazil",
+        "co2_reduction_tons_per_year": 600,
+        "budget_usd": 400000,
+        "social_impact_score": 6,
+        "project_duration_months": 48
+      },
+      "expected": {
+        "total_score": 70.4,
+        "environment_score": 100.0,
+        "social_score": 40.7,
+        "economic_score": 73.0,
+        "success_probability": 84.5,
+        "success_probability_v2": 81.92,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "Brazil",
       "preset": "Reforestation",
       "payload": {
         "project_name": "Reforestation",
@@ -359,6 +653,48 @@
     },
     {
       "country": "India",
+      "preset": "Wind",
+      "payload": {
+        "project_name": "Wind",
+        "country": "India",
+        "co2_reduction_tons_per_year": 400,
+        "budget_usd": 250000,
+        "social_impact_score": 7,
+        "project_duration_months": 30
+      },
+      "expected": {
+        "total_score": 63.39,
+        "environment_score": 63.2,
+        "social_score": 42.1,
+        "economic_score": 85.0,
+        "success_probability": 95.5,
+        "success_probability_v2": 83.45,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "India",
+      "preset": "Hydro",
+      "payload": {
+        "project_name": "Hydro",
+        "country": "India",
+        "co2_reduction_tons_per_year": 600,
+        "budget_usd": 400000,
+        "social_impact_score": 6,
+        "project_duration_months": 48
+      },
+      "expected": {
+        "total_score": 62.27,
+        "environment_score": 73.1,
+        "social_score": 36.1,
+        "economic_score": 85.0,
+        "success_probability": 84.5,
+        "success_probability_v2": 81.92,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "India",
       "preset": "Reforestation",
       "payload": {
         "project_name": "Reforestation",
@@ -415,6 +751,132 @@
         "environment_score": 28.5,
         "social_score": 54.1,
         "economic_score": 82.1,
+        "success_probability": 97.62,
+        "success_probability_v2": 86.73,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "Japan",
+      "preset": "Solar",
+      "payload": {
+        "project_name": "Solar",
+        "country": "Japan",
+        "co2_reduction_tons_per_year": 250,
+        "budget_usd": 150000,
+        "social_impact_score": 8,
+        "project_duration_months": 24
+      },
+      "expected": {
+        "total_score": 61.27,
+        "environment_score": 36.7,
+        "social_score": 70.3,
+        "economic_score": 85.0,
+        "success_probability": 95.0,
+        "success_probability_v2": 86.56,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "Japan",
+      "preset": "Wind",
+      "payload": {
+        "project_name": "Wind",
+        "country": "Japan",
+        "co2_reduction_tons_per_year": 400,
+        "budget_usd": 250000,
+        "social_impact_score": 7,
+        "project_duration_months": 30
+      },
+      "expected": {
+        "total_score": 64.57,
+        "environment_score": 51.6,
+        "social_score": 61.5,
+        "economic_score": 85.0,
+        "success_probability": 95.5,
+        "success_probability_v2": 83.45,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "Japan",
+      "preset": "Hydro",
+      "payload": {
+        "project_name": "Hydro",
+        "country": "Japan",
+        "co2_reduction_tons_per_year": 600,
+        "budget_usd": 400000,
+        "social_impact_score": 6,
+        "project_duration_months": 48
+      },
+      "expected": {
+        "total_score": 62.6,
+        "environment_score": 61.5,
+        "social_score": 52.7,
+        "economic_score": 85.0,
+        "success_probability": 84.5,
+        "success_probability_v2": 81.92,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "Japan",
+      "preset": "Reforestation",
+      "payload": {
+        "project_name": "Reforestation",
+        "country": "Japan",
+        "co2_reduction_tons_per_year": 500,
+        "budget_usd": 80000,
+        "social_impact_score": 9,
+        "project_duration_months": 36
+      },
+      "expected": {
+        "total_score": 69.84,
+        "environment_score": 61.5,
+        "social_score": 79.1,
+        "economic_score": 71.8,
+        "success_probability": 93.47,
+        "success_probability_v2": 85.29,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "Japan",
+      "preset": "EV_charging",
+      "payload": {
+        "project_name": "EV_charging",
+        "country": "Japan",
+        "co2_reduction_tons_per_year": 180,
+        "budget_usd": 200000,
+        "social_impact_score": 7,
+        "project_duration_months": 18
+      },
+      "expected": {
+        "total_score": 55.86,
+        "environment_score": 29.8,
+        "social_score": 61.5,
+        "economic_score": 85.0,
+        "success_probability": 98.5,
+        "success_probability_v2": 86.36,
+        "risk_level": "Medium"
+      }
+    },
+    {
+      "country": "Japan",
+      "preset": "Water",
+      "payload": {
+        "project_name": "Water",
+        "country": "Japan",
+        "co2_reduction_tons_per_year": 50,
+        "budget_usd": 60000,
+        "social_impact_score": 9,
+        "project_duration_months": 12
+      },
+      "expected": {
+        "total_score": 42.06,
+        "environment_score": 16.9,
+        "social_score": 79.1,
+        "economic_score": 38.6,
         "success_probability": 97.62,
         "success_probability_v2": 86.73,
         "risk_level": "Medium"
