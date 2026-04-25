@@ -29,6 +29,7 @@ check "openapi"           200 "$(curl -s -o /dev/null -w '%{http_code}' http://l
 check "drift_analyze"     200 "$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/drift/analyze)"
 check "drift_features"    200 "$(curl -s -o /dev/null -w '%{http_code}' $BASE/drift/features/stats)"
 check "model_drift"       200 "$(curl -s -o /dev/null -w '%{http_code}' $BASE/model/drift)"
+check "uncertainty"      200 "$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/predict/uncertainty -H "Content-Type: application/json" -d '{"budget":100000,"co2_reduction":250,"social_impact":7,"duration_months":24}')"
 
 echo
 echo "=== PASS: $PASS  FAIL: $FAIL ==="
