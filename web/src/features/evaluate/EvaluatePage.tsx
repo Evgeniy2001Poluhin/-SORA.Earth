@@ -11,12 +11,12 @@ import { fmtNum, fmtMoney, clamp } from "@/lib/format";
 import "./evaluate.css";
 
 const PRESETS: { id:string; label:string; body:EvaluateRequest }[] = [
-  { id:"solar",  label:"Solar Energy",     body:{ project_name:"Solar Farm",           country:"Sweden",  budget_usd:150000, co2_reduction_tons_per_year:120, social_impact_score:9, project_duration_months:18 } },
-  { id:"wind",   label:"Wind Farm",        body:{ project_name:"Offshore Wind",        country:"Germany", budget_usd:280000, co2_reduction_tons_per_year:310, social_impact_score:8, project_duration_months:24 } },
-  { id:"refo",   label:"Reforestation",    body:{ project_name:"Boreal Reforestation", country:"Canada",  budget_usd:80000,  co2_reduction_tons_per_year:200, social_impact_score:7, project_duration_months:36 } },
-  { id:"water",  label:"Water Treatment",  body:{ project_name:"Urban Water Grid",     country:"Spain",   budget_usd:120000, co2_reduction_tons_per_year:60,  social_impact_score:9, project_duration_months:20 } },
-  { id:"ev",     label:"EV Infrastructure",body:{ project_name:"Fast-Charge Network",  country:"France",  budget_usd:450000, co2_reduction_tons_per_year:420, social_impact_score:7, project_duration_months:28 } },
-  { id:"waste",  label:"Waste Recycling",  body:{ project_name:"Circular Materials",   country:"Italy",   budget_usd:95000,  co2_reduction_tons_per_year:140, social_impact_score:8, project_duration_months:16 } },
+  { id:"solar",  label:"Solar Energy",     body:{ project_name:"Solar Farm",           country:"Sweden",  budget_usd:150000, co2_reduction_tons_per_year:340, social_impact_score:9, project_duration_months:18 } },
+  { id:"wind",   label:"Wind Farm",        body:{ project_name:"Offshore Wind",        country:"Germany", budget_usd:280000, co2_reduction_tons_per_year:620, social_impact_score:8, project_duration_months:24 } },
+  { id:"refo",   label:"Reforestation",    body:{ project_name:"Boreal Reforestation", country:"Canada",  budget_usd:80000,  co2_reduction_tons_per_year:280, social_impact_score:7, project_duration_months:36 } },
+  { id:"water",  label:"Water Treatment",  body:{ project_name:"Urban Water Grid",     country:"Spain",   budget_usd:120000, co2_reduction_tons_per_year:180, social_impact_score:9, project_duration_months:20 } },
+  { id:"ev",     label:"EV Infrastructure",body:{ project_name:"Fast-Charge Network",  country:"France",  budget_usd:450000, co2_reduction_tons_per_year:780, social_impact_score:7, project_duration_months:28 } },
+  { id:"waste",  label:"Waste Recycling",  body:{ project_name:"Circular Materials",   country:"Italy",   budget_usd:95000,  co2_reduction_tons_per_year:240, social_impact_score:8, project_duration_months:16 } },
 ];
 const riskTone: Record<RiskLevel,string> = { Low:"low", Medium:"med", High:"high" };
 

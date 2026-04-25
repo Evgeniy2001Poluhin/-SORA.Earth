@@ -379,7 +379,7 @@ def calculate_esg(project, region_name: str = "Europe"):
 
     recommendations = []
     if score_env < 0.7:
-        target_co2 = min(int(project.co2_reduction + (0.7 - score_env) * 100), 100)
+        target_co2 = max(int(project.co2_reduction * 1.5), int(project.co2_reduction + (0.7 - score_env) * 200))
         recommendations.append(f"Increase CO2 reduction from {project.co2_reduction:.0f} to {target_co2:.0f}+ t/yr to reach Strong environmental rating")
     if score_soc < 0.7:
         target_si = min(int(project.social_impact + (0.7 - score_soc) * 10) + 1, 10)

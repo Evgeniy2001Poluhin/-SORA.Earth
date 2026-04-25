@@ -12,7 +12,7 @@ from app.mlflow_tracking import log_evaluation
 from app.middleware import METRICS
 from app.database import Evaluation
 
-import csv, io, time
+import csv, io, time, math
 from datetime import datetime
 
 from fpdf import FPDF
@@ -51,7 +51,7 @@ def _macro_esg_from_payload(payload: dict):
     )
     economic = (
         30
-        + min(gdp / 1000.0, 45)
+        + 18 * math.log10(max(gdp, 1000) / 5000)  # log diminishing returns: 0@5k, +15@50k, +18@100k
         - industrial * 0.15
         + renewable * 0.10
     )
