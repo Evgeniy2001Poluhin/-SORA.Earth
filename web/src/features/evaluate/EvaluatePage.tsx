@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { evaluateApi } from "@/api/endpoints/evaluate";
 import type { EvaluateRequest, EvaluateResponse, ExplainResponse, RiskLevel } from "@/api/types";
+import { UncertaintyCard } from "./UncertaintyCard";
 import { fmtNum, fmtMoney, clamp } from "@/lib/format";
 import "./evaluate.css";
 
@@ -167,7 +168,10 @@ export function EvaluatePage() {
                   onRun={(n)=>mcMut.mutate({ ...form, region: form.country, n })}
                 />
               ) : activeTab === "whatif" ? (
-                <WhatIf form={form} lastRun={{...lastRun, total_score: result.total_score, country: lastRun?.country || form.country}}/>
+                <>
+                  <WhatIf form={form} lastRun={{...lastRun, total_score: result.total_score, country: lastRun?.country || form.country}}/>
+                  <UncertaintyCard payload={form}/>
+                </>
               ) : activeTab === "ranking" ? (
                 <CountryRanking
                   data={rankMut.data as any}
