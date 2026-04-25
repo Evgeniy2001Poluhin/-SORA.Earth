@@ -1,5 +1,5 @@
 """SHAP explainability endpoints."""
-import os, pickle, numpy as np, shap
+import os, pickle, hashlib, numpy as np, shap
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from app.schemas import ProjectInput as Project
@@ -122,7 +122,12 @@ def explain_waterfall(project: Project):
             data=explanation.data, feature_names=names,
         )
 
-    out = os.path.join(ROOT, "data", "shap_waterfall.png")
+    _cache_dir = os.path.join(ROOT, "data", "explanations")
+    os.makedirs(_cache_dir, exist_ok=True)
+    _key = hashlib.sha1(repr(sorted(project.dict().items())).encode()).hexdigest()[:16]
+    out = os.path.join(_cache_dir, "wf_" + _key + ".png")
+    if os.path.exists(out):
+        return FileResponse(out, media_type="image/png", filename="shap_waterfall.png")
     shap.plots.waterfall(explanation[0], show=False)
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches="tight"); plt.close()
     return FileResponse(out, media_type="image/png", filename="shap_waterfall.png")
