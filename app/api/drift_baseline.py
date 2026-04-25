@@ -23,6 +23,7 @@ def fit_baseline(csv_path: str = "data/projects.csv"):
                 baseline[f"{c}_std"]  = float(v.std() or 1e-9)
                 used.append(c)
     drift_detector.set_baseline(baseline)
+    drift_detector._baseline_n_samples = len(df)
     return {"status":"ok","samples":len(df),"features":used,"baseline_keys":sorted(baseline.keys())}
 
 @router.post("/mlops/drift/observe", tags=["mlops"])
@@ -30,10 +31,28 @@ def observe(features: dict):
     drift_detector.add_observation(features)
     return {"status":"ok","observations":drift_detector.count()}
 
+@router.get("/mlops/drift/baseline", tags=["mlops"])
+def baseline_status():
+    base = drift_detector.get_baseline()
+    fitted = bool(base)
+    keys = sorted(base.keys()) if fitted else []
+    n_features = len([k for k in keys if k.endswith("_mean")])
+    n_samples_fit = getattr(drift_detector, "_baseline_n_samples", 0) if fitted else 0
+    return {
+        "fitted": fitted,
+        "exists": fitted,
+        "n_samples": n_samples_fit,
+        "observations": drift_detector.count(),
+        "n_features": n_features,
+        "feature_count": n_features,
+        "baseline_keys": keys,
+    }
+
 @router.delete("/mlops/drift/baseline", tags=["mlops"])
 def reset_baseline():
     drift_detector.set_baseline({})
     drift_detector._observations = []
+    drift_detector._baseline_n_samples = 0
     return {"status":"reset"}
 
 @router.post("/mlops/drift/simulate", tags=["mlops"])

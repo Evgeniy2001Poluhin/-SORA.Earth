@@ -38,9 +38,10 @@ export function DriftPage() {
   });
   const qc = useQueryClient();
   const baseline = useQuery({ queryKey: ["drift-baseline"], queryFn: driftBaselineApi.status });
+  const fitted = baseline.data?.exists ?? false;
   const fitMut = useMutation({
     mutationFn: () => driftBaselineApi.fit(200),
-    onSuccess: (r) => { toast.success("Baseline fitted: " + r.n_samples + " samples"); qc.invalidateQueries({ queryKey: ["drift"] }); qc.invalidateQueries({ queryKey: ["drift-baseline"] }); },
+    onSuccess: (r) => { toast.success("Baseline fitted: " + r.samples + " samples"); qc.invalidateQueries({ queryKey: ["drift"] }); qc.invalidateQueries({ queryKey: ["drift-baseline"] }); },
     onError: (e: any) => toast.error("Fit failed: " + (e?.message ?? "unknown")),
   });
   const delMut = useMutation({
@@ -110,13 +111,13 @@ export function DriftPage() {
         <button className="preset-btn" disabled={fitMut.isPending} onClick={() => fitMut.mutate()}>
           {fitMut.isPending ? "Fitting..." : "Fit baseline"}
         </button>
-        <button className="preset-btn" disabled={delMut.isPending} onClick={() => delMut.mutate()}>
+        <button className="preset-btn" disabled={delMut.isPending || !fitted} onClick={() => delMut.mutate()}>
           {delMut.isPending ? "Deleting..." : "Delete baseline"}
         </button>
-        <button className="preset-btn" disabled={simMut.isPending} onClick={() => simMut.mutate("stable")}>
+        <button className="preset-btn" disabled={simMut.isPending || !fitted} onClick={() => simMut.mutate("stable")}>
           Simulate stable
         </button>
-        <button className="preset-btn" disabled={simMut.isPending} onClick={() => simMut.mutate("drift")}>
+        <button className="preset-btn" disabled={simMut.isPending || !fitted} onClick={() => simMut.mutate("drift")}>
           Simulate drift
         </button>
       </div>
