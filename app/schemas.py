@@ -10,7 +10,7 @@ class ProjectInput(BaseModel):
     social_impact: float = Field(default=5, ge=1, le=10, alias="social_impact_score", description="Social impact score 1-10")
     duration_months: int = Field(default=12, ge=1, le=120, alias="project_duration_months", description="Duration in months")
     category: Optional[str] = "Solar Energy"
-    region: Optional[str] = "Europe"
+    region: Optional[str] = Field(default="Europe", alias="country")
     lat: Optional[float] = 50.0
     lon: Optional[float] = 10.0
 
