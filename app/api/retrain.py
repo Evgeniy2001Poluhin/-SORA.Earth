@@ -14,7 +14,7 @@ import torch
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from app.auth import require_api_key
 
-router = APIRouter(prefix="/model", tags=["ml-ops"])
+router = APIRouter(prefix="/model", tags=["mlops"])
 
 from app.scheduler import _start_retrain_log, _finish_retrain_log
 logger = __import__("logging").getLogger("sora_earth")

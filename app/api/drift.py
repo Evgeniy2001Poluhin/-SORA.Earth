@@ -8,7 +8,7 @@ try:
 except ImportError:
     HAS_SCIPY = False
 
-router = APIRouter(prefix="/model", tags=["ml-ops"])
+router = APIRouter(prefix="/model", tags=["mlops"])
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PRED_LOG = os.path.join(ROOT_DIR, "data", "predictions_log.csv")
 PROJ_CSV = os.path.join(ROOT_DIR, "data", "projects.csv")

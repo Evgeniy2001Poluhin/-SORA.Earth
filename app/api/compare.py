@@ -6,7 +6,7 @@ import pandas as pd
 from fastapi import APIRouter
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
-router = APIRouter(prefix="/model", tags=["ml-ops"])
+router = APIRouter(prefix="/model", tags=["mlops"])
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MODELS = os.path.join(ROOT_DIR, "models")

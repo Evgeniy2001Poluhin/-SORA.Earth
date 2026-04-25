@@ -9,7 +9,7 @@ router = APIRouter(prefix="/admin/ai-teammate", tags=["ai-teammate"])
 
 @router.post("/run")
 def run_teammate(
-    mode: str = Query("observe", regex="^(observe|auto)$"),
+    mode: str = Query("observe", pattern="^(observe|auto)$"),
     _admin=Depends(require_admin),
 ):
     """Run AI Teammate: observe (read-only) or auto (read + execute)."""
