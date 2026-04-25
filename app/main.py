@@ -438,7 +438,7 @@ from app.api.drift_baseline import router as drift_baseline_router
 from app.api.explainability import router as explainability_router
 
 _all_routers = [
-    auth_api.router, evaluate_api.router, predict_api.router,
+    evaluate_api.router, predict_api.router,
     analytics_api.router, system_api.router, infra_api.router,
     data_api.router, retrain_api.router, drift_api.router,
     compare_api.router, ab_api.router, explain_api.router,
