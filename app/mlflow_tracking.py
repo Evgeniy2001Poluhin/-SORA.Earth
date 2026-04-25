@@ -174,3 +174,48 @@ def get_experiment_stats():
     return result
 
 
+
+
+
+def log_drift_event(analysis_result, baseline_id="default"):
+    """Log drift detection event to MLflow.
+
+    Stores PSI/KS metrics per feature, drift_score, drifted features.
+    Tag type=drift_event for filtering in /drift/mlflow-history.
+    """
+    if not analysis_result or not analysis_result.get("drift_detected"):
+        return
+    try:
+        from datetime import datetime as _dt
+        run_name = "drift_" + _dt.now().strftime("%Y%m%d_%H%M%S")
+        with mlflow.start_run(run_name=run_name):
+            mlflow.set_tag("type", "drift_event")
+            mlflow.set_tag("baseline_id", str(baseline_id))
+
+            metrics = {
+                "drift_score": float(analysis_result.get("drift_score", 0.0) or 0.0),
+                "drifted_features_count": float(len(analysis_result.get("drifted_features", []) or [])),
+                "n_samples_ref": float(analysis_result.get("reference_samples", 0) or 0),
+                "n_samples_cur": float(analysis_result.get("current_samples", 0) or 0),
+            }
+            psi = analysis_result.get("psi") or {}
+            for feat, m in psi.items():
+                if isinstance(m, dict) and m.get("psi") is not None:
+                    safe = str(feat).replace(" ", "_")[:40]
+                    metrics["psi_" + safe] = float(m["psi"])
+            ks = analysis_result.get("ks_test") or analysis_result.get("ks") or {}
+            for feat, m in ks.items():
+                if isinstance(m, dict) and m.get("p_value") is not None:
+                    safe = str(feat).replace(" ", "_")[:40]
+                    metrics["ks_pvalue_" + safe] = float(m["p_value"])
+            mlflow.log_metrics(metrics)
+
+            drifted = analysis_result.get("drifted_features", []) or []
+            mlflow.log_param("drifted_features", ",".join(str(x) for x in drifted)[:250])
+            feats = analysis_result.get("features_analyzed", []) or []
+            mlflow.log_param("features_analyzed", ",".join(str(x) for x in feats)[:250])
+    except Exception as _e:
+        try:
+            print("[mlflow_drift] log failed:", _e)
+        except Exception:
+            pass

@@ -124,6 +124,15 @@ def run_drift_analysis(reference_df, current_df, feature_cols=None):
         "drift_detected": len(drifted_features) > 0,
         "drift_score": round(len(drifted_features) / max(len(feature_cols), 1), 2),
     }
+
+    # MLflow drift event logging (Sprint 7 closure)
+    try:
+        if result.get("drift_detected"):
+            from app.mlflow_tracking import log_drift_event as _lde
+            _lde(result, baseline_id="run_drift_analysis")
+    except Exception:
+        pass
+
     return _sanitize(result)
 
 
