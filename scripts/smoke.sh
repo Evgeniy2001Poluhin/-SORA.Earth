@@ -31,6 +31,7 @@ check "drift_features"    200 "$(curl -s -o /dev/null -w '%{http_code}' $BASE/dr
 check "model_drift"       200 "$(curl -s -o /dev/null -w '%{http_code}' $BASE/model/drift)"
 check "discrepancy"      200 "$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/calibration/discrepancy -H "Content-Type: application/json" -d '{"budget":100000,"co2_reduction":250,"social_impact":7,"duration_months":24}')"
 check "uncertainty"      200 "$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/predict/uncertainty -H "Content-Type: application/json" -d '{"budget":100000,"co2_reduction":250,"social_impact":7,"duration_months":24}')"
+check "waterfall_png"    200 "$(curl -s -o /tmp/wf.png -w '%{http_code}' -X POST $BASE/predict/explain/waterfall -H 'Content-Type: application/json' -d '{"budget":100000,"co2_reduction":250,"social_impact":7,"duration_months":24}')"
 
 echo
 echo "=== PASS: $PASS  FAIL: $FAIL ==="
