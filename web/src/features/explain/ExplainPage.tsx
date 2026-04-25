@@ -85,9 +85,9 @@ export function ExplainPage() {
 
       {json && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginTop: 28, marginBottom: 24 }}>
-          <div className="kpi"><div className="kpi-lbl">Prediction</div><div className="kpi-val tabular">{json.prediction.toFixed(3)}</div></div>
-          <div className="kpi"><div className="kpi-lbl">Base E[f(x)]</div><div className="kpi-val tabular">{json.base_value.toFixed(3)}</div></div>
-          <div className="kpi"><div className="kpi-lbl">Delta from base</div><div className="kpi-val tabular" style={{ color: json.prediction >= json.base_value ? "#2FE0A6" : "#EF4444" }}>{(json.prediction - json.base_value >= 0 ? "+" : "") + (json.prediction - json.base_value).toFixed(3)}</div></div>
+          <div className="kpi"><div className="kpi-lbl">Prediction</div><div className="kpi-val tabular">{json.prediction != null ? json.prediction.toFixed(3) : "—"}</div></div>
+          <div className="kpi"><div className="kpi-lbl">Base E[f(x)]</div><div className="kpi-val tabular">{json.base_value != null ? json.base_value.toFixed(3) : "—"}</div></div>
+          <div className="kpi"><div className="kpi-lbl">Delta from base</div><div className="kpi-val tabular" style={{ color: (json.prediction ?? 0) >= (json.base_value ?? 0) ? "#2FE0A6" : "#EF4444" }}>{json.prediction != null && json.base_value != null ? ((json.prediction - json.base_value >= 0 ? "+" : "") + (json.prediction - json.base_value).toFixed(3)) : "—"}</div></div>
         </div>
       )}
 
@@ -112,7 +112,7 @@ export function ExplainPage() {
                       <div className="contrib-bar" style={{ width: pct + "%", background: positive ? "#2FE0A6" : "#EF4444" }} />
                     </div>
                     <div className="tabular contrib-val" style={{ color: positive ? "#2FE0A6" : "#EF4444" }}>
-                      {(positive ? "+" : "") + c.shap_value.toFixed(3)}
+                      {(positive ? "+" : "") + (c.shap_value ?? 0).toFixed(3)}
                     </div>
                   </div>
                 );
