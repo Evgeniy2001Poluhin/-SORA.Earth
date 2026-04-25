@@ -24,7 +24,7 @@ def fit_baseline(csv_path: str = "data/projects.csv"):
                 used.append(c)
     drift_detector.set_baseline(baseline)
     drift_detector._baseline_n_samples = len(df)
-    return {"status":"ok","samples":len(df),"features":used,"baseline_keys":sorted(baseline.keys())}
+    return {"status":"ok","samples":len(df),"n_samples":len(df),"features":used,"baseline_keys":sorted(baseline.keys())}
 
 @router.post("/mlops/drift/observe", tags=["mlops"])
 def observe(features: dict):
