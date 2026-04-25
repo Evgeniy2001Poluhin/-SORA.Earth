@@ -12,9 +12,9 @@
         "project_duration_months": 24
       },
       "expected": {
-        "total_score": 65.02,
-        "environment_score": 52.3,
-        "social_score": 62.1,
+        "total_score": 74.66,
+        "environment_score": 63.3,
+        "social_score": 79.5,
         "economic_score": 85.0,
         "success_probability": 95.0,
         "success_probability_v2": 86.56,
@@ -33,13 +33,13 @@
         "project_duration_months": 36
       },
       "expected": {
-        "total_score": 79.45,
-        "environment_score": 82.5,
-        "social_score": 69.8,
-        "economic_score": 85.0,
+        "total_score": 72.09,
+        "environment_score": 93.5,
+        "social_score": 89.5,
+        "economic_score": 26.1,
         "success_probability": 93.47,
         "success_probability_v2": 85.29,
-        "risk_level": "Low"
+        "risk_level": "Medium"
       }
     },
     {
@@ -54,9 +54,9 @@
         "project_duration_months": 18
       },
       "expected": {
-        "total_score": 59.31,
-        "environment_score": 43.8,
-        "social_score": 54.3,
+        "total_score": 68.31,
+        "environment_score": 54.8,
+        "social_score": 69.6,
         "economic_score": 85.0,
         "success_probability": 98.5,
         "success_probability_v2": 86.36,
@@ -75,10 +75,10 @@
         "project_duration_months": 12
       },
       "expected": {
-        "total_score": 56.39,
-        "environment_score": 28.1,
-        "social_score": 69.8,
-        "economic_score": 80.7,
+        "total_score": 47.43,
+        "environment_score": 39.1,
+        "social_score": 89.5,
+        "economic_score": 16.5,
         "success_probability": 97.62,
         "success_probability_v2": 86.73,
         "risk_level": "Medium"
@@ -96,9 +96,9 @@
         "project_duration_months": 24
       },
       "expected": {
-        "total_score": 65.02,
-        "environment_score": 52.3,
-        "social_score": 62.1,
+        "total_score": 70.59,
+        "environment_score": 53.4,
+        "social_score": 79.1,
         "economic_score": 85.0,
         "success_probability": 95.0,
         "success_probability_v2": 86.56,
@@ -117,13 +117,13 @@
         "project_duration_months": 36
       },
       "expected": {
-        "total_score": 79.45,
-        "environment_score": 82.5,
-        "social_score": 69.8,
-        "economic_score": 85.0,
+        "total_score": 70.22,
+        "environment_score": 83.6,
+        "social_score": 89.0,
+        "economic_score": 33.5,
         "success_probability": 93.47,
         "success_probability_v2": 85.29,
-        "risk_level": "Low"
+        "risk_level": "Medium"
       }
     },
     {
@@ -138,9 +138,9 @@
         "project_duration_months": 18
       },
       "expected": {
-        "total_score": 59.31,
-        "environment_score": 43.8,
-        "social_score": 54.3,
+        "total_score": 64.23,
+        "environment_score": 44.9,
+        "social_score": 69.2,
         "economic_score": 85.0,
         "success_probability": 98.5,
         "success_probability_v2": 86.36,
@@ -159,10 +159,10 @@
         "project_duration_months": 12
       },
       "expected": {
-        "total_score": 56.39,
-        "environment_score": 28.1,
-        "social_score": 69.8,
-        "economic_score": 80.7,
+        "total_score": 44.05,
+        "environment_score": 29.2,
+        "social_score": 89.0,
+        "economic_score": 18.9,
         "success_probability": 97.62,
         "success_probability_v2": 86.73,
         "risk_level": "Medium"
@@ -180,10 +180,10 @@
         "project_duration_months": 24
       },
       "expected": {
-        "total_score": 65.02,
-        "environment_score": 52.3,
-        "social_score": 62.1,
-        "economic_score": 85.0,
+        "total_score": 53.8,
+        "environment_score": 37.0,
+        "social_score": 77.4,
+        "economic_score": 52.6,
         "success_probability": 95.0,
         "success_probability_v2": 86.56,
         "risk_level": "Medium"
@@ -201,13 +201,13 @@
         "project_duration_months": 36
       },
       "expected": {
-        "total_score": 79.45,
-        "environment_score": 82.5,
-        "social_score": 69.8,
-        "economic_score": 85.0,
+        "total_score": 58.17,
+        "environment_score": 67.3,
+        "social_score": 87.0,
+        "economic_score": 17.2,
         "success_probability": 93.47,
         "success_probability_v2": 85.29,
-        "risk_level": "Low"
+        "risk_level": "Medium"
       }
     },
     {
@@ -222,10 +222,10 @@
         "project_duration_months": 18
       },
       "expected": {
-        "total_score": 59.31,
-        "environment_score": 43.8,
-        "social_score": 54.3,
-        "economic_score": 85.0,
+        "total_score": 56.87,
+        "environment_score": 28.6,
+        "social_score": 67.7,
+        "economic_score": 83.8,
         "success_probability": 98.5,
         "success_probability_v2": 86.36,
         "risk_level": "Medium"
@@ -243,13 +243,13 @@
         "project_duration_months": 12
       },
       "expected": {
-        "total_score": 56.39,
-        "environment_score": 28.1,
-        "social_score": 69.8,
-        "economic_score": 80.7,
+        "total_score": 35.34,
+        "environment_score": 12.8,
+        "social_score": 87.0,
+        "economic_score": 13.7,
         "success_probability": 97.62,
         "success_probability_v2": 86.73,
-        "risk_level": "Medium"
+        "risk_level": "High"
       }
     },
     {
@@ -264,10 +264,10 @@
         "project_duration_months": 24
       },
       "expected": {
-        "total_score": 65.02,
-        "environment_score": 52.3,
-        "social_score": 62.1,
-        "economic_score": 85.0,
+        "total_score": 68.23,
+        "environment_score": 75.1,
+        "social_score": 54.3,
+        "economic_score": 73.0,
         "success_probability": 95.0,
         "success_probability_v2": 86.56,
         "risk_level": "Medium"
@@ -285,10 +285,10 @@
         "project_duration_months": 36
       },
       "expected": {
-        "total_score": 79.45,
-        "environment_score": 82.5,
-        "social_score": 69.8,
-        "economic_score": 85.0,
+        "total_score": 80.06,
+        "environment_score": 100.0,
+        "social_score": 61.1,
+        "economic_score": 72.5,
         "success_probability": 93.47,
         "success_probability_v2": 85.29,
         "risk_level": "Low"
@@ -306,10 +306,10 @@
         "project_duration_months": 18
       },
       "expected": {
-        "total_score": 59.31,
-        "environment_score": 43.8,
-        "social_score": 54.3,
-        "economic_score": 85.0,
+        "total_score": 62.65,
+        "environment_score": 66.3,
+        "social_score": 47.5,
+        "economic_score": 73.0,
         "success_probability": 98.5,
         "success_probability_v2": 86.36,
         "risk_level": "Medium"
@@ -327,10 +327,10 @@
         "project_duration_months": 12
       },
       "expected": {
-        "total_score": 56.39,
-        "environment_score": 28.1,
-        "social_score": 69.8,
-        "economic_score": 80.7,
+        "total_score": 58.4,
+        "environment_score": 49.8,
+        "social_score": 61.1,
+        "economic_score": 67.2,
         "success_probability": 97.62,
         "success_probability_v2": 86.73,
         "risk_level": "Medium"
@@ -348,9 +348,9 @@
         "project_duration_months": 24
       },
       "expected": {
-        "total_score": 65.02,
-        "environment_score": 52.3,
-        "social_score": 62.1,
+        "total_score": 59.25,
+        "environment_score": 48.3,
+        "social_score": 48.1,
         "economic_score": 85.0,
         "success_probability": 95.0,
         "success_probability_v2": 86.56,
@@ -369,13 +369,13 @@
         "project_duration_months": 36
       },
       "expected": {
-        "total_score": 79.45,
-        "environment_score": 82.5,
-        "social_score": 69.8,
+        "total_score": 70.96,
+        "environment_score": 73.1,
+        "social_score": 54.1,
         "economic_score": 85.0,
         "success_probability": 93.47,
         "success_probability_v2": 85.29,
-        "risk_level": "Low"
+        "risk_level": "Medium"
       }
     },
     {
@@ -390,9 +390,9 @@
         "project_duration_months": 18
       },
       "expected": {
-        "total_score": 59.31,
-        "environment_score": 43.8,
-        "social_score": 54.3,
+        "total_score": 54.68,
+        "environment_score": 41.4,
+        "social_score": 42.1,
         "economic_score": 85.0,
         "success_probability": 98.5,
         "success_probability_v2": 86.36,
@@ -411,10 +411,10 @@
         "project_duration_months": 12
       },
       "expected": {
-        "total_score": 56.39,
-        "environment_score": 28.1,
-        "social_score": 69.8,
-        "economic_score": 80.7,
+        "total_score": 52.26,
+        "environment_score": 28.5,
+        "social_score": 54.1,
+        "economic_score": 82.1,
         "success_probability": 97.62,
         "success_probability_v2": 86.73,
         "risk_level": "Medium"
