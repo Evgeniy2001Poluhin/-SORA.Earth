@@ -1,33 +1,37 @@
-venv/
+
 __pycache__/
-*.pyc
+!data/explanations/.gitkeep
+.coverage
+.DS_Store
 .env
 .pytest_cache/
-*.egg-info/
-dist/
-build/
-.DS_Store
-
-# Large files
-mlflow.db
-mlruns/
-*.db
-
-# Temporary patch scripts
-patch_*.py
-fix_*.py
-add_metrics.py
-clean_report.py
-update_report_with_metrics.py
-train_model_backup.py
-
-# Coverage artifacts
-.coverage
-
-# Model binaries (опционально — если модели большие)
-# models/*.pkl
-
-# Backup files
 *.bak
 *.bak.*
 *.bak[0-9]*
+*.db
+*.egg-info/
+*.pyc
+# Backup files
+# build artifacts (built locally)
+# Coverage artifacts
+# Large files
+# Model binaries (опционально — если модели большие)
+# models/*.pkl
+# SHAP waterfall disk cache
+# Temporary patch scripts
+# TS incremental build cache
+add_metrics.py
+app/static/spa/assets/
+app/static/spa/index.html
+build/
+clean_report.py
+data/explanations/*.png
+dist/
+fix_*.py
+mlflow.db
+mlruns/
+patch_*.py
+train_model_backup.py
+update_report_with_metrics.py
+venv/
+web/tsconfig.tsbuildinfo
