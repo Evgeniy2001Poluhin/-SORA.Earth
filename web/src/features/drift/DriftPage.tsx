@@ -41,7 +41,7 @@ export function DriftPage() {
   const fitted = baseline.data?.exists ?? false;
   const fitMut = useMutation({
     mutationFn: () => driftBaselineApi.fit(200),
-    onSuccess: (r) => { toast.success("Baseline fitted: " + r.samples + " samples"); qc.invalidateQueries({ queryKey: ["drift"] }); qc.invalidateQueries({ queryKey: ["drift-baseline"] }); },
+    onSuccess: (r) => { toast.success("Baseline fitted: " + r.n_samples + " samples"); qc.invalidateQueries({ queryKey: ["drift"] }); qc.invalidateQueries({ queryKey: ["drift-baseline"] }); },
     onError: (e: any) => toast.error("Fit failed: " + (e?.message ?? "unknown")),
   });
   const delMut = useMutation({
