@@ -6,6 +6,7 @@ import { HomePage } from "@/features/home/HomePage";
 import { EvaluatePage } from "@/features/evaluate/EvaluatePage";
 import { ComparePage } from "@/features/compare/ComparePage";
 import { ExplainPage } from "@/features/explain/ExplainPage";
+import { CalibrationPage } from "@/features/calibration/CalibrationPage";
 export function App() {
   return (
     <ErrorBoundary>
@@ -16,6 +17,7 @@ export function App() {
         <Route path="/compare" element={<ComparePage/>}/>
         <Route path="/drift" element={<DriftPage/>}/>
         <Route path="/explain" element={<ExplainPage/>}/>
+        <Route path="/calibration" element={<CalibrationPage/>}/>
         <Route path="*" element={<Navigate to="/" replace/>}/>
       </Route>
       </Routes>
