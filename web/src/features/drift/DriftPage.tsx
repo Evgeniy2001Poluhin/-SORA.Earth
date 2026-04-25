@@ -70,8 +70,8 @@ export function DriftPage() {
         </div>
         <div className="kpi">
           <div className="kpi-lbl">Drifted features</div>
-          <div className="kpi-val tabular" style={{ color: d.drifted_features.length ? "#EF4444" : "var(--text)" }}>
-            {d.drifted_features.length}
+          <div className="kpi-val tabular" style={{ color: (d.drifted_features?.length ?? 0) ? "#EF4444" : "var(--text)" }}>
+            {(d.drifted_features?.length ?? 0)}
           </div>
         </div>
       </div>
