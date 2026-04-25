@@ -6,6 +6,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Refere
 import { calibrationApi } from "@/api/endpoints/calibration";
 import type { DiscrepancyResponse, ExplainLocalRequest } from "@/api/types";
 import "./calibration.css";
+import { BrierReliabilityPanel } from "./BrierReliabilityPanel";
 
 interface FormValues {
   budget: number;
@@ -127,6 +128,8 @@ export function CalibrationPage() {
       {!data && (
         <div className="placeholder">Click a preset or fill the form to compare models</div>
       )}
+      <BrierReliabilityPanel />
+
     </div>
   );
 }
