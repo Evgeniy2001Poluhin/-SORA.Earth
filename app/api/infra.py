@@ -159,7 +159,7 @@ def clear_cache():
 
 # ===== DRIFT =====
 @router.get("/mlops/drift", tags=["mlops"])
-def check_drift():
+def check_drift_infra():
     return drift_detector.check_drift()
 
 
@@ -297,7 +297,7 @@ def invalidate_cache_prefix(prefix: str):
 
 
 
-@router.get("/infra/data-refresh-status", tags=["Infrastructure"])
+@router.get("/infra/data-refresh-status", tags=["infrastructure"])
 def data_refresh_status():
     """Return latest data refresh log entries for UI display."""
     from app.database import SessionLocal, DataRefreshLog
@@ -329,7 +329,7 @@ def data_refresh_status():
         db.close()
 
 
-@router.post("/mlops/auto-retrain", tags=["Infrastructure"])
+@router.post("/mlops/auto-retrain", tags=["infrastructure"])
 def auto_retrain_on_drift(
     window: int = 50,
     min_samples: int = 50,
@@ -428,14 +428,14 @@ def auto_retrain_on_drift(
     }
 
 
-@router.post("/mlops/full-pipeline", tags=["Infrastructure"])
+@router.post("/mlops/full-pipeline", tags=["infrastructure"])
 def run_full_pipeline(current_user=Depends(require_admin)):
     """Full MLOps pipeline: refresh → drift → retrain → AUC validate → promote/reject."""
     from app.scheduler import full_pipeline_run
     return full_pipeline_run(trigger_source="api_full_pipeline")
 
 
-@router.post("/infra/data-refresh/run", tags=["Infrastructure"])
+@router.post("/infra/data-refresh/run", tags=["infrastructure"])
 def data_refresh_run():
     """
     Trigger full external ESG data refresh (World Bank/OECD + benchmarks).

@@ -4,7 +4,7 @@ from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-router = APIRouter(tags=["System"])
+router = APIRouter(tags=["system"])
 START_TIME = time.time()
 VERSION = "2.0.0"
 
