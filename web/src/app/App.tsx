@@ -13,9 +13,9 @@ export function App() {
         <Route path="/" element={<HomePage/>}/>
         <Route path="/evaluate" element={<EvaluatePage/>}/>
         <Route path="/compare" element={<ComparePage/>}/>
+        <Route path="/drift" element={<DriftPage/>}/>
         <Route path="*" element={<Navigate to="/" replace/>}/>
       </Route>
-        <Route path="/drift" element={<DriftPage/>}/>
       </Routes>
     </ErrorBoundary>
   );
