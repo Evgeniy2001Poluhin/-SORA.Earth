@@ -40,3 +40,59 @@ export type RankingResponse = {
   offset: number;
   data: RankingItem[];
 };
+
+// ============ NEW: discrepancy / uncertainty / explain-waterfall / drift-baseline ============
+
+export type RecommendationLevel = "consensus" | "moderate_disagreement" | "high_disagreement";
+
+export interface ModelProba { proba: number; weight: number }
+
+export interface DiscrepancyResponse {
+  models: {
+    rf_v1: ModelProba;
+    stacking_v2: ModelProba;
+    calibrated_v2: ModelProba;
+  };
+  consensus: { weighted_proba: number; method: string };
+  divergence: { max_spread: number; std: number; max_pair: [string, string] };
+  tree_uncertainty: { std: number; ci_90: [number, number]; n_trees: number };
+  recommendation: RecommendationLevel;
+}
+
+export interface UncertaintyResponse {
+  prediction: { mean: number; median: number; lower_90: number; upper_90: number };
+  tree_distribution: { std: number; n_trees: number; min: number; max: number };
+  confidence: "high" | "medium" | "low";
+}
+
+export interface DriftBaselineStatus {
+  exists: boolean;
+  fitted_at?: string;
+  n_samples?: number;
+  feature_count?: number;
+}
+
+export interface DriftBaselineFitResponse {
+  status: "fitted" | "skipped";
+  n_samples: number;
+  features: string[];
+}
+
+export interface ExplainLocalRequest {
+  budget: number;
+  co2_reduction: number;
+  social_impact: number;
+  duration_months: number;
+}
+
+export interface ExplainLocalContribution {
+  feature: string;
+  value: number;
+  shap_value: number;
+}
+
+export interface ExplainLocalResponse {
+  prediction: number;
+  base_value: number;
+  top_contributions: ExplainLocalContribution[];
+}
