@@ -157,3 +157,37 @@
 .mc-legend .dot { display:inline-block; width:10px; height:10px; border-radius:2px; background:rgba(255,255,255,.10); }
 .mc-legend .dot.in { background:rgba(47,224,166,.6); }
 .mc-legend .sep { width:10px; }
+
+.ev-pdf{margin-left:auto;background:#0E1218;border:1px solid var(--line-2);color:var(--text);
+  border-radius:10px;padding:9px 14px;font:500 12px/1 var(--f-mono);letter-spacing:.18em;
+  text-transform:uppercase;display:inline-flex;align-items:center;gap:8px;transition:all .18s var(--ease)}
+.ev-pdf:hover{border-color:rgba(47,224,166,.55);color:var(--planet);transform:translateY(-1px)}
+.ev-pdf:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.ev-pdf .dot{width:5px;height:5px;border-radius:50%;background:var(--planet);box-shadow:0 0 0 3px rgba(47,224,166,.18)}
+
+.ev-skeleton{padding:32px 28px;display:flex;flex-direction:column;gap:18px}
+.ev-skeleton .sk{height:14px;border-radius:6px;
+  background:linear-gradient(90deg,#11161E 0%,#1A2230 50%,#11161E 100%);
+  background-size:200% 100%;animation:sk 1.4s var(--ease) infinite}
+.ev-skeleton .sk.lg{height:42px;width:55%}
+.ev-skeleton .sk.md{width:78%}
+.ev-skeleton .sk.sm{width:40%}
+.ev-skeleton .sk.bar{height:10px;border-radius:999px}
+@keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+.ev-pdf{margin-left:auto;background:#0E1218;border:1px solid var(--line-2);color:var(--text);
+  border-radius:10px;padding:9px 14px;font:500 12px/1 var(--f-mono);letter-spacing:.18em;
+  text-transform:uppercase;display:inline-flex;align-items:center;gap:8px;transition:all .18s var(--ease)}
+.ev-pdf:hover{border-color:rgba(47,224,166,.55);color:var(--planet);transform:translateY(-1px)}
+.ev-pdf:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.ev-pdf .dot{width:5px;height:5px;border-radius:50%;background:var(--planet);box-shadow:0 0 0 3px rgba(47,224,166,.18)}
+
+.ev-skeleton{padding:32px 28px;display:flex;flex-direction:column;gap:18px}
+.ev-skeleton .sk{height:14px;border-radius:6px;
+  background:linear-gradient(90deg,#11161E 0%,#1A2230 50%,#11161E 100%);
+  background-size:200% 100%;animation:sk 1.4s var(--ease) infinite}
+.ev-skeleton .sk.lg{height:42px;width:55%}
+.ev-skeleton .sk.md{width:78%}
+.ev-skeleton .sk.sm{width:40%}
+.ev-skeleton .sk.bar{height:10px;border-radius:999px}
+@keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
