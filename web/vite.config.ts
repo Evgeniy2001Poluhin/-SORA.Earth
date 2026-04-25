@@ -25,8 +25,9 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "../app/static",
+    outDir: "../app/static/spa",
     emptyOutDir: true,
+    // SPA served at /v2/ by FastAPI
     assetsDir: "assets",
     sourcemap: true,
   },

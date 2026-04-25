@@ -60,7 +60,7 @@ export function HomePage() {
             ESG · CO₂ · ML · SHAP
           </motion.div>
           <motion.h1 className="display" initial={{opacity:0,y:14}} animate={{opacity:1,y:0}} transition={{delay:.05,duration:.6,ease:[.16,1,.3,1]}}
-            style={{fontSize:"clamp(40px,5.6vw,76px)",lineHeight:.98,m:"0 0 22px"}}>
+            style={{fontSize:"clamp(40px,5.6vw,76px)",lineHeight:.98}}>
             Planetary-scale <em style={{fontStyle:"italic",color:"var(--planet)"}}>ESG</em> intelligence,<br/>explainable down to the feature.
           </motion.h1>
           <motion.p initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{delay:.15,duration:.6,ease:[.16,1,.3,1]}}
@@ -73,7 +73,7 @@ export function HomePage() {
             <a href="/docs" target="_blank" rel="noreferrer" className="btn-ghost">API docs →</a>
           </motion.div>
         </div>
-        <div clasame="home-globe" ref={host}/>
+        <div className="home-globe" ref={host}/>
       </section>
       <section className="home-kpis">
         <Kpi k="Models" v="4" sub="RF · XGB · MLP · Stacking"/>
@@ -82,6 +82,24 @@ export function HomePage() {
         <Kpi k="API endpoints" v="42+" sub="FastAPI · /api/v1"/>
         <Kpi k="Services" v="8" sub="Docker Compose"/>
         <Kpi k="Tests passed" v="324" sub="0 failed"/>
+      </section>
+      <section className="home-how">
+        <div className="eyebrow">HOW IT WORKS</div>
+        <div className="how-grid">
+          <div className="how-step"><span className="how-num">01</span><h3>Submit</h3><p>Project name, country, budget, CO₂, social score, duration. Six fields, no spreadsheets.</p></div>
+          <div className="how-step"><span className="how-num">02</span><h3>Score</h3><p>Stacked ML model returns ESG total + env/soc/eco breakdown, success probability and risk level.</p></div>
+          <div className="how-step"><span className="how-num">03</span><h3>Compare</h3><p>Run two projects side-by-side. See the gap on every axis. Decide with nrs, not narratives.</p></div>
+        </div>
+      </section>
+      <section className="home-cta">
+        <div>
+          <h2 className="display" style={{fontSize:"clamp(28px,3.6vw,44px)",margin:0}}>Ready to score your project?</h2>
+          <p style={{color:"var(--muted)",marginTop:8}}>Same backend that powers the live tile above. ~300ms per evaluation.</p>
+        </div>
+        <div style={{display:"flex",gap:12}}>
+          <Link to="/evaluate" className="btn-primary">Run evaluation</Link>
+          <Link to="/compare" className="btn-ghost">Compare two →</Link>
+        </div>
       </section>
     </div>
   );

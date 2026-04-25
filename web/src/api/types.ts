@@ -23,3 +23,20 @@ export interface ExplainResponse {
   all_features: { name:string; direction:string; impact:string; shap_value:number; value:number }[];
 }
 export type CountriesMap = Record<string, string>;
+
+export type RankingItem = {
+  country: string;
+  co2_per_capita: number;
+  renewable_share: number;
+  esg_rank: number;
+  hdi: number;
+  gdp_per_capita: number;
+  gini_index: number;
+  gov_effectiveness: number;
+};
+export type RankingResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  data: RankingItem[];
+};

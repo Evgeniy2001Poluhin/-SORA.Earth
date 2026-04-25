@@ -343,10 +343,24 @@ REGIONAL_FACTORS = {
 
 def calculate_esg(project, region_name: str = "Europe"):
     rf = REGIONAL_FACTORS.get(region_name, REGIONAL_FACTORS["Europe"])
+    try:
+        from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
+        country_key = getattr(project, "region", None) or "Global Average"
+        cb = BENCHMARKS.get(country_key, GLOBAL_AVG) if BENCHMARKS else GLOBAL_AVG
+    except Exception:
+        cb = {"co2_per_capita": 4.7, "renewable_share": 28.3, "hdi": 0.739, "gdp_per_capita": 20000}
+    c_co2 = float(cb.get("co2_per_capita", 4.7))
+    c_ren = float(cb.get("renewable_share", 28.3))
+    c_hdi = float(cb.get("hdi", 0.739))
+    c_gdp = float(cb.get("gdp_per_capita", 20000))
     co2_norm = min(project.co2_reduction / 500.0, 1.0)
-    score_env = min(co2_norm * rf["env_mult"] + rf["renewable_bonus"], 1.0)
-    score_soc = min(project.social_impact / 10.0 * rf["soc_mult"], 1.0)
-    score_eco = min(1.0 / (1.0 + math.exp(-0.00005 * (project.budget - 50000))) * rf["eco_mult"], 1.0)
+    country_env = max(0.0, min(1.0, (c_ren / 100.0) * 0.6 + max(0, 15 - c_co2) / 15.0 * 0.4))
+    score_env = min((0.55 * co2_norm + 0.45 * country_env) * rf["env_mult"], 1.0)
+    country_soc = max(0.4, min(1.0, c_hdi))
+    score_soc = min(project.social_impact / 10.0 * country_soc * rf["soc_mult"], 1.0)
+    gdp_pivot = max(20000.0, min(c_gdp, 80000.0))
+    budget_ratio = project.budget / gdp_pivot
+    score_eco = min(1.0 / (1.0 + math.exp(-2.5 * (budget_ratio - 2.0))) * rf["eco_mult"], 1.0)
     duration_factor = 0.9 if project.duration_months > 48 else (0.95 if project.duration_months > 36 else 1.0)
     total = round((score_env * 0.4 + score_soc * 0.3 + score_eco * 0.3) * duration_factor * 100, 2)
     total = min(total, 100.0)
@@ -364,7 +378,7 @@ def calculate_esg(project, region_name: str = "Europe"):
     recommendations = []
     if score_env < 0.7:
         target_co2 = min(int(project.co2_reduction + (0.7 - score_env) * 100), 100)
-        recommendations.append(f"Increase CO2 reduction from {project.co2_reduction}% to {target_co2}%+ to reach Strong environmental rating")
+        recommendations.append(f"Increase CO2 reduction from {project.co2_reduction:.0f} to {target_co2:.0f}+ t/yr to reach Strong environmental rating")
     if score_soc < 0.7:
         target_si = min(int(project.social_impact + (0.7 - score_soc) * 10) + 1, 10)
         recommendations.append(f"Boost social impact score from {project.social_impact} to {target_si}+ (add community engagement, job creation programs)")
@@ -379,7 +393,7 @@ def calculate_esg(project, region_name: str = "Europe"):
     if total < 50:
         recommendations.append("⚠️ High risk: focus on CO2 reduction and social impact as priority improvements")
     elif total >= 75 and success_prob >= 70:
-        recommendations.append("[OK] Excellent ESG profile — r green bond certification")
+        recommendations.append("[OK] Excellent ESG profile — ready for green bond certification")
     if not recommendations:
         recommendations.append("Strong project across all ESG dimensions — consider scaling up")
 
@@ -580,3 +594,32 @@ if _SPA_INDEX.exists():
         return FileResponse(_SPA_INDEX)
 # ===== /SORA_SPA_MOUNT =====
 
+# === SPA v2 mount ===
+from fastapi.staticfiles import StaticFiles as _SPA_Static
+from fastapi.responses import FileResponse as _SPA_File
+from pathlib import Path as _SPA_Path
+_SPA2 = _SPA_Path(__file__).parent / "static" / "spa"
+if _SPA2.exists() and (_SPA2 / "assets").exists():
+    app.mount("/v2/assets", _SPA_Static(directory=str(_SPA2 / "assets")), name="spa_assets")
+    @app.get("/v2", include_in_schema=False)
+    def _spa_v2_root():
+        return _SPA_File(str(_SPA2 / "index.html"))
+    @app.get("/v2/{full_path:path}", include_in_schema=False)
+    def _spa_v2_any(full_path: str):
+        return _SPA_File(str(_SPA2 / "index.html"))
+
+# === SPA catch-all ===
+from fastapi.responses import FileResponse as _CA_File
+from pathlib import Path as _CA_Path
+_CA_INDEX = _CA_Path(__file__).parent / "static" / "spa" / "index.html"
+_CA_RESERVED = ("api", "static", "health", "metrics", "docs", "redoc", "openapi.json", "ws", "v2", "favicon.svg", "favicon.ico")
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def _spa_catchall(full_path: str):
+    from fastapi import HTTPException
+    top = full_path.split("/", 1)[0]
+    if top in _CA_RESERVED:
+        raise HTTPException(status_code=404)
+    if _CA_INDEX.exists():
+        return _CA_File(str(_CA_INDEX))
+    raise HTTPException(status_code=404)

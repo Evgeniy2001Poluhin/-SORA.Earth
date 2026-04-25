@@ -1,3 +1,6 @@
+import Combobox from "../../components/Combobox";
+import CountryRanking from "./CountryRanking";
+import MonteCarlo from "./MonteCarlo";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
@@ -30,7 +33,11 @@ export function EvaluatePage() {
   const { data: countries } = useQuery({ queryKey:["countries"], queryFn: evaluateApi.countries });
   const [form, setForm] = useState<EvaluateRequest>(PRESETS[0].body);
   const [activePreset, setActivePreset] = useState("solar");
+  const [lastRun, setLastRun] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<string>("project");
   const evalMut = useMutation({ mutationFn: evaluateApi.evaluate });
+  const rankMut = useMutation({ mutationFn: evaluateApi.ranking });
+  const mcMut = useMutation({ mutationFn: evaluateApi.monteCarlo });
   const explainMut = useMutation({ mutationFn: evaluateApi.explain });
   const result: EvaluateResponse|undefined = evalMut.data;
   const explain: ExplainResponse|undefined = explainMut.data;
@@ -40,7 +47,10 @@ export function EvaluatePage() {
   const setField = <K extends keyof EvaluateRequest>(k:K, v:EvaluateRequest[K]) => setForm(s=>({...s,[k]:v}));
   const applyPreset = (id:string) => { const p=PRESETS.find(x=>x.id===id); if(!p) return; setForm(p.body); setActivePreset(id); };
   const run = async () => {
-    try { await Promise.all([ evalMut.mutateAsync(form), explainMut.mutateAsync(form) ]);
+    try {
+      const payload = { ...form, region: form.country };
+      await Promise.all([ evalMut.mutateAsync(payload), explainMut.mutateAsync(payload), rankMut.mutateAsync(payload) ]);
+      setLastRun(payload);
       toast.success("Evaluation complete"); }
     catch(e:any){ toast.error(e.message); }
   };
@@ -83,9 +93,12 @@ export function EvaluatePage() {
               <input value={form.project_name} onChange={e=>setField("project_name", e.target.value)}/>
             </Field>
             <Field label="Country">
-              <select key={countryList.length} value={form.country} onChange={e=>setField("country", e.target.value)}>
-                {countryList.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <Combobox
+                value={form.country}
+                onChange={v => setField("country", v)}
+                options={countryList}
+                placeholder="Select country"
+              />
             </Field>
             <Field label="Budget (USD)">
               <input type="number" value={form.budget_usd} onChange={e=>setField("budget_usd", Number(e.target.value))}/>
@@ -108,11 +121,30 @@ export function EvaluatePage() {
         <section className="card ev-result">
           {!result ? <Empty/> : (
             <>
+              <div className="ev-tabs">
+                <button className={"ev-tab" + (activeTab==="project" ? " active" : "")} onClick={()=>setActiveTab("project")}>Project</button>
+                <button className={"ev-tab" + (activeTab==="ranking" ? " active" : "")} onClick={()=>setActiveTab("ranking")}>Country Ranking</button>
+                <button className={"ev-tab" + (activeTab==="mc" ? " active" : "")} onClick={()=>setActiveTab("mc")}>Monte Carlo</button>
+              </div>
+              {activeTab === "mc" ? (
+                <MonteCarlo
+                  data={mcMut.data as any}
+                  loading={mcMut.isPending}
+                  onRun={(n)=>mcMut.mutate({ ...form, region: form.country, n })}
+                />
+              ) : activeTab === "ranking" ? (
+                <CountryRanking
+                  data={rankMut.data as any}
+                  loading={rankMut.isPending}
+                  currentCountry={form.country}
+                  onPickCountry={(c)=>setField("country", c)}
+                />
+              ) : (<>
               <div className="ev-result-head">
                 <div className="ev-meta mono">
-                  <span>{(countryList.find((c:any)=>c.code===form.country)?.name || form.country).toUpperCase()}</span><span className="sep">·</span>
-                  <span>{form.project_duration_months} MO</span><span className="sep">·</span>
-                  <span>{fmtMoney(form.budget_usd)}</span>
+                  <span>{String(lastRun?.region || lastRun?.country || form.country).toUpperCase()}</span><span className="sep">·</span>
+                  <span>{lastRun?.project_duration_months ?? form.project_duration_months} MO</span><span className="sep">·</span>
+                  <span>{fmtMoney(lastRun?.budget_usd ?? form.budget_usd)}</span>
                 </div>
                 <span className={"ev-badge "+riskTone[result.risk_level]}>{result.risk_level} risk</span>
               </div>
@@ -141,6 +173,7 @@ export function EvaluatePage() {
                   </div>
                 )}
               </div>
+            </>)}
             </>
           )}
         </section>
