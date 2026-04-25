@@ -479,3 +479,98 @@ def generate_pdf_report(project: Project):
         tmp.name, media_type="application/pdf",
         filename=f"SORA_Earth_{project.name.replace(' ', '_')}_Report.pdf",
     )
+
+
+@router.post("/evaluate/ranking")
+async def evaluate_ranking(project: Project):
+    from app.main import calculate_esg, COUNTRIES
+    out = []
+    for country, cdata in COUNTRIES.items():
+        try:
+            mod = project.model_copy(update={"region": country})
+        except Exception:
+            mod = project.copy(update={"region": country})
+        try:
+            r = calculate_esg(mod, cdata.get("region", "Europe"))
+            out.append({
+                "country": country,
+                "region": cdata.get("region"),
+                "total_score": r["total_score"],
+                "environment_score": r["environment_score"],
+                "social_score": r["social_score"],
+                "economic_score": r["economic_score"],
+                "success_probability": r["success_probability"],
+                "risk_level": r["risk_level"],
+            })
+        except Exception as e:
+            out.append({"country": country, "error": str(e)})
+    out.sort(key=lambda x: x.get("total_score", -1), reverse=True)
+    return {"count": len(out), "ranking": out}
+
+
+from pydantic import BaseModel as _BM_MC
+class _MCRequest(_BM_MC):
+    project_name: str = "Project"
+    region: str = "Sweden"
+    budget_usd: float
+    co2_reduction_tons_per_year: float
+    social_impact_score: float
+    project_duration_months: int
+    n: int = 500
+    noise: float = 0.15
+
+@router.post("/evaluate/monte-carlo")
+async def evaluate_monte_carlo(req: _MCRequest):
+    """Run N simulations with triangular noise on inputs, return distribution stats."""
+    import random, statistics
+    from app.main import calculate_esg, COUNTRIES, Project as _P
+    region_meta = COUNTRIES.get(req.region, {"region": "Europe"})
+    rname = region_meta.get("region", "Europe") if isinstance(region_meta, dict) else "Europe"
+    n = max(50, min(int(req.n), 5000))
+    noise = max(0.01, min(float(req.noise), 0.5))
+    scores = []
+    rng = random.Random(42)
+    for _ in range(n):
+        def jit(v):
+            lo = v * (1 - noise); hi = v * (1 + noise)
+            return rng.triangular(lo, hi, v)
+        try:
+            p = _P(
+                project_name=req.project_name,
+                region=req.region,
+                budget_usd=max(1000.0, jit(req.budget_usd)),
+                co2_reduction_tons_per_year=max(1.0, jit(req.co2_reduction_tons_per_year)),
+                social_impact_score=max(1.0, min(10.0, jit(req.social_impact_score))),
+                project_duration_months=max(1, int(round(jit(req.project_duration_months)))),
+            )
+            r = calculate_esg(p, rname)
+            scores.append(r["total_score"])
+        except Exception:
+            continue
+    if not scores:
+        return {"error": "no successful runs"}
+    scores.sort()
+    def pct(p):
+        if not scores: return 0.0
+        k = (len(scores) - 1) * p / 100
+        f = int(k); c = min(f + 1, len(scores) - 1)
+        return round(scores[f] + (scores[c] - scores[f]) * (k - f), 2)
+    lo, hi = min(scores), max(scores)
+    nbins = 20
+    width = max((hi - lo) / nbins, 0.01)
+    bins = [0] * nbins
+    edges = [round(lo + i * width, 2) for i in range(nbins + 1)]
+    for s in scores:
+        idx = min(int((s - lo) / width), nbins - 1)
+        bins[idx] += 1
+    return {
+        "n": len(scores),
+        "mean": round(statistics.mean(scores), 2),
+        "stdev": round(statistics.pstdev(scores), 2),
+        "min": round(lo, 2),
+        "max": round(hi, 2),
+        "p10": pct(10),
+        "p50": pct(50),
+        "p90": pct(90),
+        "histogram": {"edges": edges, "counts": bins},
+    }
