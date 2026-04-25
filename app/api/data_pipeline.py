@@ -64,7 +64,7 @@ def refresh_logs(limit: int = 50, db: Session = Depends(get_db)):
     ]
 
 
-@router.get("/refresh/status")
+@router.get("/refresh/status", operation_id="data_refresh_status")
 @router.get("/refresh-status")
 def refresh_job_status():
     """Check background refresh job status."""
