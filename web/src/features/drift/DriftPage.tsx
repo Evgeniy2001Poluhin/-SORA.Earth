@@ -56,7 +56,7 @@ export function DriftPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 32 }}>
         <div className="kpi">
           <div className="kpi-lbl">Status</div>
-          <div className="kpi-val" style={{ color: isStable ? "#2FE0A6" : "#EF4444", fontSize: 18 }}>
+          <div className="kpi-val" style={{ color: isStable ? "#2FE0A6" : (d.drift_detected ? "#EF4444" : "var(--muted)"), fontSize: 18 }}>
             {isStable ? "STABLE" : "DRIFT DETECTED"}
           </div>
         </div>
@@ -70,7 +70,7 @@ export function DriftPage() {
         </div>
         <div className="kpi">
           <div className="kpi-lbl">Drifted features</div>
-          <div className="kpi-val tabular" style={{ color: (d.drifted_features?.length ?? 0) ? "#EF4444" : "var(--text)" }}>
+          <div className="kpi-val tabular" style={{ color: (d.drifted_features?.length ?? 0) ? (d.drift_detected ? "#EF4444" : "var(--muted)") : "var(--text)" }}>
             {(d.drifted_features?.length ?? 0)}
           </div>
         </div>
@@ -90,7 +90,7 @@ export function DriftPage() {
             <div className="mono" style={{ fontSize: 12 }}>{name}</div>
             <div className="tabular" style={{ color: "var(--muted)" }}>{f.baseline_mean.toFixed(3)}</div>
             <div className="tabular">{f.current_mean.toFixed(3)}</div>
-            <div className="tabular" style={{ color: f.z_score >= 2 ? "#EF4444" : "var(--text)" }}>
+            <div className="tabular" style={{ color: f.z_score >= 2 ? (d.drift_detected ? "#EF4444" : "var(--muted)") : "var(--text)" }}>
               {f.z_score.toFixed(2)}
             </div>
             <div>
@@ -117,7 +117,7 @@ export function DriftPage() {
                 borderRadius: 8, padding: "12px 16px",
                 display: "flex", alignItems: "center", gap: 12
               }}>
-                <span style={{ color: "#EF4444", fontSize: 18 }}>⚠</span>
+                <span style={{ color: (d.drift_detected ? "#EF4444" : "var(--muted)"), fontSize: 18 }}>⚠</span>
                 <span className="mono" style={{ fontSize: 12 }}>{a.feature}</span>
                 <span style={{ color: "var(--muted)", fontSize: 13 }}>{a.message}</span>
               </div>
