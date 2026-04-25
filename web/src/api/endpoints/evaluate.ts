@@ -6,4 +6,5 @@ export const evaluateApi = {
   explain:  (b:EvaluateRequest) => api<ExplainResponse>("/predict/explain", { method:"POST", body: JSON.stringify(b) }),
   ranking:  (b:EvaluateRequest) => api<any>("/evaluate/ranking", { method:"POST", body: JSON.stringify(b) }),
   monteCarlo: (b:any) => api<any>("/evaluate/monte-carlo", { method:"POST", body: JSON.stringify(b) }),
+  whatIf: (b:any) => api<any>("/what-if", { method:"POST", body: JSON.stringify(b) }),
 };

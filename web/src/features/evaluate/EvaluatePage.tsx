@@ -1,6 +1,7 @@
 import Combobox from "../../components/Combobox";
 import CountryRanking from "./CountryRanking";
 import MonteCarlo from "./MonteCarlo";
+import { WhatIf } from "./WhatIf";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
@@ -157,6 +158,7 @@ export function EvaluatePage() {
                 <button className={"ev-tab" + (activeTab==="project" ? " active" : "")} onClick={()=>setActiveTab("project")}>Project</button>
                 <button className={"ev-tab" + (activeTab==="ranking" ? " active" : "")} onClick={()=>setActiveTab("ranking")}>Country Ranking</button>
                 <button className={"ev-tab" + (activeTab==="mc" ? " active" : "")} onClick={()=>setActiveTab("mc")}>Monte Carlo</button>
+                <button className={"ev-tab" + (activeTab==="whatif" ? " active" : "")} onClick={()=>setActiveTab("whatif")}>What-If</button>
               </div>
               {activeTab === "mc" ? (
                 <MonteCarlo
@@ -164,6 +166,8 @@ export function EvaluatePage() {
                   loading={mcMut.isPending}
                   onRun={(n)=>mcMut.mutate({ ...form, region: form.country, n })}
                 />
+              ) : activeTab === "whatif" ? (
+                <WhatIf form={form} lastRun={{...lastRun, total_score: result.total_score, country: lastRun?.country || form.country}}/>
               ) : activeTab === "ranking" ? (
                 <CountryRanking
                   data={rankMut.data as any}
