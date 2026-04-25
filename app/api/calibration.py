@@ -135,3 +135,93 @@ def predict_with_uncertainty(project: dict):
         },
         "reliability": "high" if np.std(tree_preds) < 0.1 else "medium" if np.std(tree_preds) < 0.2 else "low",
     }
+
+
+@router.post("/calibration/discrepancy")
+def calibration_discrepancy(project: dict):
+    """Cross-model divergence: rf_v1 vs stacking_v2 vs calibrated_v2.
+
+    Returns per-model proba + consensus + spread/std + RF tree uncertainty.
+    Useful for surfacing model disagreement to end-users (and thesis ch. 5).
+    """
+    import app.main as m
+    from app.validators import ProjectInput as PI
+
+    p_in = PI(
+        budget=float(project.get("budget", 10000)),
+        co2_reduction=float(project.get("co2_reduction", 50)),
+        social_impact=float(project.get("social_impact", 5)),
+        duration_months=float(project.get("duration_months", 12)),
+    )
+    cat = project.get("category", "Solar Energy")
+    reg = project.get("region", "Europe")
+
+    out = {"models": {}, "consensus": {}, "divergence": {}, "tree_uncertainty": {}}
+
+    # rf_v1
+    feats = m.make_features(p_in)
+    pr1 = float(m.rf_model.predict_proba(feats)[0][1])
+    out["models"]["rf_v1"] = {"proba": round(pr1, 6), "weight": 0.2}
+
+    # stacking_v2 (uncalibrated): unwrap base estimator if model is CalibratedClassifierCV
+    pr2 = pr1
+    feats2 = None
+    if m.ensemble_model_v2 is not None:
+        feats2 = m.make_features_v2(p_in, cat, reg)
+        base_est = m.ensemble_model_v2
+        if hasattr(base_est, "calibrated_classifiers_"):
+            inner = base_est.calibrated_classifiers_[0]
+            base_est = getattr(inner, "estimator", getattr(inner, "base_estimator", base_est))
+        pr2 = float(base_est.predict_proba(feats2)[0][1])
+    out["models"]["stacking_v2"] = {"proba": round(pr2, 6), "weight": 0.4}
+
+    # calibrated_v2
+    pr_cal = pr2
+    cal_path = os.path.join(ROOT, "models", "ensemble_model_v2_cal.pkl")
+    if os.path.exists(cal_path) and m.ensemble_model_v2 is not None:
+        with open(cal_path, "rb") as f:
+            cal_model = pickle.load(f)
+        feats2 = m.make_features_v2(p_in, cat, reg)
+        pr_cal = float(cal_model.predict_proba(feats2)[0][1])
+    out["models"]["calibrated_v2"] = {"proba": round(pr_cal, 6), "weight": 0.4}
+
+    # consensus (weighted)
+    probs = [out["models"][k]["proba"] for k in ("rf_v1", "stacking_v2", "calibrated_v2")]
+    weights = [out["models"][k]["weight"] for k in ("rf_v1", "stacking_v2", "calibrated_v2")]
+    weighted = sum(p * w for p, w in zip(probs, weights)) / sum(weights)
+    out["consensus"] = {"weighted_proba": round(weighted, 4), "method": "weighted_avg"}
+
+    # divergence
+    pmax = max(probs); pmin = min(probs)
+    spread = pmax - pmin
+    names = list(out["models"].keys())
+    pair = (names[probs.index(pmax)], names[probs.index(pmin)])
+    out["divergence"] = {
+        "max_spread": round(spread, 4),
+        "std": round(float(np.std(probs)), 4),
+        "max_pair": list(pair),
+    }
+    if spread > 0.15:
+        out["recommendation"] = "high_disagreement"
+    elif spread > 0.07:
+        out["recommendation"] = "moderate_disagreement"
+    else:
+        out["recommendation"] = "consensus"
+
+    # RF tree uncertainty (bonus)
+    try:
+        tree_preds = np.array([
+            t.predict_proba(feats.values if hasattr(feats, "values") else feats)[0][1]
+            for t in m.rf_model.estimators_
+        ])
+        out["tree_uncertainty"] = {
+            "std": round(float(np.std(tree_preds)), 4),
+            "ci_90": [round(float(np.percentile(tree_preds, 5)), 4),
+                      round(float(np.percentile(tree_preds, 95)), 4)],
+            "n_trees": int(len(m.rf_model.estimators_)),
+        }
+    except Exception:
+        pass
+
+    return out
+
