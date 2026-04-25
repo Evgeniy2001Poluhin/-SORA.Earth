@@ -12,7 +12,7 @@ type FeatureStat = {
 };
 
 type DriftResponse = {
-  status: "stable" | "drift_detected" | "insufficient_data";
+  status: "stable" | "drift_detected" | "insufficient_data" | "no_baseline";
   timestamp: string;
   observations: number;
   drift_detected: boolean;
@@ -39,7 +39,9 @@ export function DriftPage() {
   if (q.isError) return <div className="card-body"><p style={{ color: "#EF4444" }}>Failed to load drift status</p></div>;
 
   const d = q.data!;
-  const isStable = d.status === "stable";
+  const isStable = d.status === "stable" || d.status === "no_baseline";
+  const statusLabel = d.status === "no_baseline" ? "NO BASELINE" : (isStable ? "STABLE" : "DRIFT DETECTED");
+  const statusColor = d.status === "no_baseline" ? "var(--muted)" : (isStable ? "#2FE0A6" : "#EF4444");
   const features = Object.entries(d.features || {}).sort(
     (a, b) => Math.abs(b[1].z_score) - Math.abs(a[1].z_score)
   );
@@ -56,8 +58,8 @@ export function DriftPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 32 }}>
         <div className="kpi">
           <div className="kpi-lbl">Status</div>
-          <div className="kpi-val" style={{ color: isStable ? "#2FE0A6" : (d.drift_detected ? "#EF4444" : "var(--muted)"), fontSize: 18 }}>
-            {isStable ? "STABLE" : "DRIFT DETECTED"}
+          <div className="kpi-val" style={{ color: statusColor, fontSize: 18 }}>
+            {statusLabel}
           </div>
         </div>
         <div className="kpi">
@@ -127,7 +129,7 @@ export function DriftPage() {
       )}
 
       <p style={{ color: "var(--faint)", fontSize: 11, marginTop: 32, fontFamily: "var(--f-mono)" }}>
-        last update: {new Date(d.timestamp).toLocaleTimeString()}
+        last update: {d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : "—"}
       </p>
     </div>
   );
