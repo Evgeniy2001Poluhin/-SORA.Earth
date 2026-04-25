@@ -1,4 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { driftBaselineApi } from "@/api/endpoints/driftBaseline";
 import { api } from "@/api/client";
 
 type FeatureStat = {
@@ -33,6 +35,23 @@ export function DriftPage() {
     queryKey: ["drift"],
     queryFn: () => api<DriftResponse>("/mlops/drift"),
     refetchInterval: 5000,
+  });
+  const qc = useQueryClient();
+  const baseline = useQuery({ queryKey: ["drift-baseline"], queryFn: driftBaselineApi.status });
+  const fitMut = useMutation({
+    mutationFn: () => driftBaselineApi.fit(200),
+    onSuccess: (r) => { toast.success("Baseline fitted: " + r.n_samples + " samples"); qc.invalidateQueries({ queryKey: ["drift"] }); qc.invalidateQueries({ queryKey: ["drift-baseline"] }); },
+    onError: (e: any) => toast.error("Fit failed: " + (e?.message ?? "unknown")),
+  });
+  const delMut = useMutation({
+    mutationFn: () => driftBaselineApi.remove(),
+    onSuccess: () => { toast.success("Baseline deleted"); qc.invalidateQueries({ queryKey: ["drift"] }); qc.invalidateQueries({ queryKey: ["drift-baseline"] }); },
+    onError: (e: any) => toast.error("Delete failed: " + (e?.message ?? "unknown")),
+  });
+  const simMut = useMutation({
+    mutationFn: (mode: "stable" | "drift") => driftBaselineApi.simulate(mode, 50),
+    onSuccess: (_r, mode) => { toast.success("Simulated " + mode); qc.invalidateQueries({ queryKey: ["drift"] }); },
+    onError: (e: any) => toast.error("Simulate failed: " + (e?.message ?? "unknown")),
   });
 
   if (q.isLoading) return <div className="card-body"><p style={{ color: "var(--muted)" }}>Loading drift status...</p></div>;
@@ -76,6 +95,30 @@ export function DriftPage() {
             {(d.drifted_features?.length ?? 0)}
           </div>
         </div>
+      </div>
+
+      <div className="eyebrow" style={{ marginBottom: 12 }}>Baseline controls</div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 24, alignItems: "center", flexWrap: "wrap" }}>
+        <div className="kpi" style={{ minWidth: 220 }}>
+          <div className="kpi-lbl">Baseline</div>
+          <div className="kpi-val tabular" style={{ fontSize: 14 }}>
+            {baseline.data?.exists
+              ? (baseline.data.n_samples + " samples / " + (baseline.data.feature_count ?? "?") + " feats")
+              : "not fitted"}
+          </div>
+        </div>
+        <button className="preset-btn" disabled={fitMut.isPending} onClick={() => fitMut.mutate()}>
+          {fitMut.isPending ? "Fitting..." : "Fit baseline"}
+        </button>
+        <button className="preset-btn" disabled={delMut.isPending} onClick={() => delMut.mutate()}>
+          {delMut.isPending ? "Deleting..." : "Delete baseline"}
+        </button>
+        <button className="preset-btn" disabled={simMut.isPending} onClick={() => simMut.mutate("stable")}>
+          Simulate stable
+        </button>
+        <button className="preset-btn" disabled={simMut.isPending} onClick={() => simMut.mutate("drift")}>
+          Simulate drift
+        </button>
       </div>
 
       <div className="eyebrow" style={{ marginBottom: 12 }}>Feature breakdown</div>
