@@ -191,3 +191,13 @@
 .ev-skeleton .sk.sm{width:40%}
 .ev-skeleton .sk.bar{height:10px;border-radius:999px}
 @keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* What-If tornado */
+.wi-tornado{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+.wi-row{display:grid;grid-template-columns:120px 1fr 60px;gap:12px;align-items:center}
+.wi-lbl{font:500 11px/1 var(--f-mono);letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+.wi-track{height:10px;background:#0E1218;border:1px solid var(--line-2);border-radius:999px;overflow:hidden;position:relative}
+.wi-bar{height:100%;border-radius:999px;transition:width .4s var(--ease)}
+.wi-bar.pos{background:linear-gradient(90deg,rgba(47,224,166,.4),rgba(47,224,166,.85))}
+.wi-bar.neg{background:linear-gradient(90deg,rgba(239,68,68,.4),rgba(239,68,68,.85))}
+.wi-val{font:600 13px/1 ui-monospace,monospace;color:var(--text);text-align:right}
