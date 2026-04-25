@@ -225,3 +225,67 @@ def calibration_discrepancy(project: dict):
 
     return out
 
+
+
+
+# ============================================================================
+# Brier / Reliability / Murphy decomposition  (added Sprint 7, thesis-grade)
+# ============================================================================
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field as _Field
+from app.calibration_metrics import (
+    brier_score as _brier,
+    reliability_curve as _rel,
+    expected_calibration_error as _ece,
+    murphy_decomposition as _murphy,
+)
+
+
+class CalibrationDataset(BaseModel):
+    probs:  List[float] = _Field(..., description="Predicted probabilities in [0,1]")
+    labels: List[int]   = _Field(..., description="Binary outcomes 0/1")
+    n_bins: int         = _Field(10, ge=2, le=50, description="Number of equal-width bins")
+
+
+@router.post("/calibration/brier", tags=["calibration"])
+def calibration_brier(data: CalibrationDataset) -> Dict[str, Any]:
+    """Compute Brier score and Expected Calibration Error.
+
+    Brier = mean((proba - actual)^2). Range [0,1], lower is better.
+    ECE   = sum over bins of weight * |mean_pred - mean_obs|.
+    """
+    try:
+        b = _brier(data.probs, data.labels)
+        e = _ece(data.probs, data.labels, n_bins=data.n_bins)
+    except ValueError as ex:
+        raise HTTPException(status_code=422, detail=str(ex))
+    return {
+        "brier": round(b, 6),
+        "ece":   e,
+        "n_samples": len(data.probs),
+        "n_bins": data.n_bins,
+    }
+
+
+@router.post("/calibration/reliability", tags=["calibration"])
+def calibration_reliability(data: CalibrationDataset) -> Dict[str, Any]:
+    """Reliability diagram + Murphy decomposition (Brier = Rel - Res + Unc)."""
+    try:
+        curve  = _rel(data.probs, data.labels, n_bins=data.n_bins)
+        ece    = _ece(data.probs, data.labels, n_bins=data.n_bins)
+        murphy = _murphy(data.probs, data.labels, n_bins=data.n_bins)
+    except ValueError as ex:
+        raise HTTPException(status_code=422, detail=str(ex))
+    return {
+        "n_samples": murphy["n_samples"],
+        "n_bins":    data.n_bins,
+        "base_rate": murphy["base_rate"],
+        "brier":     murphy["brier"],
+        "ece":       ece,
+        "curve":     curve,
+        "murphy":    {
+            "reliability": murphy["reliability"],
+            "resolution":  murphy["resolution"],
+            "uncertainty": murphy["uncertainty"],
+        },
+    }
