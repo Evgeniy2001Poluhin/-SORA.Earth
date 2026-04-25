@@ -90,7 +90,16 @@ def log_prediction(endpoint, input_data, result, latency_ms=None):
         logger.error(f"log_prediction failed: {e}")
 
 # ===== APP =====
+
+
+def _custom_unique_id(route):
+    """Deterministic operationId: tag_name. Avoids duplicates across routers."""
+    tag = (route.tags[0] if route.tags else "default")
+    tag = tag.replace(" ", "_").replace("-", "_").replace("/", "_").lower()
+    return tag + "_" + route.name
+
 app = FastAPI(
+    generate_unique_id_function=_custom_unique_id,
     swagger_ui_parameters={"defaultModelsExpandDepth": -1, "docExpansion": "list", "filter": True},
     redoc_url="/redoc",
     title="SORA.Earth AI Platform",
