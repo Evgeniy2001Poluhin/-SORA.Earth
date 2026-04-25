@@ -54,6 +54,38 @@ export function EvaluatePage() {
       toast.success("Evaluation complete"); }
     catch(e:any){ toast.error(e.message); }
   };
+
+  const downloadPDF = () => {
+    const w = window.open("", "_blank", "width=900,height=1200"); if(!w) return;
+    const rows = (result?.recommendations||[]).map(r=>`<li>${r}</li>`).join("");
+    w.document.write(`<html><head><title>${form.project_name} · ESG Report</title>
+      <style>body{font:14px/1.5 -apple-system,sans-serif;padding:40px;color:#111}
+      h1{font-size:28px;margin:0 0 6px}.muted{color:#666;font-size:12px;letter-spacing:.18em;text-transform:uppercase}
+      .score{font:600 64px/1 ui-monospace,monospace;color:#0a8a5e;margin:24px 0 4px}
+      table{width:100%;border-collapse:collapse;margin:18px 0}td{padding:10px 0;border-bottom:1px solid #eee}
+      .k{color:#666;width:40%}.badge{display:inline-block;padding:4px 10px;border-radius:999px;background:#e8f7ef;color:#0a8a5e;font-size:11px;letter-spacing:.18em;text-transform:uppercase}
+      </style></head><body>
+      <div class="muted">SORA.Earth · ESG Evaluation Report</div>
+      <h1>${form.project_name}</h1>
+      <span class="badge">${result?.risk_level} risk</span>
+      <div class="score">${result?.total_score?.toFixed(1)}</div>
+      <div class="muted">/ 100 · ESG Score · ${result?.success_probability?.toFixed(1)}% success probability</div>
+      <table>
+        <tr><td class="k">Country</td><td>${form.country}</td></tr>
+        <tr><td class="k">Budget (USD)</td><td>${form.budget_usd.toLocaleString()}</td></tr>
+        <tr><td class="k">CO₂ Reduction</td><td>${form.co2_reduction_tons_per_year} t/yr</td></tr>
+        <tr><td class="k">Social Impact</td><td>${form.social_impact_score} / 10</td></tr>
+        <tr><td class="k">Duration</td><td>${form.project_duration_months} months</td></tr>
+        <tr><td class="k">Environment</td><td>${result?.environment_score?.toFixed(1)}</td></tr>
+        <tr><td class="k">Social</td><td>${result?.social_score?.toFixed(1)}</td></tr>
+        <tr><td class="k">Economic</td><td>${result?.economic_score?.toFixed(1)}</td></tr>
+      </table>
+      <h3>Recommendations</h3><ul>${rows}</ul>
+      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${new Date().toISOString()} · ML Scoring Engine · RF·XGB·MLP·Stacking</div>
+      </body></html>`);
+    w.document.close(); setTimeout(()=>w.print(), 300);
+  };
+
   useEffect(()=>{
     if (!countryList.length) return;
     if (!countryList.includes(form.country)) {
@@ -119,7 +151,7 @@ export function EvaluatePage() {
         </aside>
 
         <section className="card ev-result">
-          {!result ? <Empty/> : (
+          {evalMut.isPending && !result ? <Skeleton/> : !result ? <Empty/> : (
             <>
               <div className="ev-tabs">
                 <button className={"ev-tab" + (activeTab==="project" ? " active" : "")} onClick={()=>setActiveTab("project")}>Project</button>
@@ -160,6 +192,9 @@ export function EvaluatePage() {
                     <div className="big tabular">{fmtNum(prob,1)}%</div>
                     <div className="lbl">ML success probability</div>
                   </div>
+                  <button className="ev-pdf" onClick={downloadPDF} disabled={!result}>
+                    <span className="dot"/>Download PDF
+                  </button>
                 </div>
                 <div className="ev-bars">
                   <Bar kind="env" k="Environment" v={result.environment_score}/>
@@ -194,6 +229,14 @@ export function EvaluatePage() {
       </div>
     </div>
   );
+}
+
+function Skeleton(){
+  return (<div className="ev-skeleton">
+    <div className="sk sm"/><div className="sk lg"/><div className="sk md"/>
+    <div className="sk bar"/><div className="sk bar" style={{width:"70%"}}/><div className="sk bar" style={{width:"55%"}}/>
+    <div className="sk sm"/><div className="sk md"/>
+  </div>);
 }
 function Row({k,v}:{k:string;v:React.ReactNode}) {
   return <div className="ev-hero-row"><div className="k mono">{k}</div><div className="v">{v}</div></div>;

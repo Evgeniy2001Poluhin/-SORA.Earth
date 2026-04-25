@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import "./shell.css";
-const NAV = [ { to:"/", label:"Home" }, { to:"/evaluate", label:"Evaluate" }, { to:"/explain", label:"Explain" }, { to:"/ranking", label:"Ranking" }, { to:"/compare", label:"Compare" } ];
+const NAV = [ { to:"/", label:"Home" }, { to:"/evaluate", label:"Evaluate" }, { to:"/compare", label:"Compare" } ];
 export function Shell() {
   return (
     <div className="shell">
