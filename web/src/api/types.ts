@@ -166,3 +166,28 @@ export interface ModelMetrics {
   meta: ModelMeta;
   models_available: string[];
 }
+
+
+// === auth + admin contracts ===
+export interface LoginRequest { username: string; password: string; }
+export interface Token { access_token: string; refresh_token: string; token_type: string; expires_in: number; }
+export interface UserInfo { username: string; role: "admin" | "analyst" | "viewer" | string; }
+
+export interface RetrainLogItem {
+  id: number;
+  started_at: string;
+  finished_at: string;
+  duration_sec: number;
+  status: "success" | "failed" | string;
+  trigger_source: string;
+  job_name: string;
+  model_version: string | null;
+  data_version: string | null;
+  message: string | null;
+  error_message: string | null;
+  metrics_json: string | null;
+}
+export interface RetrainLogResponse { items: RetrainLogItem[]; }
+
+export interface FeatureImportanceEntry { name: string; importance: number; }
+export interface FeatureImportanceResponse { features: FeatureImportanceEntry[]; }
