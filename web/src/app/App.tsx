@@ -7,6 +7,7 @@ import { EvaluatePage } from "@/features/evaluate/EvaluatePage";
 import { ComparePage } from "@/features/compare/ComparePage";
 import { ExplainPage } from "@/features/explain/ExplainPage";
 import { CalibrationPage } from "@/features/calibration/CalibrationPage";
+import { MlopsHealthPage } from "@/features/mlops/MlopsHealthPage";
 export function App() {
   return (
     <ErrorBoundary>
@@ -18,6 +19,7 @@ export function App() {
         <Route path="/drift" element={<DriftPage/>}/>
         <Route path="/explain" element={<ExplainPage/>}/>
         <Route path="/calibration" element={<CalibrationPage/>}/>
+        <Route path="/mlops" element={<MlopsHealthPage/>}/>
         <Route path="*" element={<Navigate to="/" replace/>}/>
       </Route>
       </Routes>
