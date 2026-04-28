@@ -1,8 +1,8 @@
 graph TB
-  subgraph "Docker Compose stack"
+  subgraph DockerCompose
     n["nginx :80/:443"]
-    a["app :8000<br/>RUN_SCHEDULER=false"]
-    s["scheduler<br/>APScheduler"]
+    a["app :8000 RUN_SCHEDULER=false"]
+    s["scheduler APScheduler"]
     p[("postgres :5432")]
     r[("redis :6379")]
     pr["prometheus :9090"]

@@ -1,15 +1,15 @@
 graph LR
-  subgraph "FastAPI app"
-    routers["routers/<br/>evaluate, explain, compare,<br/>mlops, drift_baseline,<br/>calibration, model, admin"]
-    services["services/<br/>ml_engine, drift_service,<br/>calibration_service,<br/>retrain_service, audit"]
-    ml["ml_engine<br/>RF + XGB + MLP + Stacking + Calibrated"]
-    drift["drift_service<br/>KS-test + z-score + buffer"]
-    retrain["retrain_service<br/>fit → AUC validate → promote/reject"]
-    log["DataRefreshLog<br/>RetrainLog<br/>PromotionLog"]
+  subgraph FastAPI_app
+    routers["routers: evaluate, explain, compare, mlops, drift_baseline, calibration, model, admin"]
+    services["services: ml_engine, drift_service, calibration_service, retrain_service, audit"]
+    ml["ml_engine: RF + XGB + MLP + Stacking + Calibrated"]
+    drift["drift_service: KS-test + z-score + buffer"]
+    retrain["retrain_service: fit -> AUC validate -> promote/reject"]
+    log["DataRefreshLog, RetrainLog, PromotionLog"]
   end
 
   routers --> services
   services --> ml
   services --> drift
-  services --> ain
+  services --> retrain
   services --> log
