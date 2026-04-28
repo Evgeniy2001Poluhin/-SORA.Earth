@@ -1,0 +1,27 @@
+graph TB
+  subgraph "Edge"
+    nginx["nginx<br/>reverse proxy + TLS"]
+  end
+  subgraph "App tier"
+    api["FastAPI + Gunicorn<br/>RUN_SCHEDULER=false"]
+    sched["APScheduler container<br/>RUN_SCHEDULER=true"]
+    spa["React + Vite SPA<br/>TanStack Query, recharts"]
+  end
+  subgraph "Data tier"
+    pg[("PostgreSQL 15<brc migrations")]
+    redis[("Redis 7<br/>cache + advisory locks")]
+  end
+  subgraph "ML / Observability"
+    mlflow[("MLflow 2.x<br/>experiment tracking")]
+    prom["Prometheus<br/>8 sora_* metrics"]
+    graf["Grafana<br/>5 alerts, 4 panels"]
+  end
+
+  spa --> nginx --> api
+  api --> pg
+  api --> redis
+  api --> mlflow
+  api --> prom
+  sched --> pg
+  sched --> mlflow
+  prom --> graf

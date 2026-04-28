@@ -1,0 +1,16 @@
+sequenceDiagram
+  autonumber
+  participant U as User SPA
+  participant A as FastAPI
+  participant ML as ml_engine
+  participant DB as PostgreSQL
+  participant P as Prometheus
+
+  U->>A: POST /api/v1/evaluate {project}
+  A->>ML: ensemble.predict_proba(X)
+  ML-->>A: {proba, model_versions, shap}
+  A->>DB: INSERT into PredictionLog
+  A->>P: histogram sora_prediction_latency_ms.observe()
+  A->>P: counter sora_predictions_total.inc()
+  A-->>U: {esg_score, risk, explanation}
+  Note over A,DB: drift_service.observe(X) writes to buffer

@@ -1,0 +1,20 @@
+graph TB
+  subgraph "Docker Compose stack"
+    n["nginx :80/:443"]
+    a["app :8000<br/>RUN_SCHEDULER=false"]
+    s["scheduler<br/>APScheduler"]
+    p[("postgres :5432")]
+    r[("redis :6379")]
+    pr["prometheus :9090"]
+    gr["grafana :3000"]
+    ml["mlflow :5000"]
+  end
+
+  n --> a
+  a --> p
+  a --> r
+  a --> ml
+  s --> p
+  s --> ml
+  pr --> a
+  gr --> pr
