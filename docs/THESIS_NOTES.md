@@ -96,7 +96,7 @@ Load testing: Locust with sustained RPS profile.
 
 - README.md, ARCHITECTURE.md, API.md, DEMO.md, THESIS_NOTES.md
 - C4 diagrams: Context, Container, Component, Data Flow, Deployment
-- 7 screenshots in `docs/screenshots/`
+- 9 screenshots in `docs/screenshots/` (see README.md there)
 
 ## 10. Extensions beyond scope
 

@@ -69,3 +69,17 @@ SECRET_KEY=your-jwt-secret
 - [Архитектура](docs/ARCHITECTURE.md)
 - [DEMO-сценарий](docs/DEMO.md)
 - [API обзор](docs/API.md)
+
+## Architecture diagrams
+
+C4-style диаграммы в `docs/diagrams/` (Mermaid, рендерятся прямо на GitHub).
+
+- [Context](docs/diagrams/01-context.mmd) — пользователи и внешние системы
+- [Container](docs/diagrams/02-container.mmd) — 7 Docker services + MLflow
+- [Component](docs/diagrams/03-component.mmd) — внутренности FastAPI
+- [Data flow](docs/diagrams/04-data-flow.mmd) — sequence для `/evaluate`
+- [Deployment](docs/diagrams/05-deployment.mmd) — Docker Compose
+
+## Screenshots
+
+9 thesis-grade артефактов с подписями: [docs/screenshots/README.md](docs/screenshots/README.md).
