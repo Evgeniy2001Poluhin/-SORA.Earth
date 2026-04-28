@@ -96,3 +96,73 @@ export interface ExplainLocalResponse {
   base_value: number;
   top_contributions: ExplainLocalContribution[];
 }
+
+
+// === drift v2 contract ===
+// Extended baseline status returned by GET /api/v1/mlops/drift/baseline
+export interface DriftBaselineStatusV2 extends DriftBaselineStatus {
+  fitted?: boolean;
+  n_features?: number;
+  observations?: number;
+  baseline_keys?: string[];
+}
+
+// Response of POST /api/v1/mlops/drift/simulate
+export interface DriftSimulateResponse {
+  status: "simulated";
+  mode: "stable" | "drift" | "custom";
+  shift_sigma: number;
+  shifts: Record<string, number>;
+  observations: number;
+}
+
+
+// === mlops control room ===
+export interface MlopsHealth {
+  model_status: "healthy" | "degraded" | "down" | string;
+  drift_status: "stable" | "drift_detected" | "no_baseline" | "insufficient_data" | string;
+  observations_tracked: number;
+  monitoring: { prometheus?: string; mlflow?: string; drift?: string };
+}
+
+export interface ModelMeta {
+  retrained_at: string;
+  algorithm: string;
+  n_estimators: number;
+  max_depth: number;
+  features: string[];
+  total_samples: number;
+}
+
+export interface RetrainMetrics {
+  accuracy: number;
+  f1_score: number;
+  best_f1: number;
+  roc_auc: number;
+  best_threshold: number;
+  train_samples: number;
+  test_samples: number;
+  enrichment_from_log?: number;
+}
+
+export interface RetrainHistoryEntry {
+  status: "success" | "failed" | string;
+  trigger_source: string;
+  started_at: string;
+  finished_at: string;
+  duration_sec: number;
+  model_version: string;
+  metrics?: RetrainMetrics;
+}
+
+export interface ModelStatus {
+  current_threshold: number;
+  meta: ModelMeta;
+  retrain_history: RetrainHistoryEntry[];
+}
+
+export interface ModelMetrics {
+  metrics: RetrainMetrics;
+  meta: ModelMeta;
+  models_available: string[];
+}
