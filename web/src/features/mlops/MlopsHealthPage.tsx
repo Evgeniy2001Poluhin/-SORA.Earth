@@ -1,3 +1,5 @@
+import { RetrainLogPanel } from "./RetrainLogPanel";
+import { FeatureImportancePanel } from "./FeatureImportancePanel";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { mlopsApi } from "@/api/endpoints/mlops";
@@ -112,16 +114,8 @@ export function MlopsHealthPage() {
       </div>
 
       <div className="mlops-section" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <div className="kpi locked-tile">
-          <div className="locked-badge">🔒 Sign-in required</div>
-          <div className="kpi-lbl">Admin retrain log</div>
-          <div className="kpi-val" style={{ fontSize: 14, color: "var(--muted)" }}>/api/v1/admin/retrain-log</div>
-        </div>
-        <div className="kpi locked-tile">
-          <div className="locked-badge">🔒 API key required</div>
-          <div className="kpi-lbl">Feature importance</div>
-          <div className="kpi-val" style={{ fontSize: 14, color: "var(--muted)" }}>/api/v1/model/feature-importance</div>
-        </div>
+        <div className="mlops-section"><RetrainLogPanel/></div>
+        <div className="mlops-section"><FeatureImportancePanel/></div>
       </div>
     </div>
   );
