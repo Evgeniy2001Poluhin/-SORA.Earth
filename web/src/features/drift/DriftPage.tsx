@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { driftBaselineApi } from "@/api/endpoints/driftBaseline";
+import { DriftTimeline } from "./DriftTimeline";
 import { api } from "@/api/client";
 
 type FeatureStat = {
@@ -171,6 +172,9 @@ export function DriftPage() {
           </div>
         </>
       )}
+
+      <div className="eyebrow" style={{ marginTop: 32, marginBottom: 12 }}>Temporal trend</div>
+      <DriftTimeline/>
 
       <p style={{ color: "var(--faint)", fontSize: 11, marginTop: 32, fontFamily: "var(--f-mono)" }}>
         last update: {d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : "—"}
