@@ -1,10 +1,10 @@
 graph LR
-  user["👤 ESG Analyst / Investor"]
-  admin["🔧 ML Engineer / Admin"]
-  sora["**SORA.Earth Platform**<br/>ESG evaluation, drift monitoring,<br/>auto-retrain, calibration"]
-  wb["🌍 World Bank API"]
-  oecd["🌍 OECD API"]
-  mlflow["📊 MLflow Tracking Server"]
+  user["ESG Analyst / Investor"]
+  admin["ML Engineer / Admin"]
+  sora["SORA.Earth Platform"]
+  wb["World Bank API"]
+  oecd["OECD API"]
+  mlflow["MLflow Tracking Server"]
 
   user -->|REST: predict, explain, compare| sora
   admin -->|REST: retrain, drift, fit baseline| sora
