@@ -3,6 +3,8 @@ import CountryRanking from "./CountryRanking";
 import MonteCarlo from "./MonteCarlo";
 import { WhatIf } from "./WhatIf";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { historyApi } from "@/api/endpoints/history";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -37,6 +39,25 @@ export function EvaluatePage() {
   const [activePreset, setActivePreset] = useState("solar");
   const [lastRun, setLastRun] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<string>("project");
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const sid = searchParams.get("snapshot");
+    if (!sid) return;
+    historyApi.getById(Number(sid)).then((it: any) => {
+      setForm({
+        project_name: it.name || "Snapshot " + sid,
+        country: it.region,
+        budget_usd: it.budget,
+        co2_reduction_tons_per_year: it.co2_reduction,
+        social_impact_score: it.social_impact,
+        project_duration_months: it.duration_months,
+      } as any);
+      setLastRun({ ...it, region: it.region });
+      setActiveTab("project");
+      setSearchParams({}, { replace: true });
+    }).catch(() => {});
+  }, []);
+
   const evalMut = useMutation({ mutationFn: evaluateApi.evaluate });
   const rankMut = useMutation({ mutationFn: evaluateApi.ranking });
   const mcMut = useMutation({ mutationFn: evaluateApi.monteCarlo });
