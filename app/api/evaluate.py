@@ -244,6 +244,20 @@ def get_history(
         return {"items": items, "total": total, "limit": limit, "offset": offset}
     finally:
         db.close()
+
+@router.get("/history/{eval_id}")
+def get_evaluation_by_id(eval_id: int):
+    from app.main import get_db_sync
+    from fastapi import HTTPException
+    db = get_db_sync()
+    try:
+        row = db.query(Evaluation).filter(Evaluation.id == eval_id).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Evaluation not found")
+        return {c.name: getattr(row, c.name) for c in Evaluation.__table__.columns}
+    finally:
+        db.close()
+
 @router.delete("/history/{eval_id}")
 def delete_evaluation(eval_id: int):
     from app.main import get_db_sync

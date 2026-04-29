@@ -47,6 +47,9 @@ export const historyApi = {
     const qs = q.toString();
     return api<HistoryPage>("/history" + (qs ? "?" + qs : ""));
   },
+  getById(id: number) {
+    return api<HistoryItem>("/history/" + id);
+  },
   remove(id: number) {
     return api<{ status: string }>("/history/" + id, { method: "DELETE" });
   },
