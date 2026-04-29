@@ -1,6 +1,7 @@
+from typing import Optional
 from typing import List
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Query
 from fastapi.responses import StreamingResponse, FileResponse
 
 from app.schemas import ProjectInput as Project, GHGInput
@@ -211,20 +212,38 @@ async def evaluate_project(request: Request, project: Project):
 
 
 @router.get("/history")
-def get_history():
+def get_history(
+    region: Optional[str] = Query(None),
+    risk_level: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    min_score: Optional[float] = Query(None, ge=0, le=100),
+    max_score: Optional[float] = Query(None, ge=0, le=100),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
     from app.main import get_db_sync
-
     db = get_db_sync()
     try:
-        rows = db.query(Evaluation).order_by(Evaluation.created_at.desc()).all()
-        return [
-            {c.name: getattr(r, c.name) for c in Evaluation.__table__.columns}
-            for r in rows
-        ]
+        q = db.query(Evaluation)
+        if region:
+            q = q.filter(Evaluation.region.ilike(f"%{region}%"))
+        if risk_level:
+            q = q.filter(Evaluation.risk_level == risk_level.upper())
+        if date_from:
+            q = q.filter(Evaluation.created_at >= datetime.fromisoformat(date_from))
+        if date_to:
+            q = q.filter(Evaluation.created_at <= datetime.fromisoformat(date_to))
+        if min_score is not None:
+            q = q.filter(Evaluation.total_score >= min_score)
+        if max_score is not None:
+            q = q.filter(Evaluation.total_score <= max_score)
+        total = q.count()
+        rows = q.order_by(Evaluation.created_at.desc()).offset(offset).limit(limit).all()
+        items = [{c.name: getattr(r, c.name) for c in Evaluation.__table__.columns} for r in rows]
+        return {"items": items, "total": total, "limit": limit, "offset": offset}
     finally:
         db.close()
-
-
 @router.delete("/history/{eval_id}")
 def delete_evaluation(eval_id: int):
     from app.main import get_db_sync
