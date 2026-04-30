@@ -8,7 +8,12 @@ cd sora_earth_ai_platform
 cp .env.prod.example .env.prod
 # edit .env.prod — set strong POSTGRES_PASSWORD, JWT_SECRET, ADMIN_API_KEY
 
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --buiinitial DB migration
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+```
+
+Initial DB migration:
+
+```bash
 docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
 

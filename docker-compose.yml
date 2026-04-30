@@ -37,6 +37,12 @@ services:
       - postgres
       - redis
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "grep -l run_scheduler.py /proc/[0-9]*/cmdline > /dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
