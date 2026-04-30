@@ -1,17 +1,43 @@
-FROM python:3.11-slim AS backend
-ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1
+# Stage 1: builder
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /tmp/
+RUN pip install --no-cache-dir --prefer-binary --user -r /tmp/requirements.txt \
+    && pip install --no-cache-dir --user gunicorn "uvicorn[standard]" "psycopg[binary]"
+
+# Stage 2: runtime
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8000 \
+    PATH=/home/app/.local/bin:$PATH
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpq5 curl tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -u 1000 -s /bin/bash app
+
+USER app
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential libpq-dev curl && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefer-binary -r requirements.txt && pip install --no-cache-dir gunicorn "uvicorn[standard]" "psycopg[binary]"
-
-COPY app/ ./app/
-COPY alembic.ini ./
-COPY alembic/ ./alembic/
+COPY --from=builder --chown=app:app /root/.local /home/app/.local
+COPY --chown=app:app app/         ./app/
+COPY --chown=app:app alembic.ini  ./
+COPY --chown=app:app alembic/     ./alembic/
+COPY --chown=app:app entrypoint.sh ./
+RUN chmod +x ./entrypoint.sh
 
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD curl -fsS http://localhost:8000/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://localhost:8000/health || exit 1
 
-CMD ["gunicorn", "app.main:app", "-k", "uvicorn.workers.UvicornWorker", "-w", "4", "-b", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-"]
+ENTRYPOINT ["/usr/bin/tini", "--", "./entrypoint.sh"]
