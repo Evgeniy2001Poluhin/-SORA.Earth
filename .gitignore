@@ -4,6 +4,7 @@ __pycache__/
 .coverage
 .DS_Store
 .env
+.env.prod
 .pytest_cache/
 *.bak
 *.bak.*
@@ -18,8 +19,10 @@ __pycache__/
 # Model binaries (опционально — если модели большие)
 # models/*.pkl
 # SHAP waterfall disk cache
+# SHAP waterfall sha1 disk cache
 # Temporary patch scripts
 # TS incremental build cache
+# vite SPA build artifacts (built locally)
 add_metrics.py
 app/static/spa/assets/
 app/static/spa/index.html
@@ -35,6 +38,3 @@ train_model_backup.py
 update_report_with_metrics.py
 venv/
 web/tsconfig.tsbuildinfo
-
-# vite SPA build artifacts (built locally)
-# SHAP waterfall sha1 disk cache
