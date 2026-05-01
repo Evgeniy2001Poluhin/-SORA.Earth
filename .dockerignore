@@ -1,6 +1,106 @@
+# VCS
 .git
+.gitignore
+.github
+
+# Python
 __pycache__
 *.pyc
-venv/
+*.pyo
+*.pyd
+.Python
+*.egg-info
 .pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Virtual envs
+venv/
+.venv/
+env/
+
+# Coverage
+.coverage
+.coveragerc
 htmlcov/
+htmlcov.zip
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
+
+# Tests / docs / experiments
+tests/
+notebooks/
+docs/
+diagrams/
+analysis/
+plots/
+loadtest/
+load-test.js
+locustfile.py
+loadtest_*.csv
+locust_results_*.csv
+load*.csv
+
+# ML artifacts (large)
+mlflow.db
+mlruns/
+models/
+data/
+output/
+reports/
+logs/
+*.log
+server.log
+
+# Frontend (separate Dockerfile)
+web/
+_legacy_frontend_backup/
+.design-backup/
+
+# Pitch / thesis
+*.pdf
+*.pptx
+*.docx
+SORA_Earth_*.md
+thesis/
+
+# Helm / k8s / infra (not needed in image)
+helm/
+k8s/
+infra/
+
+# Misc fixers / patches (junk)
+fix_*.py
+patch_*.py
+add_metrics.py
+clean_report.py
+gen_charts.py
+update_report_with_metrics.py
+seed_data.py
+streaming.py
+test_ab_boost.py
+test_calibration_boost.py
+train_model*.py
+tune_model.py
+*.bak
+*.bak.*
+
+# Env (passed at runtime)
+.env
+.env.*
+!.env.prod.example
+
+# Docker meta
+Dockerfile
+Dockerfile.prod
+docker-compose*.yml
+.dockerignore
+
+# Other
+sora_ai_copilot/
+sora_tmp_backup/
+nginx/
+nginx.conf
