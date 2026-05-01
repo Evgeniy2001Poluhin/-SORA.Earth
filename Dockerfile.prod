@@ -10,9 +10,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /tmp/
-RUN pip install --no-cache-dir --prefer-binary --user -r /tmp/requirements.txt \
-    && pip install --no-cache-dir --user gunicorn "uvicorn[standard]" "psycopg[binary]"
 
+# CPU-only PyTorch (~190 MB вместо ~2.5 GB CUDA) [web:584]
+RUN pip install --no-cache-dir --user \
+            --index-url https://download.pytorch.org/whl/cpu \
+            torch==2.8.0
+    
+# Остальные зависимости (с PyPI)
+COPY requirements-prod.txt /tmp/
+
+# CPU-only PyTorch (~190 MB вместо ~2.5 GB CUDA) [web:584]
+RUN pip install --no-cache-dir --user \
+        --index-url https://download.pytorch.org/whl/cpu \
+        torch==2.8.0
+
+RUN pip install --no-cache-dir --prefer-binary --user -r /tmp/requirements-prod.txt \
+    && pip install --no-cache-dir --user gunicorn "uvicorn[standard]" "psycopg[binary]"
+           
 # Stage 2: runtime
 FROM python:3.11-slim AS runtime
 
