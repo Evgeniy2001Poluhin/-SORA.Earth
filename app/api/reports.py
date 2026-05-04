@@ -80,12 +80,12 @@ def _score(p):
     return {"overall":overall,"env":round(env,1),"social":round(social,1),
             "governance":round(governance,1),"frameworks":fw}
 
-def _esg_chart(env, social, gov):
+def _esg_chart(env, social, gov, labels=None):
     d = Drawing(400, 180)
     bc = VerticalBarChart()
     bc.x = 50; bc.y = 30; bc.height = 130; bc.width = 320
     bc.data = [[env, social, gov]]
-    bc.categoryAxis.categoryNames = ["Environmental","Social","Governance"]
+    bc.categoryAxis.categoryNames = labels or ["Environmental","Social","Governance"]
     bc.bars[0].fillColor = colors.HexColor("#0B5FFF")
     bc.valueAxis.valueMin = 0; bc.valueAxis.valueMax = 100; bc.valueAxis.valueStep = 20
     d.add(bc)
