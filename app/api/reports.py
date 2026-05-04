@@ -85,6 +85,8 @@ def _esg_chart(env, social, gov, labels=None):
     bc = VerticalBarChart()
     bc.x = 50; bc.y = 30; bc.height = 130; bc.width = 320
     bc.data = [[env, social, gov]]
+    bc.categoryAxis.labels.fontName = BASE_FONT
+    bc.valueAxis.labels.fontName = BASE_FONT
     bc.categoryAxis.categoryNames = labels or ["Environmental","Social","Governance"]
     bc.bars[0].fillColor = colors.HexColor("#0B5FFF")
     bc.valueAxis.valueMin = 0; bc.valueAxis.valueMax = 100; bc.valueAxis.valueStep = 20
