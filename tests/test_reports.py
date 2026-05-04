@@ -26,3 +26,12 @@ def test_batch_pdf():
     assert r.status_code == 200
     assert r.content.startswith(b"%PDF-")
     assert len(r.content) > 3000
+
+def test_metrics_exposed():
+    from app.api.reports import PDF_GENERATED
+    if PDF_GENERATED is None:
+        return
+    before = PDF_GENERATED.labels(endpoint="compliance", lang="en")._value.get()
+    client.post("/api/v1/reports/compliance.pdf", json=PAYLOAD)
+    after = PDF_GENERATED.labels(endpoint="compliance", lang="en")._value.get()
+    assert after == before + 1
