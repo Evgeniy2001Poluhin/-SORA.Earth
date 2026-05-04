@@ -235,7 +235,11 @@ def compliance_batch_pdf(projects: List[ProjectInput], lang: str = Query("en", p
         story += [Paragraph(str(i+1) + ". " + project.name, h1),
                   Paragraph(t["overall"] + ": <b>" + str(res["overall"]) + "/100</b>", h2),
                   _esg_chart(res["env"], res["social"], res["governance"], [t["env"], t["soc"], t["gov"]]),
-                  Spacer(1, 0.3*cm)] + _ml_shap_block(project, t, body, h2)  # batch_shap
+                  Spacer(1, 0.3*cm)]
+        try:
+            story += _ml_shap_block(project, t, body, h2)
+        except Exception as _e:
+            story += [Paragraph("(SHAP block error: " + str(_e) + ")", body)]
     doc.build(story)
     buf.seek(0)
     _track_pdf("compliance_batch", lang)
