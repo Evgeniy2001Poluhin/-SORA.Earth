@@ -96,7 +96,8 @@ def compliance_pdf(project: ProjectInput, lang: str = Query("en", pattern="^(en|
             [t["social"], str(project.social_impact)],[t["dur"], str(project.duration_months)]]
     t1 = Table(proj, colWidths=[5*cm, 10*cm])
     t1.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.3,colors.grey),
-                            ("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),
+                            ("FONTNAME",(0,0),(-1,-1),BASE_FONT),
+                            ("FONTNAME",(0,0),(0,-1),BOLD_FONT),
                             ("BACKGROUND",(0,0),(0,-1),colors.HexColor("#EEF3FF"))]))
     story += [t1, Spacer(1, 0.5*cm),
               Paragraph(t["overall"] + ": <b>" + str(res["overall"]) + "/100</b>", h2),
@@ -106,7 +107,8 @@ def compliance_pdf(project: ProjectInput, lang: str = Query("en", pattern="^(en|
     t2.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#0B5FFF")),
                             ("TEXTCOLOR",(0,0),(-1,0),colors.white),
                             ("GRID",(0,0),(-1,-1),0.3,colors.grey),
-                            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold")]))
+                            ("FONTNAME",(0,0),(-1,-1),BASE_FONT),
+                            ("FONTNAME",(0,0),(-1,0),BOLD_FONT)]))
     story += [t2, Spacer(1, 0.5*cm), Paragraph(t["fw"], h2)]
     rows = [[t["fwh"], t["score"], t["status"]]]
     for k,(sc,st) in res["frameworks"].items():
@@ -115,7 +117,8 @@ def compliance_pdf(project: ProjectInput, lang: str = Query("en", pattern="^(en|
     t3.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#0B5FFF")),
                             ("TEXTCOLOR",(0,0),(-1,0),colors.white),
                             ("GRID",(0,0),(-1,-1),0.3,colors.grey),
-                            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+                            ("FONTNAME",(0,0),(-1,-1),BASE_FONT),
+                            ("FONTNAME",(0,0),(-1,0),BOLD_FONT),
                             ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white, colors.HexColor("#F5F8FF")])]))
     story += [t3, PageBreak(), Paragraph(t["disc"], h2), Paragraph(t["disc_t"], body)]
     doc.build(story)
