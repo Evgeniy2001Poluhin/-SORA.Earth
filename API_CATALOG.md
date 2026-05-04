@@ -1,28 +1,31 @@
 # SORA.Earth — API Catalog
 
 **Total endpoints:** 127  
-**Categories:** 20  
-**Generated:** 2026-05-05 01:06 (auto from FastAPI OpePI spec)  
+**Categories:** 23  
+**Generated:** 2026-05-05 01:10 (auto from FastAPI OpenAPI spec + path-based classifier)  
 **Production:** https://api.sora-earth.ru
 
 ## Summary by category
 
 | Category | Endpoints |
 |----------|-----------|
-| **other** | 41 |
-| **mlops** | 17 |
-| **analytics** | 8 |
+| **mlops** | 20 |
+| **analytics** | 12 |
+| **system** | 11 |
+| **prediction** | 9 |
+| **infrastructure** | 8 |
 | **data-pipeline** | 8 |
 | **admin** | 8 |
+| **explainability** | 7 |
 | **auth** | 6 |
-| **explainability** | 5 |
+| **history** | 5 |
 | **calibration** | 5 |
-| **infrastructure** | 4 |
 | **ai-control** | 4 |
 | **batch** | 3 |
 | **a/b-testing** | 3 |
+| **drift** | 3 |
 | **compliance** | 3 |
-| **system** | 2 |
+| **reporting** | 2 |
 | **cache** | 2 |
 | **monitoring** | 2 |
 | **ab-comparison** | 2 |
@@ -76,7 +79,7 @@
 | `POST` | `/api/v1/admin/ai-teammate/run` | Run Teammate |
 | `GET` | `/api/v1/admin/ai-teammate/status` | Teammate Status |
 
-## analytics (8)
+## analytics (12)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -88,6 +91,10 @@
 | `POST` | `/api/v1/analytics/monte-carlo` | Monte Carlo risk simulation |
 | `GET` | `/api/v1/analytics/predictions-log` | Get Predictions Log |
 | `GET` | `/api/v1/analytics/summary` | Analytics Summary |
+| `GET` | `/api/v1/countries` | Countries List |
+| `POST` | `/api/v1/ghg-calculate` | Ghg Calculate |
+| `GET` | `/api/v1/regions` | Regions |
+| `GET` | `/api/v1/trends` | Trends |
 
 ## auth (6)
 
@@ -146,7 +153,15 @@
 | `GET` | `/api/v1/data/refresh/status` | Refresh Job Status |
 | `GET` | `/api/v1/data/status` | Data Status |
 
-## explainability (5)
+## drift (3)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/drift/analyze` | Analyze data drift: training vs recent predictions |
+| `POST` | `/api/v1/drift/compare` | Compare two time periods for drift |
+| `GET` | `/api/v1/drift/features/stats` | Current feature statistics |
+
+## explainability (7)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -155,11 +170,27 @@
 | `POST` | `/api/v1/explain/local` | Explain Local |
 | `POST` | `/api/v1/predict/explain` | Explain Prediction |
 | `POST` | `/api/v1/predict/explain/waterfall` | Explain Waterfall |
+| `POST` | `/api/v1/shap` | Shap Explain |
+| `POST` | `/api/v1/what-if` | What If |
 
-## infrastructure (4)
+## history (5)
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `DELETE` | `/api/v1/history` | Clear History |
+| `GET` | `/api/v1/history` | Get History |
+| `DELETE` | `/api/v1/history/{eval_id}` | Delete Evaluation |
+| `GET` | `/api/v1/history/{eval_id}` | Get Evaluation By Id |
+| `GET` | `/api/v1/scheduler/retrain/history` | Retrain history log |
+
+## infrastructure (8)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/cache/redis` | Redis cache stats |
+| `DELETE` | `/api/v1/cache/redis/invalidate` | Invalidate all prediction cache |
+| `DELETE` | `/api/v1/cache/redis/invalidate/{prefix}` | Invalidate cache by prefix |
+| `GET` | `/api/v1/cache/redis/test` | Test Redis cache |
 | `GET` | `/api/v1/infra/data-refresh-status` | Data Refresh Status |
 | `POST` | `/api/v1/infra/data-refresh/run` | Data Refresh Run |
 | `POST` | `/api/v1/mlops/auto-retrain` | Auto Retrain On Drift |
@@ -171,7 +202,7 @@
 |--------|------|-------------|
 | `GET` | `/api/v1/mlflow/stats` | Mlflow Stats |
 
-## mlops (17)
+## mlops (20)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -192,6 +223,9 @@
 | `GET` | `/api/v1/model/prediction-log/stats` | Prediction Log Stats |
 | `POST` | `/api/v1/model/retrain` | Retrain Model |
 | `GET` | `/api/v1/model/status` | Model Status |
+| `POST` | `/api/v1/scheduler/refresh_external` | Trigger external ESG data refresh now |
+| `POST` | `/api/v1/scheduler/retrain/trigger` | Trigger manual retrain now |
+| `GET` | `/api/v1/scheduler/status` | Scheduler status and jobs |
 
 ## monitoring (2)
 
@@ -200,58 +234,42 @@
 | `GET` | `/api/v1/rate-limit/status` | Rate Limit Status |
 | `GET` | `/system/health` | System Health |
 
-## other (41)
+## prediction (9)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/` | Read Root |
-| `GET` | `/api/v1/cache/redis` | Redis cache stats |
-| `DELETE` | `/api/v1/cache/redis/invalidate` | Invalidate all prediction cache |
-| `DELETE` | `/api/v1/cache/redis/invalidate/{prefix}` | Invalidate cache by prefix |
-| `GET` | `/api/v1/cache/redis/test` | Test Redis cache |
-| `GET` | `/api/v1/countries` | Countries List |
-| `POST` | `/api/v1/drift/analyze` | Analyze data drift: training vs recent predictions |
-| `POST` | `/api/v1/drift/compare` | Compare two time periods for drift |
-| `GET` | `/api/v1/drift/features/stats` | Current feature statistics |
 | `POST` | `/api/v1/evaluate` | Evaluate Project |
 | `POST` | `/api/v1/evaluate/monte-carlo` | Evaluate Monte Carlo |
 | `POST` | `/api/v1/evaluate/ranking` | Evaluate Ranking |
-| `GET` | `/api/v1/export/csv` | Export Csv |
-| `POST` | `/api/v1/ghg-calculate` | Ghg Calculate |
-| `DELETE` | `/api/v1/history` | Clear History |
-| `GET` | `/api/v1/history` | Get History |
-| `DELETE` | `/api/v1/history/{eval_id}` | Delete Evaluation |
-| `GET` | `/api/v1/history/{eval_id}` | Get Evaluation By Id |
-| `GET` | `/api/v1/metrics` | Get Metrics |
-| `GET` | `/api/v1/metrics/prometheus` | Prometheus Metrics |
 | `POST` | `/api/v1/predict` | Predict Project |
 | `POST` | `/api/v1/predict/compare` | Predict Compare |
 | `POST` | `/api/v1/predict/neural` | Predict Neural |
 | `POST` | `/api/v1/predict/stacking` | Predict Stacking |
 | `GET` | `/api/v1/predictions/export/csv` | Export Predictions Csv |
 | `GET` | `/api/v1/predictions/history` | Predictions History |
-| `GET` | `/api/v1/regions` | Regions |
+
+## reporting (2)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/export/csv` | Export Csv |
 | `POST` | `/api/v1/report/pdf` | Generate Pdf Report |
-| `POST` | `/api/v1/scheduler/refresh_external` | Trigger external ESG data refresh now |
-| `GET` | `/api/v1/scheduler/retrain/history` | Retrain history log |
-| `POST` | `/api/v1/scheduler/retrain/trigger` | Trigger manual retrain now |
-| `GET` | `/api/v1/scheduler/status` | Scheduler status and jobs |
-| `POST` | `/api/v1/shap` | Shap Explain |
+
+## system (11)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/` | Read Root |
+| `GET` | `/api/v1/health` | Full health check |
+| `GET` | `/api/v1/metrics` | Get Metrics |
+| `GET` | `/api/v1/metrics/prometheus` | Prometheus Metrics |
+| `GET` | `/api/v1/ready` | Readiness probe |
 | `GET` | `/api/v1/system/metrics` | Get System Metrics |
-| `GET` | `/api/v1/trends` | Trends |
-| `POST` | `/api/v1/what-if` | What If |
 | `GET` | `/dev` | Dev Page |
 | `GET` | `/health` | Health |
 | `GET` | `/metrics` | Metrics |
 | `GET` | `/model-info` | Model Info |
 | `GET` | `/model-metrics` | Get Model Metrics |
-
-## system (2)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/health` | Full health check |
-| `GET` | `/api/v1/ready` | Readiness probe |
 
 ## websocket (1)
 
