@@ -10,6 +10,7 @@ import { CalibrationPage } from "@/features/calibration/CalibrationPage";
 import { MlopsHealthPage } from "@/features/mlops/MlopsHealthPage";
 import { LoginPage } from "@/features/auth/LoginPage";
 import HistoryPage from "../features/history/HistoryPage";
+import CompliancePage from "@/features/compliance/CompliancePage";
 export function App() {
   return (
     <ErrorBoundary>
@@ -24,6 +25,7 @@ export function App() {
         <Route path="/mlops" element={<MlopsHealthPage/>} />
           <Route path="/history" element={<HistoryPage />} />
         <Route path="/login" element={<LoginPage/>}/>
+        <Route path="/compliance" element={<CompliancePage/>}/>
         <Route path="*" element={<Navigate to="/" replace/>}/>
       </Route>
       </Routes>
