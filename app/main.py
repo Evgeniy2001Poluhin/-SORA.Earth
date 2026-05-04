@@ -36,6 +36,7 @@ from app.api import calibration as calibration_api
 from app.api import scheduler_routes
 from app.api import drift_monitor
 from app.api import ab_comparison as ab_comparison_api
+from app.api import compliance as compliance_api
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("sora")
 
@@ -452,6 +453,7 @@ _all_routers = [
     data_api.router, retrain_api.router, drift_api.router,
     compare_api.router, ab_api.router, explain_api.router,
     calibration_api.router, ab_comparison_api.router, scheduler_routes.router, drift_monitor.router,
+    compliance_api.router,
 ]
 
 # Include all routers with /api/v1 prefix + backward-compatible original paths
