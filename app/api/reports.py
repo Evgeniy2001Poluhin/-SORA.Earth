@@ -13,6 +13,18 @@ from reportlab.lib.units import cm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 from reportlab.graphics.shapes import Drawing
 from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+import os as _os_dj
+try:
+    import matplotlib as _mpl
+    _DJF = _os_dj.path.join(_os_dj.path.dirname(_mpl.__file__), 'mpl-data', 'fonts', 'ttf')
+    pdfmetrics.registerFont(TTFont('DejaVu', _os_dj.path.join(_DJF, 'DejaVuSans.ttf')))
+    pdfmetrics.registerFont(TTFont('DejaVu-Bold', _os_dj.path.join(_DJF, 'DejaVuSans-Bold.ttf')))
+    BASE_FONT, BOLD_FONT = 'DejaVu', 'DejaVu-Bold'
+except Exception:
+    BASE_FONT, BOLD_FONT = 'Helvetica', 'Helvetica-Bold'
+
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -78,9 +90,9 @@ def compliance_pdf(project: ProjectInput, lang: str = Query("en", pattern="^(en|
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm,
                             topMargin=2*cm, bottomMargin=2*cm, title=t["title"])
     s = getSampleStyleSheet()
-    h1 = ParagraphStyle("H1", parent=s["Heading1"], textColor=colors.HexColor("#0B5FFF"))
-    h2 = ParagraphStyle("H2", parent=s["Heading2"])
-    body = s["BodyText"]
+    h1 = ParagraphStyle("H1", parent=s["Heading1"], fontName=BOLD_FONT, textColor=colors.HexColor("#0B5FFF"))
+    h2 = ParagraphStyle("H2", parent=s["Heading2"], fontName=BOLD_FONT)
+    body = ParagraphStyle("B", parent=s["BodyText"], fontName=BASE_FONT)
     story = [Paragraph(t["title"], h1),
              Paragraph(t["gen"] + ": " + datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"), body),
              Spacer(1, 0.5*cm), Paragraph(t["overview"], h2)]
