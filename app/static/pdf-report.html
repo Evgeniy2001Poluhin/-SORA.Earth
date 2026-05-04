@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="UTF-8"><title>ESG Compliance Report</title>
+<style>body{font-family:system-ui;max-width:600px;margin:40px auto;padding:20px}
+input,select{width:100%;padding:8px;margin:6px 0;box-sizing:border-box}
+button{background:#0B5FFF;color:white;padding:12px 24px;border:none;border-radius:4px;cursor:pointer;font-size:16px}
+label{font-weight:600;margin-top:10px;display:block}</style></head>
+<body>
+<h1>📄 ESG Compliance PDF Report</h1>
+<label>Название проекта</label><input id="name" value="Solar Farm Spain">
+<label>Категория</label><input id="category" value="Solar">
+<label>Регион</label><input id="region" value="ES">
+<label>Бюджет (EUR)</label><input id="budget" type="number" value="300000">
+<label>Снижение CO2 (т/год)</label><input id="co2_reduction" type="number" value="500">
+<label>Социальный эффект (0-10)</label><input id="social_impact" type="nul><input id="duration_months" type="number" value="24">
+<label>Язык</label><select id="lang"><option value="ru">Русский</option><option value="en">English</option></select>
+<br><br>
+<button onclick="generate()">📥 Скачать PDF отчёт</button>
+<script>
+async function generate() {
+  const lang = document.getElementById('lang').value;
+  const payload = {
+    name: document.getElementById('name').value,
+    category: document.getElementById('category').value,
+    region: document.getElementById('region').value,
+    budget: +document.getElementById('budget').value,
+    co2_reduction: +document.getElementById('co2_reduction').value,
+    social_impact: +document.getElementById('social_impact').value,
+    duration_months: +document.getElementById('duration_months').value
+  };
+  const r = await fetch('/api/v1/reports/compliance.pdf?lang=' + lang, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  });
+  if (!r.ok) { alert('Error: ' + r.statub = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'esg_compliance_' + lang + '.pdf';
+  a.click();
+}
+</script></body></html>
