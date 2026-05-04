@@ -34,7 +34,7 @@ jobs:
 
       - name: Rsync code to server
         run: |
-          rsync -avz --delete \
+          rsync -avz --delete -e "ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30" \
             --exclude '.git/' \
             --exclude 'venv/' \
             --exclude 'mlruns/' \
