@@ -1,0 +1,20 @@
+{
+  "title": "PDF Reports",
+  "uid": "sora-pdf-reports",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "panels": [
+    {"id":1,"type":"stat","title":"PDF Reports Generated (5m)",
+     "gridPos":{"x":0,"y":0,"w":8,"h":6},
+     "targets":[{"expr":"sum(increase(sora_pdf_generated_total[5m]))","refId":"A"}]},
+    {"id":2,"type":"timeseries","title":"PDF Reports per minute by language",
+     "gridPos":{"x":8,"y":0,"w":16,"h":6},
+     "targets":[{"expr":"sum by (lang) (rate(sora_pdf_generated_total[1m]))","legendFormat":"{{lang}}","refId":"A"}]},
+    {"id":3,"type":"timeseries","title":"PDF generation P95 latency",
+     "gridPos":{"x":0,"y":6,"w":12,"h":6},
+     "targets":[{"expr":"histogram_quantile(0.95, sum by (le, endpoint) (rate(sora_pdf_latency_seconds_bucket[5m])))","legendFormat":"{{endpoint}} p95","refId":"A"}]},
+    {"id":4,"type":"piechart","title":"Endpoint distribution",
+     "gridPos":{"x":12,"y":6,"w":12,"h":6},
+     "targets":[{"expr":"sum by (endpoint) (sora_pdf_generated_total)","legendFormat":"{{endpoint}}","refId":"A"}]}
+  ]
+}
