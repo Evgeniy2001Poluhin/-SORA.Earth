@@ -35,3 +35,15 @@ def test_metrics_exposed():
     client.post("/api/v1/reports/compliance.pdf", json=PAYLOAD)
     after = PDF_GENERATED.labels(endpoint="compliance", lang="en")._value.get()
     assert after == before + 1
+
+def test_metrics_increment():
+    from app.api.reports import PDF_GENERATED
+    if PDF_GENERATED is None:
+        return
+    payload = {"name":"M","budget":100000,"co2_reduction":300,"social_impact":7,
+               "duration_months":12,"category":"Solar","region":"ES"}
+    before = PDF_GENERATED.labels(endpoint="compliance", lang="en")._value.get()
+    r = client.post("/api/v1/reports/compliance.pdf?lang=en", json=payload)
+    assert r.status_code == 200
+    after = PDF_GENERATED.labels(endpoint="compliance", lang="en")._value.get()
+    assert after == before + 1
