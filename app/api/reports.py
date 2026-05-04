@@ -41,6 +41,15 @@ def _logo_flowable():
                 pass
     return None
 
+
+try:
+    from prometheus_client import Counter, Histogram
+    PDF_GENERATED = Counter("sora_pdf_generated_total", "PDF reports generated", ["endpoint", "lang"])
+    PDF_LATENCY = Histogram("sora_pdf_latency_seconds", "PDF generation latency", ["endpoint"])
+except ImportError:
+    PDF_GENERATED = None
+    PDF_LATENCY = None
+
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 I18N = {
@@ -92,6 +101,12 @@ def _esg_chart(env, social, gov, labels=None):
     bc.valueAxis.valueMin = 0; bc.valueAxis.valueMax = 100; bc.valueAxis.valueStep = 20
     d.add(bc)
     return d
+
+
+import time as _time_pdf
+def _track_pdf(endpoint, lang):
+    if PDF_GENERATED:
+        PDF_GENERATED.labels(endpoint=endpoint, lang=lang).inc()
 
 @router.post("/compliance.pdf", summary="Generate ESG/CSRD compliance PDF")
 def compliance_pdf(project: ProjectInput, lang: str = Query("en", pattern="^(en|ru)$")):
@@ -145,6 +160,7 @@ def compliance_pdf(project: ProjectInput, lang: str = Query("en", pattern="^(en|
     doc.build(story)
     buf.seek(0)
     fname = "compliance_" + project.name.replace(" ","_") + "_" + lang + ".pdf"
+    _track_pdf("compliance", lang)
     return StreamingResponse(buf, media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=" + fname})
 
@@ -173,8 +189,10 @@ def compliance_batch_pdf(projects: List[ProjectInput], lang: str = Query("en", p
                   Paragraph(t["overall"] + ": <b>" + str(res["overall"]) + "/100</b>", h2),
                   _esg_chart(res["env"], res["social"], res["governance"], [t["env"], t["soc"], t["gov"]]),
                   Spacer(1, 0.3*cm)]
-    doc.build(story)
+    doc.build(sry)
     buf.seek(0)
+    _track_pdf("compliance_batch", lang)
     return StreamingResponse(buf, media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=compliance_batch_" + lang + ".pdf"})
+    # _track_pdf called below
 
