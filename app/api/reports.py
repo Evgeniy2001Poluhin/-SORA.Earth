@@ -189,7 +189,7 @@ def compliance_batch_pdf(projects: List[ProjectInput], lang: str = Query("en", p
                   Paragraph(t["overall"] + ": <b>" + str(res["overall"]) + "/100</b>", h2),
                   _esg_chart(res["env"], res["social"], res["governance"], [t["env"], t["soc"], t["gov"]]),
                   Spacer(1, 0.3*cm)]
-    doc.build(sry)
+    doc.build(story)
     buf.seek(0)
     _track_pdf("compliance_batch", lang)
     return StreamingResponse(buf, media_type="application/pdf",
