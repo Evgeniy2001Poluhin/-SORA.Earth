@@ -2,7 +2,7 @@
 from __future__ import annotations
 import io
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -10,7 +10,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
 from reportlab.graphics.shapes import Drawing
 from reportlab.graphics.charts.barcharts import VerticalBarChart
 from reportlab.pdfbase import pdfmetrics
@@ -25,6 +25,21 @@ try:
 except Exception:
     BASE_FONT, BOLD_FONT = 'Helvetica', 'Helvetica-Bold'
 
+
+
+import os as _os_logo
+_LOGO_PATHS = [
+    _os_logo.path.join("app", "static", "logo.png"),
+    _os_logo.path.join("assets", "logo.png"),
+]
+def _logo_flowable():
+    for pth in _LOGO_PATHS:
+        if _os_logo.path.exists(pth):
+            try:
+                return Image(pth, width=3*cm, height=3*cm, kind="proportional")
+            except Exception:
+                pass
+    return None
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -87,7 +102,11 @@ def compliance_pdf(project: ProjectInput, lang: str = Query("en", pattern="^(en|
     h1 = ParagraphStyle("H1", parent=s["Heading1"], fontName=BOLD_FONT, textColor=colors.HexColor("#0B5FFF"))
     h2 = ParagraphStyle("H2", parent=s["Heading2"], fontName=BOLD_FONT)
     body = ParagraphStyle("B", parent=s["BodyText"], fontName=BASE_FONT)
-    story = [Paragraph(t["title"], h1),
+    story = []
+    _lg = _logo_flowable()
+    if _lg is not None:
+        story.append(_lg); story.append(Spacer(1, 0.3*cm))
+    story += [Paragraph(t["title"], h1),
              Paragraph(t["gen"] + ": " + datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"), body),
              Spacer(1, 0.5*cm), Paragraph(t["overview"], h2)]
     proj = [[t["name"], project.name],[t["cat"], project.category],[t["reg"], project.region],
@@ -126,3 +145,34 @@ def compliance_pdf(project: ProjectInput, lang: str = Query("en", pattern="^(en|
     fname = "compliance_" + project.name.replace(" ","_") + "_" + lang + ".pdf"
     return StreamingResponse(buf, media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=" + fname})
+
+@router.post("/compliance-batch.pdf", summary="Generate batch ESG PDF for multiple projects")
+def compliance_batch_pdf(projects: List[ProjectInput], lang: str = Query("en", pattern="^(en|ru)$")):
+    t = I18N.get(lang, I18N["en"])
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm,
+                            topMargin=2*cm, bottomMargin=2*cm, title=t["title"] + " (batch)")
+    s = getSampleStyleSheet()
+    h1 = ParagraphStyle("H1B", parent=s["Heading1"], fontName=BOLD_FONT, textColor=colors.HexColor("#0B5FFF"))
+    h2 = ParagraphStyle("H2B", parent=s["Heading2"], fontName=BOLD_FONT)
+    body = ParagraphStyle("BB", parent=s["BodyText"], fontName=BASE_FONT)
+    story = []
+    _lg = _logo_flowable()
+    if _lg is not None:
+        story.append(_lg); story.append(Spacer(1, 0.3*cm))
+    story += [Paragraph(t["title"] + " - Batch (" + str(len(projects)) + ")", h1),
+              Paragraph(t["gen"] + ": " + datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"), body),
+              Spacer(1, 0.5*cm)]
+    for i, project in enumerate(projects):
+        if i > 0:
+            story.append(PageBreak())
+        res = _score(project)
+        story += [Paragraph(str(i+1) + ". " + project.name, h1),
+                  Paragraph(t["overall"] + ": <b>" + str(res["overall"]) + "/100</b>", h2),
+                  _esg_chart(res["env"], res["social"], res["governance"], [t["env"], t["soc"], t["gov"]]),
+                  Spacer(1, 0.3*cm)]
+    doc.build(story)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=compliance_batch_" + lang + ".pdf"})
+
