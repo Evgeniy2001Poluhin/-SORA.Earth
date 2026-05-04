@@ -165,7 +165,7 @@ export function CompliancePage() {
             <input
               type="number"
               value={form.budget_usd}
-              onChange={(e) => update("budget_usd", +e.target.value)}
+              onChange={(e) => update("budget_usd", Number(e.target.value) || 0)}
             />
           </label>
           <label>
@@ -174,7 +174,7 @@ export function CompliancePage() {
               type="number"
               value={form.co2_reduction_tons_per_year}
               onChange={(e) =>
-                update("co2_reduction_tons_per_year", +e.target.value)
+                update("co2_reduction_tons_per_year", Number(e.target.value) || 0)
               }
             />
           </label>
@@ -185,16 +185,16 @@ export function CompliancePage() {
               min={1}
               max={10}
               value={form.social_impact_score}
-              onChange={(e) => update("social_impact_score", +e.target.value)}
+              onChange={(e) => update("social_impact_score", Number(e.target.value) || 0)}
             />
           </label>
           <label>
             Duration (months)
             <input
               type="number"
-              value={form.pro_duration_months}
+              value={form.project_duration_months}
               onChange={(e) =>
-                update("project_duration_months", +e.target.value)
+                update("project_duration_months", Number(e.target.value) || 0)
               }
             />
           </label>
