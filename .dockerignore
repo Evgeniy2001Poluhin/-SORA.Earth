@@ -104,3 +104,5 @@ sora_ai_copilot/
 sora_tmp_backup/
 nginx/
 nginx.conf
+._*
+.DS_Store

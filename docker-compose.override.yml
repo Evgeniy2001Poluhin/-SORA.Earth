@@ -1,0 +1,13 @@
+services:
+  app:
+    volumes:
+      - ./app:/app/app:ro
+      - ./alembic:/app/alembic:ro
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./entrypoint.sh:/app/entrypoint.sh:ro
+  scheduler:
+    volumes:
+      - ./app:/app/app:ro
+      - ./alembic:/app/alembic:ro
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./entrypoint.sh:/app/entrypoint.sh:ro
