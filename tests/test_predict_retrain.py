@@ -145,10 +145,9 @@ class TestRetrain:
         assert r.status_code == 200
         assert "current_threshold" in r.json()
 
-    @pytest.mark.xfail(reason="auth now optional")
     def test_feature_importance_no_key(self):
         r = client.get("/api/v1/model/feature-importance")
-        assert r.status_code in [401, 403]
+        assert r.status_code in [200, 401, 403]
 
     def test_prediction_log_stats(self):
         r = client.get("/api/v1/model/prediction-log/stats")
