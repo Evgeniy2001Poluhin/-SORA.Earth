@@ -6,7 +6,7 @@ client = TestClient(app)
 
 
 def test_login_success():
-    resp = client.post("/api/v1/auth/login", json={"username": "admin", "password": "sora2026"})
+    resp = client.post("/api/v1/auth/login-json", json={"username": "admin", "password": "sora2026"})
     assert resp.status_code == 200
     data = resp.json()
     assert "access_token" in data
@@ -14,12 +14,12 @@ def test_login_success():
 
 
 def test_login_wrong_password():
-    resp = client.post("/api/v1/auth/login", json={"username": "admin", "password": "wrong"})
+    resp = client.post("/api/v1/auth/login-json", json={"username": "admin", "password": "wrong"})
     assert resp.status_code == 401
 
 
 def test_me_with_token():
-    login = client.post("/api/v1/auth/login", json={"username": "analyst", "password": "analyst123"})
+    login = client.post("/api/v1/auth/login-json", json={"username": "analyst", "password": "analyst123"})
     token = login.json()["access_token"]
     resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
@@ -33,7 +33,7 @@ def test_me_without_token():
 
 
 def test_admin_endpoint():
-    login = client.post("/api/v1/auth/login", json={"username": "admin", "password": "sora2026"})
+    login = client.post("/api/v1/auth/login-json", json={"username": "admin", "password": "sora2026"})
     token = login.json()["access_token"]
     resp = client.get("/api/v1/admin/users", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
@@ -42,7 +42,7 @@ def test_admin_endpoint():
 
 @pytest.mark.xfail(reason='dependency_overrides bleed from other tests', strict=False)
 def test_admin_forbidden_for_viewer():
-    login = client.post("/api/v1/auth/login", json={"username": "viewer", "password": "viewer123"})
+    login = client.post("/api/v1/auth/login-json", json={"username": "viewer", "password": "viewer123"})
     token = login.json()["access_token"]
     resp = client.get("/api/v1/admin/users", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 403

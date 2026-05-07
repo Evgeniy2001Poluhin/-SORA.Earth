@@ -7,7 +7,7 @@ ADMIN_CREDS = {"username": "admin", "password": "sora2026"}
 VIEWER_CREDS = {"username": "viewer", "password": "viewer123"}
 
 def _get_token(client, creds):
-    r = client.post("/api/v1/auth/login", json=creds)
+    r = client.post("/api/v1/auth/login-json", json=creds)
     return r.json().get("access_token") if r.status_code == 200 else None
 
 @pytest.fixture(autouse=True)
@@ -20,14 +20,14 @@ def _clear_overrides():
 
 def test_login_success():
     c = TestClient(app, raise_server_exceptions=False)
-    r = c.post("/api/v1/auth/login", json=ADMIN_CREDS)
+    r = c.post("/api/v1/auth/login-json", json=ADMIN_CREDS)
     assert r.status_code == 200
     assert "access_token" in r.json()
     assert "refresh_token" in r.json()
 
 def test_login_wrong_password():
     c = TestClient(app, raise_server_exceptions=False)
-    r = c.post("/api/v1/auth/login", json={"username": "admin", "password": "wrong"})
+    r = c.post("/api/v1/auth/login-json", json={"username": "admin", "password": "wrong"})
     assert r.status_code in (401, 403)
 
 def test_register():
@@ -86,6 +86,6 @@ def test_audit_log():
 
 def test_token_expiry_format():
     c = TestClient(app, raise_server_exceptions=False)
-    r = c.post("/api/v1/auth/login", json=ADMIN_CREDS)
+    r = c.post("/api/v1/auth/login-json", json=ADMIN_CREDS)
     assert r.status_code == 200
     assert "access_token" in r.json()
