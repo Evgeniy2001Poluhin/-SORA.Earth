@@ -7,7 +7,7 @@ client = TestClient(app, raise_server_exceptions=False)
 PROJECT = {"budget": 100000, "co2_reduction": 50, "social_impact": 7, "duration_months": 12}
 
 def test_calibration_predict():
-    for path in ["/calibration/predict", "/analytics/calibration/predict", "/analytics/calibration"]:
+    for path in ["/api/v1/predict/uncertainty", "/api/v1/calibration/predict"]:
         r = client.post(path, json=PROJECT)
         if r.status_code != 404: break
     assert r.status_code in (200, 404, 422, 500)
@@ -18,13 +18,13 @@ def test_calibration_history():
     assert r.status_code in (200, 404)
 
 def test_calibration_compare():
-    for path in ["/calibration/compare", "/analytics/calibration/compare"]:
+    for path in ["/api/v1/calibration/discrepancy", "/api/v1/calibration/compare"]:
         r = client.post(path, json={"projects": [PROJECT, PROJECT]})
         if r.status_code != 404: break
     assert r.status_code in (200, 404, 422, 500)
 
 def test_calibration_recalibrate():
-    for path in ["/calibration/recalibrate", "/analytics/calibration/recalibrate"]:
+    for path in ["/api/v1/calibration/brier", "/api/v1/calibration/recalibrate"]:
         r = client.post(path, json=PROJECT)
         if r.status_code != 404: break
     assert r.status_code in (200, 404, 422, 500)
