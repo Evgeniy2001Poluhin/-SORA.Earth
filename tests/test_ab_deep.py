@@ -13,7 +13,6 @@ def test_ab_start():
     assert r.status_code in (200, 201, 404, 422)
 
 import pytest
-@pytest.mark.xfail(reason="ab/compare endpoint not implemented yet, see #v0.2.0")
 def test_ab_compare():
     for path in ["/api/v1/ab/compare", "/api/v1/analytics/ab/compare"]:
         r = client.post(path, json={"projects": [PROJECT, PROJECT]})

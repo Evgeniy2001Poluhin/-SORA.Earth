@@ -40,7 +40,6 @@ def test_admin_endpoint():
     assert len(resp.json()) == 3
 
 
-@pytest.mark.xfail(reason='dependency_overrides bleed from other tests', strict=False)
 def test_admin_forbidden_for_viewer():
     login = client.post("/api/v1/auth/login-json", json={"username": "viewer", "password": "viewer123"})
     token = login.json()["access_token"]
