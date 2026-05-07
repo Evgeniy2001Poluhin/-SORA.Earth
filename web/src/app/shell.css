@@ -9,3 +9,17 @@
 .shell-nav a:hover{color:var(--text);background:rgba(255,255,255,.04)}
 .shell-nav a.active{color:var(--text);background:rgba(47,224,166,.08);box-shadow:inset 0 0 0 1px rgba(47,224,166,.24)}
 .shell-main{padding:40px max(24px,4vw) 80px;max-width:1440px;margin:0 auto}
+
+.theme-toggle{
+  background:transparent;
+  border:1px solid var(--line);
+  color:var(--text);
+  cursor:pointer;
+  padding:6px 10px;
+  border-radius:8px;
+  font-size:14px;
+  line-height:1;
+  transition:background .15s var(--ease),transform .15s var(--ease);
+}
+.theme-toggle:hover{background:rgba(255,255,255,.06);transform:scale(1.05)}
+.theme-toggle:active{transform:scale(0.95)}

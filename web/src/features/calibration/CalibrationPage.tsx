@@ -103,7 +103,7 @@ export function CalibrationPage() {
               <BarChart data={chartData} margin={{ top: 16, right: 24, left: 0, bottom: 8 }}>
                 <XAxis dataKey="model" stroke="#8aa" tick={{ fontSize: 12 }} />
                 <YAxis stroke="#8aa" domain={[0, 1]} tick={{ fontSize: 12 }} tickFormatter={(v) => (v * 100).toFixed(0) + "%"} />
-                <Tooltip contentStyle={{ background: "#0d1814", border: "1px solid #234", borderRadius: 8, fontSize: 12 }} formatter={(v: any) => (Number(v) * 100).toFixed(2) + "%"} />
+                <Tooltip contentStyle={{ background: "var(--bg-1)", border: "1px solid #234", borderRadius: 8, fontSize: 12 }} formatter={(v: any) => (Number(v) * 100).toFixed(2) + "%"} />
                 <ReferenceLine y={data.consensus.weighted_proba} stroke="#2FE0A6" strokeDasharray="4 4" />
                 <Bar dataKey="proba" radius={[6, 6, 0, 0]}>
                   {chartData.map((d) => (<Cell key={d.model} fill={MODEL_COLOR[d.model] ?? "#7AA2F7"} />))}

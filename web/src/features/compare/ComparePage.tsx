@@ -44,13 +44,14 @@ function Bar(props: { label: string; v: number; tone: string }) {
   );
 }
 
-function ResultCard(props: { side: Side; result: EvaluateResponse | undefined; loading: boolean }) {
+function ResultCard(props: { side: Side; result: EvaluateResponse | undefined; loading: boolean; isWinner?: boolean; delta?: number }) {
   const r = props.result;
   if (props.loading) return <div className="cmp-result loading">Running…</div>;
   if (!r) return <div className="cmp-result empty">Press Run to evaluate.</div>;
   const tone = r.risk_level === "Low" ? "low" : r.risk_level === "High" ? "high" : "med";
   return (
-    <div className="cmp-result">
+    <div className={"cmp-result" + (props.isWinner ? " is-winner" : "")}>
+      {props.isWinner && <span className="cmp-winner-badge">★ WINNER · Δ {(Math.abs(props.delta||0)).toFixed(1)}</span>}
       <div className="cmp-score-row">
         <div className="cmp-score tabular">{r.total_score.toFixed(1)}</div>
         <span className={"cmp-risk " + tone}>{r.risk_level} risk</span>
@@ -93,8 +94,9 @@ export function ComparePage() {
     };
   }, [ra, rb]);
 
+  const winnerSide = diff && diff.total !== 0 ? (diff.total > 0 ? "B" : "A") : null;
   const renderColumn = (side: Side, S: ReturnType<typeof useSide>, title: string) => (
-    <section className="card cmp-col">
+    <section className={"card cmp-col" + (winnerSide === side ? " col-winner" : "")}>
       <header className="cmp-col-head">
         <span className="eyebrow">{title}</span>
         <input className="cmp-name" value={S.form.project_name} onChange={e => S.setForm({ ...S.form, project_name: e.target.value })} />
@@ -109,7 +111,7 @@ export function ComparePage() {
         <Field label="Social (1-10)" value={S.form.social_impact_score}        onChange={v => S.setForm({ ...S.form, social_impact_score: v })} min={1} max={10} />
         <Field label="Duration (mo)" value={S.form.project_duration_months}    onChange={v => S.setForm({ ...S.form, project_duration_months: v })} min={1} />
       </div>
-      <ResultCard side={side} result={S.mut.data} loading={S.mut.isPending} />
+      <ResultCard side={side} result={S.mut.data} loading={S.mut.isPending} isWinner={winnerSide === side} delta={diff?.total ?? 0} />
     </section>
   );
 
@@ -139,7 +141,7 @@ export function ComparePage() {
           </div>
           <div className="cmp-diff-axes">
             <div><span>Environment</span><b className={diff.env >= 0 ? "pos" : "neg"}>{dsign(diff.env)}</b></div>
-            <div><span>Social</span><b className={diff.soc >= 0 ? "ps" : "neg"}>{dsign(diff.soc)}</b></div>
+            <div><span>Social</span><b className={diff.soc >= 0 ? "pos" : "neg"}>{dsign(diff.soc)}</b></div>
             <div><span>Economic</span><b className={diff.eco >= 0 ? "pos" : "neg"}>{dsign(diff.eco)}</b></div>
             <div><span>Total</span><b className={diff.total >= 0 ? "pos" : "neg"}>{dsign(diff.total)}</b></div>
           </div>
