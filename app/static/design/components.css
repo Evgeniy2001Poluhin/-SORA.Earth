@@ -1,0 +1,604 @@
+/* ============================================
+   SORA.earth — Components v3 (Linear/Practicum hybrid)
+   Dark base + turquoise accent, topbar + contextual sidebar
+   ============================================ */
+
+/* ---------- Global reset complement ---------- */
+body {
+  background: var(--c-0);
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+}
+
+/* ---------- TOPBAR (horizontal nav, Practicum-style) ---------- */
+.topbar {
+  posigrid;
+  grid-template-columns: 220px 1fr auto;
+  align-items: center;
+  padding: 0 var(--sp-6);
+  background: rgba(10, 10, 10, 0.85);
+  backdrop-filter: saturate(1.4) blur(20px);
+  -webkit-backdrop-filter: saturate(1.4) blur(20px);
+  border-bottom: 1px solid var(--b-subtle);
+}
+
+.topbar-brand {
+  display: flex; align-items: center; gap: var(--sp-3);
+  font-weight: 600; font-size: 15px; letter-spacing: -0.01em;
+  color: var(--c-1000);
+}
+.topbar-brand .logo-mark {
+  width: 28px; height: 28px;
+  background: url('/static/images/logo-sora.png') center/contain no-repeat;
+  filter: drop-shadow(0 0 10px rgba(94, 234, 212, 0.3));
+}
+.topbar-brand .logo-text { color: var(--c-1000); }
+.topbar-brand .logo-text .dot { color: var(--accent); }
+
+.topbar-nav {
+  display: flex; align-items: center; justify-content: center;
+  gap: var(--sp-1);
+}
+.topbar-nav a {
+  padding: 8px 14px;
+  border-radius: var(--r-md);
+  font-size: 13px; font-weight: 500;
+  color: var(--c-700);
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.topbar-nav a:hover { color: var(--c-900); background: var(--c-100); }
+.topbar-nav a.active { color: var(--c-1000); background: var(--c-200); }
+
+.topbar-actions {
+  display: flex; align-items: center; gap: var(--sp-3);
+}
+.search-btn {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  padding: 6px 10px 6px 10px;
+  background: var(--c-100);
+  border: 1px solid var(--b-subtle);
+  border-radius: var(--r-md);
+  color: var(--c-600);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--t-fast);
+}
+.search-btn:hover { border-color: var(--b-default); color: var(--c-800); }
+.search-btn kbd {
+  font-family: var(--f-mono); font-size: 10px;
+  padding: 1px 5px; border-radius: 3px;
+  background: var(--c-200); color: var(--c-700);
+}
+
+.status-indicator {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: var(--r-full);
+  background: rgba(125, 211, 168, 0.1);
+  border: 1px solid rgba(125, 211, 168, 0.2);
+  color: var(--s-up);
+  font-size: 11px; font-weight: 500;
+}
+.status-indicator .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--s-up);
+  box-shadow: 0 0 8px rgba(125, 211, 168, 0.6);
+  animation: pulse 2s var(--ease-out) infinite;
+}
+
+.btn-signout {
+  padding: 7px 14px; border-radius: var(--r-md);
+  background: transparent;
+  border: 1px solid var(--b-default);
+  color: var(--c-800); font-size: 12px; font-weight: 500;
+  cursor: pointer;
+  transition: all var(--t-fast);
+}
+.btn-signout:hover { background: var(--c-100); color: var(--c-1000); }
+
+/* ---------- APP LAYOUT ---------- */
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  min-height: calc(100vh - var(--nav-h));
+}
+
+/* ---------- CONTEXTUAL SIDEBAR (Screenlane-style) ---------- */
+.context-sidebar {
+  position: sticky; top: var(--nav-h);
+  height: calc(100vh - var(--nav-h));
+  padding: var(--sp-6) var(--sp-4);
+  border-right: 1px solid var(--b-subtle);
+  overflow-y: auto;
+}
+.context-sidebar .section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--c-500);
+  font-weight: 600;
+  padding: 0 var(--sp-2);
+  margin: var(--sp-5) 0 var(--sp-2);
+}
+.context-sidebar .section-title:first-child { margin-top: 0; }
+.context-sidebar a, .context-sidebar .ctx-item {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 6px var(--sp-2);
+  border-radius: var(--r-sm);
+  color: var(--c-700);
+  font-size: 13px; font-weight: 400;
+  transition: all var(--t-fast);
+  cursor: pointer;
+}
+.context-sidebar a:hover, .context-sidebar .ctx-item:hover {
+  background: var(--c-100); color: var(--c-1000);
+}
+.context-sidebar a.active {
+  background: var(--c-200); color: var(--accent);
+  font-weight: 500;
+}
+.context-sidebar .collapsible {
+  margin-top: var(--sp-5);
+  border-top: 1px solid var(--b-subtle);
+  padding-top: var(--sp-4);
+}
+.context-sidebar .collapsible summary {
+  list-style: none; cursor: pointer;
+  padding: 6px var(--sp-2);
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--c-600); font-weight: 600;
+  display: flex; align-items: center; gap: var(--sp-2);
+}
+.context-sidebar .collapsible summary::-webkit-details-marker { display: none; }
+.context-sidebar .collapsible summary::before {
+  content: '▸'; font-size: 9px;
+  transition: transform var(--t-fast);
+}
+.context-sidebar .collapsible[open] summary::before { transform: rotate(90deg); }
+
+/* ---------- MAIN CONTENT ---------- */
+.main-content {
+  padding: var(--sp-8) var(--sp-8);
+  max-width: 1280px;
+  animation: fade-up 400ms var(--ease-out) both;
+}
+@media (max-width: 1100px) {
+  .main-content { padding: var(--sp-6); }
+}
+
+/* ---------- HERO CARD (Practicum/Nixon style) ---------- */
+.hero-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  min-height: 260px;
+  border-radius: var(--r-xl);
+  overflow: hidden;
+  background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%);
+  border: 1px solid var(--b-subtle);
+  margin-bottom: var(--sp-8);
+}
+.hero-card .heroontent {
+  padding: var(--sp-8);
+  display: flex; flex-direction: column; justify-content: center;
+}
+.hero-card .hero-eyebrow {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: var(--sp-3);
+}
+.hero-card h1 {
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--c-1000);
+  margin-bottom: var(--sp-3);
+}
+.hero-card .hero-sub {
+  font-size: 14px;
+  color: var(--c-700);
+  margin-bottom: var(--sp-5);
+  line-height: 1.5;
+  max-width: 380px;
+}
+.hero-card .hero-visual {
+  position: relative;
+  background: url('/static/images/earth-hero.png') center/cover no-repeat;
+}
+.hero-card .hero-visual::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, #0f0f0f 0%, transparent 40%);
+}
+@media (max-width: 900px) {
+  .hero-card { grid-template-columns: 1fr; }
+  .hero-card .hero-visual { display: none; }
+}
+
+/* ---------- BUTTONS ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 6px;
+  padding: 9px 16px;
+  font-family: inherit;
+  font-size: 13px; font-weight: 500;
+  line-height: 1;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease-out);
+  white-space: nowrap;
+}
+.btn-primary {
+  background: var(--accent);
+  color: #052e27;
+  font-weight: 600;
+}
+.btn-primary:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 4px 14px rgba(94, 234, 212, 0.25);
+  transform: translateY(-1px);
+}
+.btn-secondary {
+  background: transparent;
+  color: var(--c-900);
+  border-color: var(--b-default);
+}
+.btn-secondary:hover { background: var(--c-100); border-color: var(--b-strong); }
+
+/* ---------- KPI GRID ---------- */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-8);
+}
+.kpi-cell {
+  padding: var(--sp-5);
+  background: var(--c-50);
+  border: 1px solid var(--b-subtle);
+  border-radius: var(--r-lg);
+  transition: border-color var(--t-base), transform var(--t-base);
+}
+.kpi-cell:hover {
+  border-color: var(--b-default);
+  transform: translateY(-1px);
+}
+.kpi-cell .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--c-600);
+  font-weight: 600;
+  margin-bottom: var(--sp-3);
+}
+.kpi-cell .value {
+  font-family: var(--f-mono);
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--c-1000);
+  line-height: 1;
+}
+.kpi-cell .delta {
+  font-size: 11px;
+  margin-top: var(--sp-2);
+  color: var(--c-600);
+}
+.kpi-cell .delta.up { color: var(--s-up); }
+.kpi-cell .delta.down { color: var(--s-down); }
+
+/* ---------- CONTENT GRID (Screenlane-style cards) ---------- */
+.content-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--sp-4);
+}
+.content-card {
+  padding: var(--sp-5);
+  background: var(--c-50);
+  border: 1px solid var(--b-subtle);
+  border-radius: var(--r-lg);
+  transition: all var(--t-base);
+}
+.content-card:hover {
+  border-color: var(--b-default);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.content-card h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--c-1000);
+  margin-bottom: var(--sp-3);
+  letter-spacing: -0.01em;
+}
+.content-card .activity-item {
+  display: flex; gap: var(--sp-3); align-items: center;
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--b-subtle);
+  font-size: 13px;
+}
+.content-card .activity-item:last-child { border-bottom: none; }
+.content-card .activity-item .time { color: var(--c-500); font-size: 11px; font-family: var(--f-mono); }
+
+/* ---------- TABS (for tabbed pages Evaluate/Insights/Operations) ---------- */
+.tabs-nav {
+  display: flex; gap: 2px;
+  border-bottom: 1px solid var(--b-subtle);
+  margin-bottom: var(--sp-6);
+  padding: 0 2px;
+}
+.tabs-nav .tab {
+  padding: 10px 14px;
+  font-size: 13px; font-weight: 500;
+  color: var(--c-600);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color var(--t-fast), border-color var(--t-fast);
+  margin-bottom: -1px;
+}
+.tabs-nav .tab:hover { color: var(--c-900); }
+.tabs-nav .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ---------- EMPTY STATE (no watermark, clean) ---------- */
+.empty-state {
+  text-align: center;
+  padding: var(--sp-16) var(--sp-8);
+  border: 1px dashed var(--b-default);
+  border-radius: var(--r-xl);
+  background: rgba(255,255,255,0.015);
+}
+.empty-state h3 {
+  font-size: 18px; font-weight: 600;
+  color: var(--c-1000); margin-bottom: var(--sp-2);
+}
+.empty-state p {
+  font-size: 13px; color: var(--c-600);
+  max-width: 380px; margin: 0 auto var(--sp-5);
+}
+
+/* ---------- ANIMATIONS ---------- */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
+/* ---------- TABLE POLISH ---------- */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+  text-align: left; padding: var(--sp-3) var(--sp-4);
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--c-500); font-weight: 600;
+  border-bottom: 1px solid var(--b-subtle);
+}
+td {
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--b-subtle);
+  color: var(--c-900);
+}
+tbody tr:hover { background: rgba(255,255,255,0.02); }
+
+/* ==========================================
+   ALIGNMENT FIXES v3.1
+   ========================================== */
+
+/* Main content — breathing room from topbar */
+.main-content {
+  padding-top: var(--sp-8);
+  padding-bottom: var(--sp-16);
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Hero card — consistent padding, never cut */
+.hero-card {
+  min-height: auto;
+  margin-top: 0;
+}
+.hero-card .hero-content {
+  padding: var(--sp-8) var(--sp-8) var(--sp-8) var(--sp-8);
+  gap: 0;
+}
+.hero-card .hero-eyebrow { margin-top: 0; }
+.hero-card h1 { margin: 0 0 var(--sp-3) 0; }
+.hero-card .hero-sub { margin: 0 0 var(--sp-5) 0; }
+
+/* Buttons — clip gradient, align text */
+.btn {
+  overflow: hidden;
+  line-height: 1.2;
+  min-height: 36px;
+  padding: 0 16px;
+  vertical-align: middle;
+}
+.btn-primary {
+  color: #052e27;
+}
+a.btn { text-decoration: none; }
+
+/* Tabs — spacing from hero */
+.tabs-nav {
+  margin-top: var(--sp-8);
+  margin-bott--sp-6);
+}
+
+/* KPI row — consistent top spacing after tabs/hero */
+.kpi-row { margin-top: 0; }
+
+/* Sidebar — hide scrollbar unless overflowing content */
+.context-sidebar {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  llbar-width: thin;
+  scrollbar-color: var(--c-300) transparent;
+}
+.context-sidebar::-webkit-scrollbar { width: 4px; }
+.context-sidebar::-webkit-scrollbar-track { background: transparent; }
+.context-sidebar::-webkit-scrollbar-thumb { background: var(--c-200); border-radius: 4px; }
+.context-sidebar::-webkit-scrollbar-thumb:hover { background: var(--c-400); }
+
+/* App shell — prevent content clip */
+.app-shell {
+  min-height: calc(100vh - var(--nav-h));
+  align-items: stretch;
+}
+
+/* Content card — consistent internal padding */
+.content-card { padding: var(--sp-5) var(--sp-5); }
+.content-card  margin: 0 0 var(--sp-3) 0; }
+
+/* KPI cells — uniform height */
+.kpi-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 110px;
+}
+.kpi-cell .label { margin: 0 0 var(--sp-2) 0; }
+.kpi-cell .value { margin: 0; }
+.kpi-cell .delta { margin-top: var(--sp-2); }
+
+/* Topbar — lock height so sticky works */
+.topbar {
+  height: var(--nav-h);
+  flex-shrink: 0;
+}
+
+/* Body — allow natural flow */
+body { min-height: 100vh; }
+html { scroll-behavior: smooth; }
+
+/* Empty state visual (no watermark) */
+.hero-card .hero-visual {
+  background-size: cover;
+  background-position: center right;
+}
+
+/* Activity item — no cut-off */
+.activity-item {
+  padding: 10px 0;
+  gap: 12px;
+  min-height: 32px;
+}
+.activity-item .time {
+  flex-shrink: 0;
+  text-align: right;
+  min-width: 36px;
+}
+
+/* Tabs — prevenrizontal scroll if many */
+.tabs-nav {
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
+}
+.tabs-nav::-webkit-scrollbar { display: none; }
+.tabs-nav .tab { flex-shrink: 0; white-space: nowrap; }
+
+/* Hero visual fade — smoother on narrow */
+@media (max-width: 1100px) {
+  .hero-card { grid-template-columns: 1.4fr 1fr; }
+}
+@media (max-width: 900px) {
+  .hero-card { grid-template-columns: 1fr; }
+  .hero-card .hero-visual { display: none; }
+  .main-content { padding-left: var(--sp-5); padding-right: var(--sp-5); }
+}
+
+/* ==========================================
+   BUTTON POLISH v3.2 — perfect vertical center
+   ========================================== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  min-height: 36px;
+  line-height: 1;
+  box-sizing: border-box;
+  text-decoration: none;
+}
+.btn-primary {
+  color: #052e27;
+  font-weight: 600;
+}
+.btn-primary:hover { color: #041f1b; }
+
+/* Ensure anchor-buttons don't inherit link underline */
+a.btn, a.btn:hover, a.btn:visited { text-decoration: none; }
+
+/* Hero CTA row — tighter spacing */
+.hero-card .hero-content > div:last-child {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* Quick actions stacked buttons — left-align text, consistent padding */
+.content-card .btn {
+  justify-content: flex-start;
+  padding: 10px 14px;
+  min-height: 38px;
+}
+
+
+
+/* ==========================================
+   BRAND LOGO v3.4 — visible Tiffany gradient
+   ========================================== */
+.topbar { grid-template-columns: 240px 1fr auto; }
+
+a.topbar-brand, .topbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  margin-left: -8px;
+  border-radius: var(--r-md);
+  transition: background 160ms ease, transform 160ms ease;
+}
+a.topbar-brand:hover { background: rgba(255,255,255,0.04); transform: translateY(-1px); }
+
+.topbar-brand .logo-mark {
+  width: 32px; height: 32px;
+  background: url('/static/images/logo-sora.png') center/contain no-repeat;
+  filter: drop-adow(0 0 12px rgba(94, 234, 212, 0.55));
+  flex-shrink: 0;
+}
+a.topbar-brand:hover .logo-mark {
+  filter: drop-shadow(0 0 18px rgba(94, 234, 212, 0.9));
+}
+
+.topbar-brand .logo-text {
+  display: inline-block;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-image: linear-gradient(135deg, #81f4e1 0%, #5eead4 35%, #2dd4bf 65%, #14b8a6 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: #5eead4; /* fallback */
+}
+
+.topbar-brand .logo-text .dot {
+  display: inline-block;
+  background-image: linear-gradient(135deg, #7af0dc 0%, #2dd4bf 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: #2dd4bf;
+  font-weight: 800;
+  margin: 0 1px;
+}

@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: 'sora'
+    orgId: 1
+    folder: 'SORA.Earth'
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

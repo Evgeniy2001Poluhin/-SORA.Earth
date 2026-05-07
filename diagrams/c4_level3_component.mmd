@@ -1,0 +1,33 @@
+graph TB
+    subgraph fa["FastAPI Application"]
+        subgraph mw["Middleware"]
+            MW["CORS | Rate Limit | Audit Log | JWT | Logging"]
+        end
+        subgraph api["API Layer"]
+            AUTH["🔐 Auth<br/>login, register, JWT+roles"]
+            PRED["🔮 Predict<br/>predict, uncertainty, batch"]
+            ANAL["📊 Analytics<br/>evaluate, compare, A/B"]
+            ADM["⚙️ Admin<br/>retrain, drift, metrics"]
+        L Layer"]
+            RF["🌳 RF v1<br/>4 feat, thr=0.38"]
+            STK["🔗 Stacking v2<br/>11 feat, AUC=0.82"]
+            CAL["📐 Calibration<br/>Isotonic"]
+            SHAP["💡 SHAP<br/>TreeExplainer"]
+        end
+        subgraph dl["Data Layer"]
+            ESG["🌍 ESG Engine<br/>7 regions, 21 countries"]
+            EXT["🌐 External Data<br/>WB + OECD fallback"]
+            PIPE["💾 Pipeline<br/>bulk upload, auto-retrain"]
+        end
+    end
+    MW --> AUTH
+    MW --> PRED
+    MW --> ANAL
+    MW --> ADM
+    PRED --> RF
+    PRED --> STK
+    PRED --> CAL
+    ANAL --> SHAP
+    ADM --> PIPE
+    PIPE --> EXT
+    EXT --> ESG

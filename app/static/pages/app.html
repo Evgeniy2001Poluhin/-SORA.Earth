@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>SORA.Earth Platform</title>
+<link rel="stylesheet" href="/static/design/design.css">
+<link rel="stylesheet" href="/static/design/extras.css">
+</head>
+<body>
+<header class="topbar">
+  <a href="/app/home" data-spa class="topbar-brand">
+    <div class="logo-mark"></div>
+    <div class="logo-text">SORA<span class="dot">.</span>earth</div>
+  </a>
+  <nav class="topbar-nav">
+    <a href="/app/home" data-spa>Home</a>
+    <a href="/app/evaluate-page" data-spa>Evaluate</a>
+    <a href="/app/insights" data-spa>Insights</a>
+    <a href="/app/operations" data-spa>Operations</a>
+  </nav>
+  <div class="topbar-actions">
+    <div class="status-indicator"><span class="dot"></span>Operational</div>
+    <button class="search-btn">Search <kbd>K</kbd></button>
+    <button class="btn-signout" style="background:transparent;border:1px solid rgba(255,255,255,0.15);color:#cbd5e1;padding:6px 14px;border-radius:8px;font-size:13px;cursor:pointer" onclick="localStorage.removeItem('sora_jwt');location.href='/auth/login'">Sign out</button>
+  </div>
+</header>
+
+<div class="app-shell">
+  <aside class="context-sidebar">
+    <div class="section-title">Quick actions</div>
+    <a href="/app/evaluate-page?tab=evaluate" data-spa>Run evaluation</a>
+    <a href="/app/operations?tab=batch-evaluations" data-spa>Upload batch CSV</a>
+    <a href="#" onclick="triggerRetrain();return false">Trigger retrain</a>
+    <div class="section-title">Favorites</div>
+    <a href="/app/evaluate-page?tab=country-ranking" data-spa>Sweden #1</a>
+    <a href="/app/evaluate-page?tab=country-ranking" data-spa>Germany #12</a>
+    <a href="#">Solar Panel Initiative</a>
+    <details class="collapsible">
+      <summary>Developer</summary>
+      <a href="/app/dashboard" data-spa>Dashboard (legacy)</a>
+      <a href="/app/snapshot" data-spa>Snapshot</a>
+      <a href="/app/diagnostics" data-spa>Diagnostics</a>
+      <a href="/app/audit-log" data-spa>Audit log</a>
+      <a href="/app/data-health" data-spa>Data health</a>
+      <a href="/docs">API docs</a>
+      <a href="http://localhost:3000" target="_blank">Grafana</a>
+      <a href="http://localhost:5000" target="_blank">MLflow</a>
+    </details>
+  </aside>
+  <main class="main-content">
+    <div id="outlet">Loading...</div>
+  </main>
+</div>
+
+<div id="toast" style="position:fixed;bottom:24px;right:24px;z-index:9999"></div>
+
+<script>
+window.triggerRetrain = async function() {
+  const tok = localStorage.getItem('sora_jwt');
+  const t = document.getElementById('toast');
+  t.innerHTML = '<div style="background:#0f766e;color:#fff;padding:12px 20px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.3)">Triggering retrain...</div>';
+  try {
+    const r = await fetch('/api/v1/scheduler/retrain/trigger', {
+      method:'POST',
+      headers: {'Content-Type':'application/json', Authorization:'Bearer '+tok}
+    });
+    const d = await r.json();
+    t.innerHTML = '<div style="background:'+(r.ok?'#059669':'#dc2626')+';color:#fff;padding:12px 20px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.3)">'+(r.ok?'Retrain queued ✓':'Failed: '+(d.detail||r.status))+'</div>';
+    setTimeout(()=>t.innerHTML='',4000);
+  } catch(e) {
+    t.innerHTML = '<div style="background:#dc2626;color:#fff;padding:12px 20px;border-radius:8px">Error: '+e.message+'</div>';
+    setTimeout(()=>t.innerHTML='',4000);
+  }
+};
+</script>
+<script type="module" src="/static/js/router.js"></script>
+</body>
+</html>
