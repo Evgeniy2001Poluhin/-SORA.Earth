@@ -15,7 +15,7 @@ def _clear_overrides():
 ADMIN = {"username": "admin", "password": "sora2026"}
 
 def _token(c):
-    r = c.post("/api/v1/auth/login", json=ADMIN)
+    r = c.post("/api/v1/auth/login-json", json=ADMIN)
     assert r.status_code == 200, f"Login fail: {r.status_code} {r.text[:200]}"
     return r.json()
 
