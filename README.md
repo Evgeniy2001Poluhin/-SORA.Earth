@@ -1,5 +1,11 @@
 # SORA.Earth AI Platform
 
+[![Tests](https://img.shields.io/badge/tests-375%2F384%20passing-brightgreen)](https://github.com/Evgeniy2001Poluhin/-SORA.Earth)
+[![Version](https://img.shields.io/badge/version-v0.2.1-blue)](https://github.com/Evgeniy2001Poluhin/-SORA.Earth/releases)
+[![CI](https://img.shields.io/badge/CI-passing-success)](https://github.com/Evgeniy2001Poluhin/-SORA.Earth/actions)
+[![License](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+
+
 SORA.Earth AI Platform — полнофункциональная платформа для ESG‑оценки проектов, объяснимых ML‑предсказаний, страновой аналитики и автономного MLOps‑контурa с мониторингом и алертингом. [file:892]
 
 Платформа собирает вместе FastAPI, PostgreSQL, Redis, APScheduler, Prometheus, Grafana и Docker Compose в единый production‑стек: отдельный scheduler‑процесс, персистентные логи, AI‑агент, админ‑панель и готовый к развёртыванию docker‑композ. [file:892]
