@@ -1,0 +1,69 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+secrets/
+backups/
+
+# Backups & archives
+*.bak.*
+*.backup
+docker-compose.yml.bak.*
+app/main.py.bak.*
+_archive_*/
+_legacy_*/
+
+# Data
+data/*.db
+data/*.csv
+data/*.sqlite
+data/predictions_log.*
+mlflow.db
+mlruns/
+
+# Models
+models/_unused/
+models/*.pkl.bak
+
+# Large media (>5MB) — храни в releases или CDN
+app/static/video/*.mp4
+app/static/images/*.mp4
+web/public/*.mp4
+app/static/spa/hero.mp4
+*.map
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Local-only docs
+TESTS_TODO.md
+AUDIT_LOG_*.md
+SORA_ROADMAP_v*.md
+pytest_first_run.txt
+*.bak
+.design-backup/
+app/static/design.backup-*/
+design.backup-*/

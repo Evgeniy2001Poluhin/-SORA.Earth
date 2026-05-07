@@ -1,0 +1,1 @@
+Pytest baseline 7 May 2026 18:12 MSK: 327 passed, 52 failed, 3 skipped, 2 xfailed

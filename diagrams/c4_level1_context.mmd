@@ -1,0 +1,19 @@
+graph TB
+    classDef person fill:#08589e,stroke:#08589e,color:#fff
+    classDef system fill:#1168bd,stroke:#1168bd,color:#fff
+    classDef ext fill:#666,stroke:#666,color:#fff
+
+    User["👤 Investor / Analyst<br/>Evaluates ESG projects"]:::person
+    Admin["👤 Admin<br/>Manages models & data"]:::person
+    SORA["🌍 SORA.Earth AI Platform<br/>FastAPI + ML Pipeline<br/>84 endpoints"]:::system
+    WB["🌐 World Bank API<br/>ESG indicators"]:::ext
+    OECD["🌐 OECD API<br/>Fallback data"]:::ext
+    MLF["📊 MLflow<br/>Experiment tracking"]:::ext
+    SEN["🔍 Sentry<br/>Error monitoring"]:::ext
+
+    User -->|REST API / WebSocket| SORA
+    Admin -->|JWT Auth + Admin API| SORA
+    SORA -->|Fetch ESG data| WB
+    SORA -->|Fallback chain| OECD
+    SORA -->|Log experiments| MLF
+    SORA -->|Report errors| SEN

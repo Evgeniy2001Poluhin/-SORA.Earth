@@ -1,0 +1,35 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install pytest pytest-cov pytest-timeout
+      - name: Run tests
+        run: python -m pytest tests/ -v --tb=short
+      - name: Generate sample PDFs
+        run: |
+          python -c "
+          from fastapi.testclient import TestClient
+          from app.main import app
+          c = TestClient(app)
+          payload = {'name':'Solar Farm','budget':300000,'co2_reduction':500,'social_impact':8,'duration_months':24,'category':'Solar','region':'ES'}
+          for lang in ['en','ru']:
+              r = c.post(f'/api/v1/reports/compliance.pdf?lang={lang}', json=payload)
+              with open(f'sample_{lang}.pdf','wb') as f: f.write(r.content)
+              print(lang, len(r.content), 'bytes')
+          "
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sample-pdfs
+          path: sample_*.pdf

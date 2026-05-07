@@ -1,0 +1,18 @@
+{
+  "retrained_at": "20260507_151132",
+  "algorithm": "RandomForestClassifier",
+  "n_estimators": 200,
+  "max_depth": 10,
+  "features": [
+    "budget",
+    "co2_reduction",
+    "social_impact",
+    "duration_months",
+    "budget_per_month",
+    "co2_per_dollar",
+    "efficiency_score",
+    "year",
+    "quarter"
+  ],
+  "total_samples": 737
+}

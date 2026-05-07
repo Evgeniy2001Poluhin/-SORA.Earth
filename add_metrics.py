@@ -1,0 +1,10 @@
+from pathlib import Path
+import json
+m = json.loads(Path("reports/model_metrics.json").read_text())
+fi = m["feature_importance"]
+rows = "".join(['<tr style="background:{}"><td style="padding:8px 18px">{}</td><td style="padding:8px 18px;text-align:right;font-weight:bold">{:.4f}</td></tr>'.format("#f1f8e9" if i%2==0 else "#fff",f,v) for i,(f,v) in enumerate(sorted(fi.items(),key=lambda x:-x[1]))])
+block = "<hr><h2>Model Performance Metrics</h2><p>Ensemble + StandardScaler | n={} | target: project success</p><table style=\"border-collapse:collapse;width:520px;font-family:Arial\"><thead><tr style=\"background:#2e7d32;color:#fff\"><th style=\"padding:10px 18px;text-align:left\">Metric</th><th style=\"padding:10px 18px;text-align:right\">Value</th><th style=\"padding:10px 18px;text-align:left\">Note</th></tr></thead><tbody><tr style=\"background:#f1f8e9\"><td style=\"padding:9px 18px\">Accuracy</td><td style=\"padding:9px 18px;text-align:right;font-weight:bold\">{:.4f}</td><td style=\"padding:9px 18px;color:#555\">% correct</td></tr><tr><td style=\"padding:9px 18px\">AUC-ROC</td><td style=\"padding:9px 18px;text-align:right;font-weight:bold\">{:.4f}</td><td style=\"padding:9px 18px;color:#555\">1.0 = perfect</td></tr><tr style=\"background:#f1f8e9\"><td style=\"padding:9px 18px\">F1-Score</td><td style=\"padding:9px 18px;text-align:right;font-weight:bold\">{:.4f}</td><td style=\"padding:9px 18px;color:#555\">Precision/Recall</td></tr></tbody></table><h2 style=\"margin-top:32px\">Feature Importances (mean |SHAP|)</h2><table style=\"border-collapse:collapse;width:400px;font-family:Arial\"><thead><tr style=\"background:#2e7d32;color:#fff\"><th style=\"padding:10px 18px;text-align:left\">Feature</th><th style=\"padding:10px 18px;text-align:right\">Mean |SHAP|</th></tr></thead><tbody>{}</tbody></table><hr>".format(m["n_samples"],m["accuracy"],m["auc_roc"],m["f1"],rows)
+html = Path("reports/shap_report.html").read_text(encoding="utf-8")
+html = html.replace("</body></html>", block + "</body></html>")
+Path("reports/shap_report.html").write_text(html, encoding="utf-8")
+print("Done! Blocks:", html.count("<h2>Model Performance Metrics</h2>"))
