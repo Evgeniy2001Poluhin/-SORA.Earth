@@ -102,7 +102,7 @@ export function WhatIf({ form, lastRun }: Props) {
               <XAxis dataKey="x" tickFormatter={param.fmt} stroke="#666" fontSize={11}/>
               <YAxis domain={[0,100]} stroke="#666" fontSize={11}/>
               <Tooltip
-                contentStyle={{background:"#0E1218",border:"1px solid #1A2230",borderRadius:8,fontSize:12}}
+                contentStyle={{background:"var(--bg-1)",border:"1px solid #1A2230",borderRadius:8,fontSize:12}}
                 formatter={(v:any)=>[`${Number(v).toFixed(1)}`,"Total"]}
                 labelFormatter={(v:any)=>`${param.label}: ${param.fmt(Number(v))}`}/>
               <Line type="monotone" dataKey="total" stroke="#2FE0A6" strokeWidth={2} dot={{r:3,fill:"#2FE0A6"}} animationDuration={400}/>

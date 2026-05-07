@@ -1,7 +1,11 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { useTheme } from "./ThemeProvider";
 import "./shell.css";
+
 const NAV = [ { to:"/", label:"Home" }, { to:"/evaluate", label:"Evaluate" }, { to:"/compare", label:"Compare" }, { to:"/drift", label:"Drift" }, { to:"/explain", label:"Explain" }, { to:"/calibration", label:"Calibration" }, { to:"/mlops", label:"MLOps" }, { to:"/history", label:"History" }, { to:"/map", label:"Map" }, { to:"/compliance", label:"Compliance" } ];
+
 export function Shell() {
+  const { theme, toggle } = useTheme();
   return (
     <div className="shell">
       <header className="shell-top">
@@ -17,7 +21,12 @@ export function Shell() {
         <nav className="shell-nav">
           {NAV.map(n => <NavLink key={n.to} to={n.to} end className={({isActive})=>isActive?"active":""}>{n.label}</NavLink>)}
         </nav>
-        <div className="shell-right"><span className="status-pill">Operational</span></div>
+        <div className="shell-right" style={{display:"flex",alignItems:"center",gap:10}}>
+          <button onClick={toggle} className="theme-toggle" aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
+            {theme === "dark" ? "☀️" : "🌙"}
+          </button>
+          <span className="status-pill">Operational</span>
+        </div>
       </header>
       <main className="shell-main"><Outlet/></main>
     </div>

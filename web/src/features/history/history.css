@@ -1,11 +1,11 @@
 .hist-page { padding: 24px 28px; max-width: 1200px; }
 .hist-title { font-size: 28px; font-weight: 600; color: var(--text); margin: 4px 0 8px; }
-.hist-filters { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:12px; margin:14px 0; border:1px solid var(--line-2); border-radius:8px; background:#0E1218; }
-.hist-input { background:#0E1218; color:var(--text); border:1px solid var(--line-2); border-radius:6px; padding:6px 10px; font:inherit; font-size:13px; min-width:140px; }
+.hist-filters { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:12px; margin:14px 0; border:1px solid var(--line-2); border-radius:8px; background:var(--bg-1); }
+.hist-input { background:var(--bg-1); color:var(--text); border:1px solid var(--line-2); border-radius:6px; padding:6px 10px; font:inherit; font-size:13px; min-width:140px; }
 .hist-pills { display:flex; gap:4px; }
 .hist-reset, .hist-export { background:transparent; border:1px solid var(--line-2); color:var(--muted); border-radius:6px; padding:6px 12px; font-size:12px; cursor:pointer; text-decoration:none; }
 .hist-export { color:var(--text); }
-.hist-table { border:1px solid var(--line-2); border-radius:8px; overflow:hidden; background:#0E1218; }
+.hist-table { border:1px solid var(--line-2); border-radius:8px; overflow:hidden; background:var(--bg-1); }
 .hist-row { display:grid; grid-template-columns:130px 1fr 70px 60px 70px 110px 70px; gap:12px; align-items:center; padding:10px 14px; background:transparent; border:0; border-bottom:1px solid var(--line-2); color:var(--text); cursor:pointer; text-align:left; font:inherit; font-size:13px; width:100%; }
 .hist-row:last-child { border-bottom:0; }
 .hist-head { color:var(--muted); font-size:11px; letter-spacing:.06em; text-transform:uppercase; cursor:default; }

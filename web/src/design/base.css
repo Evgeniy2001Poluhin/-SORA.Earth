@@ -37,3 +37,309 @@ img,svg,canvas{display:block;max-width:100%}
 .status-pill::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--planet);
   box-shadow:0 0 0 4px rgba(47,224,166,.18);animation:pulse 2.4s var(--ease) infinite}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 4px rgba(47,224,166,.18)}50%{box-shadow:0 0 0 8px rgba(47,224,166,.05)}}
+
+/* === LIGHT: Sandstone Cream === */
+:root[data-theme="light"] body{background:var(--bg);background-image:radial-gradient(ellipse 1200px 600px at 75% -10%,rgba(123,94,42,.10),transparent 55%);}
+:root[data-theme="light"] .card,:root[data-theme="light"] [class*="-card"],:root[data-theme="light"] [class*="-panel"],:root[data-theme="light"] [class*="stat-"],:root[data-theme="light"] [class*="metric-"]{background:var(--bg-2)!important;color:var(--text)!important;border:1px solid var(--line)!important;box-shadow:0 1px 3px rgba(60,40,20,.10)!important;}
+:root[data-theme="light"] input,:root[data-theme="light"] select,:root[data-theme="light"] textarea{background:var(--input-bg)!important;color:var(--text)!important;border:1px solid var(--input-border)!important;}
+:root[data-theme="light"] input:focus,:root[data-theme="light"] select:focus{border-color:var(--planet)!important;box-shadow:0 0 0 3px rgba(123,94,42,.18)!important;outline:none!important;}
+:root[data-theme="light"] input::placeholder{color:var(--faint)}
+:root[data-theme="light"] table{background:var(--bg-2)!important;color:var(--text)!important;border-collapse:collapse;}
+:root[data-theme="light"] thead,:root[data-theme="light"] thead tr,:root[data-theme="light"] th{background:var(--table-head)!important;color:var(--text)!important;border-bottom:2px solid rgba(123,94,42,.30)!important;font-weight:600;letter-spacing:.04em;}
+:root[data-theme="light"] tbody tr{background:var(--table-row)!important;color:var(--text)!important;border-bottom:1px solid var(--table-border)!important;}
+:root[data-theme="light"] tbody tr:nth-child(even){background:var(--table-row-alt)!important;}
+:root[data-theme="light"] tbody tr:hover{background:rgba(123,94,42,.10)!important;}
+:root[data-theme="light"] td{color:var(--text)!important;border-color:var(--table-border)!important;}
+:root[data-theme="light"] .pill,:root[data-theme="light"] [class*="pill"]:not([class*="status"]):not([class*="risk"]){background:var(--bg-3)!important;color:var(--text)!important;border:1px solid var(--line)!important;}
+:root[data-theme="light"] .pill.active,:root[data-theme="light"] [class*="pill"][class*="active"]{background:rgba(123,94,42,.18)!important;color:var(--planet-2)!important;border-color:rgba(123,94,42,.40)!important;}
+:root[data-theme="light"] .ev-presets button,:root[data-theme="light"] [class*="preset"] button{background:var(--bg-1)!important;color:var(--text)!important;border:1px solid var(--line-2)!important;}
+:root[data-theme="light"] button[class*="primary"],:root[data-theme="light"] .btn-primary,:root[data-theme="light"] button.run,:root[data-theme="light"] .preset-btn{background:var(--planet)!important;color:#F5EDD8!important;border:0!important;}
+:root[data-theme="light"] .shell-top{background:rgba(232,223,206,.88)!important;backdrop-filter:blur(14px);border-bottom:1px solid var(--line);}
+:root[data-theme="light"] .shell-nav a{color:var(--muted)}
+:root[data-theme="light"] .shell-nav a.active{background:rgba(123,94,42,.16);color:var(--planet-2);box-shadow:inset 0 0 0 1px rgba(123,94,42,.36);}
+:root[data-theme="light"] .status-pill{background:rgba(123,94,42,.16)!important;color:var(--planet-2)!important;border:1px solid rgba(123,94,42,.36)!important;}
+:root[data-theme="light"] .status-pill::before{background:var(--planet)!important}
+:root[data-theme="light"] .progress,:root[data-theme="light"] [class*="progress"],:root[data-theme="light"] [class*="-bar"]{background:var(--bg-3)!important;}
+:root[data-theme="light"] [class*="bar-fill"],:root[data-theme="light"] [class*="progress-fill"]{background:var(--planet)!important;}
+:root[data-theme="light"] .feature-breakdown,:root[data-theme="light"] .baseline-controls,:root[data-theme="light"] .drift-table,:root[data-theme="light"] .history-table,:root[data-theme="light"] .retrain-table,:root[data-theme="light"] .brier-panel,:root[data-theme="light"] .compliance-form,:root[data-theme="light"] .compliance-card{background:var(--bg-2)!important;color:var(--text)!important;border:1px solid var(--line)!important;}
+:root[data-theme="light"] .recharts-cartesian-axis-tick text{fill:var(--muted)!important}
+:root[data-theme="light"] .recharts-cartesian-grid line{stroke:var(--line)!important}
+:root[data-theme="light"] [style*="background:#0"],:root[data-theme="light"] [style*="background: #0"],:root[data-theme="light"] [style*="background-color:#0"]{background:var(--bg-2)!important;color:var(--text)!important;border:1px solid var(--line)!important;}
+:root[data-theme="light"] ::-webkit-scrollbar-track{background:var(--bg-1)}
+:root[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(60,40,20,.24);border-radius:6px}
+
+/* === FORCE all dark backgrounds to cream + light text → dark text === */
+:root[data-theme="light"] [style*="#0"]:not([style*="#0F0"]):not([style*="#0FF"]),
+:root[data-theme="light"] [style*="#1"]:not([style*="#1F"]):not([style*="#1A6"]),
+:root[data-theme="light"] [style*="rgb(10"],
+:root[data-theme="light"] [style*="rgb(20"],
+:root[data-theme="light"] [style*="rgba(10"],
+:root[data-theme="light"] [style*="rgba(20"]{
+  background:var(--bg-2)!important;
+  color:var(--text)!important;
+}
+
+/* All tbody rows force visible text */
+:root[data-theme="light"] table *,
+:root[data-theme="light"] tr *,
+:root[data-theme="light"] td,
+:root[data-theme="light"] th{color:var(--text)!important;}
+
+/* Tinted/highlighted rows still keep accent text */
+:root[data-theme="light"] td[style*="color:#FF"],
+:root[data-theme="light"] td[style*="color:red"]{color:var(--coral)!important;}
+
+/* Specific dark hardcoded panels by class (Drift feature breakdown header,Lflow runs) */
+:root[data-theme="light"] thead,
+:root[data-theme="light"] thead *,
+:root[data-theme="light"] [class*="head"][class*="row"],
+:root[data-theme="light"] [class*="table-head"]{
+  background:var(--table-head)!important;
+  color:var(--text)!important;
+}
+
+/* MLflow Drift Runs / Kolmogorov tables — forced cream */
+:root[data-theme="light"] [class*="mlflow"],
+:root[data-theme="light"] [class*="ks-table"],
+:root[data-theme="light"] [class*="drift-runs"],
+:root[data-theme="light"] [class*="-runs"]{
+  background:var(--bg-2)!important;
+  color:var(--text)!important;
+}
+:root[data-theme="light"] [class*="mlflow"] *,
+:root[data-theme="light"] [class*="-runs"] *{color:var(--text)!important;}
+
+/* === TYPOGRAPHY CONTRAST FIX === */
+:root[data-theme="light"]{
+  --muted:rgba(40,28,12,.86) !important;
+  --faint:rgba(40,28,12,.66) !important;
+  --text:#28200E !important;
+}
+:root[data-theme="light"] body,
+:root[data-theme="light"] *:not(svg):not(path):not(circle):not(rect):not(line):not(polygon){
+  color:var(--text);
+}
+:root[data-theme="light"] h1,:root[data-theme="light"] h2,:root[data-theme="light"] h3,
+:root[data-theme="light"] h4,:root[data-theme="light"] label,:root[data-theme="light"] strong{
+  color:#1F1808 !important; font-weight:600;
+}
+:root[data-theme="light"] p,:root[data-theme="light"] span,:root[data-theme="light"] li,
+:root[data-theme="light"] td,:root[data-theme="light"] th,:root[data-theme="light"] dt,
+:root[data-theme="light"] dd,:root[data-theme="light"] small{color:#28200E !important;}
+
+/* Lighter UI eyebrows still need to be readable */
+:root[data-theme="light"] [class*="eyebrow"],
+:root[data-theme="light"] [class*="overline"],
+:root[data-theme="light"] [class*="-label"],
+:root[data-theme="light"] [class*="muted"]{color:rgba(40,28,12,.78) !important;}
+
+/* === FORCE EVERY DARK INLINE-BG → cream + dark text === */
+:root[data-theme="light"] [style*="background:#0"],
+:root[data-theme="light"] [style*="background: #0"],
+:root[data-theme="light"] [style*="background-color:#0"],
+:root[data-theme="light"] [style*="background-color: #0"],
+:root[data-theme="light"] [style*="background:#1"],
+:root[data-theme="light"] [style*="background: #1"]{
+  background:var(--bg-2) !important;
+  color:var(--text) !important;
+  border:1px solid var(--line) !important;
+}
+:root[data-theme="light"] [style*="background:#0"] *,
+:root[data-theme="light"] [style*="background-color:#0"] *,
+:root[data-theme="light"] [style*="background:#1"] *{color:var(--text) !important;}
+
+/* Dropdown native */
+:root[data-theme="light"] select{
+  background:var(--bg-2) !important;
+  color:var(--text) !important;
+  border:1px solid var(--input-border) !important; -webkit-appearance:none; appearance:none;
+  background-image:linear-gradient(45deg, transparent 50%, var(--text) 50%),
+                   linear-gradient(135deg, var(--text) 50%, transparent 50%) !important;
+  background-position:calc(100% - 18px) 55%, calc(100% - 12px) 55% !important;
+  background-size:6px 6px, 6px 6px !important;
+  background-repeat:no-repeat !important;
+}
+
+/* Calibration metric cards: titles, labels visible */
+:root[data-theme="light"] [class*="metric"] [class*="label"],
+:root[data-theme="light"] [class*="metric"] small,
+:root[data-theme="light"] [class*="kpi"] *{color:rgba(40,28,12,.80) !important;}
+:root[data-theme="light"] [class*="metric"] [class*="value"],
+:root[data-theme="light"] [class*="kpi"] [class*="value"]{color:var(--planet-2) !important;font-weight:700;}
+
+/* Compliance category card text */
+:root[data-theme="light"] [class*="esrs"] *,
+:root[data-theme="light"] [class*="category"] *,
+:root[data-theme="light"] [class*="compliance"] *{color:var(--text) !important;}
+
+/* Recommended actions banners — light bg, dark text */
+:root[data-theme="light"] [class*="action"][class*="row"],
+:root[data-theme="light"] [class*="recommend"] [class*="item"]{
+  background:var(--bg-2) !important;
+  color:var(--text) !important;
+}
+:root[data-theme="light"] [class*="action"][class*="row"] *{color:var(--text) !important;}
+
+/* Status pills inside actions keep their tinted color */
+:root[data-theme="light"] [class*="HIGH"],
+:root[data-theme="light"] [class*="MEDIUM"],
+:root[data-theme="light"] [class*="LOW"]{color:#28200E !important;}
+
+/* Calibration chart panel — tinted cream not dark */
+:root[data-theme="light"] [class*="reliability"],
+:root[data-theme="light"] [class*="chart-panel"],
+:root[data-theme="light"] [class*="diagram"]{
+  background:var(--bg-2) !important;
+}
+:root[data-theme="light"] [class*="reliability"] *,
+:root[data-theme="light"] [class*="diagram"] *{fill:var(--text); color:var(--text) !important;}
+
+/* === All bare buttons get visible cream-pill styling === */
+:root[data-theme="light"] button{
+  background:var(--bg-1) !important;
+  color:var(--text) !important;
+  border:1px solid var(--line-2) !important;
+  padding:6px 14px;
+  border-radius:8px;
+  cursor:pointer;
+  font-weight:500;
+}
+:root[data-theme="light"] button:hover{
+  background:rgba(123,94,42,.14) !important;
+  border-color:rgba(123,94,42,.36) !important;
+}
+:root[data-theme="light"] button.active,
+:root[data-theme="light"] button[class*="active"],
+:root[data-theme="light"] button[aria-pressed="true"]{
+  background:var(--planet) !important;
+  color:#F5EDD8 !important;
+  border-color:var(--planet) !important;
+}
+
+/* Primary actions (Run, Compare, Explain) keep bronze fill */
+:root[data-theme="light"] button[class*="primary"],
+:root[data-theme="light"] .btn-primary,
+:root[data-theme="light"] button.run,
+:root[data-theme="light"] button[type="submit"]{
+  background:var(--planet) !important;
+  color:#F5EDD8 !important;
+  border:0 !important;
+}
+:root[data-theme="light"] button[class*="primary"]:hover{background:var(--planet-2) !important;}
+
+/* Links styled as buttons (Export CSV) */
+:root[data-theme="light"] a[class*="btn"],
+:root[data-theme="light"] a[class*="button"],
+:root[data-theme="light"] a[role="button"]{
+  background:var(--bg-1) !important;
+  color:var(--text) !important;
+  border:1px solid var(--line-2) !important;
+  padding:6px 14px;
+  border-radius:8px;
+  text-decoration:none !important;
+  display:inline-block;
+}
+:root[data-theme="light"] a[class*="btn"]:hover{
+  background:rgba(123,94,42,.14) !important;
+}
+
+/* Filter pill group (LOW/MED/HIGH) */
+:root[data-theme="light"] [class*="risk-filter"] button,
+:root[data-theme="light"] [class*="filter-group"] button,
+:root[data-theme="light"] [role="group"] button{
+  background:var(--bg-2) !important;
+  border:1px solid var(--line) !important;
+}
+
+/* === POLISH: shadows, hover, transitions === */
+:root[data-theme="light"] .card,
+:root[data-theme="light"] [class*="-card"],
+:root[data-theme="light"] [class*="-panel"]{
+  box-shadow:
+    0 1px 2px rgba(60,40,20,.06),
+    0 4px 12px -4px rgba(60,40,20,.10),
+    inset 0 1px 0 rgba(255,245,220,.50) !important;
+  transition:transform .25s var(--ease), box-shadow .25s var(--ease), border-color .2s !important;
+}
+:root[data-theme="light"] .card:hover,
+:root[data-theme="light"] [class*="-card"]:hover{
+  transform:translateY(-2px);
+  box-shadow:
+    0 2px 4px rgba(60,40,20,.08),
+    0 12px 28px -8px rgba(60,40,20,.18),
+    inset 0 1px 0 rgba(255,245,220,.60) !important;
+  border-color:rgba(123,94,42,.24) !important;
+}
+
+/* Smooth theme switch */
+html, body, .card, [class*="-card"], [class*="-panel"], table, tr, td, th, input, select, button, a{
+  transition:background-color .35s var(--ease), color .25s var(--ease), border-color .25s var(--ease), box-shadow .25s var(--ease) !important;
+}
+
+/* Buttons depth */
+:root[data-theme="light"] button[class*="primary"],
+:root[data-theme="light"] .btn-primary,
+:root[data-theme="light"] button.run{
+  box-shadow:0 1px 2px rgba(92,69,32,.30), 0 4px 12px -4px rgba(92,69,32,.40) !important;
+  transition:transform .15s var(--ease), box-shadow .2s var(--ease), background .2s !important;
+}
+:root[data-theme="light"] button[class*="primary"]:hover{
+  transform:translateY(-1px);
+  box-shadow:0 2px 4px rgba(92,69,32,.36), 0 8px 20px -6px rgba(92,69,32,.50) !important;
+}
+:root[data-theme="light"] button[class*="primary"]:active{transform:translateY(0);}
+
+/* Table row hover smooth */
+:root[data-theme="light"] tbody tr{transition:background .15s ease;}
+
+/* Input focus glow */
+:root[data-theme="light"] input:focus,
+:root[data-theme="light"] select:focus,
+:root[data-theme="light"] textarea:focus{
+  box-shadow:0 0 0 3px rgba(123,94,42,.18), 0 1px 4px rgba(60,40,20,.10) !important;
+}
+
+/* Nav link underline animation */
+:root[data-theme="light"] .shell-nav a{position:relative;}
+:root[data-theme="light"] .shell-nav a::after{
+  content:""; position:absolute; left:50%; bottom:4px;
+  width:0; height:2px; background:var(--planet);
+  transition:width .25s var(--ease), left .25s var(--ease);
+  border-radius:2px;
+}
+:root[data-theme="light"] .shell-nav a:hover::after{width:60%; left:20%;}
+:root[data-theme="light"] .shell-nav a.active::after{width:60%; left:20%; background:var(--planet-2);}
+
+/* Skeleton shimmer in cream tone */
+@keyframes shimmerCream{
+  0%{background-position:-200% 0}
+  100%{background-position:200% 0}
+}
+:root[data-theme="light"] .skeleton,
+:root[data-theme="light"] [class*="skeleton"]{
+  background:linear-gradient(90deg, var(--bg-3) 0%, var(--bg-2) 50%, var(--bg-3) 100%) !important;
+  background-size:200% 100% !important;
+  animation:shimmerCream 1.6s infinite ease-in-out;
+  border-radius:6px;
+}
+
+/* Status pulsing dot */
+:root[data-theme="light"] .status-pill::before{
+  animation:pulseBronze 2s infinite;
+}
+@keyframes pulseBronze{
+  0%,100%{box-shadow:0 0 0 0 rgba(123,94,42,.50)}
+  70%{box-shadow:0 0 0 6px rgba(123,94,42,0)}
+}
+
+/* Dark theme — also gets nicer hover */
+:root[data-theme="dark"] .card:hover,
+:root[data-theme="dark"] [class*="-card"]:hover{
+  transform:translateY(-2px);
+  border-color:rgba(47,224,166,.28) !important;
+  box-shadow:0 12px 32px -10px rgba(0,0,0,.60), 0 0 0 1px rgba(47,224,166,.10) !important;
+}
+
+/* Selection color match palette */
+:root[data-theme="light"] ::selection{background:rgba(123,94,42,.28); color:#1F1808;}
+:root[data-theme="dark"] ::selection{background:rgba(47,224,166,.30); color:#F4F6F8;}

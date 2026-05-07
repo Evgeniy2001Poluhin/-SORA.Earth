@@ -23,7 +23,7 @@
 }
 .cmp-presets .preset {
   padding: 7px 14px;
-  background: #0e1411;
+  background: var(--bg-1);
   color: #cfcfcf;
   border: 1px solid #1f2a24;
   border-radius: 999px;
@@ -42,7 +42,7 @@
 }
 
 .cmp-form {
-  background: #0c100e;
+  background: var(--bg-1);
   border: 1px solid #1a2620;
   border-radius: 12px;
   padding: 18px;
@@ -68,7 +68,7 @@
 .cmp-form input {
   padding: 9px 11px;
   border: 1px solid #243029;
-  background: #0a0d0b;
+  background: var(--bg-1);
   color: #e6e6e6;
   border-radius: 8px;
   font-size: 14px;
@@ -105,7 +105,7 @@
   align-items: center;
   gap: 32px;
   padding: 24px;
-  background: linear-gradient(135deg, #0c1411 0%, #0a1815 100%);
+  background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-1) 100%);
   border: 1px solid #1f2a24;
   border-radius: 14px;
 }
@@ -149,7 +149,7 @@
 }
 .cat {
   padding: 16px;
-  background: #0c100e;
+  background: var(--bg-1);
   border: 1px solid #1a2620;
   border-radius: 10px;
   transition: border-color 0.15s;
@@ -208,7 +208,7 @@
   gap: 10px;
   padding: 10px 14px;
   margin-bottom: 8px;
-  background: #0c100e;
+  background: var(--bg-1);
   border-left: 3px solid #2d7a55;
   border-radius: 6px;
   font-size: 13px;
