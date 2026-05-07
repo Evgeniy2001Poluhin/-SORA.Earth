@@ -35,7 +35,9 @@ def _to_legacy(p):
 
 def _nn_forward(nn_model, feats):
     x = torch.tensor(feats.values, dtype=torch.float32)
-    return float(nn_model(x).detach().numpy()[0][0])
+    nn_model.eval()
+    with torch.no_grad():
+        return float(nn_model(x).cpu().numpy()[0][0])
 
 
 @router.post("/predict")
