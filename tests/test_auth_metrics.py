@@ -3,7 +3,7 @@ from app.main import app
 from app.auth import require_api_key
 
 def _mock_api_key():
-    return "demo-key-2026"
+    return {"name": "Demo User", "role": "user", "rate_limit": 100}
 
 app.dependency_overrides[require_api_key] = _mock_api_key
 client = TestClient(app)
