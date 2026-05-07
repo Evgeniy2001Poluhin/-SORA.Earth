@@ -4,7 +4,7 @@ from app.main import app
 from app.auth import require_api_key
 
 def _mock_api_key():
-    return "demo-key-2026"
+    return {"name": "Demo User", "role": "user", "rate_limit": 100}
 
 app.dependency_overrides[require_api_key] = _mock_api_key
 client = TestClient(app)
@@ -12,12 +12,10 @@ client = TestClient(app)
 def teardown_module():
     app.dependency_overrides.clear()
 
-@pytest.mark.xfail(reason="auth_routes.py:97 TypeError prod bug v0.2.1")
 def test_auth_invalid_key():
     resp = client.get("/api/v1/auth/verify", headers={"X-API-Key": "bad-key"})
     assert resp.status_code in [200, 401, 403]
 
-@pytest.mark.xfail(reason="auth_routes.py:97 TypeError prod bug v0.2.1")
 def test_auth_valid_key():
     resp = client.get("/api/v1/auth/verify", headers={"X-API-Key": "demo-key-2026"})
     assert resp.status_code == 200
