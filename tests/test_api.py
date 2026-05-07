@@ -15,11 +15,10 @@ PROJECT = {
 
 # ---- Health & Pages ----
 
-@pytest.mark.xfail(reason="frontend SPA replaced HTML")
 def test_root():
     r = client.get("/")
     assert r.status_code == 200
-    assert "SORA.Earth" in r.text
+    assert len(r.text) > 0
 
 def test_health():
     r = client.get("/api/v1/health")

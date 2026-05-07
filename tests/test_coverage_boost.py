@@ -212,10 +212,9 @@ class TestMainCoverage:
         assert r.status_code == 200
         assert "paths" in r.json()
 
-    @pytest.mark.xfail(reason="root no longer returns 404")
     def test_404(self):
         c = TestClient(app, raise_server_exceptions=False)
-        assert c.get("/no-such-route-xyz").status_code == 404
+        assert c.get("/api/v1/no-such-route-xyz").status_code == 404
 
     def test_docs(self):
         c = TestClient(app, raise_server_exceptions=False)
