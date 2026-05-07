@@ -83,3 +83,6 @@ C4-style диаграммы в `docs/diagrams/` (Mermaid, рендерятся �
 ## Screenshots
 
 9 thesis-grade артефактов с подписями: [docs/screenshots/README.md](docs/screenshots/README.md).
+
+![CI](https://github.com/Evgeniy2001Poluhin/-SORA.Earth/actions/workflows/ci.yml/badge.svg)
+![Production](https://img.shields.io/badge/production-live-brightgreen)
