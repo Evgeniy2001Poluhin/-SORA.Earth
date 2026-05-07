@@ -38,3 +38,7 @@ train_model_backup.py
 update_report_with_metrics.py
 venv/
 web/tsconfig.tsbuildinfo
+
+# Production secrets — added 2026-05-07
+web/.env.production
+.env.production
