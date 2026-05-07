@@ -42,3 +42,6 @@ web/tsconfig.tsbuildinfo
 # Production secrets — added 2026-05-07
 web/.env.production
 .env.production
+
+# Vercel artifacts
+.vercel/
