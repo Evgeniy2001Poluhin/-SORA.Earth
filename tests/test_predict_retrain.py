@@ -154,7 +154,6 @@ class TestRetrain:
         assert r.status_code == 200
         assert "total" in r.json()
 
-    @pytest.mark.xfail(reason="ValueError NaN in y prod bug v0.2.1")
     def test_retrain_endpoint(self):
         from app.auth import require_admin
         app.dependency_overrides[require_admin] = lambda: {"username": "test_admin", "role": "admin"}
