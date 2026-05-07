@@ -141,13 +141,8 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
                         "budget_per_month", "co2_per_dollar", "efficiency_score",
                         "year", "quarter"]
 
-        # Clean NaN/inf before training (v0.2.2 fix)
-        df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=feature_cols + ["success"])
-        if len(df) < min_samples:
-            raise HTTPException(400, f"After NaN cleanup, need at least {min_samples} samples, have {len(df)}")
-
         X = df[feature_cols].values
-        y = df["success"].astype(int).values
+        y = df["success"].values
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
         from sklearn.preprocessing import StandardScaler
