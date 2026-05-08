@@ -72,3 +72,11 @@ design.backup-*/
 app/static/spa/assets/
 !app/static/spa/assets/.gitkeep
 RELEASE_NOTES_*.md
+
+# Load test artifacts (Locust)
+loadtest_*.csv
+loadtest_v2_*.csv
+
+# Experimental test scripts (moved to tests/ or removed)
+/test_ab_boost.py
+/test_calibration_boost.py
