@@ -80,3 +80,15 @@ loadtest_v2_*.csv
 # Experimental test scripts (moved to tests/ or removed)
 /test_ab_boost.py
 /test_calibration_boost.py
+
+# Production model artifacts (не коммитим — отдельно бэкапим)
+models/best_threshold.pkl
+models/meta.json
+models/metrics.json
+models/scaler.pkl
+
+# MLflow local
+mlflow_local.db
+mlflow_local.db-journal
+mlruns_local/
+mlruns/
