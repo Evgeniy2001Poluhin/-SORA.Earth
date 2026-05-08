@@ -90,7 +90,7 @@ export function MlopsHealthPage() {
           <div className="mlops-row mlops-head">
             <div>Version</div><div>Trigger</div><div className="tabular">Dur</div><div className="tabular">Acc</div><div className="tabular">F1</div><div className="tabular">AUC</div><div>Status</div>
           </div>
-          {hist.map((r) => (
+          {hist.map((r:any) => (
             <div key={r.model_version || r.started_at} className="mlops-row">
               <div className="mono" style={{ fontSize: 11 }}>{r.model_version || "—"}</div>
               <div style={{ color: "var(--muted)", fontSize: 12 }}>{r.trigger_source || "—"}</div>
@@ -107,7 +107,7 @@ export function MlopsHealthPage() {
       <div className="mlops-section">
         <div className="eyebrow" style={{ marginBottom: 12 }}>Model artifacts · {metrics.models_available.length}</div>
         <div className="mlops-chips">
-          {metrics.models_available.map((f) => (
+          {metrics.models_available.map((f:any) => (
             <span key={f} className="mlops-chip">{f}</span>
           ))}
         </div>

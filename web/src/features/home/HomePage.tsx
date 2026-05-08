@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { HeroVideo } from "./HeroVideo";
 import { motion } from "framer-motion";
 import * as THREE from "three";
 import "./home.css";
@@ -53,7 +52,7 @@ export function HomePage() {
     return ()=>{cancelAnimationFrame(raf); window.removeEventListener("resize",onResize); renderer.dispose(); if(renderer.domElement.parentNode===el) el.removeChild(renderer.domElement);};
   }, []);
   return (
-    <div className="home"><HeroVideo/>
+    <div className="home">
       <section className="home-hero">
         <div>
           <motion.div className="eyebrow" initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} style={{display:"inline-flex",alignItems:"center",gap:10,color:"var(--planet)",marginBottom:20}}>

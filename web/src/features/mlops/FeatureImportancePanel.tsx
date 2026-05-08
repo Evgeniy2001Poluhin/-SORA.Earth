@@ -10,7 +10,7 @@ export function FeatureImportancePanel() {
   if (q.isError) return <div className="card-body"><p style={{ color: "#EF4444" }}>Failed to load feature importance</p></div>;
 
   const list = q.data && q.data.features ? q.data.features : [];
-  const data = list.slice().sort((a, b) => b.importance - a.importance);
+  const data = list.slice().sort((a:any, b:any) => b.importance - a.importance);
   const max = data.length > 0 ? data[0].importance : 1;
 
   return (
@@ -23,7 +23,7 @@ export function FeatureImportancePanel() {
             <YAxis type="category" dataKey="name" stroke="var(--muted)" fontSize={11} width={100} />
             <Tooltip cursor={{ fill: "rgba(255,255,255,0.04)" }} contentStyle={{ background: "var(--bg)", border: "1px solid rgba(255,255,255,0.1)", fontSize: 12 }} />
             <Bar dataKey="importance" radius={[0, 4, 4, 0]}>
-              {data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+              {data.map((_:any, i:number) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
             </Bar>
           </BarChart>
         </ResponsiveContainer>

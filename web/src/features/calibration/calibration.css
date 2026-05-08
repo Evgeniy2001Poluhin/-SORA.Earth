@@ -17,16 +17,16 @@
 
 
 /* Brier + Reliability panel (E1) */
-.brier-panel { margin-top: 32px; padding: 20px; background: #0f1419; border-radius: 12px; border: 1px solid #1f2937; }
+.brier-panel { margin-top: 32px; padding: 20px; background: var(--bg-1); border-radius: 12px; border: 1px solid var(--line-2); }
 .brier-head h2 { margin: 0 0 4px; font-size: 1.25rem; color: #f3f4f6; }
 .brier-head .muted { margin: 0 0 16px; color: #9ca3af; font-size: 0.875rem; }
 .scn-row { display: flex; gap: 8px; margin-bottom: 16px; }
-.scn-row button { padding: 8px 16px; background: #1f2937; color: #d1d5db; border: 1px solid #374151; border-radius: 6px; cursor: pointer; font-size: 0.875rem; }
+.scn-row button { padding: 8px 16px; background: var(--line-2); color: #d1d5db; border: 1px solid #374151; border-radius: 6px; cursor: pointer; font-size: 0.875rem; }
 .scn-row button:hover:not(:disabled) { background: #374151; }
 .scn-row button.active { background: #10b981; color: white; border-color: #10b981; }
 .scn-row button:disabled { opacity: 0.5; cursor: wait; }
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.kpi-row .kpi { background: #1f2937; padding: 12px; border-radius: 8px; text-align: center; }
+.kpi-row .kpi { background: var(--line-2); padding: 12px; border-radius: 8px; text-align: center; }
 .kpi-row .kpi span { display: block; font-size: 0.75rem; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; }
 .kpi-row .kpi b { display: block; font-size: 1.5rem; color: #10b981; margin: 4px 0; font-variant-numeric: tabular-nums; }
 .kpi-row .kpi em { display: block; font-size: 0.7rem; color: #6b7280; font-style: normal; }

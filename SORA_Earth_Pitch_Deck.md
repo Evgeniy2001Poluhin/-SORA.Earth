@@ -5,125 +5,164 @@ class: invert
 paginate: true
 ---
 
-# SORA.Earth
-## Production-grade ML platform for ESG project evaluation
+# SORA.earth
+## Planetary-scale ESG intelligence, explainable down to the feature
 
-Evgeny Poluhin · April 2026 · investor-demo ready · 90/100
+Evgeny Poluhin · Диплом · Май 2026
+https://sora-earth.ru · OPERATIONAL
 
 ---
 
 ## The Problem
 
-- ESG investing is a $50T market by 2026
-- 73% of ESG ratings are inconsistent between providers
-- Investors make multi-million decisions on opaque, black-box scores
-- No standardized, auditable, explainable ESG evaluation infrastructure exists
+- ESG investing — $50T рынок к 2026
+- 73% ESG рейтингов несогласованны между провайдерами
+- Инвесторы принимают multi-million решения на black-box скорах
+- Нет production-grade, auditable, explainable ESG-инфраструктуры
+- Регуляторы (EU CSRD, SEC, TCFD) требуют explainability к 2027
 
 ---
 
-## The Solution — SORA.Earth
+## The Solution — SORA.earth
 
-An ML-powered backend that scores any ESG project in under 200ms with full explainability, drift monitoring, and autonomous retraining.
+ML-powered backend, который оценивает любой ESG-проект за <200ms с полной explainability, drisk simulation
+- Self-healing MLOps via autonomous scheduler agent
 
-- ROC-AUC 0.912 · F1 0.838 · Accuracy 0.823
-- 15 production admin surfaces · FastAPI + PostgreSQL + XGBoost ensemble
-- SHAP-based explainability · Monte Carlo risk simulation
-- Self-healing MLOps via autonomous AI Teammate agent
+---
+
+## Live Demo
+
+![bg right:45%](assets/slides/home.png)
+
+![bg right:45%](assets/slides/home.png)
+
+https://sora-earth.ru — открываю прямо сейчас
+
+- Home · Evaluate · Compare · Drift · Explain · Calibration · MLOps · History
+- Run evaluation -> ESG score + SHAP waterfall за 200ms
+- 32 страны, real-time MLOps monitoring
+
+Переключаюсь в Safari.
+
+---
+
+## Architecture
+
+Cloudflare CDN + Zero-Trust Tunnel
+-> nginx reverse proxy
+-> React SPA + FastAPI
+-> PostgreSQL, Redis, Prometheus, Grafana
+-> MLflow + Scheduler
+
+7 Docker containers · Ubuntu 24.04 · 3 HTTPS subdomains
 
 ---
 
 ## Product — Score any project in seconds
 
-Input: budget, CO2 social impact, duration, country
-Output: ESG score / 100, category breakdowns (Env/Soc/Econ), ML success probability, SHAP waterfall
+Input: budget, CO2 impact, duration, country
+Output: ESG score /100 · Env/Soc/Econ breakdown · probability · SHAP waterfall
 
-Example: Solar Panel Germany · 50k USD · 85 t/yr CO2
-→ Score 64.2 / 100 · probability 92.0%
-→ Top drivers: efficiency_score (+0.13), budget_per_month (+0.08), social_impact (+0.08)
-
----
-
-## Risk simulation — Monte Carlo
-
-- 1,000 simulations per project in under 1 second
-- P5 / P50 / P95 confidence bands on every score
-- Risk distribution: LOW / MEDIUM / HIGH with probabilities
-- Investor sees not just a point estimate — the full uncertainty envelope
+Example: Solar Panel Germany · $50k · 85 t/yr CO2
+-> Score 64.2/100 · probability 92.0%
+-> Top drivers: efficiency (+0.13), budget (+0.08), social (+0.08)
 
 ---
 
-## Portfolio view
+## Risk Simulation — Monte Carlo
 
-20 projects evaluated · 14 Strong · 6 Medium · 0 Weak · Avg ESG 79.3
-
-Country ranking across 30 nations — Sweden #1 (HDI 0.947, 60% renewable), USA #35, Russia #58
-
----
-
-## Autonomous MLOps — AI Teammate
-
-An agent that monitors data freshness, model health, drift, and failures — then acts without human-in-the-loop.
-
-- 12 retrains logged · 8 successful · last retrain 13h ago
-- Auto-r model, promotes versions
-- Decision feed: "OK: All systems healthy. No action needed."
-- Zero human intervention to keep the model fresh
+- 1,000 simulations per project за <1 секунду
+- P5 / P50 / P95 confidence bands
+- Risk distribution: LOW / MEDIUM / HIGH
+- Инвестор видит весь uncertainty envelope, не точку
 
 ---
 
-## Production rigor
+## Autonomous MLOps
+
+![bg right:45%](assets/slides/drift.png)
+
+Scheduler agent мониторит data freshness, model health, drift и действует без human-in-the-loop.
+
+- Drift detection (PSI, KS test) real-time
+- Auto-retrain по расписанию + on-demand
+- Champion/challenger promotion
+- Decision feed: "OK: All systems healthy"
+
+---
+
+## Production Rigor
+
+![bg right:35%](assets/slides/health.png)
+
+![bg right:35%](assets/slides/health.png)
 
 | Subsystem | Metric |
 |---|---|
-| Ensemble CV AUC | 0.9186 |
-| Best threshold | 0.48 (optimized F1) |
-| Train / test | 583 / 146 samples |
-| Data health | 0% null · 0 out-of-range (24h) |
-| Avg latency | 110ms |
-| Scheduler | Running · 0 job failures |
-| Total predictions | 327 logged · full audit trail |
+| Ensemble CV AUC | 0.82 |
+| Tests passed | 324 |
+| MLflow runs | 100 |
+| Prometheus metrics | 48 |
+| Predictions logged | 327+ |
+| p95 latency | 300ms |
+| Uptime | 99.9% |
+| Scheduler | Running · 0 failures |
 
 ---
 
-## Observability stack
+## Observability & Reliability
 
-Every event, prediction, and retraining run is logged, queryable, and audit-safe.
+![bg right:45%](assets/slides/grafana.png)
 
-- Activity timeline — system-wide event feed
-- Audit log — every admin login + API call with IP + status
-- Predictions log — 100 last inferences with latency + score
-- Data health — null rates + range violations per field
-- Batch evaluations — bulk scoring runs with success/fail
+![bg right:45%](assets/slides/grafana.png)
 
----
-
-## Why now
-
-- Regulators (EU SFDR, SEC climate rule) demand auditable ESG scores by 2027
-- LLM-only "AI ESG" tools hallucinate — ours ialibrated probabilities + SHAP
-- Data partnerships available: World Bank, IEA, EDGAR
-- Infrastructure shift from Excel-based ESG consulting to API-first platforms
+- Grafana dashboards: grafana.sora-earth.ru
+- Prometheus metrics (48 metrics)
+- UptimeRobot 5-min health checks, public status page
+- Telegram aleion, tested restore
+- Disaster recovery playbook validated
 
 ---
 
-## Traction & Ask
+## Security & Performance
 
-Today:
-- 15 production surfaces · 90/100 readiness score
-- Full CI/CD · Docker · Postgres + pgbouncer · Prometheus-ready
-- Academic validation (MSUPE thesis) on signal-processing foundations
-
-Ask: seed round for
-- Data partnerships
-- GTM — 3 design partners in EU climate-tech funds
-- 2 senior ML + 1 frontend hire
+- HTTPS via Cloudflare managed TLS (3 subdomains)
+- Zero-Trust Tunnel — origin IP hidden
+- UFW firewall: 80/443/2222 only
+- Gunicorn 4 workers (+3x throughput)
+- Code-splitting 1.4MB -> 410KB gzipped
+- PostgreSQL indexes x5 (10-100x faster)
+- HTTP/2 + gzip + security headers
 
 ---
 
-## Live demo available now
+## Why Now
 
-evgenijpoluhin · sora.earth · Amsterdam, NL
+- EU SFDR, SEC climate rule требуют auditable ESG к 2027
+- LLM-only "AI ESG" hallucinate — у нас calibrated probabilities + SHAP
+- Data partnerships: World Bank, IEA, EDGAR
+- Shift от Excel ESG consulting к API-first платформам
+
+---
+
+## Roadmap
+
+- Phase 0-5 DONE: production, HTTPS, MLOps, backups
+- Phase 6: GitHub Actions CI/CD, staging
+- Phase 7: Feast feature store, canary rollouts, fairness
+- Phase 8: landing, i18n, WCAG AA, PWA
+- Phase 9: Stripe billing, multi-tenancy, public API docs
+
+---
+
+## Thank You
+
+Evgeny Poluhin · sora.earth · Amsterdam
+
+https://sora-earth.ru (OPERATIONAL)
+https://github.rth
+https://grafana.sora-earth.ru
 
 "Investing in climate without auditable ML is investing blind."
 
-Thank you.
+Questions?

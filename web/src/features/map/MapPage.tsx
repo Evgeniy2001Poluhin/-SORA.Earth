@@ -73,7 +73,7 @@ export default function MapPage() {
           attributionControl={false}
           maxBounds={WORLD_BOUNDS}
           maxBoundsViscosity={1.0}
-          style={{ height: 600, width: "100%", background: "#05080a" }}
+          style={{ height: 600, width: "100%", background: "var(--bg-1)" }}
         >
           <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
 
