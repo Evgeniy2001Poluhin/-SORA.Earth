@@ -110,11 +110,27 @@ app = FastAPI(
 
 @app.middleware("http")
 async def head_to_get(request, call_next):
+    """Convert HEAD to GET internally, then return empty body (RFC 7231).
+
+    Do NOT set Content-Length manually — it conflicts with the streamed
+    body_iterator and causes 'Ru longer than
+    Content-Length' in uvicorn. Let Starlette/Uvicorn compute it.
+    """
     if request.method == "HEAD":
         request.scope["method"] = "GET"
         response = await call_next(request)
-        response.headers["content-length"] = "0"
-        return response
+        from starlette.responses import Response as _Resp
+        empty = _Resp(
+            content=b"",
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.media_type,
+        )
+        if "content-length" in empty.headers:
+            del empty.headers["content-length"]
+        if "transfer-encoding" in empty.headers:
+            del empty.headers["transfer-encoding"]
+        return empty
     return await call_next(request)
 
 

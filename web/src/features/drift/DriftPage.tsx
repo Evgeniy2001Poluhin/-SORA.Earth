@@ -59,7 +59,16 @@ export function DriftPage() {
   if (q.isLoading) return <div className="card-body"><p style={{ color: "var(--muted)" }}>Loading drift status...</p></div>;
   if (q.isError) return <div className="card-body"><p style={{ color: "#EF4444" }}>Failed to load drift status</p></div>;
 
-  const d = q.data!;
+  const d = q.data;
+  if (!d) {
+    return (
+      <div className="card-body">
+        <p style={{ color: "var(--muted)" }}>
+          No drift data available yet. Waiting for first observation...
+        </p>
+      </div>
+    );
+  }
   const isStable = d.status === "stable" || d.status === "no_baseline";
   const statusLabel = d.status === "no_baseline" ? "NO BASELINE" : (isStable ? "STABLE" : "DRIFT DETECTED");
   const statusColor = d.status === "no_baseline" ? "var(--muted)" : (isStable ? "#2FE0A6" : "#EF4444");
