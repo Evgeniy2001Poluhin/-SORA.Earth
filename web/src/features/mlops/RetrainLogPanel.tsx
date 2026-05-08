@@ -43,7 +43,7 @@ export function RetrainLogPanel() {
           <div className="tabular">AUC</div>
           <div>Status</div>
         </div>
-        {items.map((r) => {
+        {items.map((r:any) => {
           let mx: { accuracy?: number; f1_score?: number; roc_auc?: number } = {};
           try { mx = r.metrics_json ? JSON.parse(r.metrics_json) : {}; } catch (e) { mx = {}; }
           const ok = r.status === "success";

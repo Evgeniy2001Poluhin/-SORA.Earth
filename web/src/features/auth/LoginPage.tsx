@@ -30,7 +30,7 @@ export function LoginPage() {
           <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Password</span>
           <input type="password" value={p} onChange={(e) => setP(e.target.value)} style={{ padding: 10, background: "var(--bg)", color: "var(--text)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }} />
         </label>
-        <button type="submit" disabled={loading} className="preset-btn" style={{ marginTop: 8, padding: 12, background: "#2FE0A6", color: "#0a0a0a", fontWeight: 600, border: "none", borderRadius: 8 }}>
+        <button type="submit" disabled={loading} className="preset-btn" style={{ marginTop: 8, padding: 12, background: "#2FE0A6", color: "var(--bg-2)", fontWeight: 600, border: "none", borderRadius: 8 }}>
           {loading ? "Signing in..." : "Sign in"}
         </button>
         <p style={{ color: "var(--faint)", fontSize: 11, marginTop: 8 }}>Default: admin / sora2026</p>
