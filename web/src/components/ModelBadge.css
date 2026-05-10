@@ -1,0 +1,7 @@
+.model-badge{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:18px;color:#fff;background:#475569;user-select:none}
+.model-badge--champion{background:#059669}
+.model-badge--challenger{background:#d97706}
+.model-badge--loading{color:#94a3b8;background:transparent}
+.model-badge--error{color:#ef4444;background:transparent}
+.model-badge__at{opacity:.75}
+.model-badge__dot{opacity:.6}
