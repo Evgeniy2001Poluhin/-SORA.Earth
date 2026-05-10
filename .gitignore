@@ -96,3 +96,5 @@ mlruns/
 # ML runtime artifacts
 output/
 !output/.gitkeep
+
+web/tsconfig.tsbuildinfo
