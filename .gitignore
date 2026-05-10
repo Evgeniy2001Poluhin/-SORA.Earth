@@ -92,3 +92,7 @@ mlflow_local.db
 mlflow_local.db-journal
 mlruns_local/
 mlruns/
+
+# ML runtime artifacts
+output/
+!output/.gitkeep
