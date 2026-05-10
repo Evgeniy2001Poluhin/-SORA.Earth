@@ -165,18 +165,25 @@ mv = client.create_model_version(
 print("Created version", mv.version, "of", REGISTERED_MODEL)
 
 if best_auc >= PRODUCTION_AUC_THRESHOLD:
-    target_stage = "Production"
+    target_alias = "champion"
 elif best_auc >= PROMOTION_AUC_THRESHOLD:
-    target_stage = "Staging"
+    target_alias = "challenger"
 else:
-    target_stage = None
+    target_alias = None
 
-if target_stage:
-    client.transition_model_version_stage(
-        name=REGISTERED_MODEL, version=mv.version,
-        stage=target_stage, archive_existing_versions=True,
+if target_alias:
+    try:
+        prev = client.get_model_version_by_alias(REGISTERED_MODEL, target_alias)
+        if prev and prev.version != mv.version:
+            client.delete_registered_model_alias(REGISTERED_MODEL, target_alias)
+    except Exception:
+        pass
+    client.set_registered_model_alias(
+        name=REGISTERED_MODEL,
+        alias=target_alias,
+        version=mv.version,
     )
-    print("Transitioned version", mv.version, "->", target_stage)
+    print("Assigned alias @" + target_alias, "->", mv.version)
 else:
     print("AUC", round(best_auc, 4), "below threshold", PROMOTION_AUC_THRESHOLD, "- no promotion")
 
@@ -196,11 +203,11 @@ with open(os.path.join(MODELS_DIR, "meta_v2.json"), "w") as f:
         "mlflow_run_id": best_run_id,
         "registered_model": REGISTERED_MODEL,
         "version": mv.version,
-        "stage": target_stage or "None",
+        "alias": target_alias or "None",
     }, f, indent=2)
 
 print()
 print("Best:", best_name, "| CV AUC =", round(best_auc, 4))
 print("Run:", best_run_id)
-print("Registry:", REGISTERED_MODEL, "v" + str(mv.version), "->", target_stage or "None")
+print("Registry:", REGISTERED_MODEL, "v" + str(mv.version), "->", target_alias or "None")
 print("UI: https://mlflow.sora-earth.ru/#/models/" + REGISTERED_MODEL)

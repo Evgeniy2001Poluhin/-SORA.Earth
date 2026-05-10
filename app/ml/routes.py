@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 import logging
 
-from app.ml.registry_loader import get_model, get_version, reload as reload_model
+from app.ml.registry_loader import get_model, get_version, get_alias, reload as reload_model
 from app.ml.features import build_features
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ class PredictResponse(BaseModel):
     success_class: int
     model_version: str
     model_name: str = "esg-success-predictor"
-    stage: str = "Production"
+    alias: str = "champion"
 
 
 @router.post("/predict", response_model=PredictResponse)
@@ -48,7 +48,7 @@ def predict(req: PredictRequest):
 def model_version():
     return {
         "name": "esg-success-predictor",
-        "stage": "Production",
+        "alias": get_alias(),
         "version": str(get_version()),
     }
 
