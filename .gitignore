@@ -98,3 +98,8 @@ output/
 !output/.gitkeep
 
 web/tsconfig.tsbuildinfo
+output/request_log/
+models/*.pkl
+models/*.json
+output/ref_stats.json
+output/loadtest_v2_*/

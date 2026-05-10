@@ -6,6 +6,9 @@ set -eu
 PORT="${PORT:-8000}"
 WORKERS="${WORKERS:-4}"
 
+export SORA_REQUEST_LOG="${SORA_REQUEST_LOG:-1}"
+export SORA_REQUEST_LOG_DIR="${SORA_REQUEST_LOG_DIR:-output/request_log}"
+
 echo "→ uvicorn app.main:app  workers=$WORKERS  port=$PORT"
 exec uvicorn app.main:app \
   --host 0.0.0.0 --port "$PORT" \
