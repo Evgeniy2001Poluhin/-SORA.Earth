@@ -1,9 +1,7 @@
 {
-  "best_model": "Stacking",
-  "cv_auc": 0.8194,
-  "full_dataset_auc": 1,
-  "accuracy": 0.778,
-  "f1": 0.8049,
+  "best_model": "RandomForest",
+  "cv_auc": 0.9892,
+  "cv_auc_std": 0.0053,
   "features": [
     "budget",
     "co2_reduction",
@@ -17,6 +15,9 @@
     "category_enc",
     "region_enc"
   ],
-  "dataset_size": 500,
-  "note": "CV AUC is the honest metric. Full dataset AUC shows upper bound."
+  "dataset_size": 800,
+  "mlflow_run_id": "d174574a1a484b4e9c6da334c4f5500c",
+  "registered_model": "esg-success-predictor",
+  "version": "3",
+  "stage": "Production"
 }
