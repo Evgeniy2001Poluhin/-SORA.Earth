@@ -37,6 +37,7 @@ from app.api import drift_monitor
 from app.api import ab_comparison as ab_comparison_api
 from app.api import compliance as compliance_api
 from app.api import map_data as map_api
+from app.ml.routes import router as ml_v2_router
 from app.api import reports as reports_api
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("sora")
@@ -506,6 +507,7 @@ app.include_router(api_v1)
 #     app.include_router(_r)
 # app.include_router(auth_router)
 app.include_router(ai_teammate_routes.router, prefix="/api/v1")
+app.include_router(ml_v2_router)
 
 
 # --- MLOps domain metrics (Prometheus) ---
