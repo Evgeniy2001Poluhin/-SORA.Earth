@@ -3,7 +3,7 @@ import mlflow
 import mlflow.sklearn
 from datetime import datetime
 
-MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5556")
 EXPERIMENT_NAME = "sora-earth-esg"
 
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
