@@ -57,3 +57,13 @@ def model_version():
 def model_reload():
     reload_model()
     return {"status": "reloaded", "version": str(get_version())}
+
+@router.get("/model/calibration")
+def model_calibration():
+    import json, os
+    base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    path = os.path.join(base, "output", "calibration_champion.json")
+    if not os.path.exists(path):
+        raise HTTPException(404, "run scripts/run_champion_calibration.py first")
+    with open(path) as f:
+        return json.load(f)
