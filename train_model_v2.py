@@ -86,7 +86,7 @@ gb = HistGradientBoostingClassifier(max_iter=300, max_depth=4, learning_rate=0.0
 stacking = StackingClassifier(
     estimators=[("rf", rf), ("xgb", xgbm), ("gb", gb)],
     final_estimator=LogisticRegression(C=0.5, max_iter=1000),
-    cv=5, passthrough=True,
+    cv=5, passthrough=False,
 )
 MODELS = {"RandomForest": rf, "XGBoost": xgbm, "Stacking": stacking}
 
