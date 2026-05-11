@@ -75,6 +75,15 @@ async def run_all_ingesters() -> dict:
             log.exception("[runner] %s failed: %s", ing.name, e)
 
     saved = _persist_signals(total_signals)
+
+    try:
+        from app.services.esg_aggregator import recalc_all_regions
+        agg = recalc_all_regions()
+        stats["aggregation"] = agg
+        log.info("[runner] aggregation: %s", agg)
+    except Exception as e:
+        log.exception("[runner] aggregation failed: %s", e)
+        stats["aggregation"] = {"status": "error", "error": str(e)}
     stats["total_signals"] = len(total_signals)
     stats["persisted"] = saved
     stats["finished_at"] = datetime.now(timezone.utc).isoformat()

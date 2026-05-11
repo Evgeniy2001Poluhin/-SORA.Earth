@@ -155,3 +155,18 @@ class RegionSignal(Base):
     created_at = Column(DateTime(timezone=True), default=func.now(), nullable=False)
     metadata_json = Column(Text, nullable=True)
 
+class RegionESGScore(Base):
+    __tablename__ = "region_esg_scores"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    region_code = Column(String(10), index=True, unique=True, nullable=False)
+    env_score = Column(Float, nullable=True)
+    social_score = Column(Float, nullable=True)
+    gov_score = Column(Float, nullable=True)
+    total_score = Column(Float, nullable=True)
+    confidence = Column(Float, nullable=True)
+    sources_count = Column(Integer, nullable=True)
+    signals_used = Column(Integer, nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=func.now(),
+                        onupdate=func.now(), nullable=False)
+
