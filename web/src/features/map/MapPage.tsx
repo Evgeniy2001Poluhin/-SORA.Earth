@@ -5,6 +5,8 @@ import type { LatLngBoundsExpression } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { api } from "@/api/client";
 import "./map.css";
+import { useState } from "react";
+import RussiaMapModal from "./RussiaMapModal";
 
 type Country = {
   code: string; name: string; lat: number; lon: number; esg: number;
@@ -26,6 +28,7 @@ const radiusByEsg = (esg: number) => 3 + (esg / 100) * 4;
 const haloRadius  = (esg: number) => 4 + (esg / 100) * 5;
 
 export default function MapPage() {
+  const [ruOpen, setRuOpen] = useState(false);
   const nav = useNavigate();
   const { data, isLoading, error } = useQuery({
     queryKey: ["map-countries"],
@@ -50,6 +53,11 @@ export default function MapPage() {
           <div className="stat"><b>{data.countries[0].name}</b><em>top: {data.countries[0].esg}</em></div>
           <div className="stat"><b>{Math.round(data.countries.reduce((s,c)=>s+c.esg,0)/data.countries.length)}</b><em>avg ESG</em></div>
         </div>
+              <button onClick={() => setRuOpen(true)}
+          style={{ marginTop: 8, padding: "6px 14px", borderRadius: 6,
+            background: "#1a1d20", border: "1px solid #2a2e33", color: "#e6e6e6pointer" }}>
+          🇷🇺 Россия — карта регионов
+        </button>
       </header>
 
       <div className="map-legend">
@@ -135,6 +143,7 @@ export default function MapPage() {
           ))}
         </ol>
       </section>
+          <RussiaMapModal open={ruOpen} onClose={() => setRuOpen(false)} />
     </div>
   );
 }
