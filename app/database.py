@@ -1,7 +1,7 @@
 from datetime import datetime
 import os
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text, create_engine
+from sqlalchemy import Column, DateTime, Float, Integer, String, Text, create_engine, func
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv(
@@ -141,3 +141,17 @@ def get_db():
         yield db
     finally:
         db.close()
+
+class RegionSignal(Base):
+    __tablename__ = "region_signals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    region_code = Column(String(10), index=True, nullable=False)
+    source = Column(String(32), index=True, nullable=False)
+    metric = Column(String(64), nullable=False)
+    value = Column(Float, nullable=True)
+    unit = Column(String(32), nullable=True)
+    observed_at = Column(DateTime(timezone=True), index=True, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=func.now(), nullable=False)
+    metadata_json = Column(Text, nullable=True)
+

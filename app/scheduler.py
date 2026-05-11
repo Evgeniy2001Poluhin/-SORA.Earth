@@ -390,6 +390,26 @@ def full_pipeline_run(trigger_source="full_pipeline", force: bool = False):
     finally:
         lock.release()
 
+
+def scheduled_run_ingesters():
+    """Run all registered ingesters (Rosstat, Sber/VEB, OpenAQ)."""
+    from app.locks import RedisLock
+    lock = RedisLock(key="sora:lock:ingesters", timeout=600)
+    if not lock.acquire():
+        logger.warning("Ingesters skipped: lock held")
+        return {"status": "skipped", "reason": "lock_held"}
+    try:
+        from app.ingesters.runner import run_all_ingesters_sync
+        result = run_all_ingesters_sync()
+        logger.info("Ingesters done: %s signals", result.get("total_signals"))
+        return result
+    except Exception as e:
+        logger.exception("Ingesters failed: %s", e)
+        return {"status": "error", "error": str(e)}
+    finally:
+        lock.release()
+
+
 def init_scheduler():
     if not should_run_scheduler():
         logger.info("RUN_SCHEDULER is false, scheduler will not be started in this process")
@@ -426,6 +446,15 @@ def init_scheduler():
         kwargs={"trigger_source": "auto_full_pipeline_weekly"},
         id="auto_full_pipeline_weekly",
         name="Weekly full pipeline: refresh -> drift -> retrain -> validate at Sun 03:30 UTC",
+        replace_existing=True,
+    )
+
+
+    scheduler.add_job(
+        scheduled_run_ingesters,
+        IntervalTrigger(hours=24),
+        id="auto_run_ingesters",
+        name="Run all ingesters every 24h",
         replace_existing=True,
     )
 

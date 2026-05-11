@@ -6,6 +6,7 @@ export interface RussianRegion {
   lat: number;
   lon: number;
   population: number;
+  esgScore?: number;
 }
 
 export const RUSSIA_REGIONS: RussianRegion[] = [
@@ -97,12 +98,12 @@ export const RUSSIA_REGIONS: RussianRegion[] = [
 ];
 
 export const FD_COLORS: Record<RussianRegion["district"], string> = {
-  "ЦФО":  "#3b82f6",
-  "СЗФО": "#06b6d4",
-  "ЮФО":  "#22c55e",
-  "СКФО": "#eab308",
-  "ПФО":  "#f97316",
-  "УФО":  "#ef4444",
-  "СФО":  "#a855f7",
-  "ДФО":  "#ec4899",
+  "ЦФО":  "#4C9AFF",
+  "СЗФО": "#00B8D9",
+  "ЮФО":  "#36B37E",
+  "СКФО": "#FFAB00",
+  "ПФО":  "#FF8B00",
+  "УФО":  "#FF5630",
+  "СФО":  "#8777D9",
+  "ДФО":  "#E774BB",
 };
