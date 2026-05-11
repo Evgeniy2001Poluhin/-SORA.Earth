@@ -15,6 +15,7 @@ import platform
 import torch
 import torch.nn as tnn
 import warnings
+from app.routes import map_russia
 # import sqlite3  # replaced by SQLAlchemy
 import csv
 import sentry_sdk
@@ -508,6 +509,7 @@ app.include_router(api_v1)
 # app.include_router(auth_router)
 app.include_router(ai_teammate_routes.router, prefix="/api/v1")
 app.include_router(ml_v2_router)
+app.include_router(map_russia.router)
 
 
 # --- MLOps domain metrics (Prometheus) ---
