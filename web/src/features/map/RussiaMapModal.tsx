@@ -31,8 +31,19 @@ export default function RussiaMapModal({
   const { data: apiRegions } = useRussiaMap();
   const enrichedRegions = useMemo(() => {
     if (!apiRegions?.length) return RUSSIA_REGIONS;
-    const esgMap = new Map(apiRegions.map(r => [r.code, r.esg.score]));
-    return RUSSIA_REGIONS.map(r => ({ ...r, esgScore: esgMap.get(r.code) ?? r.esgScore }));
+    const apiMap = new Map(apiRegions.map(r => [r.code, r]));
+    return RUSSIA_REGIONS.map(r => {
+      const a = apiMap.get(r.code);
+      if (!a) return r;
+      return {
+        ...r,
+        esgScore: a.esg?.score ?? r.esgScore,
+        esgBreakdown: a.esg,
+        confidence: a.confidence,
+        sourcesUsed: a.sources_used,
+        updatedAt: a.updated_at,
+      };
+    });
   }, [apiRegions]);
 
   useEffect(() => {
@@ -191,7 +202,7 @@ export default function RussiaMapModal({
               activeFD={activeFD}
               search={search}
               mode={mode}
-              onSelect={setSelected}
+              onSelect={(r) => setSelected(enrichedRegions.find(x => x.code === r.code) ?? r)}
               regions={enrichedRegions}
             />
           </div>
