@@ -135,3 +135,87 @@ async def russia_regions():
         "source": source,
         "count": len(regions),
     }
+
+@router.get("/russia/{region_code}")
+async def region_detail(region_code: str):
+    """Detailed region view: snapshot + signals + per-metric trend."""
+    pool = await _get_pool()
+    if pool is None:
+        return {"error": "DB unavailable", "region_code": region_code}
+
+    meta = _REGIONS_META.get(region_code, {"code": region_code, "name": region_code})
+
+    try:
+        async with pool.acquire() as c:
+            snap = await c.fetchrow(
+                "SELECT region_code, e_score, s_score, g_score, score, "
+                "confidence, sources_used, sources_missing, computed_at, "
+                "model_version, features "
+                "FROM regional_esg_snapshot WHERE region_code = $1",
+                region_code,
+            )
+            signals = await c.fetch(
+                "SELECT source, metric, value, unit, observed_at, metadata "
+                "FROM raw_signals WHERE region_code = $1 "
+                "ORDER BY observed_at DESC",
+                region_code,
+            )
+    except Exception as e:
+        log.warning(f"[region_detail] DB read failed: {e}")
+        return {"error": str(e), "region_code": region_code}
+
+    if snap is None and not signals:
+        return {"error": "region not found", "region_code": region_code}
+
+    esg = None
+    if snap:
+        esg = {
+            "score": float(snap["score"] or 0),
+            "e_score": float(snap["e_score"] or 0),
+            "s_score": float(snap["s_score"] or 0),
+            "g_score": float(snap["g_score"] or 0),
+        }
+
+    indicators = []
+    by_metric = {}
+    for s in signals:
+        key = (s["source"], s["metric"])
+        if key not in by_metric:
+            by_metric[key] = []
+        by_metric[key].append(s)
+
+    for (source, metric), rows in by_metric.items():
+        rows_sorted = sorted(rows, key=lambda r: r["observed_at"])
+        latest = rows_sorted[-1]
+        trend = [
+            {
+                "date": r["observed_at"].isoformat() if r["observed_at"] else None,
+                "value": float(r["value"]) if r["value"] is not None else None,
+            }
+            for r in rows_sorted
+        ]
+        indicators.append({
+            "source": source,
+            "metric": metric,
+            "value": float(latest["value"]) if latest["value"] is not None else None,
+            "unit": latest["unit"],
+            "observed_at": latest["observed_at"].isoformat() if latest["observed_at"] else None,
+            "trend": trend,
+            "points_count": len(trend),
+        })
+
+    return {
+        "region": meta,
+        "esg": esg,
+        "confidence": float(snap["confidence"]) if snap and snap["confidence"] is not None else None,
+        "sources_used": list(snap["sources_used"]) if snap and snap["sources_used"] else [],
+        "sources_missing": list(snap["sources_missing"]) if snap and snap["sources_missing"] else [],
+        "model_version": snap["model_version"] if snap else None,
+        "computed_at": snap["computed_at"].isoformat() if snap and snap["computed_at"] else None,
+        "features": dict(snap["features"]) if snap and snap["features"] else None,
+        "indicators": indicators,
+        "indicators_count": len(indicators),
+        "signals_total": len(signals),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+

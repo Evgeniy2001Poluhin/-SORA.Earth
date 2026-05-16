@@ -55,7 +55,7 @@ export default function MapPage() {
         </div>
               <button onClick={() => setRuOpen(true)}
           style={{ marginTop: 8, padding: "6px 14px", borderRadius: 6,
-            background: "#1a1d20", border: "1px solid #2a2e33", color: "#e6e6e6", cursor: "pointer" }}>
+            background: "#1a1d20", border: "1px solid #2a2e33", color: "var(--text)", cursor: "pointer" }}>
           🇷🇺 Россия — карта регионов
         </button>
       </header>

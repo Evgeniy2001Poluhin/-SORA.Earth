@@ -1,134 +1,301 @@
-.map-page { padding: 28px; max-width: 1300px; margin: 0 auto; color: #e6e6e6; }
+/* ============ Map page — theme-aware via design tokens ============ */
 
-.map-header {
-  display: flex; align-items: flex-end; justify-content: space-between;
-  gap: 24px; margin-bottom: 18px; flex-wrap: wrap;
-}
-.map-header h1 {
-  main: 0 0 6px; font-size: 28px; letter-spacing: -0.01em;
-  background: linear-gradient(90deg, #7a9a78 0%, #9a9a6b 60%, #b89a6b 100%);
-  -webkit-background-clip: text; background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-.map-header .muted { color: #8a8a8a; margin: 0; font-size: 13px; }
+/* Layout for stats and legend (was lost when CSS was reset) */
+.map-page { padding: 16px 24px; }
 
-.map-stats { display: flex; gap: 12px; }
+.map-header { margin-bottom: 16px; }
+
+.map-stats {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
 .map-stats .stat {
-  background: linear-gradient(180deg, rgba(34,197,94,0.06) 0%, rgba(0,0,0,0) 100%);
-  border: 1px solid #1a2620; border-radius: 10px;
-  padding: 10px 16px; min-width: 110px; text-align: center;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  min-width: 120px;
 }
-.map-stats .stat b { display: block; font-size: 18px; color: #e6e6e6; font-weight: 700; }
+.map-stats .stat b {
+  font-size: 22px;
+  font-family: var(--f-display);
+  color: var(--text);
+}
 .map-stats .stat em {
-  display: block; font-style: normal; color: #6b7670;
-  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: .04em;
 }
 
 .map-legend {
-  display: flex; flex-wrap: wrap; gap: 18px; margin-bottom: 14px;
-  padding: 12px 18px; background: rgba(12,16,14,0.7);
-  backdrop-filter: blur(8px);
-  border: 1px solid #1a2620; border-radius: 12px;
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+  padding: 10px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
-.legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #cfcfcf; text-transform: capitalize; }
-.legend-item .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
-.legend-item em { color: #777; font-style: normal; margin-left: 2px; font-size: 11px; }
-
-@keyframes pulse-glow {
-  0%, 100% { opacity: 0.85; }
-  50%      { opacity: 1; }
+.map-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
 }
-.dot.pulse { animation: pulse-glow 2.4s ease-in-out infinite; }
+.map-legend .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
 
 .map-wrap {
-  border: 1px solid #1a2620; border-radius: 14px; overflow: hidden;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 0 1px rgba(34,197,94,0.05) inset;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  border: 1px solid var(--line);
 }
-.leaflet-container { background: var(--bg-1) !important; }
+
+/* Map canvas always dark — markers need contrast */
+.leaflet-container {
+  background: #0a0c0e;
+}
+
+/* ===== Zoom control: theme-aware via tokens ===== */
+.leaflet-control-zoom {
+  margin: 12px !important;
+  border: 1px solid var(--line-2) !important;
+  border-radius: var(--r-sm) !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background: var(--bg-2) !important;
+}
+.leaflet-control-zoom a,
+.leaflet-container .leaflet-control-zoom a {
+  background: var(--bg-2) !important;
+  color: var(--text) !important;
+  border: none !important;
+  border-bottom: 1px solid var(--line) !important;
+  width: 30px !important;
+  height: 30px !important;
+  line-height: 30px mportant;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  text-align: center !important;
+  text-decoration: none !important;
+  display: block !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  font-family: var(--f-sans) !important;
+}
+.leaflet-control-zoom a:last-child { border-bottom: none !important; }
+.leaflet-control-zoom a:hover {
+  background: var(--bg-3) !important;
+  color: var(--text) !important;
+}
+
+/* Attribution */
+.leaflet-control-attribution {
+  background: var(--bg-2) !important;
+  color: var(--muted) !important;
+  border: 1px solid var(--line) !important;
+  font-size: 10px !important;
+}
+.leaflet-control-attribution a { color: var(--planet) !important; }
+
+/* Tooltip on markers — transparent so your inner .tip styles work */
+.esg-tooltip {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+.esg-tooltip::before { display: none !important; }
+
+/* Russia map zoom ttons inside modal */
+.map-wrap .leaflet-control-zoom {
+  background: var(--bg-2) !important;
+}
+
+/* Prevent zoom link clicks from scrolling/changing URL hash */
 .leaflet-control-zoom a {
-  background: rgba(12,16,14,0.85) !important;
-  color: #cfcfcf !important;
-  border: 1px solid #1a2620 !important;
-  backdrop-filter: blur(6px);
-}
-.leaflet-control-zoom a:hover { background: #14181a !important; color: #cfcfcf !important; }
-
-/* Animated marker pulse via CSS on circle path */
-.leaflet-interactive {
-  transition: filter 0.15s ease, stroke-width 0.15s ease;
-}
-.leaflet-interactive:hover {
-  filter: brightness(1.15);
-  stroke-width: 2 !important;
-  cursor: pointer;
+  pointer-events: auto;
 }
 
-/* Custom tooltip */
-.leaflet-tooltip.esg-tooltip {
-  background: linear-gradient(180deg, var(--bg-1) 0%, var(--bg-1) 100%);
-  border: 1px solid #1f2e26;
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.6), 0 0 0 1px rgba(34,197,94,0.08) inset;
+.legend-item em {
+  margin-left: 6px;
+  color: var(--muted);
+  font-style: normal;
+}
+.legend-item span:not(.dot) {
+  font-weight: 500;
+}
+
+.map-stats .stat em { margin-top: 2px; }
+
+/* Top 10 list — gaps between rank/name/score */
+.top-list {
+  list-style: none;
+  margin-top: 16px;
   padding: 0;
-  color: #e6e6e6;
 }
-.leaflet-tooltip.esg-tooltip::before { display: none; }
-
-.tip { min-width: 200px; padding: 12px 14px; }
-.tip-name {
-  font-weight: 700; font-size: 14px; color: #e6e6e6;
-  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+.top-list ol { padding-left: 0; list-style: none; margin: 0; }
+.top-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
 }
-.tip-flag { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 4px currentColor; }
-.tip-score { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
-.tip-score-num { font-size: 26px; font-weight: 800; color: #fff; line-height: 1; }
-.tip-score-band {
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
-  color: #8a8a8a;
+.top-list li:last-child { border-bottom: none; }
+.top-list .rank {
+  font-weight: 700;
+  color: var(--muted);
+  min-width: 36px;
 }
-.tip-bar {
-  height: 4px; background: #1a2620; border-radius: 4px; overflow: hidden; margin-bottom: 10px;
-}
-.tip-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
-.tip-rows { display: grid; gap: 4px; margin-bottom: 8px; }
-.tip-rows > div {
-  display: flex; justify-content: space-between; font-size: 12px;
-}
-.tip-rows span { color: #8a8a8a; }
-.tip-rows b { color: #e6e6e6; font-weight: 600; }
-.tip-cta {
-  font-size: 11px; color: #8a9a7e; font-weight: 600;
-  border-top: 1px solid #1a2620; padding-top: 7px; margin-top: 4px;
+.top-list li em {
+  margin-left: auto;
+  font-style: normal;
+  font-weight: 600;
+  color: var(--text);
 }
 
-.top-list { margin-top: 24px; }
-.top-list h3 {
-  font-size: 12px; color: #888; text-transform: uppercase;
-  letter-spacing: 0.08em; margin-bottom: 12px;
+/* === KPI top stats — professional cards === */
+.map-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.map-stats .stat {
+  position: relative;
+  padding: 16px 18px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+  transition: border-color .15s var(--ease), transform .15s var(--ease);
+}
+.map-stats .stat:hover {
+  border-color: var(--line-2);
+  transform: translateY(-1px);
+}
+.map-stats .stat::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--planet);
+  opacity: .6;
+}
+.map-stats .stat b {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.map-stats .stat em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 500; color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* === Top 10 list — professional table-like === */
+.top-list {
+  margin-top: 24px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.top-list h3, .top-list > div:first-child:not(ol) {
+  padding: 14px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid var(--line);
+  margin: 0;
+  background: var(--bg-1);
 }
 .top-list ol {
-  list-style: none; padding: 0; display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  counter-reset: rank;
 }
 .top-list li {
-  display: flex; align-items: center; gap: 10px;
-  padding: 11px 14px; background: var(--bg-1);
-  border: 1px solid #1a2620; border-radius: 8px;
-  cursor: pointer; transition: all 0.15s; font-size: 13px;
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  transition: background .15s var(--ease);
 }
-.top-list li:hover {
-  border-color: var(--line-2); background: var(--bg-1);
-  transform: translateX(2px);
+.top-list li:last-child { border-bottom: none; }
+.top-list li:hover { background: var(--bg-3); }
+.top-list .rank {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  letter-spacing: 0.04em;
 }
-.top-list li .rank {
-  font-size: 11px; color: #6b7670; font-weight: 700; min-width: 28px;
+.top-list li:nth-child(1) .rank { color: #C9A96E; }   /* gold */
+.top-list li:nth-child(2) .rank { color: #B8B8B8; }   /* silver */
+.top-list li:nth-child(3) .rank { color: #B07A4A; }   /* bronze */
+.top-list li > span:not(.rank):not(.dot) {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
 }
-.top-list li b { flex: 1; color: #e6e6e6; }
 .top-list li em {
-  font-style: normal; color: #8a9a7e; font-size: 14px; font-weight: 700;
+  font-style: normal;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--planet);
+  letter-spacing: -0.01em;
 }
 
-.err {
-  padding: 12px; background: #2a1414; border: 1px solid #5c2020;
-  border-radius: 8px; color: #f87171;
+/* Top 10: country name was <b>, not <span> — fix selector */
+.top-list li b {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  font-style: normal;
+}
+.top-list h3 {
+  margin: 0;
+  padding: 14px 18px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+}
+/* Inline borderLeft from JSX — keep but make it subtler */
+.top-list li[style*="border-left"] {
+  padding-left: 15px !important;  /* compensate the 3px border */
 }

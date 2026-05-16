@@ -1,0 +1,37 @@
+.rd-page { max-width: 1200px; margin: 0 auto; padding: 24px; color: var(--text); font-family: -apple-system, system-ui, sans-serif; }
+.rd-back { display: inline-flex; align-items: center; gap: 6px; color: var(--planet); text-decoration: none; font-size: 13px; font-weight: 500; transition: opacity .15s var(--ease); }
+.rd-back:hover { opacity: .75; text-decoration: underline; }
+.rd-title { margin: 16px 0 4px; font-size: 32px; font-weight: 600; letter-spacing: -0.02em; color: var(--text); }
+.rd-title .code { margin-left: 10px; font-size: 14px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; padding: 3px 8px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; letter-spacing: 0.04em; }
+.rd-meta { color: var(--muted); font-size: 13px; margin-bottom: 24px; display: flex; gap: 16px; flex-wrap: wrap; }
+.rd-meta b { color: var(--text); font-weight: 500; }
+.rd-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
+.rd-card { position: relative; padding: 16px 18px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; transition: border-color .15s var(--ease), transform .15s var(--ease); }
+.rd-card:hover { border-color: var(--line-2); transform: translateY(-1px); }
+.rd-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--score-color, var(--planet)); }
+.rd-card .label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.rd-card .value { margin-top: 8px; font-size: 36px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--score-color, var(--text)); line-height: 1.05; }
+.rd-row { display: grid; grid-template-columns: 1fr 2fr; gap: 12px; margin: 12px 0 24px; }
+.rd-conf-bar { margin-top: 12px; height: 6px; background: var(--bg-3); border-radius: 999px; overflow: hidden; }
+.rd-conf-bar > i { display: block; height: 100%; background: var(--score-color, var(--planet)); border-radius: 999px; transition: width .3s var(--ease); }
+.rd-chips { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.rd-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--bg-3); border: 1px solid var(--line); color: var(--text); }
+.rd-chip.used { color: var(--planet); border-color: rgba(47,224,166,.35); background: rgba(47,224,166,.08); }
+.rd-chip.missing { color: #B85C5C; border-color: rgba(184,92,92,.35); background: rgba(184,92,92,.08); }
+.rd-chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.rd-section-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 10px; }
+.rd-section-title .count { margin-left: 8px; color: var(--text); font-weight: 500; text-transform: none; letter-spacing: 0; }
+.rd-table-wrap { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.rd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.rd-table thead th { padding: 12px 14px; text-align: left; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; background: var(--bg-1); border-bottom: 1px solid var(--line); }
+.rd-table thead th.num { text-align: right; }
+.rd-table tbody tr { border-bottom: 1px solid var(--line); transition: background .12s var(--ease); }
+.rd-table tbody tr:last-child { border-bottom: none; }
+.rd-table tbody tr:hover { background: var(--bg-3); }
+.rd-table td { padding: 12px 14px; color: var(--text); }
+.rd-table td.muted { color: var(--muted); }
+.rd-table td.mono { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: var(--planet); }
+.rd-table td.num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.rd-table td.num.muted { font-weight: 500; }
+.rd-footer { margin-top: 16px; font-size: 11px; color: var(--faint); font-family: ui-monospace, SFMono-Regular, monospace; }
+@media (max-width: 768px) { .rd-kpis { grid-template-columns: repeat(2, 1fr); } .rd-row { grid-template-columns: 1fr; } .rd-table { font-size: 12px; } .rd-table thead th, .rd-table td { padding: 10px 12px; } }

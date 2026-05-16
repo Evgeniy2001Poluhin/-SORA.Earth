@@ -1,3 +1,4 @@
+import RegionDetail from "../features/region/RegionDetail";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Shell } from "./Shell";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -30,7 +31,8 @@ export function App() {
         <Route path="/map" element={<MapPage/>}/>
         <Route path="*" element={<Navigate to="/" replace/>}/>
       </Route>
-      </Routes>
+        <Route path="/region/:code" element={<RegionDetail />} />
+</Routes>
     </ErrorBoundary>
   );
 }

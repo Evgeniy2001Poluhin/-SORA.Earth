@@ -70,11 +70,7 @@ img,svg,canvas{display:block;max-width:100%}
 
 /* === FORCE all dark backgrounds to cream + light text → dark text === */
 :root[data-theme="light"] [style*="#0"]:not([style*="#0F0"]):not([style*="#0FF"]),
-:root[data-theme="light"] [style*="#1"]:not([style*="#1F"]):not([style*="#1A6"]),
-:root[data-theme="light"] [style*="rgb(10"],
-:root[data-theme="light"] [style*="rgb(20"],
-:root[data-theme="light"] [style*="rgba(10"],
-:root[data-theme="light"] [style*="rgba(20"]{
+:root[data-theme="light"] [style*="#1"]:not([style*="#1F"]):not([style*="#1A6"]){
   background:var(--bg-2)!important;
   color:var(--text)!important;
 }
@@ -343,3 +339,39 @@ html, body, .card, [class*="-card"], [class*="-panel"], table, tr, td, th, input
 /* Selection color match palette */
 :root[data-theme="light"] ::selection{background:rgba(123,94,42,.28); color:#1F1808;}
 :root[data-theme="dark"] ::selection{background:rgba(47,224,166,.30); color:#F4F6F8;}
+
+/* SORA — lock dark scheme, prevent Safari light-mode override */
+:root { color-scheme: dark; }
+
+/* === Map feature theme alignment === */
+:root[data-theme="light"] .map-page,
+:root[data-theme="light"] .region-detail-page,
+:root[data-theme="light"] .top-list,
+:root[data-theme="light"] .map-aside,
+:root[data-theme="light"] .region-aside {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+}
+:root[data-theme="light"] .map-page [class*="metric"],
+:root[data-theme="light"] .map-page [class*="card"],
+:root[data-theme="light"] .region-detail-page [class*="metric"],
+:root[data-theme="light"] .region-detail-page [class*="card"],
+:root[data-theme="light"] .map-stats .stat,
+:root[data-theme="light"] .map-legend,
+:root[data-theme="local light"] .top-list li,
+:root[data-theme="light"] .region-aside .row,
+:root[data-theme="light"] .map-modal {
+  background: var(--bg-2) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--line) !important;
+}
+:root[data-theme="light"] .leaflet-container {
+  /* keep map dark for marker contrast even on light theme */
+  background: #0a0c0e !important;
+}
+:root[data-theme="light"] .top-list,
+:root[data-theme="light"] .top-list ol,
+:root[data-theme="light"] .top-list li {
+  background: var(--bg-2) !important;
+  color: var(--text) !important;
+}

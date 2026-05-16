@@ -98,11 +98,11 @@ export function WhatIf({ form, lastRun }: Props) {
         <div style={{height:260,marginTop:8}}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={sweepData} margin={{top:8,right:16,left:0,bottom:8}}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)"/>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--line)"/>
               <XAxis dataKey="x" tickFormatter={param.fmt} stroke="#666" fontSize={11}/>
               <YAxis domain={[0,100]} stroke="#666" fontSize={11}/>
               <Tooltip
-                contentStyle={{background:"var(--bg-1)",border:"1px solid #1A2230",borderRadius:8,fontSize:12}}
+                contentStyle={{background:"var(--bg-1)",border:"1px solid var(--line-2)",borderRadius:8,fontSize:12}}
                 formatter={(v:any)=>[`${Number(v).toFixed(1)}`,"Total"]}
                 labelFormatter={(v:any)=>`${param.label}: ${param.fmt(Number(v))}`}/>
               <Line type="monotone" dataKey="total" stroke="#2FE0A6" strokeWidth={2} dot={{r:3,fill:"#2FE0A6"}} animationDuration={400}/>
