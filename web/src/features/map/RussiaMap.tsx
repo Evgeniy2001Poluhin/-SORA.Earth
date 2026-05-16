@@ -11,11 +11,11 @@ const radByEsg = (s?: number) => 4 + ((s ?? 50) - 40) / 15;
 
 const esgColor = (s?: number) => {
   if (s == null) return "#808890";
-  if (s >= 80) return "#5A9A6F";
-  if (s >= 70) return "#8FB069";
-  if (s >= 60) return "#C9A96E";
-  if (s >= 50) return "#C97D4E";
-  return "#B85C5C";
+  if (s >= 80) return "#2FE0A6";
+  if (s >= 70) return "#7BC678";
+  if (s >= 60) return "#E4C04A";
+  if (s >= 50) return "#E4954A";
+  return "#E4504A";
 };
 
 function FitOnMount() {
@@ -44,7 +44,7 @@ export default function RussiaMap({ height = 560, activeFD, search, mode, onSele
   );
 
   return (
-    <div className="map-wrap" style={{ height }}>
+    <div className="map-wrap" style={{ height, position: "relative" }}>
       <MapContainer
         bounds={B}
         minZoom={3}
@@ -60,7 +60,7 @@ export default function RussiaMap({ height = 560, activeFD, search, mode, onSele
           const radius = mode === "esg" ? radByEsg(r.esgScore) : radByPop(r.population);
           return (
             <CircleMarker
-              key={r.code}
+              key={`${r.code}-${mode}`}
               center={[r.lat, r.lon]}
               radius={radius}
               pathOptions={{ fillColor: fill, color: "#fff", weight: 1.25, fillOpacity: 0.9 }}
@@ -70,14 +70,42 @@ export default function RussiaMap({ height = 560, activeFD, search, mode, onSele
                 <strong>{r.capital}</strong>
                 <div style={{ fontSize: 11, opacity: 0.8 }}>{r.name}</div>
                 <div style={{ fontSize: 10, opacity: 0.6 }}>
-                  {r.district} - {(r.population / 1e6).toFixed(2)}M
-                  {r.esgScore != null && ` - ESG ${r.esgScore}`}
+                  {r.district} · {(r.population / 1e6).toFixed(2)}M
+                  {r.esgScore != null && ` · ESG ${r.esgScore}`}
                 </div>
+                {(r as any).esgBreakdown && (
+                  <div style={{ fontSize: 10, opacity: 0.75, marginTop: 2, display: "flex", gap: 6 }}>
+                    <span style={{ color: "#5A9A6F" }}>E{Math.round((r as any).esgBreakdown.e_score)}</span>
+                    <span style={{ color: "#8FB069" }}>S{Math.round((r as any).esgBreakdown.s_score)}</span>
+                    <span style={{ color: "#C9A96E" }}>G{Math.round((r as any).esgBreakdown.g_score)}</span>
+                    {(r as any).confidence != null && (
+                      <span style={{ opacity: 0.55, marginLeft: 4 }}>
+                        · conf {Math.round((r as any).confidence * 100)}%
+                      </span>
+                    )}
+                  </div>
+                )}
               </Tooltip>
             </CircleMarker>
           );
         })}
       </MapContainer>
+      {mode === "esg" && (
+        <div style={{
+          position: "absolute", bottom: 12, right: 12, zIndex: 500,
+          background: "rgba(11,13,15,0.85)", border: "1px solid #1f2225",
+          borderRadius: 8, padding: "8px 10px", fontSize: 11, color: "#e5e7eb",
+          backdropFilter: "blur(6px)", minWidth: 140,
+        }}>
+          <div style={{ opacity: 0.6, marginBottom: 4, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>ESG Score</div>
+          <div style={{ height: 8, borderRadius: 4,
+            background: "linear-gradient(90deg, #E4504A 0%, #E4954A 25%, #E4C04A 50%, #7BC678 75%, #2FE0A6 100%)",
+            marginBottom: 4 }} />
+          <div style={{ display: "flex", justifyContent: "space-between", opacity: 0.7, fontSize: 10 }}>
+            <span>0</span><span>50</span><span>100</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

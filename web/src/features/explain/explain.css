@@ -1,6 +1,6 @@
 .explain-presets { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; }
 .preset-btn {
-  padding: 6px 14px; border: 1px solid rgba(255,255,255,0.12);
+  padding: 6px 14px; border: 1px solid var(--line-2);
   background: transparent; color: var(--muted, #8aa);
   border-radius: 999px; cursor: pointer; font-size: 12px; letter-spacing: 0.04em;
   font-family: inherit;
@@ -18,8 +18,8 @@
 }
 .explain-form label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
 .explain-form input {
-  padding: 8px 10px; background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.08); color: var(--text, #fff);
+  padding: 8px 10px; background: var(--bg-3);
+  border: 1px solid var(--line); color: var(--text, #fff);
   border-radius: 8px; font-family: inherit; font-size: 13px;
 }
 .explain-form input:focus { outline: none; border-color: #2FE0A6; }
@@ -32,7 +32,7 @@
 .primary-btn:disabled { opacity: 0.5; cursor: wait; }
 
 .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 16px; }
-.explain-img-wrap { background: rgba(255,255,255,0.02); padding: 16px; border-radius: 12px; }
+.explain-img-wrap { background: var(--bg-2); padding: 16px; border-radius: 12px; }
 .explain-img { width: 100%; height: auto; border-radius: 8px; display: block; }
 .placeholder { color: var(--muted); padding: 60px 0; text-align: center; font-size: 13px; }
 .placeholder.small { padding: 24px 0; }
@@ -40,7 +40,7 @@
 .contrib-list { display: flex; flex-direction: column; gap: 8px; }
 .contrib-row { display: grid; grid-template-columns: 160px 1fr 80px; gap: 12px; align-items: center; }
 .contrib-name { font-size: 12px; color: var(--text, #fff); }
-.contrib-bar-wrap { height: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; overflow: hidden; }
+.contrib-bar-wrap { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
 .contrib-bar { height: 100%; transition: width 0.3s ease; }
 .contrib-val { font-size: 13px; text-align: right; font-family: ui-monospace, monospace; }
 

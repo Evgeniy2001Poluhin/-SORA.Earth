@@ -6,10 +6,8 @@ type Ctx = { theme: Theme; toggle: () => void };
 const ThemeCtx = createContext<Ctx>({ theme: "dark", toggle: () => {} });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    const saved = localStorage.getItem("sora-theme");
-    return saved === "light" ? "light" : "dark";
-  });
+  // Diploma lock: default to dark; ignore stale "light" in localStorage.
+  const [theme, setTheme] = useState<Theme>("dark");
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;

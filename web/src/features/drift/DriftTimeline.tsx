@@ -25,10 +25,10 @@ export function DriftTimeline() {
   return (
     <div>
       <div className="eyebrow" style={{ marginBottom: 12 }}>Drift timeline (MLflow): {data.length} events</div>
-      <div style={{ height: 240, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: 16, marginBottom: 24 }}>
+      <div style={{ height: 240, background: "var(--bg-2)", border: "1px solid var(--line)", borderRadius: 10, padding: 16, marginBottom: 24 }}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-            <CartesianGrid stroke="rgba(255,255,255,0.05)" strokeDasharray="3 3" />
+            <CartesianGrid stroke="var(--line)" strokeDasharray="3 3" />
             <XAxis dataKey="timeShort" stroke="var(--muted)" fontSize={11} />
             <YAxis domain={[0, 1]} stroke="var(--muted)" fontSize={11} />
             <Tooltip contentStyle={{ background: "var(--bg)", border: "1px solid rgba(255,255,255,0.1)", fontSize: 12 }} />

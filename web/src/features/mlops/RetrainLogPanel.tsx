@@ -19,13 +19,13 @@ export function RetrainLogPanel() {
         <div className="locked-badge">Sign-in required</div>
         <div className="kpi-lbl">Admin retrain log</div>
         <div className="kpi-val" style={{ fontSize: 13 }}>
-          <Link to="/login" style={{ color: "#2FE0A6" }}>Sign in</Link>
+          <Link to="/login" style={{ color: "var(--planet)" }}>Sign in</Link>
         </div>
       </div>
     );
   }
   if (q.isLoading) return <div className="card-body"><p style={{ color: "var(--muted)" }}>Loading retrain log...</p></div>;
-  if (q.isError) return <div className="card-body"><p style={{ color: "#EF4444" }}>Failed to load retrain log</p></div>;
+  if (q.isError) return <div className="card-body"><p style={{ color: "var(--danger, #EF4444)" }}>Failed to load retrain log</p></div>;
 
   const items = (q.data && q.data.items ? q.data.items : []).slice(0, 15);
   const total = q.data && q.data.items ? q.data.items.length : 0;
@@ -58,7 +58,7 @@ export function RetrainLogPanel() {
               <div className="tabular">{mx.f1_score !== undefined ? mx.f1_score.toFixed(3) : "-"}</div>
               <div className="tabular">{mx.roc_auc !== undefined ? mx.roc_auc.toFixed(3) : "-"}</div>
               <div>
-                <span className="pill" style={{ color: ok ? "#2FE0A6" : "#EF4444", background: ok ? bgOk : bgBad }}>{r.status}</span>
+                <span className="pill" style={{ color: ok ? "var(--planet)" : "var(--danger, #EF4444)", background: ok ? bgOk : bgBad }}>{r.status}</span>
               </div>
             </div>
           );

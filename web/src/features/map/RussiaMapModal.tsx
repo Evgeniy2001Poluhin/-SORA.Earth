@@ -114,7 +114,7 @@ export default function RussiaMapModal({
           }}
         >
           <div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: "#e6e6e6" }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text)" }}>
               Карта России
             </div>
             <div style={{ fontSize: 12, opacity: 0.6, color: "#cfcfcf" }}>
@@ -129,7 +129,7 @@ export default function RussiaMapModal({
               style={{
                 background: "#0f1214",
                 border: "1px solid #2a2e33",
-                color: "#e6e6e6",
+                color: "var(--text)",
                 borderRadius: 6,
                 padding: "6px 10px",
                 fontSize: 12,
@@ -146,7 +146,7 @@ export default function RussiaMapModal({
                     border: "none",
                     borderRadius: 0,
                     background: mode === m ? "#1a1d20" : "transparent",
-                    color: mode === m ? "#e6e6e6" : "#8a8f96",
+                    color: mode === m ? "var(--text)" : "#8a8f96",
                   }}
                 >
                   {m === "population" ? "Население" : "ESG"}
@@ -212,7 +212,7 @@ export default function RussiaMapModal({
                 width: 320,
                 borderLeft: "1px solid #1f2225",
                 padding: 20,
-                color: "#e6e6e6",
+                color: "var(--text)",
                 fontSize: 13,
                 overflow: "auto",
               }}

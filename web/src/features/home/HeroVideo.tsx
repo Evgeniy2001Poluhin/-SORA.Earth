@@ -45,7 +45,7 @@ export function HeroVideo() {
           </Link>
           <Link to="/calibration" style={{padding:"0.9rem 2rem",
             border:"1px solid rgba(255,255,255,0.35)",color:"#fff",borderRadius:"0.6rem",
-            textDecoration:"none",background:"rgba(255,255,255,0.08)"}}>
+            textDecoration:"none",background:"var(--line)"}}>
             Explore Platform
           </Link>
         </div>
