@@ -20,7 +20,7 @@ export function DriftTimeline() {
       features: e["params.drifted_features"] || "-",
     }));
 
-  const ksFeatures = ks.data && ks.data.features ? Object.entries(ks.data.features) : [];
+  const ksFeatures = ks.data && ks.data.features && typeof ks.data.features === 'object' ? Object.entries(ks.data.features as Record<string, any>) : [];
 
   return (
     <div>
@@ -48,12 +48,12 @@ export function DriftTimeline() {
         </div>
         {ksFeatures.map(([name, f]) => {
           const drift = f.drift;
-          const sig = f.p_value < 0.01;
+          const sig = Number(f.p_value ?? 1) < 0.01;
           return (
             <div key={name} className="drift-row" style={{ gridTemplateColumns: "1.4fr 1fr 1fr 1fr" }}>
               <div className="mono" style={{ fontSize: 12 }}>{name}</div>
-              <div className="tabular">{f.ks_stat.toFixed(4)}</div>
-              <div className="tabular" style={{ color: sig ? "#EF4444" : "var(--muted)" }}>{f.p_value.toFixed(4)}</div>
+              <div className="tabular">{Number(f.ks_stat ?? 0).toFixed(4)}</div>
+              <div className="tabular" style={{ color: sig ? "#EF4444" : "var(--muted)" }}>{Number(f.p_value ?? 1).toFixed(4)}</div>
               <div>
                 <span className="drift-pill" style={{
                   background: drift ? "rgba(239,68,68,0.12)" : "rgba(47,224,166,0.12)",

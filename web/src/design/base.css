@@ -382,3 +382,22 @@ html, body, .card, [class*="-card"], [class*="-panel"], table, tr, td, th, input
 .danger { color: #EF4444; }
 .success { color: var(--planet); }
 .warning { color: #F5C84B; }
+
+/* === KPI cards (shared across features) === */
+.kpi {
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  padding: 16px;
+}
+.kpi-lbl {
+  font: 500 10px/1 var(--f-mono);
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.kpi-val {
+  font: 600 22px/1 ui-serif, Georgia, serif;
+  color: var(--text);
+}
