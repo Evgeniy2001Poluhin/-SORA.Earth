@@ -79,7 +79,7 @@ export function DriftPage() {
 
   return (
     <div className="card-body" style={{ padding: 32 }}>
-      <div className="eyebrow" style={{ marginBottom: 8 }}>MLOps Â· Model Monitoring</div>
+      <div className="eyebrow" style={{ marginBottom: 8 }}>MLOps · Model Monitoring</div>
       <h1 className="display" style={{ fontSize: 36, margin: "0 0 8px" }}>Feature Drift</h1>
       <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 28 }}>
         Real-time KS-style drift detection across {Object.keys(d.features || {}).length} model features. Auto-refresh every 5s.
@@ -148,7 +148,7 @@ export function DriftPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {d.recent_alerts.map((a, i) => (
               <div key={i} className="drift-alert">
-                <span className="icon">â </span>
+                <span className="icon">⚠</span>
                 <span className="feature mono">{a.feature}</span>
                 <span className="msg">{a.message}</span>
               </div>
@@ -161,7 +161,7 @@ export function DriftPage() {
       <DriftTimeline/>
 
       <p style={{ color: "var(--faint)", fontSize: 11, marginTop: 32, fontFamily: "var(--f-mono)" }}>
-        last update: {d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : "â"}
+        last update: {d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : "—"}
       </p>
     </div>
   );
