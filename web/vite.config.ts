@@ -16,19 +16,35 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      "/api":     { target: "http://localhost:8000", changeOrigin: true },
-      "/admin":   { target: "http://localhost:8000", changeOrigin: true },
-      "/health":  { target: "http://localhost:8000", changeOrigin: true },
-      "/metrics": { target: "http://localhost:8000", changeOrigin: true },
-      "/docs":    { target: "http://localhost:8000", changeOrigin: true },
+      "/api":          { target: "http://localhost:8000", changeOrigin: true },
+      "/admin":        { target: "http://localhost:8000", changeOrigin: true },
+      "/health":       { target: "http://localhost:8000", changeOrigin: true },
+      "/metrics":      { target: "http://localhost:8000", changeOrigin: true },
+      "/docs":         { target: "http://localhost:8000", changeOrigin: true },
       "/openapi.json": { target: "http://localhost:8000", changeOrigin: true },
     },
   },
   build: {
     outDir: "../app/static/spa",
     emptyOutDir: true,
-    // SPA served at /v2/ by FastAPI
     assetsDir: "assets",
     sourcemap: true,
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("/three/") || id.includes("\\three\\")) return "vendor-three";
+          if (id.includes("react-router")) return "vendor-router";
+          if (id.includes("@tanstack/react-query")) return "vendor-query";
+          if (id.includes("framer-motion")) return "vendor-motion";
+          if (id.includes("sonner")) return "vendor-toast";
+          if (id.includes("/react-dom/") || id.includes("/react/") || id.includes("/scheduler/")) return "vendor-react";
+          if (id.includes("recharts") || id.includes("d3-")) return "vendor-charts";
+          if (id.includes("leaflet")) return "vendor-leaflet";
+          return "vendor-misc";
+        },
+      },
+    },
   },
 });

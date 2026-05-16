@@ -375,3 +375,10 @@ html, body, .card, [class*="-card"], [class*="-panel"], table, tr, td, th, input
   background: var(--bg-2) !important;
   color: var(--text) !important;
 }
+
+/* === Utility classes for inline-style replacement === */
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.danger { color: #EF4444; }
+.success { color: var(--planet); }
+.warning { color: #F5C84B; }

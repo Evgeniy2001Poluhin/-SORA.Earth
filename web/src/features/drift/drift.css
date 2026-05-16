@@ -1,0 +1,99 @@
+/* === Drift Page === */
+
+.drift-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 24px;
+  border-radius: 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+}
+.drift-banner::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  background: var(--planet);
+  border-radius: 14px 0 0 14px;
+}
+.drift-banner[data-status="drift"]::before { background: #EF4444; }
+.drift-banner[data-status="no_baseline"]::before { background: var(--muted); }
+
+.drift-banner .icon {
+  font-size: 28px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.drift-banner[data-status="stable"] .icon { color: var(--planet); }
+.drift-banner[data-status="drift"] .icon { color: #EF4444; }
+.drift-banner[data-status="no_baseline"] .icon { color: var(--muted); }
+
+.drift-banner .body { flex: 1; }
+.drift-banner .label {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.drift-banner .title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+}
+.drift-banner[data-status="drift"] .title { color: #EF4444; }
+.drift-banner[data-status="stable"] .title { color: var(--planet); }
+
+.drift-banner .meta {
+  font-size: 12px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  text-align: right;
+}
+
+/* Alerts */
+.drift-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  position: relative;
+}
+.drift-alert::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: #EF4444;
+  border-radius: 8px 0 0 8px;
+}
+.drift-alert .icon { color: #EF4444; font-size: 16px; flex-shrink: 0; }
+.drift-alert .feature { font-family: var(--f-mono); font-size: 12px; color: var(--text); }
+.drift-alert .msg { color: var(--muted); font-size: 13px; flex: 1; }
+
+/* Pills */
+.drift-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.drift-pill[data-level="LOW"]    { background: rgba(47,224,166,.13); color: #2FE0A6; border: 1px solid rgba(47,224,166,.35); }
+.drift-pill[data-level="MEDIUM"] { background: rgba(245,200,75,.13); color: #F5C84B; border: 1px solid rgba(245,200,75,.35); }
+.drift-pill[data-level="HIGH"]   { background: rgba(239,68,68,.13);  color: #EF4444; border: 1px solid rgba(239,68,68,.35); }
+
+/* Drift feature table */
+.drift-table { display: flex; flex-direction: column; gap: 1px; background: var(--line-2); border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; }
+.drift-row { display: grid; grid-template-columns: 2fr 1fr 1fr 80px 100px; gap: 12px; align-items: center; padding: 12px 16px; background: var(--bg-1); }
+.drift-row.drift-head { background: var(--bg-3); font: 500 10px/1 var(--f-mono); letter-spacing: .18em; text-transform: uppercase; color: var(--muted); }
