@@ -124,8 +124,8 @@ export function DriftPage() {
       <div className="drift-table">
         <div className="drift-row drift-head">
           <div>Feature</div>
-          <div className="tabular">Baseline Î¼</div>
-          <div className="tabular">Current Î¼</div>
+          <div className="tabular">Baseline μ</div>
+          <div className="tabular">Current μ</div>
           <div className="tabular">|z|</div>
           <div>Severity</div>
         </div>

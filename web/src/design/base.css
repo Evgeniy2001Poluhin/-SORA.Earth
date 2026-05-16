@@ -401,3 +401,18 @@ html, body, .card, [class*="-card"], [class*="-panel"], table, tr, td, th, input
   font: 600 22px/1 ui-serif, Georgia, serif;
   color: var(--text);
 }
+
+/* === Preset button (shared from explain.css, used in drift, evaluate, etc) === */
+.preset-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--muted, #8aa);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  font-family: inherit;
+}
+.preset-btn:hover:not(:disabled) { color: #2FE0A6; border-color: #2FE0A6; }
+.preset-btn:disabled { opacity: 0.5; cursor: not-allowed; }
