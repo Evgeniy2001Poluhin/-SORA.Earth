@@ -1,11 +1,5 @@
 .explain-presets { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; }
-.preset-btn {
-  padding: 6px 14px; border: 1px solid var(--line-2);
-  background: transparent; color: var(--muted, #8aa);
-  border-radius: 999px; cursor: pointer; font-size: 12px; letter-spacing: 0.04em;
-  font-family: inherit;
-}
-.preset-btn:hover { color: #2FE0A6; border-color: #2FE0A6; }
+
 .elapsed-pill {
   margin-left: auto; padding: 4px 10px; font-size: 11px;
   border-radius: 999px; background: rgba(47,224,166,0.1); color: #2FE0A6;
