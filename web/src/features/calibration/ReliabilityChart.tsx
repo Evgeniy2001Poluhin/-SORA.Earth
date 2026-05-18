@@ -27,7 +27,7 @@ export function ReliabilityChart({ data }: Props) {
 
   return (
     <div className="rel-chart-wrap">
-      <ResponsiveContainer width="100%" height={360}>
+      <ResponsiveContainer width="100%" height={360} minWidth={1} minHeight={1}>
         <ScatterChart margin={{ top: 12, right: 24, bottom: 36, left: 36 }}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="x" type="number" domain={[0, 1]} tickCount={6}

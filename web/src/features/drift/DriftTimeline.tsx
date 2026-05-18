@@ -26,7 +26,7 @@ export function DriftTimeline() {
     <div>
       <div className="eyebrow" style={{ marginBottom: 12 }}>Drift timeline (MLflow): {data.length} events</div>
       <div style={{ height: 240, background: "var(--bg-2)", border: "1px solid var(--line)", borderRadius: 10, padding: 16, marginBottom: 24 }}>
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
           <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
             <CartesianGrid stroke="var(--line)" strokeDasharray="3 3" />
             <XAxis dataKey="timeShort" stroke="var(--muted)" fontSize={11} />

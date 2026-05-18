@@ -96,7 +96,7 @@ export function WhatIf({ form, lastRun }: Props) {
       </div>
       {sweepData.length>0 && (
         <div style={{height:260,marginTop:8}}>
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
             <LineChart data={sweepData} margin={{top:8,right:16,left:0,bottom:8}}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--line)"/>
               <XAxis dataKey="x" tickFormatter={param.fmt} stroke="#666" fontSize={11}/>

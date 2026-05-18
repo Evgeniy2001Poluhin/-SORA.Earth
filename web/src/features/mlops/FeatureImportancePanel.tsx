@@ -17,7 +17,7 @@ export function FeatureImportancePanel() {
     <div>
       <div className="eyebrow" style={{ marginBottom: 12 }}>Feature importance: {data.length} features</div>
       <div style={{ height: 280, background: "var(--bg-2)", border: "1px solid var(--line)", borderRadius: 10, padding: 16 }}>
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
           <BarChart data={data} layout="vertical" margin={{ left: 100, right: 16, top: 8, bottom: 8 }}>
             <XAxis type="number" domain={[0, max * 1.1]} stroke="var(--muted)" fontSize={11} />
             <YAxis type="category" dataKey="name" stroke="var(--muted)" fontSize={11} width={100} />
