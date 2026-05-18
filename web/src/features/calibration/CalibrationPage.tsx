@@ -99,7 +99,7 @@ export function CalibrationPage() {
 
           <div className="eyebrow" style={{ marginBottom: 12 }}>Per-model probability</div>
           <div className="chart-wrap">
-            <ResponsiveContainer width="100%" height={280}>
+            <ResponsiveContainer width="100%" height={280} minWidth={1} minHeight={1}>
               <BarChart data={chartData} margin={{ top: 16, right: 24, left: 0, bottom: 8 }}>
                 <XAxis dataKey="model" stroke="#8aa" tick={{ fontSize: 12 }} />
                 <YAxis stroke="#8aa" domain={[0, 1]} tick={{ fontSize: 12 }} tickFormatter={(v) => (v * 100).toFixed(0) + "%"} />
