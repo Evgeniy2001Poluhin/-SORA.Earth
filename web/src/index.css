@@ -1,0 +1,4 @@
+
+/* Recharts safety: prevent -1 width/height in flex/grid parents */
+.recharts-responsive-container { min-width: 0 !important; min-height: 0 !important; }
+.chart-wrap, .rel-chart-wrap { min-width: 0; }
