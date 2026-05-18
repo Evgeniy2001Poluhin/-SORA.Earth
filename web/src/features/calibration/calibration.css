@@ -33,3 +33,43 @@
 .rel-chart-wrap { background: var(--bg-1); padding: 12px; border-radius: 8px; }
 .rel-empty { padding: 60px; text-align: center; color: var(--muted); background: var(--bg-1); border-radius: 8px; }
 .rel-caption { margin: 8px 0 0; font-size: 0.75rem; color: var(--muted); text-align: center; }
+
+.chart-wrap { width: 100%; height: 280px; min-width: 0; }
+.rel-chart-wrap { width: 100%; height: 360px; min-width: 0; }
+
+/* Compare models — primary button, matches project pill style (radius 8) */
+.calib-form .primary-btn {
+  appearance: none;
+  border: 1px solid var(--planet, #2FE0A6);
+  background: var(--planet, #2FE0A6);
+  color: #0B1B14;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: .02em;
+  padding: 0 18px;
+  height: 38px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  align-self: end;
+  min-width: 140px;
+  transition: filter .15s ease, transform .05s ease;
+}
+.calib-form .primary-btn:hover { filter: brightness(1.07); }
+.calib-form .primary-btn:active { transform: translateY(1px); }
+.calib-form .primary-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Preset chips (WEAK / MED /eset-btn {
+  appearance: none;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  letter-spacing: .04em;
+  cursor: pointer;
+  transition: border-color .15s ease, color .15s ease;
+}
+.calib-presets .preset-btn:hover { border-color: var(--planet); color: var(--planet); }
+.calib-presets .preset-btn:active { transform: translateY(1px); }
