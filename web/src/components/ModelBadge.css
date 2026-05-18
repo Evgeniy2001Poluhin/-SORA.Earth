@@ -1,7 +1,15 @@
-.model-badge{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:18px;color:#fff;background:#475569;user-select:none}
-.model-badge--champion{background:#059669}
-.model-badge--challenger{background:#d97706}
-.model-badge--loading{color:#94a3b8;background:transparent}
-.model-badge--error{color:#ef4444;background:transparent}
-.model-badge__at{opacity:.75}
+.model-badge{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:2px 8px;border-radius:6px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:11px;line-height:18px;
+  color:var(--text);background:var(--bg-2);
+  border:1px solid var(--line);
+  user-select:none;
+}
+.model-badge--production {background:#059669;color:#fff;border-color:transparent}
+.model-badge--staging    {background:#d97706;color:#fff;border-color:transparent}
+.model-badge--shadow     {background:#475569;color:#fff;border-color:transparent}
+.model-badge--muted      {color:var(--muted);background:transparent;border-color:transparent}
+.model-badge__at {opacity:.75}
 .model-badge__dot{opacity:.6}

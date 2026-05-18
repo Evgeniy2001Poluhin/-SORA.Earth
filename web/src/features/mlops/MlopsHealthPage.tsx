@@ -37,7 +37,7 @@ export function MlopsHealthPage() {
       <div className="eyebrow" style={{ marginBottom: 8 }}>MLOps · Platform Health</div>
       <h1 className="display" style={{ fontSize: 36, margin: "0 0 8" }}>MLOps Control Room</h1>
       <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 28 }}>
-        Model serving, drift detection, training history. Auto-refresh every 10s.
+        Drift detection and training history. Auto-refresh every 10s.
       </p>
 
       <div className="kpi-grid">
