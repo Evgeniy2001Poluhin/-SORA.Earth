@@ -10,7 +10,7 @@ export function Providers({ children }: PropsWithChildren) {
   return (
     <ThemeProvider>
       <QueryClientProvider client={qc}>
-        <BrowserRouter>{children}<Toaster theme="dark" position="bottom-right" richColors/></BrowserRouter>
+        <BrowserRouter>{children}<Toaster theme="system" position="bottom-right" richColors toastOptions={{ style: { background: "var(--bg-2)", color: "var(--text)", border: "1px solid var(--line)" } }}/></BrowserRouter>
       </QueryClientProvider>
     </ThemeProvider>
   );

@@ -40,7 +40,7 @@ img,svg,canvas{display:block;max-width:100%}
 
 /* === LIGHT: Sandstone Cream === */
 :root[data-theme="light"] body{background:var(--bg);background-image:radial-gradient(ellipse 1200px 600px at 75% -10%,rgba(123,94,42,.10),transparent 55%);}
-:root[data-theme="light"] .card,:root[data-theme="light"] [class*="-card"],:root[data-theme="light"] [class*="-panel"],:root[data-theme="light"] [class*="stat-"],:root[data-theme="light"] [class*="metric-"]{background:var(--bg-2)!important;color:var(--text)!important;border:1px solid var(--line)!important;box-shadow:0 1px 3px rgba(60,40,20,.10)!important;}
+:root[data-theme="light"] .card,:root[data-theme="light"] .stat-card,:root[data-theme="light"] .metric-card,:root[data-theme="light"] .info-panel,:root[data-theme="light"] .panel{background:var(--bg-2)!important;color:var(--text)!important;border:1px solid var(--line)!important;box-shadow:0 1px 3px rgba(60,40,20,.10)!important;}
 :root[data-theme="light"] input,:root[data-theme="light"] select,:root[data-theme="light"] textarea{background:var(--input-bg)!important;color:var(--text)!important;border:1px solid var(--input-border)!important;}
 :root[data-theme="light"] input:focus,:root[data-theme="light"] select:focus{border-color:var(--planet)!important;box-shadow:0 0 0 3px rgba(123,94,42,.18)!important;outline:none!important;}
 :root[data-theme="light"] input::placeholder{color:var(--faint)}
@@ -50,10 +50,10 @@ img,svg,canvas{display:block;max-width:100%}
 :root[data-theme="light"] tbody tr:nth-child(even){background:var(--table-row-alt)!important;}
 :root[data-theme="light"] tbody tr:hover{background:rgba(123,94,42,.10)!important;}
 :root[data-theme="light"] td{color:var(--text)!important;border-color:var(--table-border)!important;}
-:root[data-theme="light"] .pill,:root[data-theme="light"] [class*="pill"]:not([class*="status"]):not([class*="risk"]){background:var(--bg-3)!important;color:var(--text)!important;border:1px solid var(--line)!important;}
-:root[data-theme="light"] .pill.active,:root[data-theme="light"] [class*="pill"][class*="active"]{background:rgba(123,94,42,.18)!important;color:var(--planet-2)!important;border-color:rgba(123,94,42,.40)!important;}
-:root[data-theme="light"] .ev-presets button,:root[data-theme="light"] [class*="preset"] button{background:var(--bg-1)!important;color:var(--text)!important;border:1px solid var(--line-2)!important;}
-:root[data-theme="light"] button[class*="primary"],:root[data-theme="light"] .btn-primary,:root[data-theme="light"] button.run,:root[data-theme="light"] .preset-btn{background:var(--planet)!important;color:#F5EDD8!important;border:0!important;}
+:root[data-theme="light"] .pill,:root[data-theme="light"] .filter-pill,:root[data-theme="light"] .nav-pill{background:var(--bg-3)!important;color:var(--text)!important;border:1px solid var(--line)!important;}
+:root[data-theme="light"] .pill.active,:root[data-theme="light"] .filter-pill.active,:root[data-theme="light"] .nav-pill.active{background:rgba(123,94,42,.18)!important;color:var(--planet-2)!important;border-color:rgba(123,94,42,.40)!important;}
+:root[data-theme="light"] .ev-presets button,:root[data-theme="light"] .preset-grid button,:root[data-theme="light"] .preset-btn{background:var(--bg-1)!important;color:var(--text)!important;border:1px solid var(--line-2)!important;}
+:root[data-theme="light"] .btn-primary,:root[data-theme="light"] button.btn-primary,:root[data-theme="light"] button.run,:root[data-theme="light"] .preset-btn{background:var(--planet)!important;color:#F5EDD8!important;border:0!important;}
 :root[data-theme="light"] .shell-top{background:rgba(232,223,206,.88)!important;backdrop-filter:blur(14px);border-bottom:1px solid var(--line);}
 :root[data-theme="light"] .shell-nav a{color:var(--muted)}
 :root[data-theme="light"] .shell-nav a.active{background:rgba(123,94,42,.16);color:var(--planet-2);box-shadow:inset 0 0 0 1px rgba(123,94,42,.36);}
