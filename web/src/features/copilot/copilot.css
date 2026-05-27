@@ -403,11 +403,7 @@
 
 
 /* === FINAL preset pills - SMALL with BIG GAP === */
-.preset-row {
-  display: flex;
-  gap: 32px;
-  margin-bottom: 22px;
-}
+
 .preset-btn {
   background: var(--bg-1);
   border: 1px solid var(--line-2);
@@ -431,4 +427,11 @@
   background: rgba(123, 94, 42, 0.18);
   border-color: rgba(123, 94, 42, 0.55);
   color: var(--planet-2);
+}
+
+.preset-row {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 22px;
 }
