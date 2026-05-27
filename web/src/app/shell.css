@@ -24,17 +24,4 @@
 .theme-toggle:hover{background:rgba(255,255,255,.06);transform:scale(1.05)}
 .theme-toggle:active{transform:scale(0.95)}
 
-.shell-nav a[href="/copilot"]::after {
-  content: "NEW";
-  display: inline-block;
-  margin-left: 6px;
-  padding: 2px 5px;
-  background: var(--planet);
-  color: var(--bg);
-  font: 700 8px/1 var(--f-mono);
-  letter-spacing: 0.1em;
-  border-radius: 3px;
-  vertical-align: middle;
-  position: relative;
-  top: -1px;
-}
+
