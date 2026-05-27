@@ -1,0 +1,46 @@
+.copilot-page { padding: 32px; max-width: 1200px; margin: 0 auto; }
+.copilot-header { margin-bottom: 24px; }
+.copilot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+@media (max-width: 900px) { .copilot-grid { grid-template-columns: 1fr; } }
+
+.copilot-form { background: var(--card-bg, #fff); padding: 24px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.copilot-form .row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.copilot-form label { font-size: 13px; color: #555; font-weight: 500; }
+.copilot-form input { padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
+.copilot-form input:focus { outline: none; border-color: #5b8def; }
+
+.preset-row { display: flex; gap: 8px; margin: 8px 0 16px; }
+.preset-btn { padding: 6px 14px; border: 1px solid #ccc; border-radius: 20px; background: #f7f7f7; cursor: pointer; font-size: 13px; }
+.preset-btn:hover { background: #ececec; }
+
+.btn-primary { padding: 12px 20px; background: #28200E; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px; width: 100%; }
+.btn-primary:hover { background: #3d3217; }
+.btn-primary:disabled { background: #999; cursor: not-allowed; }
+
+.copilot-result { background: var(--card-bg, #fff); padding: 24px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.verdict-badge { display: inline-block; padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 14px; margin-bottom: 12px; }
+.verdict-excellent { background: #d4f4dd; color: #1f7a35; }
+.verdict-high      { background: #d4f4dd; color: #1f7a35; }
+.verdict-moderate  { background: #fff3cd; color: #856404; }
+.verdict-low       { background: #ffe1cc; color: #8a4b00; }
+.verdict-critical  { background: #fde0e0; color: #a02323; }
+
+.prob-bar { height: 12px; background: #eee; border-radius: 6px; overflow: hidden; margin: 12px 0; }
+.prob-bar-fill { height: 100%; background: linear-gradient(90deg, #ff6b6b, #ffd93d, #6dca6d); transition: width 0.4s; }
+
+.confidence-chip { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; margin-left: 8px; }
+.conf-high { background: #d4f4dd; color: #1f7a35; }
+.conf-medium { background: #fff3cd; color: #856404; }
+.conf-low { background: #fde0e0; color: #a02323; }
+
+.section-title { font-size: 14px; font-weight: 600; color: #333; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+.driver-card { padding: 10px 14px; margin-bottom: 6px; border-radius: 8px; border-left: 3px solid; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+.driver-positive { background: #f0faf3; border-color: #4caf50; }
+.driver-negative { background: #fff5f0; border-color: #ff7043; }
+.shap-value { font-family: monospace; font-weight: 600; }
+
+.risk-item { padding: 8px 12px; background: #fff8e1; border-left: 3px solid #f9a825; border-radius: 6px; margin-bottom: 6px; font-size: 13px; }
+
+.recommendation-block { padding: 16px; background: #eef5ff; border-radius: 8px; border-left: 4px solid #5b8def; margin: 16px 0; font-style: italic; font-size: 15px; }
+
+.mode-chip { display: inline-block; padding: 4px 10px; background: #f0f0f0; border-radius: 12px; font-size: 11px; color: #666; margin-top: 12px; }
