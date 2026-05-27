@@ -158,6 +158,24 @@ export function CopilotPage() {
               <div className="recommendation-block">
                 <span>{result.recommendation}</span>
               </div>
+              {result.sources && result.sources.length > 0 && (
+                <>
+                  <div className="section-title" style={{marginTop: 22}}>Sources Retrieved Knowledge</div>
+                  {result.sources.map((s, i) => (
+                    <div key={i} className="source-card">
+                      <div className="source-head">
+                        <span className="source-title">{s.title}</span>
+                        <span className="source-meta">
+                          <span className={"cat-chip cat-" + s.category}>{s.category.replace("_"," ")}</span>
+                          <span className="score-chip">{Math.round(s.score * 100)}% match</span>
+                        </span>
+                      </div>
+                      <p className="source-excerpt">{s.excerpt}</p>
+                    </div>
+                  ))}
+                </>
+              )}
+
 
               {result.executive_summary && (
                 <>

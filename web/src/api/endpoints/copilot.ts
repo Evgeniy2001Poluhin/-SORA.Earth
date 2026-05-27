@@ -21,6 +21,14 @@ export interface CopilotDriver {
   note?: string;
 }
 
+export interface CopilotSource {
+  id: string;
+  title: string;
+  category: string;
+  score: number;
+  excerpt: string;
+}
+
 export interface CopilotResponse {
   verdict: { label: string; level: string };
   probability: number;
@@ -31,6 +39,8 @@ export interface CopilotResponse {
   model_version: string;
   explanation_mode: string;
   executive_summary?: string;
+  sources?: CopilotSource[];
+  rag_query?: string;
 }
 
 export interface CopilotHealth {
