@@ -176,6 +176,24 @@ export function CopilotPage() {
                 </>
               )}
 
+              {result.compliance && (
+                <div className={"sentinel-badge sentinel-" + (result.compliance.passed ? "pass" : (result.compliance.risk_score >= 0.5 ? "fail" : "warn"))}>
+                  <span className="sentinel-icon">{result.compliance.passed ? "✓" : "⚠"}</span>
+                  <span className="sentinel-label">SENTINEL · {result.compliance.passed ? "PASS" : (result.compliance.risk_score >= 0.5 ? "FAIL" : "WARN")}</span>
+                  <span className="sentinel-meta">risk {(result.compliance.risk_score * 100).toFixed(0)}%</span>
+                  {result.compliance.pii_findings.length > 0 && (
+                    <span className="sentinel-meta">PII {result.compliance.pii_findings.length}</span>
+                  )}
+                  {result.compliance.bias_findings.length > 0 && (
+                    <span className="sentinel-meta">bias {result.compliance.bias_findings.length}</span>
+                  )}
+                  {result.compliance.policy_violations.length > 0 && (
+                    <span className="sentinel-meta">policy {result.compliance.policy_violations.length}</span>
+                  )}
+                </div>
+              )}
+
+
 
               {result.executive_summary && (
                 <>

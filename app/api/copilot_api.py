@@ -1,9 +1,10 @@
-"""Co-Pilot API with RAG."""
+"""Co-Pilot API with RAG + Compliance Sentinel."""
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import logging
 from app.services.copilot import explain_prediction, health as copilot_health
+from app.services.compliance import check as compliance_check
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -21,7 +22,8 @@ def _build_rag_query(probability, features):
     bud = features.get("budget")
     soc = features.get("social_impact")
     dur = features.get("duration_months")
-    cpd = features.get("co2_(co2)} t/yr")
+    cpd = features.get("co2_per_dollar")
+    if co2: parts.append(f"CO2 reduction {int(co2)} t/yr")
     if bud: parts.append(f"budget {int(bud)/1000000:.1f}M USD")
     if soc is not None: parts.append(f"social impact {int(soc)}")
     if dur: parts.append(f"{int(dur)} month duration")
@@ -43,14 +45,22 @@ def _retrieve_sources(query, k=4):
         log.warning("RAG failed: %s", e)
         return []
 
+def _scan_text(base):
+    parts = [base.get("recommendation") or ""]
+    risks = base.get("risks") or []
+    parts.extend(risks)
+    return " ".join(p for p in parts if p).strip()
+
 @router.post("/copilot/explain")
 def explain(payload: CopilotRequest, k: int = Query(4, ge=1, le=8)):
     base = explain_prediction(probability=payload.probability, features=payload.features, shap_values=payload.shap_values, project=payload.project, model_version=payload.model_version or "v5")
     q = _build_rag_query(payload.probability, payload.features)
-    src = _retrieve_sources(q, k=k)
+    sources = _retrieve_sources(q, k=k)
     if isinstance(base, dict):
-        base["sources"] = src
+        base["sources"] = sources
         base["rag_query"] = q
+        scan_text = _scan_text(base)
+        base["compliance"] = compliance_check(scan_text) if scan_text else {"passed": True, "pii_findings": [], "bias_findings": [], "policy_violations": [], "redacted_text": "", "risk_score": 0.0, "engine": "regex-v1"}
     return base
 
 @router.get("/copilot/health")
@@ -61,4 +71,5 @@ def health():
         h["rag"] = {"enabled": True, "docs": get_retriever().collection.count()}
     except Exception as e:
         h["rag"] = {"enabled": False, "error": str(e)}
+    h["compliance"] = {"enabled": True, "engine": "regex-v1"}
     return h

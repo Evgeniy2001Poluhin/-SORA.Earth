@@ -29,6 +29,19 @@ export interface CopilotSource {
   excerpt: string;
 }
 
+
+export interface CopilotPiiFinding { type: string; text: string; start: number; end: number; confidence: number; }
+export interface CopilotBiasFinding { pattern: string; match: string; note: string; }
+export interface CopilotCompliance {
+  passed: boolean;
+  pii_findings: CopilotPiiFinding[];
+  bias_findings: CopilotBiasFinding[];
+  policy_violations: CopilotBiasFinding[];
+  redacted_text: string;
+  risk_score: number;
+  engine: string;
+}
+
 export interface CopilotResponse {
   verdict: { label: string; level: string };
   probability: number;
@@ -41,6 +54,7 @@ export interface CopilotResponse {
   executive_summary?: string;
   sources?: CopilotSource[];
   rag_query?: string;
+  compliance?: CopilotCompliance;
 }
 
 export interface CopilotHealth {
