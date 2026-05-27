@@ -37,6 +37,7 @@ from app.api import scheduler_routes
 from app.api import drift_monitor
 from app.api import ab_comparison as ab_comparison_api
 from app.api import compliance as compliance_api
+from app.api import rag_api
 from app.api import map_data as map_api
 from app.api import predict_v2 as predict_v2_api
 from app.ml.routes import router as ml_v2_router
@@ -514,6 +515,7 @@ app.include_router(ai_teammate_routes.router, prefix="/api/v1")
 app.include_router(ml_v2_router)
 app.include_router(map_russia.router)
 app.include_router(predict_v2_api.router)
+app.include_router(rag_api.router)
 
 
 # --- MLOps domain metrics (Prometheus) ---
