@@ -30,6 +30,9 @@ export function CopilotPage() {
   const [result, setResult] = useState<CopilotResponse | null>(null);
   const [activePreset, setActivePreset] = useState<PresetKey | null>("HIGH");
   const probability = watch("probability");
+  const [streamMode, setStreamMode] = useState(false);
+  const [streamingText, setStreamingText] = useState("");
+  const [streaming, setStreaming] = useState(false);
 
   const mut = useMutation({
     mutationFn: async (v: FormValues) => {
@@ -56,6 +59,55 @@ export function CopilotPage() {
 
   const submit = (v: FormValues) => { setActivePreset(null); mut.mutate(v); };
   const usePreset = (k: PresetKey) => { setActivePreset(k); reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
+
+  const runStream = async (v: FormValues) => {
+    setStreaming(true);
+    setStreamingText("");
+    setResult(null);
+    setActivePreset(null);
+    const body: CopilotRequest = {
+      probability: Number(v.probability),
+      features: {
+        budget: Number(v.budget),
+        co2_reduction: Number(v.co2_reduction),
+        social_impact: Number(v.social_impact),
+        duration_months: Number(v.duration_months),
+        co2_per_dollar: Number(v.co2_per_dollar),
+      },
+      shap_values: [
+        { feature: "co2_reduction", shap_value: 0.12 },
+        { feature: "social_impact", shap_value: 0.08 },
+        { feature: "budget", shap_value: -0.04 },
+      ],
+    };
+    try {
+      let acc = "";
+      for await (const ev of copilotApi.explainStream(body)) {
+        if (ev.type === "token") {
+          acc += ev.value;
+          setStreamingText(acc);
+        } else if (ev.type === "done") {
+          setResult({
+            verdict: { label: "Streamed", level: "info" },
+            probability: Number(v.probability),
+            confidence: "streaming",
+            key_drivers: { positive: [], negative: [] },
+            risks: [],
+            recommendation: acc.trim(),
+            model_version: "v5",
+            explanation_mode: "stream",
+            sources: ev.sources,
+            compliance: ev.compliance,
+          });
+        }
+      }
+      toast.success("Stream complete");
+    } catch (e: any) {
+      toast.error("Stream failed: " + (e?.message ?? "unknown"));
+    } finally {
+      setStreaming(false);
+    }
+  };
 
   return (
     <div className="copilot-page">
@@ -92,13 +144,32 @@ export function CopilotPage() {
           <div className="row"><label>Duration (months)</label><input type="number" {...register("duration_months", { valueAsNumber: true })} /></div>
           <div className="row"><label>CO2 per dollar</label><input type="number" step="0.1" {...register("co2_per_dollar", { valueAsNumber: true })} /></div>
 
-          <button className="btn-primary" type="submit" disabled={mut.isPending}>
-            {mut.isPending ? "Generating..." : "Generate AI Explanation"}
-          </button>
+          <div className="row" style={{display:"flex",alignItems:"center",gap:"10px",margin:"8px 0"}}>
+            <label style={{display:"flex",alignItems:"center",gap:"6px",cursor:"pointer",fontSize:"13px"}}>
+              <input type="checkbox" checked={streamMode} onChange={(e)=>setStreamMode(e.target.checked)} />
+              <span>⃡ Stream mode (token-by-token)</span>
+            </label>
+          </div>
+          {!streamMode ? (
+            <button className="btn-primary" type="submit" disabled={mut.isPending || streaming}>
+              {mut.isPending ? "Generating..." : "Generate AI Explanation"}
+            </button>
+          ) : (
+            <button className="btn-primary" type="button" disabled={streaming}
+              onClick={handleSubmit(runStream)}>
+              {streaming ? "Streaming..." : "⡡ Stream AI Explanation"}
+            </button>
+          )}
         </form>
 
         <div className="copilot-result">
-          {!result && (
+          {streaming && (
+            <div className="streaming-block" style={{padding:"20px",lineHeight:"1.6",fontSize:"14px"}}>
+              <div className="section-title">⡡ Streaming...</div>
+              <p style={{whiteSpace:"pre-wrap"}}>{streamingText}<span className="cursor-blink">▊</span></p>
+            </div>
+          )}
+          {!result && !streaming && (
             <div className="copilot-empty">
               <div className="copilot-empty-orb" />
               <p>No explanation yet</p>
