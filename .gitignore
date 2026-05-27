@@ -107,3 +107,4 @@ output/loadtest_v2_*/
 # sed backup files
 *.bak
 *.bak2
+!logs/.gitkeep
