@@ -422,7 +422,7 @@
 
 :root[data-theme="light"] 
 
-.preset-row { display: flex; flex-direction: column; gap: 10px; margin-bottom: 22px; align-items: flex-start; }
+
 
 .preset-btn.active {
   background: var(--planet) !important;
@@ -436,4 +436,13 @@
   border-color: var(--planet) !important;
   color: #F5EDD8 !important;
   font-weight: 700 !import: 0 4px 12px rgba(123,94,42,0.3);
+}
+
+.preset-row {
+  display: flex !important;
+  flex-direction: row !important;
+  gap: 60px !important;
+  margin-bottom: 22px !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
 }
