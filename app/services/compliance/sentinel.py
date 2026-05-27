@@ -1,15 +1,10 @@
-"""Compliance Sentinel: regex-based PII + bias + policy guard.
-
-Lightweight implementation without presidio/spacy dependency.
-Suitable for thesis demonstration of Responsible AI patterns.
-"""
+"""Compliance Sentinel: regex-based PII + bias + policy guard."""
 from __future__ import annotations
 import re, logging
 from typing import List, Dict, Any
 
 log = logging.getLogger(__name__)
 
-# PII regex patterns (entity_type, regex, default_confidence)
 _PII_PATTERNS = [
     ("EMAIL_ADDRESS", r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", 0.95),
     ("PHONE_NUMBER", r"\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}", 0.85),
@@ -31,6 +26,14 @@ _BIAS_PATTERNS = [
      "Avoid certainty language; ML predictions are probabilistic"),
     (r"\bwill\s+(succeed|fail)\b", "outcome_promise",
      "Replace deterministic claim with probability statement"),
+    (r"\bfavors?\s+(only\s+)?(male|female|men|women)\b", "gender_preference",
+     "Gender preference detected; ensure non-discriminatory criteria"),
+    (r"\b(only|exclusively)\s+(male|female|men|women)\b", "gender_exclusion",
+     "Gender exclusion violates equal opportunity principles"),
+    (r"\b(male|female)-only\b", "gender_exclusion",
+     "Gender-only restriction detected"),
+    (r"\bprefers?\s+(men|women|male|female)\s+(for|in|as)\b", "gender_role_bias",
+     "Gendered role assignment may indicate stereotyping"),
 ]
 
 _POLICY_PATTERNS = [
@@ -43,19 +46,13 @@ _POLICY_PATTERNS = [
 ]
 
 
-def _scan_pii(text: str) -> List[Dict[str, Any]]:
+def _scan_pii(text):
     out = []
     for entity, pat, conf in _PII_PATTERNS:
         for m in re.finditer(pat, text):
-            out.append({
-                "type": entity,
-                "text": m.group(0),
-                "start": m.start(),
-                "end": m.end(),
-                "confidence": conf,
-            })
+            out.append({"type": entity, "text": m.group(0), "start": m.start(),
+                        "end": m.end(), "confidence": conf})
     out.sort(key=lambda x: x["start"])
-    # Remove overlaps (keep higher confidence)
     cleaned = []
     for f in out:
         if cleaned and f["start"] < cleaned[-1]["end"]:
@@ -66,21 +63,16 @@ def _scan_pii(text: str) -> List[Dict[str, Any]]:
     return cleaned
 
 
-def _scan_patterns(text: str, patterns) -> List[Dict[str, Any]]:
+def _scan_patterns(text, patterns):
     out = []
     for pat, code, note in patterns:
         for m in re.finditer(pat, text, flags=re.IGNORECASE):
-            out.append({
-                "pattern": code,
-                "match": m.group(0),
-                "start": m.start(),
-                "end": m.end(),
-                "note": note,
-            })
+            out.append({"pattern": code, "match": m.group(0), "start": m.start(),
+                        "end": m.end(), "note": note})
     return out
 
 
-def _redact(text: str, pii: List[Dict[str, Any]]) -> str:
+def _redact(text, pii):
     if not pii:
         return text
     sorted_pii = sorted(pii, key=lambda x: x["start"], reverse=True)
@@ -90,31 +82,24 @@ def _redact(text: str, pii: List[Dict[str, Any]]) -> str:
     return out
 
 
-def _risk_score(pii, bias, policy) -> float:
+def _risk_score(pii, bias, policy):
     pii_w = sum(p["confidence"] for p in pii) * 0.4
     bias_w = len(bias) * 0.15
     policy_w = len(policy) * 0.5
     return round(min(1.0, pii_w + bias_w + policy_w), 3)
 
 
-def check(text: str) -> Dict[str, Any]:
-    """Run full compliance check on a text."""
+def check(text):
     if not text or not text.strip():
-        return {
-            "passed": True, "pii_findings": [], "bias_findings": [],
-            "policy_violations": [], "redacted_text": text, "risk_score": 0.0,
-            "engine": "regex-v1",
-        }
+        return {"passed": True, "pii_findings": [], "bias_findings": [],
+                "policy_violations": [], "redacted_text": text, "risk_score": 0.0,
+                "engine": "regex-v1"}
     pii = _scan_pii(text)
     bias = _scan_patterns(text, _BIAS_PATTERNS)
     policy = _scan_patterns(text, _POLICY_PATTERNS)
     risk = _risk_score(pii, bias, policy)
     return {
         "passed": risk < 0.5 and not policy,
-        "pii_findings": pii,
-        "bias_findings": bias,
-        "policy_violations": policy,
-        "redacted_text": _redact(text, pii),
-        "risk_score": risk,
-        "engine": "regex-v1",
+        "pii_findings": pii, "bias_findings": bias, "policy_violations": policy,
+        "redacted_text": _redact(text, pii), "risk_score": risk, "engine": "regex-v1",
     }
