@@ -438,11 +438,7 @@
   font-weight: 700 !import: 0 4px 12px rgba(123,94,42,0.3);
 }
 
-.preset-row {
-  display: flex !important;
-  flex-direction: row !important;
-  gap: 60px !important;
-  margin-bottom: 22px !important;
-  align-items: center !important;
-  justify-content: flex-start !important;
-}
+
+
+.preset-row { display: flex; gap: 16px; margin-bottom: 22px; }
+.preset-btn { box-sizing: border-box; min-width: 88px; }
