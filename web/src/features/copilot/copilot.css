@@ -453,3 +453,22 @@
 .cat-case_study { background: rgba(47,224,166,0.14); color: var(--planet); }
 .score-chip { font: 500 10px/1 var(--f-mono); color: var(--faint); letter-spacing: 0.08em; }
 .source-excerpt { font: 400 12px/1.5 var(--f-sans); color: var(--text-2); margin: 4px 0 0; }
+
+/* === Compliance Sentinel badge === */
+.sentinel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font: 600 11px/1 var(--f-mono);
+  letter-spacing: 0.08em;
+  margin-top: 16px;
+  text-transform: uppercase;
+}
+.sentinel-pass { background: rgba(47,224,166,0.12); color: var(--planet); border: 1px solid rgba(47,224,166,0.4); }
+.sentinel-warn { background: rgba(255,200,80,0.12); color: #FFC850; border: 1px solid rgba(255,200,80,0.4); }
+.sentinel-fail { background: rgba(255,80,80,0.14); color: #FF7070; border: 1px solid rgba(255,80,80,0.4); }
+.sentinel-icon { font-size: 14px; }
+.sentinel-label { font-weight: 700; }
+.sentinel-meta { opacity: 0.75; font-weight: 500; }
