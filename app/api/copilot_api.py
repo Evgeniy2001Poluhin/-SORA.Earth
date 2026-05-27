@@ -73,3 +73,44 @@ def health():
         h["rag"] = {"enabled": False, "error": str(e)}
     h["compliance"] = {"enabled": True, "engine": "regex-v1"}
     return h
+
+
+
+from fastapi.responses import StreamingResponse
+import asyncio, json
+
+
+@router.post("/copilot/explain/stream")
+async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8)):
+    """SSE streaming variant of /copilot/explain."""
+    base = explain_prediction(
+        probability=payload.probability, features=payload.features,
+        shap_values=payload.shap_values, project=payload.project,
+        model_version=payload.model_version or "v5",
+    )
+    q = _build_rag_query(payload.probability, payload.features)
+    sources = _retrieve_sources(q, k=k)
+    scan_text = _scan_text(base) if isinstance(base, dict) else ""
+    compliance = compliance_check(scan_text) if scan_text else {
+        "passed": True, "pii_findings": [], "bias_findings": [],
+        "policy_violations": [], "redacted_text": "", "risk_score": 0.0,
+        "engine": "regex-v1",
+    }
+    rec = (base.get("recommendation") or "") if isinstance(base, dict) else ""
+    exs = (base.get("executive_summary") or "") if isinstance(base, dict) else ""
+
+    async def gen():
+        yield "data: " + json.dumps({"type": "meta", "probability": payload.probability, "rag_query": q}) + "\n\n"
+        if exs:
+            yield "data: " + json.dumps({"type": "section", "name": "executive_summary"}) + "\n\n"
+            for w in exs.split(" "):
+                yield "data: " + json.dumps({"type": "token", "value": w + " "}) + "\n\n"
+                await asyncio.sleep(0.035)
+        if rec:
+            yield "data: " + json.dumps({"type": "section", "name": "recommendation"}) + "\n\n"
+            for w in rec.split(" "):
+                yield "data: " + json.dumps({"type": "token", "value": w + " "}) + "\n\n"
+                await asyncio.sleep(0.035)
+        yield "data: " + json.dumps({"type": "done", "sources": sources, "compliance": compliance}) + "\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
