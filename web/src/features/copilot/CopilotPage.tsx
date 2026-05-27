@@ -69,7 +69,7 @@ export function CopilotPage() {
         <form className="copilot-form" onSubmit={handleSubmit(submit)}>
           <h3>Project Inputs</h3>
 
-          <div cassName="preset-row">
+          <div className="preset-row">
             {PRESET_KEYS.map((k) => (
               <button
                 key={k}
@@ -127,7 +127,7 @@ export function CopilotPage() {
                     <div key={i} className="driver-card driver-positive">
                       <span className="driver-feature">{d.feature_label}</span>
                       {d.shap_value !== undefined && <span className="shap-value">+{d.shap_value.toFixed(3)}</span>}
-                      {d.shap_value === undefined && d.ote && <span className="shap-value">{d.note}</span>}
+                      {d.shap_value === undefined && d.note && <span className="shap-value">{d.note}</span>}
                     </div>
                   ))}
                 </>
