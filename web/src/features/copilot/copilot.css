@@ -473,3 +473,44 @@
 .sentinel-icon { font-size: 14px; }
 .sentinel-label { font-weight: 700; }
 .sentinel-meta { opacity: 0.75; font-weight: 500; }
+
+/* Copilot Stream controls polish */
+.copilot-stream-speed {
+  margin-left: 8px;
+  padding: 6px 10px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  border-radius: 6px;
+  color: #d1fae5;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+}
+.copilot-stream-speed:hover { border-color: #10b981; }
+.copilot-stream-speed:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.copilot-cite {
+  color: #3b82f6 !important;
+  font-weight: 600;
+  cursor: help;
+  border-bottom: 1px dotted #3b82f6;
+  padding: 0 2px;
+  transition: background 0.15s;
+}
+.copilot-cite:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-radius: 3px;
+}
+
+.copilot-stop-btn {
+  margin-left: 8px;
+  padding: 8px 14px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  border-radius: 6px;
+  color: #fca5a5;
+  font-size: 13px;
+  cursor: pointer;
+}
+.copilot-stop-btn:hover { background: rgba(239, 68, 68, 0.2); }
