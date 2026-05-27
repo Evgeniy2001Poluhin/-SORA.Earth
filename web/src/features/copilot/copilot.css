@@ -66,7 +66,7 @@
 .row { margin-bottom: 14px; }
 .row label {
   display: block;
-  font0 10px/1 var(--f-mono);
+  font: 10px/1 var(--f-mono);
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--faint);
@@ -435,7 +435,8 @@
   background: var(--planet) !important;
   border-color: var(--planet) !important;
   color: #F5EDD8 !important;
-  font-weight: 700 !import: 0 4px 12px rgba(123,94,42,0.3);
+  font-weight: 700 !important;
+  box-shadow: 0 4px 12px rgba(123,94,42,0.3);
 }
 
 
