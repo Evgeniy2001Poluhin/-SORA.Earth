@@ -74,12 +74,14 @@ export const copilotApi = {
     api<CopilotResponse>("/copilot/explain", { method: "POST", body: JSON.stringify(b) }),
   health: () => api<CopilotHealth>("/copilot/health"),
 
-  async *explainStream(b: CopilotRequest): AsyncGenerator<CopilotStreamEvent, void, unknown> {
+  async *explainStream(b: CopilotRequest, opts?: { signal?: AbortSignal; speed?: "fast" | "normal" | "slow" }): AsyncGenerator<CopilotStreamEvent, void, unknown> {
     const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api/v1";
-    const res = await fetch(base + "/copilot/explain/stream", {
+    const qs = opts?.speed ? ("?speed=" + encodeURIComponent(opts.speed)) : "";
+    const res = await fetch(base + "/copilot/explain/stream" + qs, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(b),
+      signal: opts?.signal,
     });
     if (!res.ok || !res.body) {
       throw new Error("Stream failed: HTTP " + res.status);
