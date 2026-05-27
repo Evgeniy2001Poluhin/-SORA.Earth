@@ -9,6 +9,7 @@ const EvaluatePage    = lazy(() => import("@/features/evaluate/EvaluatePage").th
 const ComparePage     = lazy(() => import("@/features/compare/ComparePage").then(m => ({ default: m.ComparePage })));
 const DriftPage       = lazy(() => import("@/features/drift/DriftPage").then(m => ({ default: m.DriftPage })));
 const ExplainPage     = lazy(() => import("@/features/explain/ExplainPage").then(m => ({ default: m.ExplainPage })));
+const CopilotPage     = lazy(() => import("@/features/copilot/CopilotPage").then(m => ({ default: m.CopilotPage })));
 const CalibrationPage = lazy(() => import("@/features/calibration/CalibrationPage").then(m => ({ default: m.CalibrationPage })));
 const MlopsHealthPage = lazy(() => import("@/features/mlops/MlopsHealthPage").then(m => ({ default: m.MlopsHealthPage })));
 const HistoryPage     = lazy(() => import("../features/history/HistoryPage"));
@@ -39,6 +40,7 @@ export function App() {
             <Route path="/compare" element={<ComparePage />} />
             <Route path="/drift" element={<DriftPage />} />
             <Route path="/explain" element={<ExplainPage />} />
+            <Route path="/copilot" element={<CopilotPage />} />
             <Route path="/calibration" element={<CalibrationPage />} />
             <Route path="/mlops" element={<MlopsHealthPage />} />
             <Route path="/history" element={<HistoryPage />} />
