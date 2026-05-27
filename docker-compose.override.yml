@@ -5,9 +5,14 @@ services:
       - ./alembic:/app/alembic:ro
       - ./alembic.ini:/app/alembic.ini:ro
       - ./entrypoint.sh:/app/entrypoint.sh:ro
+      - /Users/evgenijpoluhin/sora_earth_ai_platform/mlruns_local:/Users/evgenijpoluhin/sora_earth_ai_platform/mlruns_local:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
   scheduler:
     volumes:
       - ./app:/app/app:ro
       - ./alembic:/app/alembic:ro
       - ./alembic.ini:/app/alembic.ini:ro
       - ./entrypoint.sh:/app/entrypoint.sh:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
