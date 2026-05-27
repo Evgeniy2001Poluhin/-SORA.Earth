@@ -29,7 +29,6 @@ export interface CopilotSource {
   excerpt: string;
 }
 
-
 export interface CopilotPiiFinding { type: string; text: string; start: number; end: number; confidence: number; }
 export interface CopilotBiasFinding { pattern: string; match: string; note: string; }
 export interface CopilotCompliance {
@@ -57,6 +56,12 @@ export interface CopilotResponse {
   compliance?: CopilotCompliance;
 }
 
+export type CopilotStreamEvent =
+  | { type: "meta"; probability: number; rag_query: string }
+  | { type: "section"; name: "executive_summary" | "recommendation" }
+  | { type: "token"; value: string }
+  | { type: "done"; sources: CopilotSource[]; compliance: CopilotCompliance };
+
 export interface CopilotHealth {
   ok: boolean;
   llm_enabled: boolean;
@@ -68,4 +73,37 @@ export const copilotApi = {
   explain: (b: CopilotRequest) =>
     api<CopilotResponse>("/copilot/explain", { method: "POST", body: JSON.stringify(b) }),
   health: () => api<CopilotHealth>("/copilot/health"),
+
+  async *explainStream(b: CopilotRequest): AsyncGenerator<CopilotStreamEvent, void, unknown> {
+    const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api/v1";
+    const res = await fetch(base + "/copilot/explain/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(b),
+    });
+    if (!res.ok || !res.body) {
+      throw new Error("Stream failed: HTTP " + res.status);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const chunks = buf.split("\n\n");
+      buf = chunks.pop() ?? "";
+      for (const chunk of chunks) {
+        const line = chunk.trim();
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (!payload) continue;
+        try {
+          yield JSON.parse(payload) as CopilotStreamEvent;
+        } catch (err) {
+          console.warn("SSE parse error:", err, payload);
+        }
+      }
+    }
+  },
 };
