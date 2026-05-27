@@ -6,9 +6,15 @@ warnings.filterwarnings("ignore")
 import pandas as pd
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier, HistGradientBoostingClassifier, StackingClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier, StackingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, brier_score_loss, precision_recall_curve, average_precision_score
+from sklearn.calibration import calibration_curve
+from sklearn.model_selection import cross_val_predict
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
 from xgboost import XGBClassifier
 
 import mlflow
@@ -110,10 +116,22 @@ with mlflow.start_run(run_name="compare-" + git_sha) as parent:
             cv_auc = cross_val_score(model, X_scaled, y, cv=cv, scoring="roc_auc")
             cv_acc = cross_val_score(model, X_scaled, y, cv=cv, scoring="accuracy")
             cv_f1 = cross_val_score(model, X_scaled, y, cv=cv, scoring="f1")
+            cv_proba = cross_val_predict(model, X_scaled, y, cv=cv, method="predict_proba")[:, 1]
+            cv_brier = brier_score_loss(y, cv_proba)
+            bins = np.linspace(0, 1, 11)
+            bin_ids = np.digitize(cv_proba, bins) - 1
+            bin_ids = np.clip(bin_ids, 0, 9)
+            ece = 0.0
+            for b in range(10):
+                mask = bin_ids == b
+                if mask.sum() > 0:
+                    ece += (mask.sum() / len(y)) * abs(cv_proba[mask].mean() - y.values[mask].mean())
             mlflow.log_metric("cv_roc_auc_mean", cv_auc.mean())
             mlflow.log_metric("cv_roc_auc_std", cv_auc.std())
             mlflow.log_metric("cv_accuracy", cv_acc.mean())
             mlflow.log_metric("cv_f1", cv_f1.mean())
+            mlflow.log_metric("cv_brier", cv_brier)
+            mlflow.log_metric("cv_ece", ece)
 
             model.fit(X_scaled, y)
             proba = model.predict_proba(X_scaled)[:, 1]
@@ -124,14 +142,57 @@ with mlflow.start_run(run_name="compare-" + git_sha) as parent:
                                      signature=sig, input_example=X_scaled.head(3))
 
             results[name] = {"run_id": child.info.run_id, "cv_auc": cv_auc.mean(),
-                             "cv_auc_std": cv_auc.std(), "model": model}
-            print(name.ljust(15), "CV AUC =", round(cv_auc.mean(), 4),
-                  "+/-", round(cv_auc.std(), 4))
+                             "cv_auc_std": cv_auc.std(), "model": model,
+                             "cv_proba": cv_proba, "cv_brier": cv_brier, "cv_ece": ece}
+            print(name.ljust(15), "AUC =", round(cv_auc.mean(), 4),
+                  "Brier =", round(cv_brier, 4),
+                  "ECE =", round(ece, 4))
 
     best_name = max(results, key=lambda n: results[n]["cv_auc"])
     best = results[best_name]
     mlflow.log_param("best_model", best_name)
     mlflow.log_metric("best_cv_auc", best["cv_auc"])
+    mlflow.log_metric("best_cv_brier", best["cv_brier"])
+    mlflow.log_metric("best_cv_ece", best["cv_ece"])
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+    for nm, r in results.items():
+        frac_pos, mean_pred = calibration_curve(y, r["cv_proba"], n_bins=10, strategy="uniform")
+        ax.plot(mean_pred, frac_pos, marker="o", linewidth=2,
+                label=f"{nm} (Brier={r['cv_brier']:.3f}, ECE={r['cv_ece']:.3f})")
+    ax.plot([0, 1], [0, 1], "k:", label="Perfectly calibrated")
+    ax.set_xlabel("Mean predicted probability")
+    ax.set_ylabel("Fraction of positives")
+    ax.set_title("Reliability Diagram (5-fold CV)")
+    ax.legend(loc="best", fontsize=10)
+    ax.grid(True, alpha=0.3)
+    rd_path = os.path.join(tempfile.gettempdir(), "reliability_diagram.png")
+    fig.tight_layout()
+    fig.savefig(rd_path, dpi=120)
+    plt.close(fig)
+    mlflow.log_artifact(rd_path, "calibration")
+    import shutil
+    shutil.copy(rd_path, os.path.join(MODELS_DIR, "reliability_diagram.png"))
+    print("Saved reliability_diagram.png ->", rd_path)
+
+    fig2, ax2 = plt.subplots(figsize=(7, 7))
+    for nm, r in results.items():
+        prec, rec, _ = precision_recall_curve(y, r["cv_proba"])
+        ap = average_precision_score(y, r["cv_proba"])
+        ax2.plot(rec, prec, linewidth=2, label=f"{nm} (AP={ap:.3f})")
+        mlflow.log_metric(f"cv_avg_precision_{nm}", ap)
+    ax2.set_xlabel("Recall")
+    ax2.set_ylabel("Precision")
+    ax2.set_title("Precision-Recall Curve (5-fold CV)")
+    ax2.legend(loc="best", fontsize=10)
+    ax2.grid(True, alpha=0.3)
+    pr_path = os.path.join(tempfile.gettempdir(), "pr_curve.png")
+    fig2.tight_layout()
+    fig2.savefig(pr_path, dpi=120)
+    plt.close(fig2)
+    mlflow.log_artifact(pr_path, "calibration")
+    shutil.copy(pr_path, os.path.join(MODELS_DIR, "pr_curve.png"))
+    print("Saved pr_curve.png ->", pr_path)
 
     with tempfile.TemporaryDirectory() as tmp:
         sp = os.path.join(tmp, "scaler.pkl")

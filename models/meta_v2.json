@@ -16,8 +16,8 @@
     "region_enc"
   ],
   "dataset_size": 800,
-  "mlflow_run_id": "b976f997630a4e0781f9158afc525c22",
+  "mlflow_run_id": "41e70453e3a241e283ce29c21c310913",
   "registered_model": "esg-success-predictor",
-  "version": "4",
+  "version": "5",
   "alias": "champion"
 }
