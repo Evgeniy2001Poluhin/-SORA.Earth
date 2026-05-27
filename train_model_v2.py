@@ -21,7 +21,7 @@ DATA_PATH = os.path.join(BASE_DIR, "data", "projects.csv")
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
 
-TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://7.0.0.1:5555")
+TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5556")
 EXPERIMENT = "esg-success-classification-v2"
 REGISTERED_MODEL = "esg-success-predictor"
 PROMOTION_AUC_THRESHOLD = 0.80
