@@ -1,4 +1,5 @@
 import { RetrainLogPanel } from "./RetrainLogPanel";
+import { SchedulerPanel } from "./SchedulerPanel";
 import { FeatureImportancePanel } from "./FeatureImportancePanel";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
@@ -111,6 +112,10 @@ export function MlopsHealthPage() {
             <span key={f} className="mlops-chip">{f}</span>
           ))}
         </div>
+      </div>
+
+      <div className="mlops-section">
+        <SchedulerPanel/>
       </div>
 
       <div className="mlops-section" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
