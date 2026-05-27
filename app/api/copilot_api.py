@@ -78,10 +78,11 @@ def health():
 
 from fastapi.responses import StreamingResponse
 import asyncio, json
+_SPEED_MAP = {"fast": 0.015, "normal": 0.035, "slow": 0.08}
 
 
 @router.post("/copilot/explain/stream")
-async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8)):
+async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8), speed: str = Query("normal")):
     """SSE streaming variant of /copilot/explain."""
     base = explain_prediction(
         probability=payload.probability, features=payload.features,
@@ -97,6 +98,9 @@ async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8))
         "engine": "regex-v1",
     }
     rec = (base.get("recommendation") or "") if isinstance(base, dict) else ""
+    if rec and sources:
+        cites_text = " ".join(["[" + s.get("id", "?") + "]" for s in sources[:2]])
+        rec = rec.rstrip() + " " + cites_text
     exs = (base.get("executive_summary") or "") if isinstance(base, dict) else ""
 
     async def gen():
@@ -105,12 +109,12 @@ async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8))
             yield "data: " + json.dumps({"type": "section", "name": "executive_summary"}) + "\n\n"
             for w in exs.split(" "):
                 yield "data: " + json.dumps({"type": "token", "value": w + " "}) + "\n\n"
-                await asyncio.sleep(0.035)
+                await asyncio.sleep(_SPEED_MAP.get(speed, 0.035))
         if rec:
             yield "data: " + json.dumps({"type": "section", "name": "recommendation"}) + "\n\n"
             for w in rec.split(" "):
                 yield "data: " + json.dumps({"type": "token", "value": w + " "}) + "\n\n"
-                await asyncio.sleep(0.035)
+                await asyncio.sleep(_SPEED_MAP.get(speed, 0.035))
         yield "data: " + json.dumps({"type": "done", "sources": sources, "compliance": compliance}) + "\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")
