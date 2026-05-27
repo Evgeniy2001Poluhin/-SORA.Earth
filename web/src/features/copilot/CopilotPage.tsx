@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -33,6 +33,8 @@ export function CopilotPage() {
   const [streamMode, setStreamMode] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [streamSpeed, setStreamSpeed] = useState<"fast" | "normal" | "slow">(() => { try { const v = localStorage.getItem("copilot.streamSpeed"); return (v === "fast" || v === "slow" || v === "normal") ? v : "normal"; } catch { return "normal"; } });
+  const abortRef = useRef<AbortController | null>(null);
 
   const mut = useMutation({
     mutationFn: async (v: FormValues) => {
@@ -149,16 +151,30 @@ export function CopilotPage() {
               <input type="checkbox" checked={streamMode} onChange={(e)=>setStreamMode(e.target.checked)} />
               <span>⃡ Stream mode (token-by-token)</span>
             </label>
+            {streamMode && (
+              <select className="copilot-stream-speed" value={streamSpeed} onChange={(e)=>{const v=e.target.value as any; setStreamSpeed(v); try{localStorage.setItem("copilot.streamSpeed", v)}catch{}}} disabled={streaming}>
+                <option value="fast">Fast</option>
+                <option value="normal">Normal</option>
+                <option value="slow">Slow</option>
+              </select>
+            )}
           </div>
           {!streamMode ? (
             <button className="btn-primary" type="submit" disabled={mut.isPending || streaming}>
               {mut.isPending ? "Generating..." : "Generate AI Explanation"}
             </button>
           ) : (
-            <button className="btn-primary" type="button" disabled={streaming}
-              onClick={handleSubmit(runStream)}>
-              {streaming ? "Streaming..." : "⡡ Stream AI Explanation"}
-            </button>
+            <>
+              <button className="btn-primary" type="button" disabled={streaming}
+                onClick={handleSubmit(runStream)}>
+                {streaming ? "Streaming..." : "⡡ Stream AI Explanation"}
+              </button>
+              {streaming && (
+                <button className="copilot-stop-btn" type="button" onClick={() => { abortRef.current?.abort(); }}>
+                  Stop
+                </button>
+              )}
+            </>
           )}
         </form>
 
@@ -166,7 +182,13 @@ export function CopilotPage() {
           {streaming && (
             <div className="streaming-block" style={{padding:"20px",lineHeight:"1.6",fontSize:"14px"}}>
               <div className="section-title">⡡ Streaming...</div>
-              <p style={{whiteSpace:"pre-wrap"}}>{streamingText}<span className="cursor-blink">▊</span></p>
+              <p style={{whiteSpace:"pre-wrap"}}>{
+              streamingText.split(/(\[[^\]]+\])/g).map((part, i) =>
+                /^\[[^\]]+\]$/.test(part)
+                  ? <span key={i} className="copilot-cite" style={{color:"#3b82f6",fontWeight:600}}>{part}</span>
+                  : <span key={i}>{part}</span>
+              )
+            }<span className="cursor-blink">▊</span></p>
             </div>
           )}
           {!result && !streaming && (
