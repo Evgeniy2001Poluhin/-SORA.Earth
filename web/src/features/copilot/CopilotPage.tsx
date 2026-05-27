@@ -28,6 +28,7 @@ const PRESET_KEYS: PresetKey[] = ["HIGH", "MODERATE", "LOW"];
 export function CopilotPage() {
   const { register, handleSubmit, reset, watch } = useForm<FormValues>({ defaultValues: PRESETS.HIGH });
   const [result, setResult] = useState<CopilotResponse | null>(null);
+  const [activePreset, setActivePreset] = useState<PresetKey | null>("HIGH");
   const probability = watch("probability");
 
   const mut = useMutation({
@@ -53,27 +54,33 @@ export function CopilotPage() {
     onError: (e: any) => toast.error("Failed: " + (e?.message ?? "unknown")),
   });
 
-  const submit = (v: FormValues) => mut.mutate(v);
-  const usePreset = (k: PresetKey) => { reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
+  const submit = (v: FormValues) => { setActivePreset(null); mut.mutate(v); };
+  const usePreset = (k: PresetKey) => { setActivePreset(k); reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
 
   return (
     <div className="copilot-page">
-      <div className="copilot-header">
+      <div className="copilot-hero">
         <div className="eyebrow">AI Co-Pilot · Explainability Layer</div>
-        <h1>Why this <em style={{ color: "#5DDA92", fontStyle: "italic" }}>prediction</em>?</h1>
-        <p>Translate raw SHAP attributions and probability scores into human-readable executive summaries with drivers, risks, and recommendations.</p>
+        <h1>Why this <em>prediction</em>?</h1>
+        <p>Translate raw SHAP attributions and probability scores into human-readable executive summaries with drivers, risks, and recommendations for funding decisions.</p>
       </div>
 
       <div className="copilot-grid">
         <form className="copilot-form" onSubmit={handleSubmit(submit)}>
           <h3>Project Inputs</h3>
 
-          <div className="preset-row">
+          <div cassName="preset-row">
             {PRESET_KEYS.map((k) => (
-              <button key={k} type="button" className="preset-btn" onClick={() => usePreset(k)}>
+              <button
+                key={k}
+                type="button"
+                className={"preset-btn" + (activePreset === k ? " active" : "")}
+                onClick={() => usePreset(k)}
+              >
                 {k}
               </button>
-            ))}          </div>
+            ))}
+          </div>
 
           <div className="row">
             <label>Probability ({probability ? Number(probability).toFixed(2) : "0.50"})</label>
@@ -100,20 +107,17 @@ export function CopilotPage() {
           )}
           {result && (
             <>
-              <span className={"verdict-badge verdict-" + result.verdict.level}>
-                {result.verdict.label}
-              </span>
-              <span className="confidence-chip">Confidence: {result.confidence}</span>
+              <div className="result-head">
+                <span className={"verdict-badge verdict-" + result.verdict.level}>
+                  {result.verdict.label}
+                </span>
+                <span className="confidence-chip">Confidence · {result.confidence}</span>
+              </div>
 
               <div className="prob-display">
-                <div>
-                  <span className="prob-value">{(result.probability * 100).toFixed(0)}</span>
-                  <span className="prob-value-suffix">/100</span>
-                </div>
+                <span className="prob-value">{(result.probability * 100).toFixed(0)}</span>
+                <span className="prob-value-suffix">/ 100</span>
                 <div className="prob-value-label">ML Success Probability</div>
-                <div className="prob-bar">
-                  <div className="prob-bar-fill" style={{ width: (result.probability * 100) + "%" }} />
-                </div>
               </div>
 
               {result.key_drivers.positive.length > 0 && (
@@ -121,9 +125,9 @@ export function CopilotPage() {
                   <div className="section-title">Positive Drivers</div>
                   {result.key_drivers.positive.map((d, i) => (
                     <div key={i} className="driver-card driver-positive">
-                      <span>{d.feature_label}</span>
+                      <span className="driver-feature">{d.feature_label}</span>
                       {d.shap_value !== undefined && <span className="shap-value">+{d.shap_value.toFixed(3)}</span>}
-                      {d.note && <span className="shap-value">{d.note}</span>}
+                      {d.shap_value === undefined && d.ote && <span className="shap-value">{d.note}</span>}
                     </div>
                   ))}
                 </>
@@ -134,9 +138,9 @@ export function CopilotPage() {
                   <div className="section-title neg">Negative Drivers</div>
                   {result.key_drivers.negative.map((d, i) => (
                     <div key={i} className="driver-card driver-negative">
-                      <span>{d.feature_label}</span>
+                      <span className="driver-feature">{d.feature_label}</span>
                       {d.shap_value !== undefined && <span className="shap-value">{d.shap_value.toFixed(3)}</span>}
-                      {d.note && <span className="shap-value">{d.note}</span>}
+                      {d.shap_value === undefined && d.note && <span className="shap-value">{d.note}</span>}
                     </div>
                   ))}
                 </>
@@ -152,13 +156,13 @@ export function CopilotPage() {
               )}
 
               <div className="recommendation-block">
-                {result.recommendation}
+                <span>{result.recommendation}</span>
               </div>
 
               {result.executive_summary && (
                 <>
                   <div className="section-title">Executive Summary</div>
-                  <p style={{ fontSize: 14, lineHeight: 1.6, color: "rgba(232,236,239,0.8)" }}>{result.executive_summary}</p>
+                  <p className="exec-summary">{result.executive_summary}</p>
                 </>
               )}
 
