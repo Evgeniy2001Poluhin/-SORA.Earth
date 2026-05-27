@@ -473,6 +473,7 @@ from app.api import admin_timeline
 from app.api import admin_diagnostics
 from app.api import admin_ai_control
 from app.api import ai_teammate_routes
+from app.api import copilot_api
 from app.api.drift_baseline import router as drift_baseline_router
 from app.api.explainability import router as explainability_router
 
@@ -501,6 +502,7 @@ api_v1.include_router(admin_diagnostics.router)
 api_v1.include_router(admin_ai_control.router)
 api_v1.include_router(drift_baseline_router)
 api_v1.include_router(explainability_router)
+api_v1.include_router(copilot_api.router)
 app.include_router(api_v1)
 
 # Backward compatibility: original paths (no prefix)
