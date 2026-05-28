@@ -1,4 +1,5 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { SessionsSidebar } from "./SessionsSidebar";
 import { useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -35,6 +36,40 @@ export function CopilotPage() {
   const [streaming, setStreaming] = useState(false);
   const [streamSpeed, setStreamSpeed] = useState<"fast" | "normal" | "slow">(() => { try { const v = localStorage.getItem("copilot.streamSpeed"); return (v === "fast" || v === "slow" || v === "normal") ? v : "normal"; } catch { return "normal"; } });
   const abortRef = useRef<AbortController | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [sidebarTick, setSidebarTick] = useState(0);
+
+  const loadSession = useCallback(async (id: string) => {
+    try {
+      const s = await copilotApi.getSession(id);
+      setCurrentSessionId(s.id);
+      const lastAssistant = [...s.messages].reverse().find((m) => m.role === "assistant");
+      if (lastAssistant) {
+        setStreamingText(lastAssistant.content);
+        setResult({
+          verdict: { label: "Restored", level: "info" },
+          probability: 0,
+          confidence: "restored",
+          key_drivers: { positive: [], negative: [] },
+          risks: [],
+          recommendation: lastAssistant.content,
+          model_version: "v5",
+          explanation_mode: "restored",
+        });
+      }
+      toast.success("Loaded chat");
+    } catch (e: any) {
+      toast.error("Load failed: " + (e?.message ?? "unknown"));
+    }
+  }, []);
+
+  const newChat = useCallback(() => {
+    setCurrentSessionId(null);
+    setResult(null);
+    setStreamingText("");
+    setActivePreset("HIGH");
+    reset(PRESETS.HIGH);
+  }, [reset]);
 
   const mut = useMutation({
     mutationFn: async (v: FormValues) => {
@@ -53,9 +88,10 @@ export function CopilotPage() {
           { feature: "budget", shap_value: -0.04 },
         ],
       };
+      if (currentSessionId) body.session_id = currentSessionId;
       return copilotApi.explain(body);
     },
-    onSuccess: (r) => { setResult(r); toast.success("Explanation generated"); },
+    onSuccess: (r) => { setResult(r); if (r.session_id) setCurrentSessionId(r.session_id); setSidebarTick(t=>t+1); toast.success("Explanation generated"); },
     onError: (e: any) => toast.error("Failed: " + (e?.message ?? "unknown")),
   });
 
@@ -84,8 +120,11 @@ export function CopilotPage() {
     };
     try {
       let acc = "";
+      if (currentSessionId) body.session_id = currentSessionId;
       for await (const ev of copilotApi.explainStream(body)) {
-        if (ev.type === "token") {
+        if (ev.type === "meta") {
+          if (ev.session_id) { setCurrentSessionId(ev.session_id); setSidebarTick(t=>t+1); }
+        } else if (ev.type === "token") {
           acc += ev.value;
           setStreamingText(acc);
         } else if (ev.type === "done") {
@@ -112,6 +151,14 @@ export function CopilotPage() {
   };
 
   return (
+    <div className="copilot-layout">
+      <SessionsSidebar
+        currentId={currentSessionId}
+        onSelect={loadSession}
+        onNew={newChat}
+        refreshToken={sidebarTick}
+      />
+      <div className="copilot-main">
     <div className="copilot-page">
       <div className="copilot-hero">
         <div className="eyebrow">AI Co-Pilot · Explainability Layer</div>
@@ -151,13 +198,7 @@ export function CopilotPage() {
               <input type="checkbox" checked={streamMode} onChange={(e)=>setStreamMode(e.target.checked)} />
               <span>⃡ Stream mode (token-by-token)</span>
             </label>
-            {streamMode && (
-              <select className="copilot-stream-speed" value={streamSpeed} onChange={(e)=>{const v=e.target.value as any; setStreamSpeed(v); try{localStorage.setItem("copilot.streamSpeed", v)}catch{}}} disabled={streaming}>
-                <option value="fast">Fast</option>
-                <option value="normal">Normal</option>
-                <option value="slow">Slow</option>
-              </select>
-            )}
+            
           </div>
           {!streamMode ? (
             <button className="btn-primary" type="submit" disabled={mut.isPending || streaming}>
@@ -302,6 +343,8 @@ export function CopilotPage() {
             </>
           )}
         </div>
+      </div>
+    </div>
       </div>
     </div>
   );
