@@ -363,7 +363,8 @@
 }
 .prob-value-suffix {
   font-family: var(--f-display);
-  font-sizeer-spacing: 0;
+  font-size: 0.4em;
+  letter-spacing: 0;
   vertical-align: super;
 }
 .prob-value-label {
