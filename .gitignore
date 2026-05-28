@@ -108,3 +108,8 @@ output/loadtest_v2_*/
 *.bak
 *.bak2
 !logs/.gitkeep
+
+# Runtime data (Day 5-6)
+.chroma/
+data/sessions.db
+data/sessions.db-journal
