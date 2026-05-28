@@ -15,6 +15,7 @@ class CopilotRequest(BaseModel):
     shap_values: Optional[List[Dict[str, Any]]] = None
     project: Optional[Dict[str, Any]] = None
     model_version: Optional[str] = "v5"
+    session_id: Optional[str] = None
 
 def _build_rag_query(probability, features):
     parts = []
@@ -61,6 +62,9 @@ def explain(payload: CopilotRequest, k: int = Query(4, ge=1, le=8)):
         base["rag_query"] = q
         scan_text = _scan_text(base)
         base["compliance"] = compliance_check(scan_text) if scan_text else {"passed": True, "pii_findings": [], "bias_findings": [], "policy_violations": [], "redacted_text": "", "risk_score": 0.0, "engine": "regex-v1"}
+        sid = _persist_explain(payload, base, sources)
+        if sid:
+            base["session_id"] = sid
     return base
 
 @router.get("/copilot/health")
@@ -103,8 +107,10 @@ async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8),
         rec = rec.rstrip() + " " + cites_text
     exs = (base.get("executive_summary") or "") if isinstance(base, dict) else ""
 
+    sid = _persist_explain(payload, base, sources)
+
     async def gen():
-        yield "data: " + json.dumps({"type": "meta", "probability": payload.probability, "rag_query": q}) + "\n\n"
+        yield "data: " + json.dumps({"type": "meta", "probability": payload.probability, "rag_query": q, "session_id": sid}) + "\n\n"
         if exs:
             yield "data: " + json.dumps({"type": "section", "name": "executive_summary"}) + "\n\n"
             for w in exs.split(" "):
@@ -118,3 +124,54 @@ async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8),
         yield "data: " + json.dumps({"type": "done", "sources": sources, "compliance": compliance}) + "\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+# --- Sessions ---
+from app.services.sessions import (
+    create_session as _ses_create,
+    add_message as _ses_add,
+    get_session as _ses_get,
+    list_sessions as _ses_list,
+    delete_session as _ses_del,
+)
+from fastapi import HTTPException
+
+
+@router.get("/copilot/sessions")
+def sessions_list(limit: int = Query(50, ge=1, le=200)):
+    return {"sessions": _ses_list(limit=limit)}
+
+
+@router.get("/copilot/sessions/{session_id}")
+def sessions_get(session_id: str):
+    s = _ses_get(session_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="session not found")
+    return s
+
+
+@router.delete("/copilot/sessions/{session_id}")
+def sessions_delete(session_id: str):
+    ok = _ses_del(session_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"deleted": True, "id": session_id}
+
+
+def _persist_explain(payload, base, sources):
+    """Save explain interaction to a session. Creates one if needed."""
+    try:
+        sid = payload.session_id or _ses_create(title=None)
+        user_summary = (
+            f"Explain p={payload.probability:.2f} "
+            f"co2={payload.features.get('co2_reduction','-')} "
+            f"budget={payload.features.get('budget','-')}"
+        )
+        _ses_add(sid, "user", user_summary)
+        rec = (base.get("recommendation") or "") if isinstance(base, dict) else ""
+        cites = [s.get("id") for s in (sources or []) if s.get("id")]
+        _ses_add(sid, "assistant", rec, citations=cites)
+        return sid
+    except Exception as e:
+        log.warning("session persist failed: %s", e)
+        return None
