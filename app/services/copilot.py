@@ -123,6 +123,28 @@ def explain_prediction(probability, features, shap_values=None, project=None, mo
     return response
 
 
+
+def _chat_completion(messages, max_tokens=350, temperature=0.4):
+    """Call OpenRouter/OpenAI with model fallback. LLM_MODEL may be comma-separated."""
+    import openai
+    client = openai.OpenAI(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+    )
+    models = [m.strip() for m in os.getenv("LLM_MODEL", "gpt-4o-mini").split(",") if m.strip()]
+    last_err = None
+    for model in models:
+        try:
+            return client.chat.completions.create(
+                model=model, messages=messages,
+                max_tokens=max_tokens, temperature=temperature,
+            )
+        except (openai.RateLimitError, openai.NotFoundError, openai.APIConnectionError) as e:
+            last_err = e
+            continue
+    raise last_err if last_err else RuntimeError("No LLM model configured")
+
+
 def _enrich_with_gpt(base, features, project):
     import openai
     client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
@@ -134,11 +156,7 @@ def _enrich_with_gpt(base, features, project):
         "Risks: " + str(base["risks"]) + ". "
         "Give 2-3 sentence executive summary."
     )
-    resp = client.chat.completions.create(
-        model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=300,
-    )
+    resp = _chat_completion([{"role": "user", "content": prompt}], max_tokens=300, temperature=0.4)
     base["executive_summary"] = resp.choices[0].message.content.strip()
     return base
 
@@ -193,14 +211,9 @@ def answer_qa(question: str, context: str, sources: list, audience: str = "execu
         f"Prior explanation context:\n{context[:1500]}"
         f"{src_block}\n\nUser question: {question}"
     )
-    resp = client.chat.completions.create(
-        model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user",   "content": user},
-        ],
-        max_tokens=350,
-        temperature=0.4,
+    resp = _chat_completion(
+        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        max_tokens=350, temperature=0.4,
     )
     txt = resp.choices[0].message.content.strip()
     usage = getattr(resp, "usage", None)
