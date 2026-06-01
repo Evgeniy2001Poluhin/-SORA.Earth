@@ -125,7 +125,7 @@ def explain_prediction(probability, features, shap_values=None, project=None, mo
 
 def _enrich_with_gpt(base, features, project):
     import openai
-    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
     prompt = (
         "Rewrite this ESG project prediction explanation in natural language. "
         "Verdict: " + base["verdict"]["label"] + ". "
@@ -135,7 +135,7 @@ def _enrich_with_gpt(base, features, project):
         "Give 2-3 sentence executive summary."
     )
     resp = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
         messages=[{"role": "user", "content": prompt}],
         max_tokens=300,
     )
@@ -150,3 +150,59 @@ def health():
         "explanation_mode": "gpt" if os.getenv("OPENAI_API_KEY") else "template",
         "supported_features": list(FEATURE_RU.keys()),
     }
+
+
+# ============ Day 7: Audience presets + QA ============
+
+_AUDIENCE_DIRECTIVES = {
+    "executive": "Provide a concise executive summary with key drivers and a clear recommendation.",
+    "investor":  "Focus on ROI: CO2 per dollar, payback, comparable benchmarks. End with explicit FUND / DO NOT FUND verdict and confidence level.",
+    "auditor":   "Adopt a conservative, formal tone. Cite policy alignment, compliance risks, data lineage, and caveats. State all assumptions explicitly.",
+    "operator":  "Focus on execution: timeline risks, KPIs to monitor, mitigation actions. Output 3-5 actionable next steps.",
+}
+
+
+def audience_directive(audience: str) -> str:
+    return _AUDIENCE_DIRECTIVES.get((audience or "executive").lower(),
+                           _AUDIENCE_DIRECTIVES["executive"])
+
+
+def answer_qa(question: str, context: str, sources: list, audience: str = "executive") -> dict:
+    """Follow-up QA in a Co-Pilot session. Uses GPT if available, otherwise deterministic fallback."""
+    src_block = ""
+    if sources:
+        src_block = "\n\nRetrieved knowledge:\n" + "\n".join(
+            f"- [{s.get('id','?')}] {s.get('title','')}: {s.get('excerpt','')[:200]}"
+            for s in sources[:4]
+        )
+
+    if not os.getenv("OPENAI_API_KEY"):
+        ans = (f"Based on the prior explanation and {len(sources)} retrieved sources, "
+               f"the answer to '{question}' depends on the key drivers already identified. "
+               f"Audience: {audience}. {audience_directive(audience)}")
+        return {"answer": ans, "mode": "template", "tokens_used": 0}
+
+    import openai
+    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
+    system = (
+        "You are SORA.earth Co-Pilot, answering follow-up questions about an ESG project prediction. "
+        + audience_directive(audience)
+        + " Cite sources by their [doc_id] when relevant. Keep under 180 words."
+    )
+    user = (
+        f"Prior explanation context:\n{context[:1500]}"
+        f"{src_block}\n\nUser question: {question}"
+    )
+    resp = client.chat.completions.create(
+        model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user",   "content": user},
+        ],
+        max_tokens=350,
+        temperature=0.4,
+    )
+    txt = resp.choices[0].message.content.strip()
+    usage = getattr(resp, "usage", None)
+    tokens = getattr(usage, "total_tokens", 0) if usage else 0
+    return {"answer": txt, "mode": "gpt", "tokens_used": tokens}
