@@ -101,10 +101,7 @@ nest-asyncio==1.6.0
 networkx==3.2.1
 notebook_shim==0.2.4
 numba==0.60.0
-numpy==2.0.2
-opentelemetry-api==1.40.0
-opentelemetry-sdk==1.40.0
-opentelemetry-semantic-conventions==0.61b0
+numpy==1.26.4
 orjson==3.11.5
 overrides==7.7.0
 packaging==24.2
@@ -203,3 +200,5 @@ redis>=5.0.0
 apscheduler>=3.10.0
 reportlab>=4.2.0
 asyncpg==0.29.0
+chromadb==1.5.0
+sentence-transformers==2.7.0
