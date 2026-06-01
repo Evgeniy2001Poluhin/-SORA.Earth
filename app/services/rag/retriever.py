@@ -1,6 +1,8 @@
 """RAG retriever using ChromaDB 1.5+ + sentence-transformers."""
 from __future__ import annotations
-import json, logging
+import os, json, logging
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 from pathlib import Path
 from functools import lru_cache
 from typing import List, Dict, Any
@@ -13,7 +15,8 @@ log = logging.getLogger(__name__)
 _CORPUS_PATH = Path(__file__).resolve().parents[2] / "data" / "rag_corpus" / "seed.json"
 _CHROMA_DIR = Path(__file__).resolve().parents[3] / ".chroma"
 _COLLECTION = "sora_corpus"
-_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+_MODEL_DIR = Path("/app/models/all-MiniLM-L6-v2")
+_MODEL_NAME = str(_MODEL_DIR) if _MODEL_DIR.exists() else "sentence-transformers/all-MiniLM-L6-v2"
 
 
 class RagRetriever:
