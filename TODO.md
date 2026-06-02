@@ -1,0 +1,1 @@
+- ML artifacts (.pkl) MUST be generated inside the container (numpy 1.26.4), not host venv (numpy 2.x) — else MT19937 BitGenerator load error
