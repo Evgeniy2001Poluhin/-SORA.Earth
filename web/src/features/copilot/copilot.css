@@ -671,3 +671,14 @@
 .md-answer th, .md-answer td { border: 1px solid var(--line-2); padding: 6px 8px; text-align: left; }
 .md-answer p { margin: 0 0 8px; line-height: 1.6; }
 .md-answer strong { font-weight: 600; color: var(--text); }
+
+/* light theme: neutralize sessions sidebar dark strip */
+[data-theme="light"] .sessions-sidebar{
+  background: var(--bg-1);
+  border-right: 1px solid var(--line-2);
+  backdrop-filter: none;
+}
+[data-theme="light"] .sessions-sidebar--collapsed{
+  background: transparent;
+  border-right: none;
+}
