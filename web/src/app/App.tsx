@@ -15,6 +15,7 @@ const MlopsHealthPage = lazy(() => import("@/features/mlops/MlopsHealthPage").th
 const HistoryPage     = lazy(() => import("../features/history/HistoryPage"));
 const CompliancePage  = lazy(() => import("@/features/compliance/CompliancePage"));
 const MapPage         = lazy(() => import("@/features/map/MapPage"));
+const ForecastPage    = lazy(() => import("@/features/forecast/ForecastPage"));
 const RegionDetail    = lazy(() => import("../features/region/RegionDetail"));
 
 function PageLoader() {
@@ -47,6 +48,7 @@ export function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/compliance" element={<CompliancePage />} />
             <Route path="/map" element={<MapPage />} />
+            <Route path="/forecast" element={<ForecastPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
           <Route path="/region/:code" element={<RegionDetail />} />
