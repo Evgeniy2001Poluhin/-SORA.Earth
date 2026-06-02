@@ -191,3 +191,11 @@ class WebhookDelivery(Base):
     ok = Column(Boolean, default=False)
     error = Column(String(512))
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class HealthPing(Base):
+    __tablename__ = "health_pings"
+    id = Column(Integer, primary_key=True)
+    ts = Column(DateTime, default=datetime.utcnow, index=True)
+    component = Column(String(32), index=True)
+    ok = Column(Boolean, default=True)

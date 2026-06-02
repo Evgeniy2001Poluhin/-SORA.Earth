@@ -458,6 +458,10 @@ def init_scheduler():
         replace_existing=True,
     )
 
+    scheduler.add_job(
+        lambda: __import__("app.services.status_service", fromlist=["record_health"]).record_health(),
+        IntervalTrigger(minutes=5), id="health_ping", replace_existing=True,
+    )
     scheduler.start()
     logger.info(
         "Scheduler started with %d jobs: %s",

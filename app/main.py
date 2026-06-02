@@ -35,6 +35,7 @@ from app.api import explain as explain_api
 from app.api import calibration as calibration_api
 from app.api import scheduler_routes
 from app.api import webhooks as webhooks_api
+from app.api import status_page as status_page_api
 from app.api import drift_monitor
 from app.api import ab_comparison as ab_comparison_api
 from app.api import compliance as compliance_api
@@ -508,6 +509,7 @@ api_v1.include_router(explainability_router)
 api_v1.include_router(copilot_api.router)
 app.include_router(api_v1)
 app.include_router(webhooks_api.router)
+app.include_router(status_page_api.router)
 
 # Backward compatibility: original paths (no prefix)
 # DISABLED to avoid duplicate route registration / duplicate OpenAPI operation IDs
