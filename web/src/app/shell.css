@@ -30,3 +30,14 @@
 
 /* keep nav labels like "Co-Pilot" on one line */
 .shell-nav a { white-space: nowrap; }
+
+/* prevent horizontal scroll (joyride overlay + wide tables) */
+html, body, #root { max-width: 100%; overflow-x: hidden; }
+.shell { max-width: 100vw; overflow-x: hidden; }
+.shell-main { max-width: 100%; overflow-x: auto; }
+.shell-main table { max-width: 100%; }
+
+/* compact tables */
+.shell-main table { font-size: 13px; border-collapse: collapse; }
+.shell-main th, .shell-main td { padding: 6px 10px; white-space: nowrap; }
+.shell-main td { overflow: hidden; text-overflow: ellipsis; max-width: 280px; }

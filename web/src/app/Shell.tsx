@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import OnboardingTour from "./OnboardingTour";
 import { useTheme } from "./ThemeProvider";
 import { ModelBadge } from "../components/ModelBadge";
 import "./shell.css";
@@ -7,6 +9,7 @@ const NAV = [ { to:"/", label:"Home" }, { to:"/evaluate", label:"Evaluate" }, { 
 
 export function Shell() {
   const { theme, toggle } = useTheme();
+  const [tour, setTour] = useState(0);
   return (
     <div className="shell">
       <header className="shell-top">
@@ -20,17 +23,19 @@ export function Shell() {
           <span className="display" style={{fontSize:20}}>SORA<span style={{color:"var(--planet)"}}>.</span>earth</span>
         </div>
         <nav className="shell-nav">
-          {NAV.map(n => <NavLink key={n.to} to={n.to} end className={({isActive})=>isActive?"active":""}>{n.label}</NavLink>)}
+          {NAV.map(n => <NavLink key={n.to} to={n.to} end data-tour={n.to.replace("/","")||"home"} className={({isActive})=>isActive?"active":""}>{n.label}</NavLink>)}
         </nav>
         <div className="shell-right" style={{display:"flex",alignItems:"center",gap:10}}>
           <button onClick={toggle} className="theme-toggle" aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
             {theme === "dark" ? "☀️" : "🌙"}
           </button>
+          <button onClick={()=>setTour(t=>t+1)} className="theme-toggle" title="Take the tour" aria-label="Take the tour">?</button>
           <ModelBadge />
           <span className="status-pill">Operational</span>
         </div>
       </header>
       <main className="shell-main"><Outlet/></main>
+      <OnboardingTour runSignal={tour} />
     </div>
   );
 }
