@@ -22,19 +22,30 @@ type StatusResponse = {
 };
 
 export async function fetchModelVersion(): Promise<ModelVersionInfo> {
-  const r = await fetch("/api/v1/model/status");
-  if (!r.ok) throw new Error("model/status " + r.status);
-  const j: StatusResponse = await r.json();
-  const m = j.meta ?? {};
+  // primary: lightweight v2 endpoint (always returns name/alias/version)
+  const r = await fetch("/api/v2/model/version");
+  if (!r.ok) throw new Error("model/version " + r.status);
+  const j: { name: string; alias: string; version: string } = await r.json();
+  // enrich with training details from v1 status (best-effort, non-fatal)
+  let meta: StatusResponse["meta"] = {};
+  let threshold: number | undefined;
+  try {
+    const sr = await fetch("/api/v1/model/status");
+    if (sr.ok) {
+      const sj: StatusResponse = await sr.json();
+      meta = sj.meta ?? {};
+      threshold = sj.current_threshold;
+    }
+  } catch { /* ignore — badge still works from v2 */ }
   return {
-    name: m.algorithm ?? "model",
-    alias: "production",
-    version: m.retrained_at ?? "—",
-    retrained_at: m.retrained_at,
-    total_samples: m.total_samples,
-    n_estimators: m.n_estimators,
-    max_depth: m.max_depth,
-    threshold: j.current_threshold,
+    name: j.name ?? meta.algorithm ?? "model",
+    alias: j.alias ?? "production",
+    version: j.version ?? meta.retrained_at ?? "—",
+    retrained_at: meta.retrained_at,
+    total_samples: meta.total_samples,
+    n_estimators: meta.n_estimators,
+    max_depth: meta.max_depth,
+    threshold,
   };
 }
 
