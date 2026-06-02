@@ -25,3 +25,8 @@
 .theme-toggle:active{transform:scale(0.95)}
 
 
+
+/* prevent nav labels like "✨ Co-Pilot" from wrapping to 2 lines */
+
+/* keep nav labels like "Co-Pilot" on one line */
+.shell-nav a { white-space: nowrap; }

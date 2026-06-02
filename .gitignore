@@ -113,3 +113,4 @@ output/loadtest_v2_*/
 .chroma/
 data/sessions.db
 data/sessions.db-journal
+models/

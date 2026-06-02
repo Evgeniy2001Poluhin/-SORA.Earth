@@ -3,7 +3,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import logging
-from app.services.copilot import explain_prediction, health as copilot_health
+from app.services.copilot import explain_prediction, health as copilot_health, answer_qa, audience_directive
 from app.services.compliance import check as compliance_check
 
 router = APIRouter()
@@ -16,6 +16,7 @@ class CopilotRequest(BaseModel):
     project: Optional[Dict[str, Any]] = None
     model_version: Optional[str] = "v5"
     session_id: Optional[str] = None
+    audience: Optional[str] = "executive"
 
 def _build_rag_query(probability, features):
     parts = []
@@ -175,3 +176,50 @@ def _persist_explain(payload, base, sources):
     except Exception as e:
         log.warning("session persist failed: %s", e)
         return None
+
+
+class QARequest(BaseModel):
+    session_id: str
+    question: str
+    audience: Optional[str] = "executive"
+    k: Optional[int] = 4
+
+
+class QAResponse(BaseModel):
+    session_id: str
+    answer: str
+    sources: List[Dict[str, Any]]
+    audience: str
+    mode: str
+    tokens_used: int
+
+
+@router.post("/copilot/qa", response_model=QAResponse)
+def qa(payload: QARequest):
+    sess = _ses_get(payload.session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="session not found")
+    msgs = sess.get("messages", [])
+    last_a = next((m for m in reversed(msgs) if m.get("role") == "assistant"), None)
+    context = (last_a or {}).get("content", "")
+    sources = _retrieve_sources(payload.question, k=payload.k or 4)
+    result = answer_qa(
+        question=payload.question,
+        context=context,
+        sources=sources,
+        audience=payload.audience or "executive",
+    )
+    try:
+        _ses_add(payload.session_id, "user", payload.question)
+        _ses_add(payload.session_id, "assistant", result["answer"],
+                 citations=[s.get("id") for s in sources if s.get("id")])
+    except Exception as e:
+        log.warning("qa persist failed: %s", e)
+    return QAResponse(
+        session_id=payload.session_id,
+        answer=result["answer"],
+        sources=sources,
+        audience=payload.audience or "executive",
+        mode=result["mode"],
+        tokens_used=result["tokens_used"],
+    )

@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from typing import List, Dict, Any
 import math
 
@@ -84,4 +84,4 @@ def country_detail(code: str):
                 "csrd_alignment": round(c["esg"] * 0.92, 1),
                 "audit_ready_share_pct": round(max(0.0, c["esg"] - 30) * 1.4, 1),
             }
-    return {"error": f"Country {code} not found"}, 404
+    raise HTTPException(status_code=404, detail=f"Country {code} not found")

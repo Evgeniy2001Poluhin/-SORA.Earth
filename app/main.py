@@ -517,6 +517,8 @@ app.include_router(ml_v2_router)
 app.include_router(map_russia.router)
 app.include_router(predict_v2_api.router)
 app.include_router(rag_api.router)
+from app.api import forecast as forecast_api
+app.include_router(forecast_api.router, prefix="/api/v1")
 app.include_router(sentinel_api.router)
 
 
