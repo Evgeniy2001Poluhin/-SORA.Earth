@@ -656,3 +656,18 @@
   width: 100%;
   max-width: 1280px;
 }
+
+/* markdown answer + citation chips */
+.copilot-cite-chip {
+  display: inline-flex; align-items: center;
+  padding: 1px 7px; margin: 0 2px;
+  border-radius: 999px; font-size: 11px; font-weight: 600;
+  color: #3b82f6; background: rgba(59,130,246,0.12);
+  border: 1px solid rgba(59,130,246,0.3);
+  text-decoration: none; cursor: pointer;
+}
+.copilot-cite-chip:hover { background: rgba(59,130,246,0.22); }
+.md-answer table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
+.md-answer th, .md-answer td { border: 1px solid var(--line-2); padding: 6px 8px; text-align: left; }
+.md-answer p { margin: 0 0 8px; line-height: 1.6; }
+.md-answer strong { font-weight: 600; color: var(--text); }

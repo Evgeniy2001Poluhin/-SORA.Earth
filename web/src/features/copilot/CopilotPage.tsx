@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { MarkdownAnswer } from "./MarkdownAnswer";
 import { SessionsSidebar } from "./SessionsSidebar";
 import { useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -223,13 +224,7 @@ export function CopilotPage() {
           {streaming && (
             <div className="streaming-block" style={{padding:"20px",lineHeight:"1.6",fontSize:"14px"}}>
               <div className="section-title">⡡ Streaming...</div>
-              <p style={{whiteSpace:"pre-wrap"}}>{
-              streamingText.split(/(\[[^\]]+\])/g).map((part, i) =>
-                /^\[[^\]]+\]$/.test(part)
-                  ? <span key={i} className="copilot-cite" style={{color:"#3b82f6",fontWeight:600}}>{part}</span>
-                  : <span key={i}>{part}</span>
-              )
-            }<span className="cursor-blink">▊</span></p>
+              <div style={{whiteSpace:"normal"}}><MarkdownAnswer content={streamingText} /><span className="cursor-blink">▊</span></div>
             </div>
           )}
           {!result && !streaming && (
@@ -290,7 +285,7 @@ export function CopilotPage() {
               )}
 
               <div className="recommendation-block">
-                <span>{result.recommendation}</span>
+                <MarkdownAnswer content={result.recommendation} />
               </div>
               {result.sources && result.sources.length > 0 && (
                 <>
