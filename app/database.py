@@ -1,7 +1,7 @@
 from datetime import datetime
 import os
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text, create_engine, func
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, create_engine, func
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv(
@@ -170,3 +170,24 @@ class RegionESGScore(Base):
     updated_at = Column(DateTime(timezone=True), default=func.now(),
                         onupdate=func.now(), nullable=False)
 
+
+
+class WebhookSubscription(Base):
+    __tablename__ = "webhook_subscriptions"
+    id = Column(Integer, primary_key=True)
+    url = Column(String(512), nullable=False)
+    event_type = Column(String(64), nullable=False, default="drift")
+    secret = Column(String(128), nullable=False)
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+    id = Column(Integer, primary_key=True)
+    subscription_id = Column(Integer, index=True)
+    event_type = Column(String(64))
+    status_code = Column(Integer)
+    ok = Column(Boolean, default=False)
+    error = Column(String(512))
+    created_at = Column(DateTime, default=datetime.utcnow)

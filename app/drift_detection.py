@@ -130,6 +130,11 @@ def run_drift_analysis(reference_df, current_df, feature_cols=None):
         if result.get("drift_detected"):
             from app.mlflow_tracking import log_drift_event as _lde
             _lde(result, baseline_id="run_drift_analysis")
+            try:
+                from app.services.alerts import dispatch_webhooks
+                dispatch_webhooks("drift", result)
+            except Exception:
+                pass
     except Exception:
         pass
 

@@ -3,7 +3,7 @@ import { useTheme } from "./ThemeProvider";
 import { ModelBadge } from "../components/ModelBadge";
 import "./shell.css";
 
-const NAV = [ { to:"/", label:"Home" }, { to:"/evaluate", label:"Evaluate" }, { to:"/compare", label:"Compare" }, { to:"/drift", label:"Drift" }, { to:"/explain", label:"Explain" }, { to:"/copilot", label:"✨ Co-Pilot" }, { to:"/calibration", label:"Calibration" }, { to:"/mlops", label:"MLOps" }, { to:"/history", label:"History" }, { to:"/map", label:"Map" }, { to:"/forecast", label:"Forecast" }, { to:"/compliance", label:"Compliance" } ];
+const NAV = [ { to:"/", label:"Home" }, { to:"/evaluate", label:"Evaluate" }, { to:"/compare", label:"Compare" }, { to:"/drift", label:"Drift" }, { to:"/explain", label:"Explain" }, { to:"/copilot", label:"✨ Co-Pilot" }, { to:"/calibration", label:"Calibration" }, { to:"/mlops", label:"MLOps" }, { to:"/history", label:"History" }, { to:"/map", label:"Map" }, { to:"/forecast", label:"Forecast" }, { to:"/webhooks", label:"Webhooks" }, { to:"/compliance", label:"Compliance" } ];
 
 export function Shell() {
   const { theme, toggle } = useTheme();

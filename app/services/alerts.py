@@ -87,3 +87,34 @@ def send_alert(message, severity="warning", title=None, channels=None):
     if "email" in channels:
         results["email"] = send_email_alert(title or "SORA.Earth Alert", message, severity)
     return {"severity": severity, "results": results}
+
+
+def dispatch_webhooks(event_type, payload):
+    """Send POST to all active DB subscriptions for event_type, HMAC-signed."""
+    import hmac, hashlib, requests
+    from app.database import SessionLocal, WebhookSubscription, WebhookDelivery
+    db = SessionLocal()
+    results = []
+    try:
+        subs = db.query(WebhookSubscription).filter_by(event_type=event_type, active=True).all()
+        body = json.dumps({"event": event_type, "data": payload}, default=str).encode()
+        for s in subs:
+            sig = hmac.new(s.secret.encode(), body, hashlib.sha256).hexdigest()
+            rec = WebhookDelivery(subscription_id=s.id, event_type=event_type)
+            try:
+                r = requests.post(s.url, data=body, timeout=5, headers={
+                    "Content-Type": "application/json",
+                    "X-SORA-Event": event_type,
+                    "X-SORA-Signature": "sha256=" + sig,
+                })
+                rec.status_code = r.status_code
+                rec.ok = 200 <= r.status_code < 300
+            except Exception as e:
+                rec.error = str(e)[:500]
+            db.add(rec)
+            results.append({"url": s.url, "ok": rec.ok, "status": rec.status_code})
+        db.commit()
+        _log_jsonl({"channel": "webhook", "event": event_type, "sent": len(results)})
+    finally:
+        db.close()
+    return {"event": event_type, "delivered": results}

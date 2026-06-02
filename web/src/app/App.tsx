@@ -13,6 +13,7 @@ const CopilotPage     = lazy(() => import("@/features/copilot/CopilotPage").then
 const CalibrationPage = lazy(() => import("@/features/calibration/CalibrationPage").then(m => ({ default: m.CalibrationPage })));
 const MlopsHealthPage = lazy(() => import("@/features/mlops/MlopsHealthPage").then(m => ({ default: m.MlopsHealthPage })));
 const HistoryPage     = lazy(() => import("../features/history/HistoryPage"));
+const WebhooksPage    = lazy(() => import("../features/webhooks/WebhooksPage"));
 const CompliancePage  = lazy(() => import("@/features/compliance/CompliancePage"));
 const MapPage         = lazy(() => import("@/features/map/MapPage"));
 const ForecastPage    = lazy(() => import("@/features/forecast/ForecastPage"));
@@ -49,6 +50,7 @@ export function App() {
             <Route path="/compliance" element={<CompliancePage />} />
             <Route path="/map" element={<MapPage />} />
             <Route path="/forecast" element={<ForecastPage />} />
+            <Route path="/webhooks" element={<WebhooksPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
           <Route path="/region/:code" element={<RegionDetail />} />
