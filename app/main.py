@@ -478,6 +478,7 @@ from app.api import admin_diagnostics
 from app.api import admin_ai_control
 from app.api import ai_teammate_routes
 from app.api import copilot_api
+from app.api.embed import api as embed_api
 from app.api.drift_baseline import router as drift_baseline_router
 from app.api.explainability import router as explainability_router
 
@@ -498,6 +499,7 @@ api_v1 = APIRouter(prefix="/api/v1")
 for _r in _all_routers:
     api_v1.include_router(_r)
 from app.auth_routes import router as auth_router
+api_v1.include_router(embed_api.router)
 api_v1.include_router(auth_router)
 api_v1.include_router(admin_retrain_log.router)
 api_v1.include_router(admin_snapshot.router)
