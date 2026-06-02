@@ -21,7 +21,13 @@ export function MlopsHealthPage() {
   const metrics = m.data!;
   const meta    = status?.meta ?? {};
 
-  const driftColor = health?.drift_status === "stable" || health?.drift_status === "no_baseline" ? "var(--planet)" : "var(--danger, #EF4444)";
+  const ds = health?.drift_status;
+  const driftColor =
+    ds === "stable" || ds === "no_baseline"
+      ? "var(--planet)"
+      : ds === "insufficient_data" || ds === "unknown"
+        ? "var(--muted, #9aa0a6)"
+        : "var(--danger, #EF4444)";
   const modelColor = health?.model_status === "healthy" ? "var(--planet)" : "var(--danger, #EF4444)";
 
   const metricBars = [
