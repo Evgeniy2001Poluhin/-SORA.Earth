@@ -92,6 +92,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sora2026}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sora"]
