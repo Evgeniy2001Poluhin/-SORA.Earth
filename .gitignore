@@ -114,3 +114,4 @@ web/style_map.py
 models_backup_*/
 
 # --- models policy (clean) ---
+models/all-MiniLM-L6-v2/
