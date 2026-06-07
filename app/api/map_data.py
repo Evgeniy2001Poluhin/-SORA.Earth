@@ -39,6 +39,7 @@ COUNTRIES: List[Dict[str, Any]] = [
     {"code":"ZAF","name":"South Africa","lat":-30.6,"lon":22.9,"esg":55},
     {"code":"KEN","name":"Kenya","lat":-0.0,"lon":37.9,"esg":52},
     {"code":"ARE","name":"UAE","lat":23.4,"lon":53.8,"esg":63},
+    {"code":"RUS","name":"Russia","lat":55.75,"lon":37.62,"esg":58},
 ]
 
 def _band(esg: int) -> str:

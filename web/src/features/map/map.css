@@ -301,3 +301,7 @@
 .top-list li[style*="border-left"] {
   padding-left: 15px !important;  /* compensate the 3px border */
 }
+
+.esg-tooltip, .esg-tooltip * { color: #eef2f0 !important; opacity: 1 !important; }
+.esg-tooltip .tip-title, .esg-tooltip b, .esg-tooltip strong { color: #ffffff !important; font-weight: 700 !important; }
+.esg-tooltip .tip-sub, .esg-tooltip .muted { color: #b8c4bf !important; }
