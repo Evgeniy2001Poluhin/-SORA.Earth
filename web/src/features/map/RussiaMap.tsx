@@ -1,6 +1,6 @@
-import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Tooltip, GeoJSON, useMap } from "react-leaflet";
 import type { LatLngBoundsExpression } from "leaflet";
-import { useEffect } from "react";
+import { useEffect, useState, useMemo } from "react";
 import "leaflet/dist/leaflet.css";
 import "./map.css";
 import { RUSSIA_REGIONS, FD_COLORS, type RussianRegion } from "@/data/russia_regions";
@@ -24,6 +24,11 @@ function FitOnMount() {
   return null;
 }
 
+const FD_FILL: Record<string, string> = {
+  "ЦФО": "#7493C7", "СЗФО": "#6BC7C7", "ЮФО": "#74C7A9", "СКФО": "#C7B363",
+  "ПФО": "#C7A05E", "УФО": "#C77979", "СФО": "#9782C7", "ДФО": "#C77DAD",
+};
+
 export type MapMode = "population" | "esg";
 
 interface Props {
@@ -43,6 +48,32 @@ export default function RussiaMap({ height = 560, activeFD, search, mode, onSele
     (q === "" || r.name.toLowerCase().includes(q) || r.capital.toLowerCase().includes(q))
   );
 
+  const [geo, setGeo] = useState(null);
+  useEffect(() => {
+    fetch("/geo/russia.geo.json").then(r => r.json()).then(setGeo).catch(() => setGeo(null));
+  }, []);
+
+  const byCode = useMemo(() => new Map(source.map(r => [r.code, r])), [source]);
+
+  const geoStyle = (feat) => {
+    const r = byCode.get(feat.properties.code);
+    const on = r && activeFD.has(r.district) &&
+      (q === "" || r.name.toLowerCase().includes(q) || r.capital.toLowerCase().includes(q));
+    const fill = !r ? "#5A6068" : mode === "esg" ? esgColor(r.esgScore) : FD_FILL[r.district];
+    return { fillColor: fill, color: "rgba(255,255,255,0.22)", weight: 0.75,
+             fillOpacity: on ? 0.18 : 0.03, opacity: on ? 0.5 : 0.08 };
+  };
+
+  const onEachFeature = (feat, layer) => {
+    const r = byCode.get(feat.properties.code);
+    if (!r) return;
+    layer.on({
+      mouseover: () => layer.setStyle({ weight: 1.5, color: "#fff", fillOpacity: 0.32 }),
+      mouseout:  () => layer.setStyle(geoStyle(feat)),
+      click:     () => onSelect(r),
+    });
+  };
+
   return (
     <div className="map-wrap" style={{ height, position: "relative" }}>
       <MapContainer
@@ -55,6 +86,9 @@ export default function RussiaMap({ height = 560, activeFD, search, mode, onSele
       >
         <FitOnMount />
         <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+        {geo && (
+          <GeoJSON key={`${mode}-${q}-${[...activeFD].join()}`} data={geo} style={geoStyle} onEachFeature={onEachFeature} />
+        )}
         {visible.map(r => {
           const fill = mode === "esg" ? esgColor(r.esgScore) : FD_COLORS[r.district];
           const radius = mode === "esg" ? radByEsg(r.esgScore) : radByPop(r.population);

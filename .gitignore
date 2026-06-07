@@ -114,3 +114,6 @@ output/loadtest_v2_*/
 data/sessions.db
 data/sessions.db-journal
 models/
+
+web/fix_map.py
+web/style_map.py
