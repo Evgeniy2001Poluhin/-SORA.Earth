@@ -82,10 +82,6 @@ loadtest_v2_*.csv
 /test_calibration_boost.py
 
 # Production model artifacts (не коммитим — отдельно бэкапим)
-models/best_threshold.pkl
-models/meta.json
-models/metrics.json
-models/scaler.pkl
 
 # MLflow local
 mlflow_local.db
@@ -99,8 +95,6 @@ output/
 
 web/tsconfig.tsbuildinfo
 output/request_log/
-models/*.pkl
-models/*.json
 output/ref_stats.json
 output/loadtest_v2_*/
 
@@ -113,9 +107,10 @@ output/loadtest_v2_*/
 .chroma/
 data/sessions.db
 data/sessions.db-journal
-models/
 
 web/fix_map.py
 web/style_map.py
 *.bak*
 models_backup_*/
+
+# --- models policy (clean) ---
