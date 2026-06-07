@@ -439,10 +439,7 @@ def generate_pdf_report(project: Project):
     feats_7 = make_features_xgb(legacy)
     rf_p = float(rf_model.predict_proba(feats_9)[0][1])
     xgb_p = float(xgb_model.predict_proba(feats_7)[0][1])
-    import torch
-    def _nn_forward(model, feats):
-        x = torch.tensor(feats.values, dtype=torch.float32)
-        return float(model(x).detach().numpy()[0][0])
+    from app.api.predict import _nn_forward
     nn_p = _nn_forward(nn_model, feats_9)
 
     prob = float((rf_p + xgb_p + nn_p) / 3.0)
