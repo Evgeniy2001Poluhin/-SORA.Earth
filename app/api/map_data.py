@@ -49,16 +49,43 @@ def _band(esg: int) -> str:
     if esg >= 50: return "emerging"
     return "lagging"
 
+
+_NAME_MAP={"United States":"USA","United Kingdom":"UK","South Korea":"Korea","Czech Republic":"Czechia"}
+def _live_esg(name: str, fallback: int):
+    name=_NAME_MAP.get(name,name)
+    try:
+        from app.external_data import get_merged_country_data
+        d = get_merged_country_data(name)
+        if not d:
+            return fallback, {}, "hardcoded"
+        live = d.get("live", {}) or {}
+        ind = live.get("indicators", {}) or {}
+        co2 = ind.get("co2_per_capita", d.get("co2_per_capita", 5.0))
+        renew = ind.get("renewable_share", d.get("renewable_share", 20.0))
+        gini = ind.get("gini_index", d.get("gini_index", 35.0))
+        gov = ind.get("gov_effectiveness", d.get("gov_effectiveness", 0.0))
+        hdi = d.get("hdi", 0.7)
+        e = 0.6*min(renew,100) + 0.4*max(0,(16-co2)/16*100)
+        soc = 0.7*hdi*100 + 0.3*max(0,(60-gini)/40*100)
+        g = (gov+2.5)/5*100
+        total = round(0.4*e + 0.35*soc + 0.25*g)
+        return total, {"co2_intensity_t_per_capita": round(co2,1), "renewable_share_pct": round(renew,1), "hdi": round(hdi,3), "gini_index": round(gini,1), "gov_effectiveness": round(gov,2), "esg_breakdown": {"E": round(e), "S": round(soc), "G": round(g)}}, "world_bank_live"
+    except Exception:
+        return fallback, {}, "hardcoded"
+
+
 @router.get("/map/countries")
 def map_countries():
     items = []
     for c in COUNTRIES:
-        items.append({
-            **c,
-            "band": _band(c["esg"]),
-            "co2_intensity_t_per_capita": round(20.0 - c["esg"] * 0.18, 2),
-            "renewable_share_pct": min(round(c["esg"] * 0.95, 1), 95.0),
-        })
+        live_score, extra, src = _live_esg(c["name"], c["esg"])
+        item = {**c, "esg": live_score, "esg_source": src, "band": _band(live_score)}
+        if extra:
+            item.update(extra)
+        else:
+            item["co2_intensity_t_per_capita"] = round(20.0 - live_score * 0.18, 2)
+            item["renewable_share_pct"] = min(round(live_score * 0.95, 1), 95.0)
+        items.append(item)
     items.sort(key=lambda x: -x["esg"])
     return {
         "total_countries": len(items),

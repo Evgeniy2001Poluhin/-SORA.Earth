@@ -366,7 +366,7 @@ COUNTRIES = {
     "Japan": {"lat": 36.2, "lon": 138.3, "region": "Asia"},
     "Mexico": {"lat": 23.6, "lon": -102.6, "region": "North America"},
     "Nigeria": {"lat": 9.1, "lon": 8.7, "region": "Africa"},
-    "Russia": {"lat": 61.5, "lon": 105.3, "region": "Europe"},
+    "Russia": {"lat": 55.75, "lon": 37.62, "region": "Europe"},
     "South Africa": {"lat": -30.6, "lon": 22.9, "region": "Africa"},
     "Spain": {"lat": 40.5, "lon": -3.7, "region": "Europe"},
     "United Kingdom": {"lat": 55.4, "lon": -3.4, "region": "Europe"},
@@ -584,6 +584,14 @@ _executor: ProcessPoolExecutor = None
 
 @app.on_event("startup")
 async def startup_event():
+    import asyncio
+    async def _bg_refresh():
+        try:
+            from app.external_data import refresh_all_countries
+            await asyncio.to_thread(refresh_all_countries)
+        except Exception:
+            pass
+    asyncio.create_task(_bg_refresh())
     global _executor
     _executor = ProcessPoolExecutor(max_workers=4)
     app.state.executor = _executor
