@@ -117,3 +117,5 @@ models/
 
 web/fix_map.py
 web/style_map.py
+*.bak*
+models_backup_*/
