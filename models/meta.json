@@ -1,5 +1,5 @@
 {
-  "retrained_at": "20260507_151132",
+  "retrained_at": "20260602_124842",
   "algorithm": "RandomForestClassifier",
   "n_estimators": 200,
   "max_depth": 10,
@@ -14,5 +14,5 @@
     "year",
     "quarter"
   ],
-  "total_samples": 737
+  "total_samples": 800
 }
