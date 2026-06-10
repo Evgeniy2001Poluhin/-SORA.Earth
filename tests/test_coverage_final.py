@@ -31,6 +31,10 @@ def teardown_module():
 
 
 class TestDataPipeline:
+    def setup_method(self):
+        app.dependency_overrides[require_admin] = _mock_admin
+        app.dependency_overrides[require_api_key] = _mock_api_key
+
     def test_refresh_status(self):
         r = client.get("/api/v1/data/refresh/status")
         assert r.status_code == 200
