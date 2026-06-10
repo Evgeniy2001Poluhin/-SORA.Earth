@@ -79,9 +79,9 @@ export function HomePage() {
         <Kpi k="Models" v="4" sub="RF · XGB · MLP · Stacking"/>
         <Kpi k="Production AUC" v="0.82" sub="CV 0.98 · calibrated"/>
         <Kpi k="MLflow runs" v="100" sub="tracked · artifacts · SHAP"/>
-        <Kpi k="API endpoints" v="42+" sub="FastAPI · /api/v1"/>
+        <Kpi k="API endpoints" v="154" sub="FastAPI · /api/v1"/>
         <Kpi k="Services" v="8" sub="Docker Compose"/>
-        <Kpi k="Tests passed" v="324" sub="0 failed"/>
+        <Kpi k="Tests passed" v="392" sub="0 failed"/>
       </section>
       <section className="home-how">
         <div className="eyebrow">HOW IT WORKS</div>
