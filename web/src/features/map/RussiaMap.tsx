@@ -55,7 +55,7 @@ export default function RussiaMap({ height = 560, activeFD, search, mode, onSele
 
   const byCode = useMemo(() => new Map(source.map(r => [r.code, r])), [source]);
 
-  const geoStyle = (feat) => {
+  const geoStyle = (feat: any) => {
     const r = byCode.get(feat.properties.code);
     const on = r && activeFD.has(r.district) &&
       (q === "" || r.name.toLowerCase().includes(q) || r.capital.toLowerCase().includes(q));
@@ -64,7 +64,7 @@ export default function RussiaMap({ height = 560, activeFD, search, mode, onSele
              fillOpacity: on ? 0.18 : 0.03, opacity: on ? 0.5 : 0.08 };
   };
 
-  const onEachFeature = (feat, layer) => {
+  const onEachFeature = (feat: any, layer: any) => {
     const r = byCode.get(feat.properties.code);
     if (!r) return;
     layer.on({
