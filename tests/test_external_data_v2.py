@@ -105,7 +105,8 @@ class TestFallbackChain:
 
     @patch("app.external_data._fetch_indicator", return_value=None)
     @patch("app.external_data._fetch_oecd", return_value=None)
-    def test_all_fail_unknown_country(self, mock_oecd, mock_wb):
+    def test_all_fail_unknown_country(self, mock_oecd, mock_wb, monkeypatch):
+        monkeypatch.delenv("SORA_OFFLINE", raising=False)
         val = _fetch_with_fallback("XXX", "co2_per_capita", "EN.ATM.CO2E.PC", "Atlantis")
         assert val is None
 

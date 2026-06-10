@@ -15,6 +15,8 @@ _version = None
 
 def _load():
     global _model, _version
+    if os.getenv("SORA_OFFLINE", "0") == "1":
+        return None
     mlflow.set_tracking_uri(MLFLOW_URI)
     _model = mlflow.sklearn.load_model(f"models:/{MODEL_NAME}@{MODEL_ALIAS}")
     mv = MlflowClient().get_model_version_by_alias(MODEL_NAME, MODEL_ALIAS)

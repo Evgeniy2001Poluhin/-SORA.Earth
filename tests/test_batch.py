@@ -72,7 +72,8 @@ def test_batch_processing_time():
 # --- external_data coverage ---
 from unittest.mock import patch, MagicMock
 
-def test_fetch_indicator_success():
+def test_fetch_indicator_success(monkeypatch):
+    monkeypatch.delenv("SORA_OFFLINE", raising=False)
     from app.external_data import _fetch_indicator
     mock_resp = MagicMock()
     mock_resp.json.return_value = [

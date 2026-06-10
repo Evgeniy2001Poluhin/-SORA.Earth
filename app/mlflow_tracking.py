@@ -5,6 +5,7 @@ from datetime import datetime
 
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5556")
 EXPERIMENT_NAME = "sora-earth-esg"
+_OFFLINE = os.getenv("SORA_OFFLINE","0")=="1"  # _SORA_OFFLINE_GUARD
 
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
@@ -50,6 +51,8 @@ def log_prediction(
     confidence=None,
     esg_total_score: float = None,
 ):
+    if _OFFLINE:
+        return None
     try:
         params = _to_dict(input_data)
 
@@ -101,6 +104,8 @@ def log_prediction(
 
 
 def log_evaluation(project_name: str, esg_scores: dict, risk_level: str):
+    if _OFFLINE:
+        return None
     try:
         with mlflow.start_run(run_name=f"eval_{project_name}_{datetime.now().strftime('%H%M%S')}"):
             metrics = {
@@ -122,6 +127,8 @@ def log_evaluation(project_name: str, esg_scores: dict, risk_level: str):
 
 
 def log_model_registry(model, model_name: str, metrics: dict):
+    if _OFFLINE:
+        return None
     try:
         with mlflow.start_run(run_name=f"register_{model_name}"):
             mlflow.log_metrics(metrics)
@@ -178,6 +185,8 @@ def get_experiment_stats():
 
 
 def log_drift_event(analysis_result, baseline_id="default"):
+    if _OFFLINE:
+        return None
     """Log drift detection event to MLflow.
 
     Stores PSI/KS metrics per feature, drift_score, drifted features.

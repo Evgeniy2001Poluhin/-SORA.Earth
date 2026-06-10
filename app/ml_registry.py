@@ -40,6 +40,9 @@ def _ensure_loaded() -> bool:
     global _model, _scaler, _encodings
     if _model is not None:
         return True
+    if os.getenv("SORA_OFFLINE", "0") == "1":
+        _meta["error"] = "offline: skipping MLflow registry"
+        return False
     try:
         import mlflow
         uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5556")
