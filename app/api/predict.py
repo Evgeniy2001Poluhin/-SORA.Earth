@@ -81,6 +81,7 @@ def predict_project(project: Project):
     }
     cache_set(ck, result)
     log_prediction("RandomForest", project.model_dump(), prediction, result["probability"])
+    _log_csv(project)
     METRICS["predictions_total"] = METRICS.get("predictions_total", 0) + 1
     return result
 
@@ -240,3 +241,16 @@ def export_predictions_csv():
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=sora_predictions_log.csv"},
     )
+
+
+import os as _os, csv as _csv
+_PRED_LOG = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), 'data', 'predictions_log.csv')
+def _log_csv(_project):
+    _d = _project.model_dump()
+    _row = {'budget': _d.get('budget_usd', _d.get('budget')), 'co2_reduction': _d.get('co2_reduction_tons_per_year', _d.get('co2_reduction')), 'social_impact': _d.get('social_impact_score', _d.get('social_impact')), 'duration_months': _d.get('project_duration_months', _d.get('duration_months'))}
+    _new = not _os.path.exists(_PRED_LOG)
+    _os.makedirs(_os.path.dirname(_PRED_LOG), exist_ok=True)
+    with open(_PRED_LOG, 'a', newline='') as _f:
+        _w = _csv.DictWriter(_f, fieldnames=list(_row))
+        if _new: _w.writeheader()
+        _w.writerow(_row)
