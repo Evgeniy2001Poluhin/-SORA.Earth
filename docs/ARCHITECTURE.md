@@ -1,97 +1,96 @@
 # Архитектура SORA.Earth AI Platform
 
-## Назначение
+> Актуализировано: 2026-06-10. Все цифры сверены с живой системой
+> (/api/v1/scheduler/status, /openapi.json, models/, docker-compose.yml).
 
-SORA.Earth AI Platform — backend-first платформа для ESG-оценки проектов, explainable ML, country analytics, closed-loop MLOps и operational monitoring.
+## 1. Назначение
+SORA.Earth AI Platform — backend-first платформа для ESG-оценки проектов и стран:
+explainable ML, country & regional analytics, closed-loop MLOps и operational monitoring.
 
-## Основные компоненты
+## 2. Технологический стек
+- API: FastAPI + Uvicorn/Gunicorn (154 эндпоинта)
+- Scheduler: APScheduler (BackgroundScheduler, UTC) в выделенном сервисе
+- Хранилище: PostgreSQL 16 + Alembic
+- Кэш / локи: Redis 7 (distributed locks для retrain)
+- ML: scikit-learn (RandomForest, калибровка), XGBoost, Stacking, ensemble_v2
+- Explainability: SHAP (beeswarm, waterfall)
+- Experiment tracking: MLflow 2.x (regмировая карта (33 страны)
+- GET /api/v1/map/countries/{code}
+- GET /api/v1/map/russia — карта РФ (85 субъектов)
+- GET /api/v1/map/russia/{region_code}
+### Prediction & Explainability
+- POST /api/v1/predict, /predict/v2, /api/v2/predict
+- POST /api/v1/predict/explain, /predict/explain/waterfall (SHAP)
+- POST /api/v1/predict/neural, /predict/stacking, /predict/uncertainty
+- POST /api/v1/predict/compare, /api/v1/ab/predict
+### Evaluate
+- POST /api/v1/evaluate, /evaluate/monte-carlo, /evaluate/ranking, /batch/evaluate
+### Analytics
+- /analytics/country-benchmark/{country}, /analytics/country-ranking
+- /analytics/model-compare, /analytics/monte-carlo
+- /analytics/data-health, /analytics/metrics/model-health, /analytics/summary
+### Scheduler / MLOps
+- GET /api/v1/scheduler/status
+- GET /api/v1/scheduler/retrain/history
+- POST /api/v1/scheduler/retrain/trigger
+- POST /api/v1/scheduler/refresh_external
+### Drift
+- GET /api/v2/drift/predictions
 
-### FastAPI Application
-Центральный backend-сервис, который предоставляет:
-- ESG evaluate endpoints
-- prediction / explain endpoints
-- analytics endpoints
-- admin endpoints
-- auth endpoints
-- metrics / health / readiness endpoints
+## 4. Карта России (85 субъектов РФ)
+- Рендеринг: Leaflet (RussiaMap.tsx), полигоны из web/public/geo/russia.geo.json
+  (FeatureCollection, EPSG:4326, properties {code, name}).
+- Покрытие: все 85 субъектов, включая Республику Крым (RU-CR) и Севастополь (RU-SEV)
+  — добавлены 2026-06-10 (commit 47f981b, 83 -> 85).
+- Данные регионов: web/src/data/russia_regions.ts (столица, округ, население,
+  координаты, ESG E/S/G + confidence).
+- Режимы: «Население» и «ESG» (шкала 0–100). Раскраска по 8 федеральным округам.
+- Население суммарно: 147.3M чел.
 
-Ключевые маршруты:
-- `/api/v1/evaluate`
-- `/api/v1/predict`
-- `/api/v1/predict/explain`
-- `/api/v1/analytics/country-benchmark/{country}`
-- `/api/v1/mlops/auto-retrain`
-- `/api/v1/mlops/full-pipeline`
-- `/api/v1/admin/snapshot`
-- `/api/v1/admin/ai-teammate/status`
+## 5. ML слой
+### Production-модели (models/)
+| Файл | Назначение |
+|------|------------|
+| model.pkl | Champion RandomForest |
+| rf_model_cal.pkl | Калиброванный RF (CalibratedClassifierCV, isotonic, prefit) pkl | Метрики последнего retrain |
+### Inference
+- Продакшн: ensemble_model_v2.predict_proba с фоллбэком на RF.
+- Метрики последнего retrain: accuracy 0.9563, F1 0.9637, ROC-AUC 0.9884, threshold 0.63.
+- Explainability: SHAP beeswarm + waterfall. MLflow registry хранит версии.
 
-### ML Layer
-ML-слой включает:
-- Random Forest
-- XGBoost
-- Neural Network
-- Stacking Ensemble
-- SHAP explainability
-- model comparison
-- uncertainty-aware predi Redis
-Используется для:
-- кэширования повторяющихся ответов
-- ускорения API
-- distributed locks
+## 6. Scheduler — 5 джобов (выделенный сервис)
+Контейнер scheduler (run_scheduler.py), RUN_SCHEDULER=true, APScheduler, UTC.
 
-### Scheduler
-Отдельный процесс APScheduler выполняет:
-- daily data refresh
-- daily drift checks
-- auto retraining
-- weekly full pipeline
+| Job ID | Триггер | Назначение |
+|--------|---------|------------|
+| auto_closed_loop_daily | cron 03:00 UTC | drift -> retrain -> validate -> promote/reject |
+| auto_refresh_external_data | interval 12h | обновление ESG (World Bank + OECD) |
+| auto_full_pipeline_weekly | cron вс 03:30 UTC | refresh -> drift -> retrain -> validate |
+| auto_run_ingesters | interval 24h | прогон всех ингестеров |
+| health_ping | interval 5min | запись health-метрики |
 
-### Prometheus + Grafana
-Observability-слой включает:
-- экспорт `/api/v1/metrics/prometheus Nginx
-Nginx используется как reverse proxy и даёт:
-- единый вход через порт 80
-- rate limiting
-- security headers
-- gzip
-- проксирование к FastAPI
+tion (DriftDetector.check_drift())
+3. retrain candidate (RF + изотоническая калибровка)
+4. validation против действующей модели
+5. promote / reject
+6. запись в retrain log (try/finally — статус всегда терминальный)
+Конкурентность защищена Redis-локом sora:lock:model_retrain.
 
-## Closed-loop MLOps
+## 8. AI Teammate
+Автономный agent: observe -> decide -> execute. Анализирует freshness данных и retrain,
+model quality thresholds, consecutive failures, drift state.
 
-Pipeline реализует цикл:
-1. refresh внешних данных  
-2. drift detection  
-3. retrain candidate model  
-4. validation against previous model  
-5. promote or reject  
-6. запись решения в retrain log  
+## 9. Docker-сервисы (7)
+| Сервис | Команда / образ | RUN_SCHEDULER |
+|--------|-----------------|---------------|
+| app | uvicorn app.main:app (8000) | false |
+| scheduler | python3 -u run_scheduler.py | true |
+| redis | redis:7-alpine | — |
+| postgres | postgres:16-alpine | — |
+| prometheus | prom/prometheus | — |
+| grafana | grafana/grafana | — |
+| nginx | nginx:alpine (80) | — |
 
-## AI Teammate
-
-AI Teammate — автономный operational agent.
-
-Фазы:
-- observe
-- decide
-- execute
-
-Он анализирует:
-- freshness данных
-- freshness retrain
-- model quality thresholds
-- consecutive failures
-- drift state
-
-## Docker Services
-
-В docker-compose используются 7 сервисов:
-- app
-- scheduler
-- nginx
-- postgres
-- redis
-- prometheus
-- grafana
-
-##
-Архитектура платформы сочетает backend API, explainable ML, automated retraining, admin tooling и full observability stack.
+Ключевое реубъектов) + мировая карта,
+explainable ML (RF + калибровка + ensemble_v2 + SHAP), автономный closed-loop MLOps
+с выделенным планировщиком и полный observability-стек.
