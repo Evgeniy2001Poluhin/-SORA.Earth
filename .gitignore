@@ -116,3 +116,6 @@ models_backup_*/
 # --- models policy (clean) ---
 models/all-MiniLM-L6-v2/
 data/*.png
+data/predictions_log.csv
+data/*.png
+models/*.json
