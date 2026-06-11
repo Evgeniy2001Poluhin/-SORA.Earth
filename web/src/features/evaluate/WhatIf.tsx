@@ -3,7 +3,14 @@ import { useMutation } from "@tanstack/react-query";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceDot, ResponsiveContainer } from "recharts";
 import { evaluateApi } from "@/api/endpoints/evaluate";
 
-type Props = { form: any; lastRun: any };
+type EvalInput = {
+  country?: string;
+  budget_usd?: number;
+  co2_reduction_tons_per_year?: number;
+  social_impact_score?: number;
+  [key: string]: any;
+};
+type Props = { form: EvalInput; lastRun: EvalInput | null };
 
 const PARAMS = [
   { key:"budget_usd",                    label:"Budget (USD)",   min:50000, max:500000, step:10000, fmt:(v:number)=>`$${(v/1000).toFixed(0)}k` },
