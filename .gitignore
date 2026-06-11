@@ -119,3 +119,4 @@ data/*.png
 data/predictions_log.csv
 data/*.png
 models/*.json
+nginx.conf.bak
