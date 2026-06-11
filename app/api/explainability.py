@@ -108,18 +108,20 @@ def explain_local(features: Dict[str, float], top_n: int = 10, nsamples: int = 1
     base = expl.expected_value
     if hasattr(base, "__len__"):
         base = float(base[1])
-    pred_proba = float(model.predict_proba(Xs)[0][1])
+    pred_proba = float(model.predict_proba(df)[0][1])
     order = np.argsort(np.abs(contrib))[::-1][:top_n]
     return {
         "explainer": kind,
         "base_value": float(base),
         "prediction_proba": pred_proba,
+        "prediction": pred_proba,
         "top_contributions": [
             {
                 "feature": FEATURE_COLS[i],
                 "scaled_value": float(Xs[0, i]),
                 "raw_value": float(df.iloc[0, i]),
                 "shap": float(contrib[i]),
+                "shap_value": float(contrib[i]),
                 "direction": "up" if contrib[i] > 0 else "down",
             }
             for i in order
