@@ -62,7 +62,7 @@ export function UncertaintyCard({ payload }: Props) {
 
       <div className="uc-meta">
         <div><span className="muted">std</span> <span className="tabular">{((u.tree_distribution?.std ?? 0) * 100).toFixed(2)}%</span></div>
-        <div><span className="muted">range</span> <span className="tabular">{(((u.tree_distribution?.p5 ?? u.tree_distribution?.min) ?? 0) * 100).toFixed(1)}-{(((u.tree_distribution?.p95 ?? u.tree_distribution?.max) ?? 0) * 100).toFixed(1)}%</span></div>
+        <div><span className="muted">5-95%</span> <span className="tabular">{(((u.tree_distribution?.p5 ?? u.tree_distribution?.min) ?? 0) * 100).toFixed(1)}-{(((u.tree_distribution?.p95 ?? u.tree_distribution?.max) ?? 0) * 100).toFixed(1)}%</span></div>
         <div><span className="muted">trees</span> <span className="tabular">{(u.tree_distribution?.n_trees ?? 0)}</span></div>
       </div>
     </div>
