@@ -110,12 +110,12 @@ function drawStackChart(probs,sp){
 }
 
 function loadShap(d){
-  fetch("/explain/shap",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(j){
+  fetch("/api/v1/shap",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(j){
     if(!j.features)return;
     if(shapChart)shapChart.destroy();
     var ctx=document.getElementById("shapChart");if(!ctx)return;
     var colors=j.shap_values.map(function(v){return v>=0?"#00e5a0":"#ef4444"});
-    shapChart=new Chart(ctx,{type:"bar",data:{labels:j.features,datasets:[{data:j.shap_values,backgroundColor:colors,borderRadius:4}]},options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#8892a8"},grid:{color:"#1e2a45"}},y:{ticks:{color:"#e2e8f0"},grid:{display:false}}}}});
+    window.shapChart&&window.shapChart.destroy&&window.shapChart.destroy(),shapChart=new Chart(ctx,{type:"bar",data:{labels:j.features,datasets:[{data:j.shap_values,backgroundColor:colors,borderRadius:4}]},options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#8892a8"},grid:{color:"#1e2a45"}},y:{ticks:{color:"#e2e8f0"},grid:{display:false}}}}});
   }).catch(function(e){console.error("shap error",e)});
 }
 

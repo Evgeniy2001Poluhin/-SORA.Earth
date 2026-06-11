@@ -212,9 +212,10 @@ def shap_explain(project: Project):
 
     feats = make_features_base(_to_legacy(project))
     shap_values = explainer_shap.shap_values(feats)
-    vals = shap_values[1][0].tolist() if isinstance(shap_values, list) else shap_values[0].tolist()
+    raw = shap_values[1][0].tolist() if isinstance(shap_values, list) else shap_values[0].tolist()
+    vals = [float(v[1]) if isinstance(v, (list, tuple)) else float(v) for v in raw]
     feature_names = list(feats.columns)
-    return {"shap_values": dict(zip(feature_names, vals)), "feature_names": feature_names}
+    return {"features": feature_names, "shap_values": vals}
 
 
 @router.get("/predictions/history")
