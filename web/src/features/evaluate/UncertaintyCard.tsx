@@ -33,9 +33,9 @@ export function UncertaintyCard({ payload }: Props) {
 
   if (!q.data) return null;
   const u = q.data;
-  const lo = u.prediction.lower_90 * 100;
-  const med = u.prediction.median * 100;
-  const hi = u.prediction.upper_90 * 100;
+  const lo = (u?.prediction?.lower_90 ?? 0) * 100;
+  const med = (u?.prediction?.median ?? 0) * 100;
+  const hi = (u?.prediction?.upper_90 ?? 0) * 100;
   const width = Math.max(1, hi - lo);
   const medPos = ((med - lo) / width) * 100;
 
@@ -44,7 +44,7 @@ export function UncertaintyCard({ payload }: Props) {
       <div className="uncertainty-head">
         <div className="eyebrow">Confidence interval (tree-level)</div>
         <span className="uc-badge" style={{ background: (CONF_COLOR[u.confidence] ?? "#888") + "22", color: CONF_COLOR[u.confidence] ?? "#888", borderColor: CONF_COLOR[u.confidence] ?? "#888" }}>
-          {u.confidence.toUpperCase()} CONFIDENCE
+          {(u.confidence ?? "").toUpperCase()} CONFIDENCE
         </span>
       </div>
 
@@ -61,9 +61,9 @@ export function UncertaintyCard({ payload }: Props) {
       </div>
 
       <div className="uc-meta">
-        <div><span className="muted">std</span> <span className="tabular">{(u.tree_distribution.std * 100).toFixed(2)}%</span></div>
-        <div><span className="muted">range</span> <span className="tabular">{(u.tree_distribution.min * 100).toFixed(1)}-{(u.tree_distribution.max * 100).toFixed(1)}%</span></div>
-        <div><span className="muted">trees</span> <span className="tabular">{u.tree_distribution.n_trees}</span></div>
+        <div><span className="muted">std</span> <span className="tabular">{((u.tree_distribution?.std ?? 0) * 100).toFixed(2)}%</span></div>
+        <div><span className="muted">range</span> <span className="tabular">{((u.tree_distribution?.min ?? 0) * 100).toFixed(1)}-{((u.tree_distribution?.max ?? 0) * 100).toFixed(1)}%</span></div>
+        <div><span className="muted">trees</span> <span className="tabular">{(u.tree_distribution?.n_trees ?? 0)}</span></div>
       </div>
     </div>
   );

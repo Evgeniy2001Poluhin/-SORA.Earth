@@ -123,17 +123,35 @@ def predict_with_uncertainty(project: dict):
     tree_preds = np.array([t.predict_proba(feats.values if hasattr(feats, "values") else feats)[0][1]
                            for t in m.rf_model.estimators_])
 
+    median = float(np.median(tree_preds))
+    lo = float(np.percentile(tree_preds, 5))
+    hi = float(np.percentile(tree_preds, 95))
+    std = float(np.std(tree_preds))
+    confidence = "high" if std < 0.1 else "medium" if std < 0.2 else "low"
+
     return {
         "probability": round(base_proba * 100, 2),
+        "prediction": {
+            "mean": float(np.mean(tree_preds)),
+            "median": median,
+            "lower_90": lo,
+            "upper_90": hi,
+        },
+        "tree_distribution": {
+            "std": std,
+            "n_trees": int(len(m.rf_model.estimators_)),
+            "min": float(np.min(tree_preds)),
+            "max": float(np.max(tree_preds)),
+        },
+        "confidence": confidence,
         "uncertainty": {
             "method": "RF tree variance",
             "mean": round(float(np.mean(tree_preds)) * 100, 2),
-            "std": round(float(np.std(tree_preds)) * 100, 2),
-            "ci_90": [round(float(np.percentile(tree_preds, 5)) * 100, 2),
-                      round(float(np.percentile(tree_preds, 95)) * 100, 2)],
+            "std": round(std * 100, 2),
+            "ci_90": [round(lo * 100, 2), round(hi * 100, 2)],
             "n_trees": len(m.rf_model.estimators_),
         },
-        "reliability": "high" if np.std(tree_preds) < 0.1 else "medium" if np.std(tree_preds) < 0.2 else "low",
+        "reliability": confidence,
     }
 
 

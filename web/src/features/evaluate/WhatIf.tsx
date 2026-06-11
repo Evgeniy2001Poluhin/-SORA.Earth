@@ -21,15 +21,18 @@ export function WhatIf({ form, lastRun }: Props) {
 
   const param = PARAMS.find(p=>p.key===paramKey)!;
 
-  // Tornado on mount/lastRun change
+  // Tornado on mount/lastRun change — debounced 400ms to avoid request avalanche
   useEffect(()=>{
     if (!base?.country) return;
-    wi.mutate({
-      ...base, region: base.country,
-      budget: base.budget_usd, co2_reduction: base.co2_reduction_tons_per_year, social_impact: base.social_impact_score,
-    });
+    const id = setTimeout(() => {
+      wi.mutate({
+        ...base, region: base.country,
+        budget: base.budget_usd, co2_reduction: base.co2_reduction_tons_per_year, social_impact: base.social_impact_score,
+      });
+    }, 400);
+    return () => clearTimeout(id);
   // eslint-disable-next-line
-  },[base?.budget_usd, base?.country]);
+  },[base?.budget_usd, base?.co2_reduction_tons_per_year, base?.social_impact_score, base?.country]);
 
   // Sweep: 12 points across param range
   const runSweep = async () => {
@@ -50,7 +53,7 @@ export function WhatIf({ form, lastRun }: Props) {
     return [
       { key:"Budget +20%",  delta: v.budget?.score_change ?? 0,         abs: Math.abs(v.budget?.score_change ?? 0) },
       { key:"CO2 +20%",     delta: v.co2_reduction?.score_change ?? 0,  abs: Math.abs(v.co2_reduction?.score_change ?? 0) },
-      { key:"Social +1",    dea: v.social_impact?.score_change ?? 0,  abs: Math.abs(v.social_impact?.score_change ?? 0) },
+      { key:"Social +1",    delta: v.social_impact?.score_change ?? 0,  abs: Math.abs(v.social_impact?.score_change ?? 0) },
     ].sort((a,b)=>b.abs-a.abs);
   },[wi.data]);
 

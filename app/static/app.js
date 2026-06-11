@@ -83,15 +83,15 @@ function loadEvalHistory(){
 
 window.predictStacking=function(){
   var d={budget:+document.getElementById("s-budget").value,co2_reduction:+document.getElementById("s-co2").value,social_impact:+document.getElementById("s-social").value,duration_months:+document.getElementById("s-duration").value};
-  fetch("/predict/stacking",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(j){
+  fetch("/api/v1/predict/stacking",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(j){
     var box=document.getElementById("stackResult");box.style.display="block";
-    var prob=j.probability||0;
+    var prob=(j.probability||0)/100;
     var pred=j.prediction;
     box.className="result-panel "+(pred===1?"result-success":"result-fail");
     document.getElementById("stackTitle").textContent=pred===1?"✅ Project Likely Successful":"❌ Project Likely Unsuccessful";
     document.getElementById("stackProb").textContent=(prob*100).toFixed(1)+"%";
     var mg="";
-    var ip=j.individual_probs||{};
+    var ip={};var _bm=j.base_models||{};for(var _k in _bm)ip[_k]=_bm[_k]/100;
     var keys=Object.keys(ip);
     keys.forEach(function(k){mg+="<div class='model-box'><div class='m-name'>"+k+"</div><div class='m-value'>"+(ip[k]*100).toFixed(1)+"%</div></div>"});
     mg+="<div class='model-box'><div class='m-name'>stacking</div><div class='m-value'>"+(prob*100).toFixed(1)+"%</div></div>";
@@ -121,7 +121,7 @@ function loadShap(d){
 
 window.whatIf=function(){
   var d={name:document.getElementById("e-name").value,budget:+document.getElementById("e-budget").value,co2_reduction:+document.getElementById("e-co2").value,social_impact:+document.getElementById("e-social").value,duration_months:+document.getElementById("e-duration").value,region:document.getElementById("e-country").value};
-  fetch("/what-if",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(j){
+  fetch("/api/v1/what-if",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(j){
     var msg="What-If Analysis:\n\n";var vars=j.variations||{};
     for(var k in vars){msg+=k+": score "+vars[k].score_change.toFixed(2)+" ("+vars[k].new_score+"), prob "+vars[k].prob_change.toFixed(2)+"% ("+vars[k].new_probability+"%)\n"}
     alert(msg);
@@ -211,7 +211,7 @@ window.compareProjects=function(){
 
 window.calcGHG=function(){
   var d={electricity_kwh:+document.getElementById("g-elec").value,natural_gas_m3:+document.getElementById("g-gas").value,diesel_liters:+document.getElementById("g-diesel").value,petrol_liters:+document.getElementById("g-petrol").value,flights_km:+document.getElementById("g-flights").value,waste_kg:+document.getElementById("g-waste").value};
-  fetch("/ghg-calculate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(j){
+  fetch("/api/v1/ghg-calculate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(j){
     var el=document.getElementById("ghgResult");if(!el)return;el.style.display="block";
     var rc=j.rating==="Excellent"?"#10b981":j.rating==="Good"?"#00e5a0":j.rating==="Average"?"#f59e0b":"#ef4444";
     var tot=Math.max(j.total_tons_co2,0.01);
@@ -225,7 +225,7 @@ window.calcGHG=function(){
 };
 
 function loadTrends(){
-  fetch("/trends").then(function(r){return r.json()}).then(function(data){
+  fetch("/api/v1/trends").then(function(r){return r.json()}).then(function(data){
     if(trendsChart)trendsChart.destroy();if(!data||data.length===0)return;
     var ctx=document.getElementById("trendsChart");if(!ctx)return;
     trendsChart=new Chart(ctx,{type:"line",data:{labels:data.map(function(d){return d.date}),datasets:[{label:"ESG Score",data:data.map(function(d){return d.score}),borderColor:"#00e5a0",backgroundColor:"rgba(0,229,160,0.1)",fill:true,tension:0.4},{label:"Success %",data:data.map(function(d){return d.prob}),borderColor:"#00c9db",backgroundColor:"rgba(0,201,219,0.1)",fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"#e2e8f0"}}},scales:{y:{ticks:{color:"#8892a8"},grid:{color:"#1e2a45"}},x:{ticks:{color:"#8892a8",maxTicksLimit:10},grid:{display:false}}}}});
@@ -233,15 +233,15 @@ function loadTrends(){
 }
 
 function loadMetrics(){
-  fetch("/system/metrics").then(function(r){return r.json()}).then(function(m){
+  fetch("/api/v1/system/metrics").then(function(r){return r.json()}).then(function(m){
     var mc=document.getElementById("metricsCards");if(!mc)return;
     mc.innerHTML="<div class='stat-card'><div class='label'>Total Requests</div><div class='value'>"+(m.requests_total||0)+"</div></div><div class='stat-card'><div class='label'>Predictions</div><div class='value'>"+(m.predictions_total||0)+"</div></div><div class='stat-card'><div class='label'>Errors</div><div class='value' style='color:#ef4444'>"+(m.errors_total||0)+"</div></div><div class='stat-card'><div class='label'>Avg Response</div><div class='value'>"+(m.avg_response_time_ms||0)+"ms</div></div>";
   }).catch(function(){
-    fetch("/metrics").then(function(r){return r.text()}).then(function(t){
+    fetch("/api/v1/metrics").then(function(r){return r.text()}).then(function(t){
       try{var m=JSON.parse(t);var mc=document.getElementById("metricsCards");if(mc)mc.innerHTML="<div class='stat-card'><div class='label'>Total Requests</div><div class='value'>"+(m.requests_total||0)+"</div></div><div class='stat-card'><div class='label'>Predictions</div><div class='value'>"+(m.predictions_total||0)+"</div></div><div class='stat-card'><div class='label'>Errors</div><div class='value' style='color:#ef4444'>"+(m.errors_total||0)+"</div></div><div class='stat-card'><div class='label'>Avg Response</div><div class='value'>"+(m.avg_response_time_ms||0)+"ms</div></div>"}catch(e){}
     });
   });
-  fetch("/predictions/history?limit=20").then(function(r){return r.json()}).then(function(j){
+  fetch("/api/v1/predictions/history?limit=20").then(function(r){return r.json()}).then(function(j){
     var preds=j.predictions||j||[];
     var html="";preds.reverse().forEach(function(p){
       html+="<tr><td>"+(p.timestamp||"—")+"</td><td>$"+Number(p.budget||0).toLocaleString()+"</td><td>"+(p.co2_reduction||"—")+"</td><td><span class='badge "+(p.prediction==1?"badge-low":"badge-high")+"'>"+(p.prediction==1?"Success":"Fail")+"</span></td><td>"+(p.probability?(p.probability*100).toFixed(1)+"%":"—")+"</td></tr>";
@@ -319,7 +319,7 @@ fetch("/api/v1/countries").then(function(r){return r.json()}).then(function(c){
 
 window.monteCarlo=function(){
   var d={budget:+document.getElementById("e-budget").value,co2_reduction:+document.getElementById("e-co2").value,social_impact:+document.getElementById("e-social").value,duration_months:+document.getElementById("e-duration").value};
-  fetch("/analytics/montecarlo",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(j){
+  fetch("/api/v1/analytics/montecarlo",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(j){
     var el=document.getElementById("monteCarloResult");if(el){el.style.display="block";
     var html="<div style='font-weight:700;margin-bottom:12px'>Monte Carlo ("+j.simulations+" runs)</div>";
     html+="<div style='display:grid;grid-template-columns:repeat(3,1fr);gap:12px'>";
@@ -332,7 +332,7 @@ window.monteCarlo=function(){
 
 window.exportPDF=function(){
   var d={name:document.getElementById("e-name").value,budget:+document.getElementById("e-budget").value,co2_reduction:+document.getElementById("e-co2").value,social_impact:+document.getElementById("e-social").value,duration_months:+document.getElementById("e-duration").value,region:document.getElementById("e-country").value};
-  fetch("/report/pdf",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){
+  fetch("/api/v1/report/pdf",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){
     var ct=r.headers.get("content-type")||"";
     if(ct.indexOf("pdf")>=0||ct.indexOf("octet")>=0){return r.blob().then(function(b){var u=URL.createObjectURL(b);var a=document.createElement("a");a.href=u;a.download="report.pdf";a.click()})}
     return r.json().then(function(j){var w=window.open();w.document.write("<pre>"+JSON.stringify(j,null,2)+"</pre>")});
@@ -341,7 +341,7 @@ window.exportPDF=function(){
 
 window.compareAllModels=function(){
   var d={budget:+document.getElementById("e-budget").value,co2_reduction:+document.getElementById("e-co2").value,social_impact:+document.getElementById("e-social").value,duration_months:+document.getElementById("e-duration").value};
-  fetch("/analytics/model-compare",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(j){
+  fetch("/api/v1/analytics/model-compare",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(j){
     var el=document.getElementById("compareModelsResult");if(el){el.style.display="block";
     var models=j.models||j;var html="<div style='font-weight:700;margin-bottom:12px'>Model Comparison</div><table style='width:100%;border-collapse:collapse'><thead><tr><th style='text-align:left;padding:8px;border-bottom:1px solid var(--border)'>Model</th><th style='padding:8px;border-bottom:1px solid var(--border)'>Prob</th><th style='padding:8px;border-bottom:1px solid var(--border)'>Result</th></tr></thead><tbody>";
     if(Array.isArray(models)){models.forEach(function(m){html+="<tr><td style='padding:8px;border-bottom:1px solid var(--border)'>"+m.model+"</td><td style='padding:8px;text-align:center;border-bottom:1px solid var(--border)'>"+m.probability.toFixed(1)+"%</td><td style='padding:8px;text-align:center;border-bottom:1px solid var(--border)'>"+(m.prediction===1?"Success":"Fail")+"</td></tr>"})}
