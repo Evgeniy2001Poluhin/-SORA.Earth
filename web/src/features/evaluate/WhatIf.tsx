@@ -32,6 +32,7 @@ export function WhatIf({ form, lastRun }: Props) {
   useEffect(()=>{
     if (!base?.country) return;
     const id = setTimeout(() => {
+      wi.reset();
       wi.mutate({
         ...base, region: base.country,
         budget: base.budget_usd, co2_reduction: base.co2_reduction_tons_per_year, social_impact: base.social_impact_score,
