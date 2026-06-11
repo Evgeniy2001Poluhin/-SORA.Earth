@@ -142,6 +142,8 @@ def predict_with_uncertainty(project: dict):
             "n_trees": int(len(m.rf_model.estimators_)),
             "min": float(np.min(tree_preds)),
             "max": float(np.max(tree_preds)),
+            "p5": lo,
+            "p95": hi,
         },
         "confidence": confidence,
         "uncertainty": {
