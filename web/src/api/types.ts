@@ -45,7 +45,7 @@ export type RankingResponse = {
 
 export type RecommendationLevel = "consensus" | "moderate_disagreement" | "high_disagreement";
 
-export interface ModelProba { proba: number; weight: number }
+export interface ModelProba { proba: number; weight: number; near_deterministic?: boolean }
 
 export interface DiscrepancyResponse {
   models: {

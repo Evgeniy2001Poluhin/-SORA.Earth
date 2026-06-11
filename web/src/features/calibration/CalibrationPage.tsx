@@ -51,9 +51,9 @@ export function CalibrationPage() {
   const usePreset = (k: PresetKey) => { reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
 
   const chartData = data ? [
-    { model: "rf_v1",         proba: data.models.rf_v1.proba,         weight: data.models.rf_v1.weight },
-    { model: "stacking_v2",   proba: data.models.stacking_v2.proba,   weight: data.models.stacking_v2.weight },
-    { model: "calibrated_v2", proba: data.models.calibrated_v2.proba, weight: data.models.calibrated_v2.weight },
+    { model: "rf_v1",         proba: data.models.rf_v1.proba,         weight: data.models.rf_v1.weight, nd: data.models.rf_v1.near_deterministic },
+    { model: "stacking_v2",   proba: data.models.stacking_v2.proba,   weight: data.models.stacking_v2.weight, nd: data.models.stacking_v2.near_deterministic },
+    { model: "calibrated_v2", proba: data.models.calibrated_v2.proba, weight: data.models.calibrated_v2.weight, nd: data.models.calibrated_v2.near_deterministic },
   ] : [];
 
   const rec = data ? REC_STYLE[data.recommendation] ?? REC_STYLE.consensus : null;
@@ -117,7 +117,7 @@ export function CalibrationPage() {
               <div key={d.model} className="model-meta-row">
                 <span className="model-dot" style={{ background: MODEL_COLOR[d.model] }} />
                 <span className="mono">{d.model}</span>
-                <span className="tabular muted">proba {(d.proba * 100).toFixed(2)}%</span>
+                <span className="tabular muted">proba {(d.proba * 100).toFixed(2)}%{d.nd && <span title="Почти бинарный прогноз (0/1)"> ≈det</span>}</span>
                 <span className="tabular muted">weight {(d.weight * 100).toFixed(0)}%</span>
               </div>
             ))}

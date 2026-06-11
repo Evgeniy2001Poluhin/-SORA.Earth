@@ -203,7 +203,8 @@ def calibration_discrepancy(project: dict):
             cal_model = pickle.load(f)
         feats2 = m.make_features_v2(p_in, cat, reg)
         pr_cal = float(cal_model.predict_proba(feats2)[0][1])
-    out["models"]["calibrated_v2"] = {"proba": round(pr_cal, 6), "weight": 0.4}
+    out["models"]["calibrated_v2"] = {"proba": round(pr_cal, 6), "weight": 0.4,
+                                      "near_deterministic": pr_cal in (0.0, 1.0)}
 
     # consensus (weighted)
     probs = [out["models"][k]["proba"] for k in ("rf_v1", "stacking_v2", "calibrated_v2")]
