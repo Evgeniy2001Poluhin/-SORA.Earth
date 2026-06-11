@@ -48,10 +48,12 @@ export function WhatIf({ form, lastRun }: Props) {
     const points: Array<{x:number; total:number}> = [];
     const xs: number[] = [];
     for (let i=0; i<=11; i++) xs.push(param.min + (param.max-param.min)*i/11);
-    const results = await Promise.all(xs.map(x => evaluateApi.evaluate({
-      ...base, region: base.country, [param.key]: x
-    } as any).catch(()=>null)));
-    results.forEach((r,i)=>{ if(r) points.push({ x: xs[i], total: (r as any).total_score }); });
+    for (const x of xs) {
+      const r = await evaluateApi.evaluate({
+        ...base, region: base.country, [param.key]: x
+      } as any).catch(()=>null);
+      if (r) points.push({ x, total: (r as any).total_score });
+    }
     setSweepData(points);
     setSweepLoading(false);
   };
