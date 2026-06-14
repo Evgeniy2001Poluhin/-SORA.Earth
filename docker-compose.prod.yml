@@ -73,6 +73,7 @@ services:
       ENV: production
       MLFLOW_TRACKING_URI: "http://mlflow:5556"
       RUN_SCHEDULER: "true"
+      OPENAQ_API_KEY: ${OPENAQ_API_KEY}
     depends_on:
       pgbouncer:
         condition: service_started
