@@ -462,6 +462,14 @@ def init_scheduler():
         lambda: __import__("app.services.status_service", fromlist=["record_health"]).record_health(),
         IntervalTrigger(minutes=5), id="health_ping", replace_existing=True,
     )
+    from datetime import datetime, timezone
+    _now = datetime.now(timezone.utc)
+    for _jid in ("auto_run_ingesters", "auto_refresh_external_data"):
+        try:
+            scheduler.modify_job(_jid, next_run_time=_now)
+            logger.info("Job %s scheduled to run immediately on startup", _jid)
+        except Exception as e:
+            logger.warning("Could not set immediate run for %s: %s", _jid, e)
     scheduler.start()
     logger.info(
         "Scheduler started with %d jobs: %s",
