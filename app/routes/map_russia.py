@@ -8,7 +8,7 @@ import asyncpg
 log = logging.getLogger("map_russia")
 router = APIRouter(prefix="/api/v1/map", tags=["map"])
 
-DSN = os.environ.get("DATABASE_URL") or "postgresql://sora:changeme_strong_password@localhost:5432/sora_earth"
+DSN = (os.environ.get("DATABASE_URL") or "postgresql://sora:changeme_strong_password@localhost:5432/sora_earth").replace("+psycopg", "").replace("postgresql+asyncpg", "postgresql")
 
 # ---------- parse russia_regions.ts once ----------
 _TS_PATH = Path(__file__).resolve().parent.parent.parent / "web/src/data/russia_regions.ts"
@@ -149,14 +149,14 @@ async def region_detail(region_code: str):
         async with pool.acquire() as c:
             snap = await c.fetchrow(
                 "SELECT region_code, e_score, s_score, g_score, score, "
-                "confidence, sources_used, sources_missing, computed_at, "
-                "model_version, features "
+                "confidence, sources_used, ARRAY[]::text[] AS sources_missing, computed_at, "
+                "NULL::text AS model_version, NULL::jsonb AS features "
                 "FROM regional_esg_snapshot WHERE region_code = $1",
                 region_code,
             )
             signals = await c.fetch(
-                "SELECT source, metric, value, unit, observed_at, metadata "
-                "FROM raw_signals WHERE region_code = $1 "
+                "SELECT source, metric, value, unit, observed_at, metadata_json AS metadata "
+                "FROM region_signals WHERE region_code = $1 "
                 "ORDER BY observed_at DESC",
                 region_code,
             )

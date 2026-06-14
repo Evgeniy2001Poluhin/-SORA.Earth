@@ -48,7 +48,6 @@ load*.csv
 mlflow.db
 mlruns/
 models/
-data/
 output/
 reports/
 logs/
@@ -104,3 +103,6 @@ sora_ai_copilot/
 sora_tmp_backup/
 nginx/
 nginx.conf
+data/*.png
+data/sessions.db
+data/explanations/
