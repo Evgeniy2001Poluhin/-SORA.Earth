@@ -38,6 +38,8 @@ services:
       - redisdata:/data
 
   backend:
+    volumes:
+      - ./models:/app/models
     build:
       context: .
       dockerfile: Dockerfile.prod
@@ -58,6 +60,8 @@ services:
       - "8000"
 
   scheduler:
+    volumes:
+      - ./models:/app/models
     build:
       context: .
       dockerfile: Dockerfile.prod
@@ -81,12 +85,12 @@ services:
       retries: 3
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.16.2
+    image: ghcr.io/mlflow/mlflow:v3.1.4
     restart: unless-stopped
     command: >
       mlflow server --host 0.0.0.0 --port 5556
       --backend-store-uri sqlite:////mlflow/mlflow.db
-      --default-artifact-root /mlflow/artifacts
+      --artifacts-destination /mlflow/artifacts --serve-artifacts
     volumes:
       - mlflowdata:/mlflow
     expose:
