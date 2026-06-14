@@ -46,6 +46,7 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       ENV: production
+      MLFLOW_TRACKING_URI: "http://mlflow:5556"
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_API_KEY: ${ADMIN_API_KEY}
     depends_on:
@@ -55,6 +56,41 @@ services:
         condition: service_started
     expose:
       - "8000"
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    command: python3 -u run_scheduler.py
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      ENV: production
+      MLFLOW_TRACKING_URI: "http://mlflow:5556"
+      RUN_SCHEDULER: "true"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "grep -l run_scheduler.py /proc/[0-9]*/cmdline > /dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.16.2
+    restart: unless-stopped
+    command: >
+      mlflow server --host 0.0.0.0 --port 5556
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts
+    volumes:
+      - mlflowdata:/mlflow
+    expose:
+      - "5556"
 
   nginx:
     image: nginx:1.27-alpine
@@ -69,5 +105,6 @@ services:
       - backend
 
 volumes:
+  mlflowdata:
   pgdata:
   redisdata:
