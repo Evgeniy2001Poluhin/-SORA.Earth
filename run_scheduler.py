@@ -11,6 +11,7 @@ logging.basicConfig(
 import time
 from app.scheduler import init_scheduler, scheduler
 
+logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
 logger = logging.getLogger("run_scheduler")
 
 if __name__ == "__main__":
