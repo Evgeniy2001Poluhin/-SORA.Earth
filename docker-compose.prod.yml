@@ -105,6 +105,8 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./certs:/etc/nginx/certs:ro
+      - ./certbot/www:/var/www/certbot
+      - ./certs:/etc/letsencrypt
     depends_on:
       - backend
 
@@ -125,7 +127,8 @@ services:
       - "127.0.0.1:3000:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-sora2026}
-      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
+      - GF_SERVER_DOMAIN=sora-earth.online
+      - GF_SERVER_ROOT_URL=https://sora-earth.online/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
     volumes:
       - grafana_data:/var/lib/grafana
