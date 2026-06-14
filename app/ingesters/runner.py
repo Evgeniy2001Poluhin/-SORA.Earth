@@ -6,6 +6,7 @@ and persists them (if persistence layer exists).
 from __future__ import annotations
 import asyncio
 import logging
+from sqlalchemy import text
 from datetime import datetime, timezone
 
 from app.ingesters.base import Signal
@@ -54,6 +55,43 @@ def _persist_signals(signals: list[Signal]) -> int:
     return saved
 
 
+
+def _audit_start(source: str):
+    try:
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            rid = db.execute(text(
+                "INSERT INTO ingester_runs (source, status) VALUES (:s, 'running') RETURNING id"),
+                {"s": source}).scalar()
+            db.commit()
+            return rid
+        finally:
+            db.close()
+    except Exception as e:
+        log.warning("[runner] audit_start failed for %s: %s", source, e)
+        return None
+
+
+def _audit_finish(rid, status, rows_written=None, error=None):
+    if rid is None:
+        return
+    try:
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            db.execute(text(
+                "UPDATE ingester_runs SET finished_at=now(), status=:st, "
+                "rows_written=:rw, error=:err WHERE id=:id"),
+                {"st": status, "rw": rows_written,
+                 "err": (str(error)[:2000] if error else None), "id": rid})
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        log.warning("[runner] audit_finish failed: %s", e)
+
+
 async def run_all_ingesters() -> dict:
     """Run all registered ingesters, return stats."""
     stats = {"started_at": datetime.now(timezone.utc).isoformat(), "ingesters": {}}
@@ -61,6 +99,7 @@ async def run_all_ingesters() -> dict:
 
     for cls in INGESTERS:
         ing = cls()
+        rid = _audit_start(ing.name)
         try:
             signals = await ing.fetch_with_retry()
             stats["ingesters"][ing.name] = {
@@ -70,9 +109,11 @@ async def run_all_ingesters() -> dict:
             }
             total_signals.extend(signals)
             log.info("[runner] %s: %d signals", ing.name, len(signals))
+            _audit_finish(rid, "ok", rows_written=len(signals))
         except Exception as e:
             stats["ingesters"][ing.name] = {"status": "error", "error": str(e)}
             log.exception("[runner] %s failed: %s", ing.name, e)
+            _audit_finish(rid, "error", error=e)
 
     saved = _persist_signals(total_signals)
 
