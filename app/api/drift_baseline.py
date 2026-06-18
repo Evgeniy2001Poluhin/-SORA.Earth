@@ -50,7 +50,7 @@ def baseline_status():
     fitted = bool(base)
     keys = sorted(base.keys()) if fitted else []
     n_features = len([k for k in keys if k.endswith("_mean")])
-    n_samples_fit = getattr(drift_detector, "_baseline_n_samples", 0) if fitted else 0
+    n_samples_fit = drift_detector.get_baseline_n() if fitted else 0
     return {
         "fitted": fitted,
         "exists": fitted,
@@ -66,7 +66,7 @@ def baseline_status():
 def reset_baseline():
     drift_detector.set_baseline({})
     drift_detector._r.delete(drift_detector._k_obs)
-    drift_detector._baseline_n_samples = 0
+    drift_detector.set_baseline_n(0)
     return {"status": "reset"}
 
 
