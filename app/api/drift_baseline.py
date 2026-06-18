@@ -1,11 +1,13 @@
 from fastapi import APIRouter, HTTPException, Query
 import pandas as pd
 import os
+import logging
 import random
 from typing import Optional
 from app.drift_detection import drift_detector
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 NUM_FEATURES = ["budget", "co2_reduction", "social_impact", "duration_months",
                 "budget_per_month", "co2_per_dollar", "efficiency_score"]
@@ -63,7 +65,7 @@ def baseline_status():
 @router.delete("/mlops/drift/baseline", tags=["mlops"])
 def reset_baseline():
     drift_detector.set_baseline({})
-    drift_detector._observations = []
+    drift_detector._r.delete(drift_detector._k_obs)
     drift_detector._baseline_n_samples = 0
     return {"status": "reset"}
 
@@ -90,6 +92,9 @@ def simulate_drift(
     if not base:
         raise HTTPException(400, "fit baseline first")
 
+    if not drift_detector._r.set("drift:last_sim", "1", nx=True, ex=2):
+        return {"status": "skipped", "reason": "debounced", "observations": drift_detector.count()}
+
     if mode == "stable":
         shifts = {f: 0.0 for f in NUM_FEATURES}
         applied_shift = 0.0
@@ -100,17 +105,15 @@ def simulate_drift(
         shifts = {"budget": shift}
         applied_shift = shift
 
-    drift_detector._observations = []
+    drift_detector._r.delete(drift_detector._k_obs)
     for _ in range(n):
         drift_detector.add_observation(_gen_observation(base, shifts))
 
-    print("[sim hook] reached, mode=", mode, flush=True)
     try:
         if mode == "drift":
-            _r = drift_detector.check_drift()
-            print("[sim hook] check_drift drifted=", _r.get("drift_detected"), flush=True)
+            drift_detector.check_drift()
     except Exception as _e:
-        print("[sim hook] failed:", _e)
+        logger.warning("sim hook failed: %s", _e)
 
     return {
         "status": "simulated",

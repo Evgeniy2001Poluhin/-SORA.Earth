@@ -247,7 +247,7 @@ class DriftDetector:
         if len(drifted) > 0:
             try:
                 from app.mlflow_tracking import log_drift_event as _lde
-                _lde({"drift_detected": True, "drift_score": round(len(drifted)/max(len(feature_results),1),2), "drifted_features": drifted, "features_analyzed": list(feature_results.keys()), "ks_test": {}, "current_samples": total}, baseline_id="baseline_zscore")
+                _lde({"drift_detected": True, "drift_score": round(len(drifted)/max(len(feature_results),1),2), "drifted_features": drifted, "features_analyzed": list(feature_results.keys()), "ks_test": {}, "current_samples": total, "reference_samples": len(_base)}, baseline_id="baseline_zscore")
             except Exception as _e:
                 logger.warning("base hook failed: %s", _e)
         recent_alerts = []
