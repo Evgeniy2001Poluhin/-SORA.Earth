@@ -49,13 +49,13 @@ export function DriftPage() {
   });
   const delMut = useMutation({
     mutationFn: () => driftBaselineApi.remove(),
-    onSuccess: () => { toast.success("Baseline deleted"); qc.invalidateQueries({ queryKey: ["drift"] }); qc.invalidateQueries({ queryKey: ["drift-baseline"] }); },
+    onSuccess: () => { toast.success("Baseline deleted"); qc.setQueryData(["drift-baseline"], (old: any) => ({ ...(old ?? {}), exists: false })); qc.invalidateQueries({ queryKey: ["drift"] }); qc.invalidateQueries({ queryKey: ["drift-baseline"] }); },
     onError: (e: any) => toast.error("Delete failed: " + (e?.message ?? "unknown")),
   });
   const simMut = useMutation({
     mutationFn: (mode: "stable" | "drift") => driftBaselineApi.simulate(mode, 50),
     onSuccess: (_r, mode) => { toast.success("Simulated " + mode); qc.invalidateQueries({ queryKey: ["drift"] }); },
-    onError: (e: any) => toast.error("Simulate failed: " + (e?.message ?? "unknown")),
+    onError: (e: any) => { const msg = String(e?.message ?? ""); if (msg.includes("fit baseline first")) toast("Fit baseline before simulating"); else toast.error("Simulate failed: " + (msg || "unknown")); },
   });
 
   if (q.isLoading) return <div className="card-body"><p style={{ color: "var(--muted)" }}>Loading drift status...</p></div>;
@@ -70,9 +70,10 @@ export function DriftPage() {
     );
   }
 
-  const isStable = d.status === "stable" || d.status === "no_baseline";
-  const statusLabel = d.status === "no_baseline" ? "NO BASELINE" : (isStable ? "STABLE" : "DRIFT DETECTED");
-  const statusColor = d.status === "no_baseline" ? "var(--muted)" : (isStable ? "#2FE0A6" : "#EF4444");
+  const noData = d.status === "insufficient_data" || d.status === "no_baseline";
+  const isStable = noData || d.status === "stable";
+  const statusLabel = noData ? "NO BASELINE" : (d.drift_detected ? "DRIFT DETECTED" : "STABLE");
+  const statusColor = noData ? "var(--muted)" : (d.drift_detected ? "#EF4444" : "#2FE0A6");
   const features = Object.entries(d.features || {}).sort(
     (a, b) => Math.abs(b[1].z_score) - Math.abs(a[1].z_score)
   );

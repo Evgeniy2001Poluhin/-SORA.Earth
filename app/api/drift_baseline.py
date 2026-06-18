@@ -104,6 +104,14 @@ def simulate_drift(
     for _ in range(n):
         drift_detector.add_observation(_gen_observation(base, shifts))
 
+    print("[sim hook] reached, mode=", mode, flush=True)
+    try:
+        if mode == "drift":
+            _r = drift_detector.check_drift()
+            print("[sim hook] check_drift drifted=", _r.get("drift_detected"), flush=True)
+    except Exception as _e:
+        print("[sim hook] failed:", _e)
+
     return {
         "status": "simulated",
         "mode": mode or "custom",

@@ -1,0 +1,2 @@
+import{t as e}from"./client-CMwtEEOB.js";var t={discrepancy:t=>e(`/calibration/discrepancy`,{method:`POST`,body:JSON.stringify(t)}),uncertainty:t=>e(`/predict/uncertainty`,{method:`POST`,body:JSON.stringify(t)})},n={brier:t=>e(`/calibration/brier`,{method:`POST`,body:JSON.stringify(t)}),reliability:t=>e(`/calibration/reliability`,{method:`POST`,body:JSON.stringify(t)})};export{n,t};
+//# sourceMappingURL=calibration-CwEwOQ45.js.map

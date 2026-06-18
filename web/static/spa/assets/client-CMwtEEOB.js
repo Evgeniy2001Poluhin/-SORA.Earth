@@ -1,0 +1,2 @@
+var e=`/api/v1`,t=null,n=null,r={set(e){t=e},get(){return t},setApiKey(e){n=e},getApiKey(){return n}};async function i(r,i={}){let a={"Content-Type":`application/json`,...i.headers||{}};t&&(a.Authorization=`Bearer `+t),n&&(a[`X-API-Key`]=n);let o=await fetch(e+r,{...i,headers:a});if(!o.ok){let e=await o.text().catch(()=>``);throw Error(`API `+o.status+`: `+(e||o.statusText))}return o.json()}export{r as n,i as t};
+//# sourceMappingURL=client-CMwtEEOB.js.map

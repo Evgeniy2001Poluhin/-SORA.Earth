@@ -1,0 +1,2 @@
+import{t as e}from"./client-CMwtEEOB.js";import"./mock-XEu9Y1Xw.js";var t={countries:()=>e(`/countries`),evaluate:t=>e(`/evaluate`,{method:`POST`,body:JSON.stringify(t)}),explain:t=>e(`/predict/explain`,{method:`POST`,body:JSON.stringify(t)}),ranking:t=>e(`/evaluate/ranking`,{method:`POST`,body:JSON.stringify(t)}),monteCarlo:t=>e(`/evaluate/monte-carlo`,{method:`POST`,body:JSON.stringify(t)}),whatIf:t=>e(`/what-if`,{method:`POST`,body:JSON.stringify(t)})};export{t};
+//# sourceMappingURL=evaluate-7epRTtQ4.js.map
