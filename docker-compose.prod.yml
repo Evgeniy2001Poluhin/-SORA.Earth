@@ -46,7 +46,7 @@ services:
       dockerfile: Dockerfile.prod
     restart: unless-stopped
     environment:
-      WORKERS: "1"
+      WORKERS: "4"
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       ENV: production

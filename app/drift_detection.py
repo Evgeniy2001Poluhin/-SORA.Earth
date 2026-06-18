@@ -1,5 +1,8 @@
 """Data drift detection using KS-test and PSI."""
 import logging
+import os
+import json
+import redis
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -150,30 +153,35 @@ class DriftDetector:
         self.drift_threshold = float(drift_threshold)
         self._observations = []
         self._baseline = {}
+        self._r = redis.from_url(os.environ.get("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
+        self._k_base = "drift:baseline"
+        self._k_obs = "drift:observations"
 
     def set_baseline(self, baseline: dict):
-        self._baseline = dict(baseline or {})
+        self._r.set(self._k_base, json.dumps(dict(baseline or {})))
 
     def get_baseline(self):
-        return dict(self._baseline)
+        raw = self._r.get(self._k_base)
+        return json.loads(raw) if raw else {}
 
     def add_observation(self, features: dict):
-        self._observations.append(features)
-        if len(self._observations) > self.window_size:
-            self._observations = self._observations[-self.window_size:]
+        self._r.rpush(self._k_obs, json.dumps(features))
+        self._r.ltrim(self._k_obs, -self.window_size, -1)
 
     @property
     def recent_data(self):
-        return self._observations
+        return self.get_observations()
 
     def get_observations(self):
-        return self._observations
+        return [json.loads(x) for x in self._r.lrange(self._k_obs, 0, -1)]
 
     def count(self):
-        return len(self._observations)
+        return self._r.llen(self._k_obs)
 
     def _baseline_drift_check(self):
-        total = len(self._observations)
+        _obs = self.get_observations()
+        _base = self.get_baseline()
+        total = len(_obs)
         if total < self.min_samples:
             return {
                 "status": "insufficient_data",
@@ -184,7 +192,7 @@ class DriftDetector:
                 "required_min_samples": self.min_samples,
             }
 
-        if not self._baseline:
+        if not _base:
             return {
                 "status": "no_baseline",
                 "drift_detected": False,
@@ -193,7 +201,7 @@ class DriftDetector:
                 "observations": total,
             }
 
-        current_df = pd.DataFrame(self._observations)
+        current_df = pd.DataFrame(_obs)
         numeric_cols = [c for c in current_df.columns if pd.api.types.is_numeric_dtype(current_df[c])]
         feature_results = {}
         drifted = []
@@ -201,12 +209,12 @@ class DriftDetector:
         for col in numeric_cols:
             mean_key = f"{col}_mean"
             std_key = f"{col}_std"
-            if mean_key not in self._baseline:
+            if mean_key not in _base:
                 continue
 
             current_mean = float(current_df[col].dropna().mean()) if current_df[col].dropna().size else None
-            baseline_mean = float(self._baseline[mean_key])
-            baseline_std = float(self._baseline.get(std_key, 0.0) or 0.0)
+            baseline_mean = float(_base[mean_key])
+            baseline_std = float(_base.get(std_key, 0.0) or 0.0)
 
             if current_mean is None:
                 feature_results[col] = {
@@ -241,7 +249,7 @@ class DriftDetector:
                 from app.mlflow_tracking import log_drift_event as _lde
                 _lde({"drift_detected": True, "drift_score": round(len(drifted)/max(len(feature_results),1),2), "drifted_features": drifted, "features_analyzed": list(feature_results.keys()), "ks_test": {}, "current_samples": total}, baseline_id="baseline_zscore")
             except Exception as _e:
-                print("[base hook] failed:", _e)
+                logger.warning("base hook failed: %s", _e)
         recent_alerts = []
         if drifted:
             for feature in drifted:
@@ -262,7 +270,7 @@ class DriftDetector:
             "features": feature_results,
             "feature_results": feature_results,
             "recent_alerts": recent_alerts,
-            "baseline_features": sorted(self._baseline.keys()),
+            "baseline_features": sorted(_base.keys()),
         }
 
     def check_drift(self, reference_data=None, current_data=None, feature_cols=None):
