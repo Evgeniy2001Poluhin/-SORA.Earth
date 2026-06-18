@@ -156,9 +156,17 @@ class DriftDetector:
         self._r = redis.from_url(os.environ.get("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
         self._k_base = "drift:baseline"
         self._k_obs = "drift:observations"
+        self._k_n = "drift:baseline_n"
 
     def set_baseline(self, baseline: dict):
         self._r.set(self._k_base, json.dumps(dict(baseline or {})))
+
+    def set_baseline_n(self, n: int):
+        self._r.set(self._k_n, int(n))
+
+    def get_baseline_n(self):
+        v = self._r.get(self._k_n)
+        return int(v) if v else 0
 
     def get_baseline(self):
         raw = self._r.get(self._k_base)
@@ -247,7 +255,7 @@ class DriftDetector:
         if len(drifted) > 0:
             try:
                 from app.mlflow_tracking import log_drift_event as _lde
-                _lde({"drift_detected": True, "drift_score": round(len(drifted)/max(len(feature_results),1),2), "drifted_features": drifted, "features_analyzed": list(feature_results.keys()), "ks_test": {}, "current_samples": total, "reference_samples": len(_base)}, baseline_id="baseline_zscore")
+                _lde({"drift_detected": True, "drift_score": round(len(drifted)/max(len(feature_results),1),2), "drifted_features": drifted, "features_analyzed": list(feature_results.keys()), "ks_test": {}, "current_samples": total, "reference_samples": self.get_baseline_n()}, baseline_id="baseline_zscore")
             except Exception as _e:
                 logger.warning("base hook failed: %s", _e)
         recent_alerts = []

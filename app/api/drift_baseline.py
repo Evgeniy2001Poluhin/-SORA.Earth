@@ -28,7 +28,7 @@ def fit_baseline(csv_path: str = "data/projects.csv"):
                 baseline[f"{c}_std"] = float(v.std() or 1e-9)
                 used.append(c)
     drift_detector.set_baseline(baseline)
-    drift_detector._baseline_n_samples = len(df)
+    drift_detector.set_baseline_n(len(df))
     return {
         "status": "ok",
         "samples": len(df),
