@@ -282,6 +282,37 @@ def get_retrain_log(limit: int = 20):
 
 
 def get_scheduler_status():
+    """
+    Fetch scheduler status from Redis (published by scheduler container).
+    Falls back to local scheduler if Redis unavailable or scheduler container not running.
+    """
+    import json
+    from datetime import datetime
+
+    # Try to get status from Redis first (scheduler container publishes it)
+    try:
+        from app.redis_cache import redis_client, REDIS_AVAILABLE
+
+        if REDIS_AVAILABLE:
+            status_json = redis_client.get("sora:scheduler:status")
+            if status_json:
+                status = json.loads(status_json)
+
+                # Add retrain history count
+                try:
+                    from app.database import SessionLocal, RetrainLog
+                    db = SessionLocal()
+                    status["retrain_history_count"] = db.query(RetrainLog).count()
+                    db.close()
+                except Exception:
+                    status["retrain_history_count"] = 0
+
+                status["source"] = "scheduler_container"
+                return status
+    except Exception as e:
+        logger.warning("Failed to fetch scheduler status from Redis: %s", e)
+
+    # Fallback: check local scheduler (will be empty in app container)
     jobs = []
     for job in scheduler.get_jobs():
         jobs.append({
@@ -290,10 +321,26 @@ def get_scheduler_status():
             "trigger": str(job.trigger),
             "next_run": str(job.next_run_time) if job.next_run_time else None,
         })
+
+    if not jobs and not scheduler.running:
+        # Local scheduler is empty and not running
+        return {
+            "running": False,
+            "enabled": os.getenv("SORA_SCHEDULER", "1") == "1",
+            "jobs": [],
+            "jobs_count": 0,
+            "error": "Scheduler container unreachable or not running",
+            "source": "local_fallback",
+            "retrain_history_count": 0,
+        }
+
+    # Local scheduler has jobs (shouldn't happen in app container, but handle it)
     return {
         "running": scheduler.running,
         "enabled": os.getenv("SORA_SCHEDULER", "1") == "1",
         "jobs": jobs,
+        "jobs_count": len(jobs),
+        "source": "local_scheduler",
         "retrain_history_count": (
             __import__("app.database", fromlist=["SessionLocal", "RetrainLog"]).SessionLocal().query(
                 __import__("app.database", fromlist=["SessionLocal", "RetrainLog"]).RetrainLog
