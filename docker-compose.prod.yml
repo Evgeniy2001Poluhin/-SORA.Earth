@@ -38,6 +38,7 @@ services:
       - redisdata:/data
 
   backend:
+    user: "1000:1000"
     volumes:
       - ./models:/app/models
       - ./app/static/spa:/app/app/static/spa:ro
@@ -62,6 +63,7 @@ services:
       - "8000"
 
   scheduler:
+    user: "1000:1000"
     volumes:
       - ./models:/app/models
       - ./app/static/spa:/app/app/static/spa:ro
