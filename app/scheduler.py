@@ -294,7 +294,9 @@ def get_scheduler_status():
         from app.redis_cache import redis_client, REDIS_AVAILABLE
 
         if REDIS_AVAILABLE:
+            logger.info("Redis available, trying to get scheduler status...")
             status_json = redis_client.get("sora:scheduler:status")
+            logger.info("Redis status_json type: %s, value: %s", type(status_json), str(status_json)[:100] if status_json else None)
             if status_json:
                 status = json.loads(status_json)
 
