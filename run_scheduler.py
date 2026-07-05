@@ -25,6 +25,8 @@ def publish_scheduler_status():
         if not REDIS_AVAILABLE:
             return
 
+        logger.info("Publishing scheduler status to Redis...")
+
         status = {
             "running": True,
             "jobs": [
@@ -39,7 +41,8 @@ def publish_scheduler_status():
         }
         redis_client.set("sora:scheduler:status", json.dumps(status), ex=120)
     except Exception as e:
-        logger.warning("Failed to publish scheduler status to Redis: %s", e)
+        import traceback
+        logger.error("Failed to publish scheduler status to Redis: %s\n%s", e, traceback.format_exc())
 
 
 if __name__ == "__main__":
