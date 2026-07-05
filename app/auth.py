@@ -127,10 +127,20 @@ def require_analyst_or_admin(authorization: str = Header(None)) -> UserInfo:
         raise HTTPException(status_code=403, detail="Analyst or admin access required")
     return user
 
-API_KEYS = {
-    "demo-key-2026": {"name": "Demo User", "role": "user", "rate_limit": 100},
-    "admin-key-2026": {"name": "Admin", "role": "admin", "rate_limit": 1000},
-}
+def _build_api_keys() -> dict:
+    keys = {
+        "demo-key-2026": {"name": "Demo User", "role": "user", "rate_limit": 100},
+        "admin-key-2026": {"name": "Admin", "role": "admin", "rate_limit": 1000},
+    }
+    env_admin = os.getenv("ADMIN_API_KEY")
+    if env_admin:
+        keys[env_admin] = {"name": "Admin (env)", "role": "admin", "rate_limit": 1000}
+    env_user = os.getenv("API_KEY")
+    if env_user:
+        keys[env_user] = {"name": "User (env)", "role": "user", "rate_limit": 100}
+    return keys
+
+API_KEYS: dict = _build_api_keys()
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 def get_api_key(api_key: str = Security(api_key_header)):
