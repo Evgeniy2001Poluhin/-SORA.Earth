@@ -659,7 +659,8 @@ if _SPA_INDEX.exists():
     async def _sora_spa(spa_path: str):
         blocked = ("api/", "admin/", "health", "metrics",
                    "docs", "openapi.json", "redoc")
-        if spa_path.startswith(blocked):
+        # Security: block sensitive paths
+        if spa_path.startswith(blocked) or spa_path.startswith(".") or "/.env" in spa_path or spa_path == ".env":
             raise HTTPException(status_code=404)
         candidate = _SPA_DIR / spa_path
         if candidate.is_file():
@@ -691,7 +692,10 @@ _CA_RESERVED = ("api", "static", "health", "metrics", "docs", "redoc", "openapi.
 def _spa_catchall(full_path: str):
     from fastapi import HTTPException
     top = full_path.split("/", 1)[0]
+    # Security: block reserved paths and sensitive files
     if top in _CA_RESERVED:
+        raise HTTPException(status_code=404)
+    if full_path.startswith(".") or "/.env" in full_path or full_path == ".env" or ".git" in full_path:
         raise HTTPException(status_code=404)
     if _CA_INDEX.exists():
         return _CA_File(str(_CA_INDEX))
