@@ -7,12 +7,13 @@ MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5556")
 EXPERIMENT_NAME = "sora-earth-esg"
 _OFFLINE = os.getenv("SORA_OFFLINE","0")=="1"  # _SORA_OFFLINE_GUARD
 
-mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-
 try:
-    mlflow.set_experiment(EXPERIMENT_NAME)
-except Exception:
-    pass
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    if not _OFFLINE:
+        mlflow.set_experiment(EXPERIMENT_NAME)
+except Exception as e:
+    import logging
+    logging.getLogger(__name__).warning("MLflow init failed: %s", e)
 
 
 def _to_dict(input_data):
