@@ -12,6 +12,7 @@ services:
     environment:
       - SORA_ADMIN_TOKEN=${SORA_ADMIN_TOKEN}
       - RUN_SCHEDULER=false
+      - SORA_OFFLINE=1
     volumes:
       - ./data:/app/data
       - ./models:/app/models
