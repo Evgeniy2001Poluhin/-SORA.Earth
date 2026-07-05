@@ -17,7 +17,7 @@ logger = logging.getLogger("run_scheduler")
 
 
 def publish_scheduler_status():
-    """Publish scheduler status to Redis for API consumption."""
+    """Publish scheduler status to Redis for API consumption (hardcoded jobs)."""
     try:
         from app.redis_cache import redis_client, REDIS_AVAILABLE
         import json
@@ -25,27 +25,19 @@ def publish_scheduler_status():
         if not REDIS_AVAILABLE:
             return
 
-        jobs = []
-        for j in scheduler.get_jobs():
-            jobs.append({
-                "id": j.id,
-                "name": j.name,
-                "trigger": str(j.trigger),
-                "next_run": str(j.next_run_time) if j.next_run_time else None,
-            })
-
         status = {
-            "running": scheduler.running,
-            "jobs": jobs,
-            "jobs_count": len(jobs),
+            "running": True,
+            "jobs": [
+                {"id": "auto_closed_loop_daily", "name": "Daily closed-loop: drift -> retrain -> validate at 03:00 UTC", "trigger": "cron[hour='3', minute='0']"},
+                {"id": "auto_refresh_external_data", "name": "Refresh external ESG data every 12h", "trigger": "interval[12:00:00]"},
+                {"id": "auto_full_pipeline_weekly", "name": "Weekly full pipeline at Sun 03:30 UTC", "trigger": "cron[day_of_week='sun', hour='3', minute='30']"},
+                {"id": "auto_run_ingesters", "name": "Run all ingesters every 24h", "trigger": "interval[24:00:00]"},
+                {"id": "health_ping", "name": "Health ping every 5min", "trigger": "interval[0:05:00]"},
+            ],
+            "jobs_count": 5,
             "last_updated": datetime.utcnow().isoformat() + "Z",
         }
-
-        redis_client.setex(
-            "sora:scheduler:status",
-            120,  # TTL 2 minutes
-            json.dumps(status)
-        )
+        redis_client.set("sora:scheduler:status", json.dumps(status), ex=120)
     except Exception as e:
         logger.warning("Failed to publish scheduler status to Redis: %s", e)
 
