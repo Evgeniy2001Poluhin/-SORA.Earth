@@ -1,5 +1,5 @@
-from fastapi import APIRouter, HTTPException, Query, Security
-from app.auth import require_admin_apikey, require_api_key
+from fastapi import APIRouter, Depends, HTTPException, Query, Security
+from app.auth import require_admin, require_api_key
 import pandas as pd
 import os
 import logging
@@ -17,7 +17,7 @@ NUM_FEATURES = ["budget", "co2_reduction", "social_impact", "duration_months",
 @router.post("/mlops/drift/baseline/fit", tags=["mlops"])
 def fit_baseline(
     csv_path: str = "data/projects.csv",
-    _admin: dict = Security(require_admin_apikey),
+    _admin=Depends(require_admin),
 ):
     if not os.path.exists(csv_path):
         raise HTTPException(404, f"{csv_path} not found")
@@ -71,7 +71,7 @@ def baseline_status():
 
 @router.delete("/mlops/drift/baseline", tags=["mlops"])
 def reset_baseline(
-    _admin: dict = Security(require_admin_apikey),
+    _admin=Depends(require_admin),
 ):
     drift_detector.set_baseline({})
     drift_detector._r.delete(drift_detector._k_obs)
@@ -96,7 +96,7 @@ def simulate_drift(
     mode: Optional[str] = Query(None, pattern="^(stable|drift|custom)$"),
     shift: float = 5.0,
     n: int = 80,
-    _admin: dict = Security(require_admin_apikey),
+    _admin=Depends(require_admin),
 ):
     base = drift_detector.get_baseline()
     if not base:
