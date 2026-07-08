@@ -110,6 +110,7 @@ services:
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./app/static/spa:/usr/share/nginx/spa:ro
       - ./certs:/etc/nginx/certs:ro
       - ./certbot/www:/var/www/certbot
       - ./certs:/etc/letsencrypt
