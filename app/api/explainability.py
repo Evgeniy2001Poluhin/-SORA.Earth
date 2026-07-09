@@ -14,7 +14,16 @@ FEATURE_COLS = [
     "budget", "co2_reduction", "social_impact", "duration_months",
     "budget_per_month", "co2_per_dollar", "efficiency_score",
     "impact_ratio", "budget_efficiency", "category_enc", "region_enc",
+    "country_gdp_per_capita",
 ]
+
+
+def _gdp_median():
+    try:
+        from app.main import COUNTRY_GDP
+        return COUNTRY_GDP.get("median", 0.0)
+    except Exception:
+        return 0.0
 
 
 def _engineer(features):
@@ -30,6 +39,7 @@ def _engineer(features):
     out.setdefault("budget_efficiency", co2 / max(d, 1))
     out.setdefault("category_enc", 0.0)
     out.setdefault("region_enc", 0.0)
+    out.setdefault("country_gdp_per_capita", _gdp_median())
     return out
 
 
@@ -42,8 +52,9 @@ def _resolve_state():
 
 def _make_background(scaler, n=50):
     rng = np.random.RandomState(42)
-    means = [50000, 100, 5, 12, 5000, 0.002, 50, 0.5, 10, 0.0, 0.0]
-    stds = [20000, 50, 2, 6, 2000, 0.001, 20, 0.3, 5, 1.0, 1.0]
+    # 12 features: budget, co2, social, duration, bpm, c2d, eff, ir, be, cat_enc, reg_enc, gdp
+    means = [50000, 100, 5, 12, 5000, 0.002, 50, 0.5, 10, 0.0, 0.0, 12720.0]
+    stds = [20000, 50, 2, 6, 2000, 0.001, 20, 0.3, 5, 1.0, 1.0, 15000.0]
     raw = rng.normal(loc=means, scale=stds, size=(n, len(FEATURE_COLS)))
     df = pd.DataFrame(raw, columns=FEATURE_COLS)
     return scaler.transform(df), df

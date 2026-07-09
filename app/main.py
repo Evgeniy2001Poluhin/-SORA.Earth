@@ -226,11 +226,42 @@ try:
         ensemble_model_v2 = pickle.load(_f)
     FEATURE_COLS_V2 = ["budget","co2_reduction","social_impact","duration_months",
                        "budget_per_month","co2_per_dollar","efficiency_score",
-                       "impact_ratio","budget_efficiency","category_enc","region_enc"]
-    logger.info("ensemble_model_v2 loaded OK (CV AUC=0.82)")
+                       "impact_ratio","budget_efficiency","category_enc","region_enc",
+                       "country_gdp_per_capita"]
+    logger.info("ensemble_model_v2 loaded OK (12 features incl country_gdp_per_capita)")
 except Exception as _e:
     ensemble_model_v2 = None; scaler_v2 = None; FEATURE_COLS_V2 = []
     logger.warning(f"ensemble_model_v2 not loaded: {_e}")
+
+# country -> GDP-per-capita lookup for the v2 model's country_gdp_per_capita feature
+try:
+    with open(os.path.join(ROOT_DIR, "models", "country_gdp.json")) as _f:
+        COUNTRY_GDP = json.load(_f)
+except Exception:
+    COUNTRY_GDP = {"by_iso": {}, "by_name": {}, "median": 0.0}
+
+
+def gdp_for_country(name):
+    """Resolve a request's country/region string to a GDP-per-capita value.
+    Tries the country short-name, then ISO code, then name->ISO via
+    external_data.COUNTRY_ISO3; falls back to the dataset median."""
+    median = COUNTRY_GDP.get("median", 0.0)
+    if not name:
+        return median
+    by_name = COUNTRY_GDP.get("by_name", {})
+    by_iso = COUNTRY_GDP.get("by_iso", {})
+    if name in by_name:
+        return by_name[name]
+    if name in by_iso:
+        return by_iso[name]
+    try:
+        from app.external_data import COUNTRY_ISO3
+        iso = COUNTRY_ISO3.get(name)
+        if iso and iso in by_iso:
+            return by_iso[iso]
+    except Exception:
+        pass
+    return median
 if os.path.exists(ENS_PATH):
     with open(ENS_PATH, "rb") as f:
         ensemble_model = pickle.load(f)
@@ -337,8 +368,9 @@ def make_features_v2(data, category: str = "Solar Energy", region: str = "Europe
     be  = data.co2_reduction / max(bpm, 1)
     c_enc = cat_encodings.get("category", {}).get(category, 0.5)
     r_enc = cat_encodings.get("region", {}).get(region, 0.5)
+    gdp = gdp_for_country(region)  # `region` carries the request's country (aliased)
     row = [[data.budget, data.co2_reduction, data.social_impact, data.duration_months,
-            bpm, c2d, eff, ir, be, c_enc, r_enc]]
+            bpm, c2d, eff, ir, be, c_enc, r_enc, gdp]]
     df = pd.DataFrame(row, columns=FEATURE_COLS_V2)
     return pd.DataFrame(scaler_v2.transform(df), columns=FEATURE_COLS_V2)
 

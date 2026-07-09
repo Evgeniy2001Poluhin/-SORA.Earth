@@ -15,7 +15,7 @@ SAMPLE = {"budget": 50000, "co2_reduction": 40, "social_impact": 5, "duration_mo
 def test_make_features_v2_shape():
     p = ProjectInput(**SAMPLE)
     df = make_features_v2(p, "Solar Energy", "Europe")
-    assert df.shape == (1, 11), f"Expected (1,11), got {df.shape}"
+    assert df.shape == (1, 12), f"Expected (1,12) with GDP, got {df.shape}"
 
 def test_make_features_v2_no_nan():
     p = ProjectInput(**SAMPLE)
@@ -25,7 +25,7 @@ def test_make_features_v2_no_nan():
 def test_make_features_v2_unknown_category_fallback():
     p = ProjectInput(**SAMPLE)
     df = make_features_v2(p, "UnknownCategory", "UnknownRegion")
-    assert df.shape == (1, 11)
+    assert df.shape == (1, 12)
 
 @pytest.mark.parametrize("category,region", [
     ("Solar Energy", "Europe"),
@@ -35,7 +35,7 @@ def test_make_features_v2_unknown_category_fallback():
 def test_make_features_v2_parametrized(category, region):
     p = ProjectInput(**SAMPLE)
     df = make_features_v2(p, category, region)
-    assert df.shape == (1, 11)
+    assert df.shape == (1, 12)
 
 # --- /predict endpoint tests ---
 
