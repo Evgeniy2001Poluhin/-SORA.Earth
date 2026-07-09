@@ -15,18 +15,23 @@ Then retrain on it:
 Notes / assumptions (the WB API does not expose every field the model needs):
   * budget            <- totalamt (commas stripped); rows with budget<=0 are dropped.
   * co2_reduction     <- co2_emissions_reduced when present, else 0.
-  * success           <- status in {Active, Closed, Completed} -> 1, else 0.
+  * success           <- 1 if disbursement_percentage>50 OR (Closed AND closing
+                         date in the past AND budget>0); 0 if Active/Dropped/
+                         Pipeline/future-close. Rows are sampled spread across the
+                         whole portfolio (not newest-first) so both completed and
+                         in-progress projects appear -> realistic ~50/50 balance.
+  * duration_months   <- (closingdate - boardapprovaldate) in months; budget-based
+                         proxy fallback when a date is missing.
   * region            <- regionname mapped to AFR/APAC/EU/LATAM/NAM (else Unknown).
   * category          <- sector / project_name keyword-mapped to the existing
                          vocabulary (water/edu/agro/waste/energy); default energy
                          since we filter fq=sector_exact:(Environment).
-  * duration_months   <- synthesized deterministically from budget (WB gives no
-                         dates in the requested field list), clipped to [6, 72].
   * social_impact     <- synthesized normalized 0..100 proxy from log(budget)
                          (WB has no social-impact metric); min-max scaled to 40..95.
 """
 import argparse
 import csv
+import datetime as _dt
 import hashlib
 import math
 import os
@@ -38,9 +43,38 @@ import requests
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 
 API_URL = "https://search.worldbank.org/api/v2/projects"
-FL = "id,project_name,totalamt,status,sector,regionname,co2_emissions_reduced,url"
+FL = ("id,project_name,totalamt,status,sector,regionname,co2_emissions_reduced,url,"
+      "boardapprovaldate,closingdate,disbursement_percentage")
 FQ = "sector_exact:(Environment)"
 PAGE_ROWS = 500
+
+_TODAY = _dt.datetime.now(_dt.timezone.utc)
+
+
+def parse_wb_date(s):
+    """WB returns two date formats: ISO (2024-12-20T00:00:00Z) and
+    US (12/20/2025 12:00:00 AM). Return a tz-aware datetime or None."""
+    if not s:
+        return None
+    s = str(s).strip()
+    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y", "%Y-%m-%d"):
+        try:
+            return _dt.datetime.strptime(s, fmt).replace(tzinfo=_dt.timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def parse_disbursement(row):
+    """disbursement_percentage as a float, or None if absent (the v2 API
+    currently returns None for this field — kept for forward-compatibility)."""
+    v = row.get("disbursement_percentage")
+    if v in (None, ""):
+        return None
+    try:
+        return float(str(v).replace("%", "").strip())
+    except (ValueError, TypeError):
+        return None
 
 # --- field mappings -------------------------------------------------------
 
@@ -94,9 +128,30 @@ def map_category(sector, project_name: str) -> str:
     return "energy"
 
 
-def map_success(status: str) -> int:
+def map_success(status, closingdate, budget, disb_pct) -> int:
+    """Realistic completion signal:
+      1  if disbursement_percentage > 50, OR the project has Closed with a
+         closing date in the past and a real budget (i.e. it ran to completion).
+      0  if it is still Active (not yet finished), Dropped/cancelled, Pipeline,
+         or closed in the future / with no budget.
+    """
     s = (status or "").strip().lower()
-    return 1 if s in ("active", "closed", "completed") else 0
+    if any(x in s for x in ("drop", "cancel", "disband")):
+        return 0
+    if disb_pct is not None and disb_pct > 50:
+        return 1
+    if "closed" in s and closingdate is not None and closingdate < _TODAY and budget > 0:
+        return 1
+    return 0
+
+
+def duration_from_dates(board, closing, budget: float, pid: str) -> int:
+    """duration_months = (closingdate - boardapprovaldate) in whole months.
+    Falls back to a budget-based proxy when either date is missing/invalid."""
+    if board and closing and closing > board:
+        months = (closing.year - board.year) * 12 + (closing.month - board.month)
+        return int(min(120, max(1, months)))
+    return synth_duration(budget, pid)
 
 
 def parse_amount(totalamt) -> float:
@@ -125,59 +180,81 @@ def synth_duration(budget: float, pid: str) -> int:
 
 # --- fetch ----------------------------------------------------------------
 
+def _fetch_page(os_offset, session):
+    """Fetch one page; returns (rows, total) or (None, total) on failure."""
+    params = {"format": "json", "fl": FL, "fq": FQ, "rows": PAGE_ROWS, "os": os_offset}
+    for attempt in range(3):
+        try:
+            resp = session.get(API_URL, params=params, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+            projects = data.get("projects") or {}
+            rows = list(projects.values()) if isinstance(projects, dict) else list(projects)
+            return rows, int(data.get("total", 0))
+        except (requests.RequestException, ValueError) as e:
+            print(f"  ! request failed (os={os_offset}, attempt {attempt+1}/3): {e}", file=sys.stderr)
+            time.sleep(2 * (attempt + 1))
+    return None, 0
+
+
+def _spread_offsets(total, n_pages):
+    """Evenly spaced offsets across the whole portfolio, so the sample mixes
+    recent (Active) and older (Closed/Dropped) projects instead of only the
+    newest-first Active projects. Pagination newest-first means os=0 is ~100%
+    Active; deeper offsets are ~99% Closed — spreading is what yields balance."""
+    last = max(0, total - PAGE_ROWS)
+    if last == 0 or n_pages <= 1:
+        return [0]
+    step = last / (n_pages - 1)
+    seen, offsets = set(), []
+    for i in range(n_pages):
+        off = int(round(i * step))
+        if off not in seen:
+            seen.add(off)
+            offsets.append(off)
+    return offsets
+
+
 def fetch_rows(min_projects: int, session: requests.Session):
-    """Page through the API (os += 500) until we have >= min_projects valid rows."""
-    collected = []
-    os_offset = 0
-    total = None
-    while True:
-        params = {
-            "format": "json",
-            "fl": FL,
-            "fq": FQ,
-            "rows": PAGE_ROWS,
-            "os": os_offset,
-        }
-        data = None
-        for attempt in range(3):
-            try:
-                resp = session.get(API_URL, params=params, timeout=60)
-                resp.raise_for_status()
-                data = resp.json()
-                break
-            except (requests.RequestException, ValueError) as e:
-                print(f"  ! request failed (os={os_offset}, attempt {attempt+1}/3): {e}", file=sys.stderr)
-                time.sleep(2 * (attempt + 1))
-        if data is None:
-            print("  ! giving up on this page after 3 attempts", file=sys.stderr)
-            break
+    """Collect >= min_projects valid rows, spread across the portfolio history."""
+    # Discover the total, then fan out across evenly-spaced offsets. Oversize the
+    # page count a bit since ~10-40% of rows have no budget and get dropped.
+    _, total = _fetch_page(0, session)
+    print(f"World Bank reports total={total} Environment projects")
+    if not total:
+        return []
+    n_pages = max(6, math.ceil(min_projects / (PAGE_ROWS * 0.6)))
+    offsets = _spread_offsets(total, n_pages)
 
-        if total is None:
-            total = int(data.get("total", 0))
-            print(f"World Bank reports total={total} Environment projects")
+    collected, fetched = [], set()
 
-        projects = data.get("projects") or {}
-        page = list(projects.values()) if isinstance(projects, dict) else list(projects)
-        if not page:
-            print("  (empty page — stopping)")
-            break
-
+    def _consume(os_offset):
+        rows, _t = _fetch_page(os_offset, session)
+        fetched.add(os_offset)
+        if not rows:
+            print(f"  os={os_offset}: empty")
+            return
         kept = 0
-        for row in page:
+        for row in rows:
             budget = parse_amount(row.get("totalamt"))
             if budget <= 0:
                 continue
             collected.append((row, budget))
             kept += 1
+        print(f"  os={os_offset}: fetched {len(rows)}, kept {kept} (valid total: {len(collected)})")
 
-        os_offset += PAGE_ROWS
-        print(f"  os={os_offset - PAGE_ROWS}: fetched {len(page)}, kept {kept} "
-              f"(valid total: {len(collected)})")
+    print(f"Spread sampling across {len(offsets)} offsets: {offsets}")
+    for off in offsets:
+        _consume(off)
 
-        if len(collected) >= min_projects:
-            break
-        if total and os_offset >= total:
-            break
+    # Top up sequentially (from the newest end) if the spread came up short.
+    i = 0
+    while len(collected) < min_projects and i * PAGE_ROWS < total:
+        off = i * PAGE_ROWS
+        i += 1
+        if off in fetched:
+            continue
+        _consume(off)
     return collected
 
 
@@ -193,14 +270,17 @@ def to_records(collected):
     for (row, budget), lb in zip(collected, log_budgets):
         pid = str(row.get("id") or "")
         social = round(40.0 + 55.0 * ((lb - lo) / span), 1)  # 40..95 proxy
+        board = parse_wb_date(row.get("boardapprovaldate"))
+        closing = parse_wb_date(row.get("closingdate"))
+        disb = parse_disbursement(row)
         records.append({
             "budget": round(budget, 2),
             "co2_reduction": round(parse_co2(row), 1),
             "social_impact": social,
-            "duration_months": synth_duration(budget, pid),
+            "duration_months": duration_from_dates(board, closing, budget, pid),
             "category": map_category(row.get("sector"), row.get("project_name")),
             "region": map_region(row.get("regionname")),
-            "success": map_success(row.get("status")),
+            "success": map_success(row.get("status"), closing, budget, disb),
             "name": (row.get("project_name") or "").strip().replace("\n", " "),
             "source": "worldbank",
         })
