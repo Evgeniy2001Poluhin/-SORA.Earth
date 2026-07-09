@@ -1,4 +1,4 @@
-import pandas as pd, numpy as np, pickle, os, json
+import argparse, pandas as pd, numpy as np, pickle, os, json
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, StackingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -8,7 +8,15 @@ from sklearn.calibration import CalibratedClassifierCV
 from datetime import datetime
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
-df = pd.read_csv(os.path.join(ROOT, 'data', 'projects.csv'))
+
+_ap = argparse.ArgumentParser()
+_ap.add_argument('--data', default=os.path.join(ROOT, 'data', 'projects.csv'),
+                 help='training CSV (projects.csv schema)')
+_args = _ap.parse_args()
+_data_path = _args.data if os.path.isabs(_args.data) or os.path.exists(_args.data) \
+    else os.path.join(ROOT, _args.data)
+print(f'Training on: {_data_path}')
+df = pd.read_csv(_data_path)
 
 df['budget_per_month'] = df['budget'] / df['duration_months'].clip(lower=1)
 df['co2_per_dollar'] = df['co2_reduction'] / df['budget'].clip(lower=1) * 1000
