@@ -14,6 +14,15 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
+# Production security: fail-fast if using dev secrets in production
+SORA_ENV = os.getenv("SORA_ENV", "development")
+if SORA_ENV == "production":
+    if SECRET_KEY.startswith("sora-earth-dev-"):
+        raise RuntimeError(
+            "CRITICAL: Production deployment detected with development JWT secret! "
+            "Set SORA_JWT_SECRET environment variable to a secure random value."
+        )
+
 class Token(BaseModel):
     access_token: str
     refresh_token: str
@@ -71,10 +80,39 @@ def verify_password(plain: str, hashed: str) -> bool:
     salt, h = hashed.split("$", 1)
     return hmac.compare_digest(hashlib.sha256(f"{salt}{plain}".encode()).hexdigest(), h)
 
+# Load default users from environment (fallback to dev passwords only in dev mode)
+def _get_default_password(role: str, dev_default: str) -> str:
+    """Get password from env or use dev default only if not in production."""
+    env_key = f"SORA_DEFAULT_{role.upper()}_PASSWORD"
+    password = os.getenv(env_key)
+    if password:
+        return password
+    if SORA_ENV == "production":
+        raise RuntimeError(
+            f"CRITICAL: Production deployment requires {env_key} environment variable. "
+            f"Default passwords are disabled in production for security."
+        )
+    return dev_default
+
 USERS_DB: dict = {
-    "admin": {"username": "admin", "hashed_password": _hash_password("sora2026"), "role": "admin", "created_at": datetime.now(timezone.utc).isoformat()},
-    "analyst": {"username": "analyst", "hashed_password": _hash_password("analyst123"), "role": "analyst", "created_at": datetime.now(timezone.utc).isoformat()},
-    "viewer": {"username": "viewer", "hashed_password": _hash_password("viewer123"), "role": "viewer", "created_at": datetime.now(timezone.utc).isoformat()},
+    "admin": {
+        "username": "admin",
+        "hashed_password": _hash_password(_get_default_password("admin", "sora2026")),
+        "role": "admin",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    },
+    "analyst": {
+        "username": "analyst",
+        "hashed_password": _hash_password(_get_default_password("analyst", "analyst123")),
+        "role": "analyst",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    },
+    "viewer": {
+        "username": "viewer",
+        "hashed_password": _hash_password(_get_default_password("viewer", "viewer123")),
+        "role": "viewer",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    },
 }
 
 _refresh_tokens: set = set()

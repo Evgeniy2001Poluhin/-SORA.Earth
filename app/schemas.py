@@ -1,18 +1,62 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
 
 class ProjectInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     name: str = "Project"
-    budget: float = Field(default=50000, ge=0, alias="budget_usd", description="Budget in USD")
-    co2_reduction: float = Field(default=50, ge=0, alias="co2_reduction_tons_per_year", description="CO2 reduction tons/year")
-    social_impact: float = Field(default=5, ge=1, le=10, alias="social_impact_score", description="Social impact score 1-10")
-    duration_months: int = Field(default=12, ge=1, le=120, alias="project_duration_months", description="Duration in months")
+    budget: float = Field(
+        default=50000,
+        ge=1000,
+        le=100_000_000_000,
+        alias="budget_usd",
+        description="Budget in USD (range: $1K to $100B based on training data)"
+    )
+    co2_reduction: float = Field(
+        default=50,
+        ge=0,
+        le=10000,
+        alias="co2_reduction_tons_per_year",
+        description="CO2 reduction tons/year (max 10K tons based on training data)"
+    )
+    social_impact: float = Field(
+        default=5,
+        ge=0,
+        le=100,
+        alias="social_impact_score",
+        description="Social impact score 0-100 (normalized to match training data range)"
+    )
+    duration_months: int = Field(
+        default=12,
+        ge=1,
+        le=120,
+        alias="project_duration_months",
+        description="Duration in months (1-120 range from training data)"
+    )
     category: Optional[str] = "Solar Energy"
     region: Optional[str] = Field(default="Europe", alias="country")
     lat: Optional[float] = 50.0
     lon: Optional[float] = 10.0
+
+    @field_validator("budget")
+    @classmethod
+    def validate_budget_range(cls, v: float) -> float:
+        """Validate budget is within training data range to prevent extrapolation."""
+        if v < 1000:
+            raise ValueError(f"budget ${v:,.0f} below training range (min $1,000)")
+        if v > 100_000_000_000:
+            raise ValueError(f"budget ${v:,.0f} exceeds training range (max $100B)")
+        return v
+
+    @field_validator("co2_reduction")
+    @classmethod
+    def validate_co2_range(cls, v: float) -> float:
+        """Validate CO2 is within training data range."""
+        if v < 0:
+            raise ValueError("co2_reduction cannot be negative")
+        if v > 10000:
+            raise ValueError(f"co2_reduction {v:,.1f} tons exceeds training range (max 10K tons/year)")
+        return v
 
 class GHGInput(BaseModel):
     electricity_kwh: float = Field(default=10000, ge=0)

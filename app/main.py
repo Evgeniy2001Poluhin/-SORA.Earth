@@ -158,16 +158,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-origins = [
-    "https://sora-earth.ru",
-    "https://www.sora-earth.ru",
-    "http://localhost:8081",
-    "http://127.0.0.1:8081",
-    "http://localhost:3000",
-    "http://localhost:5173",
-]
-
 # Sentry
 if os.getenv("SENTRY_DSN"):
     sentry_sdk.init(dsn=os.getenv("SENTRY_DSN"), traces_sample_rate=0.1, environment=os.getenv("SORA_ENV", "development"))
