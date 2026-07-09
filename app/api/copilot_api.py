@@ -3,7 +3,14 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import logging
-from app.services.copilot import explain_prediction, health as copilot_health, answer_qa, audience_directive
+from app.services.copilot import (
+    explain_prediction,
+    health as copilot_health,
+    answer_qa,
+    audience_directive,
+    stream_explanation_claude,
+    _anthropic_enabled,
+)
 from app.services.compliance import check as compliance_check
 
 router = APIRouter()
@@ -88,11 +95,19 @@ _SPEED_MAP = {"fast": 0.015, "normal": 0.035, "slow": 0.08}
 
 @router.post("/copilot/explain/stream")
 async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8), speed: str = Query("normal")):
-    """SSE streaming variant of /copilot/explain."""
+    """SSE streaming variant of /copilot/explain.
+
+    When ANTHROPIC_API_KEY is set, the executive summary is streamed live token-by-token
+    from the real Anthropic API. Otherwise it falls back to word-pacing a pre-computed
+    (GPT or template) summary.
+    """
+    use_claude = _anthropic_enabled()
+    # With Claude we stream the summary live, so skip the (blocking) enrichment call here.
     base = explain_prediction(
         probability=payload.probability, features=payload.features,
         shap_values=payload.shap_values, project=payload.project,
         model_version=payload.model_version or "v5",
+        enrich=not use_claude,
     )
     q = _build_rag_query(payload.probability, payload.features)
     sources = _retrieve_sources(q, k=k)
@@ -108,11 +123,23 @@ async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8),
         rec = rec.rstrip() + " " + cites_text
     exs = (base.get("executive_summary") or "") if isinstance(base, dict) else ""
 
-    sid = _persist_explain(payload, base, sources)
-
     async def gen():
         yield "data: " + json.dumps({"type": "meta", "probability": payload.probability, "rag_query": q, "session_id": sid}) + "\n\n"
-        if exs:
+        summary_text = ""
+        if use_claude:
+            yield "data: " + json.dumps({"type": "section", "name": "executive_summary"}) + "\n\n"
+            try:
+                async for text in stream_explanation_claude(
+                    base, payload.features, payload.project, payload.probability,
+                ):
+                    summary_text += text
+                    yield "data: " + json.dumps({"type": "token", "value": text}) + "\n\n"
+            except Exception as e:
+                log.warning("Claude stream failed: %s", e)
+                err = f"[Co-Pilot LLM unavailable: {e}]"
+                yield "data: " + json.dumps({"type": "token", "value": err}) + "\n\n"
+        elif exs:
+            summary_text = exs
             yield "data: " + json.dumps({"type": "section", "name": "executive_summary"}) + "\n\n"
             for w in exs.split(" "):
                 yield "data: " + json.dumps({"type": "token", "value": w + " "}) + "\n\n"
@@ -122,8 +149,12 @@ async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8),
             for w in rec.split(" "):
                 yield "data: " + json.dumps({"type": "token", "value": w + " "}) + "\n\n"
                 await asyncio.sleep(_SPEED_MAP.get(speed, 0.035))
+        # Persist after the summary is known so the streamed narrative is saved to the session.
+        if summary_text and isinstance(base, dict):
+            base["executive_summary"] = summary_text
         yield "data: " + json.dumps({"type": "done", "sources": sources, "compliance": compliance}) + "\n\n"
 
+    sid = _persist_explain(payload, base, sources)
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 

@@ -1,6 +1,103 @@
 """SORA.Earth - LLM Co-Pilot for ESG prediction explanations."""
 import os
+import logging
 from typing import Optional
+
+log = logging.getLogger(__name__)
+
+# Claude model for Co-Pilot explanations. Default to Haiku 4.5 (fast + cheap,
+# well-suited to high-volume real-time explanations); set ANTHROPIC_MODEL to
+# "claude-sonnet-5" for higher-quality narratives. NOTE: the legacy
+# "claude-3-5-haiku" / "claude-3-5-sonnet" IDs are retired and 404 — these are
+# their current equivalents.
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
+
+_COPILOT_SYSTEM = (
+    "You are SORA.earth Co-Pilot, an ESG investment analyst. You are given a "
+    "machine-learning success prediction for a sustainable project together with its "
+    "explainability drivers (SHAP values) and concrete project metrics. Write a concise, "
+    "natural-language executive summary for a decision-maker: explain what is driving the "
+    "prediction, reference the specific metrics and drivers you were given, and be specific "
+    "to THIS project — never generic boilerplate. Do not invent numbers that were not "
+    "provided. 2-4 sentences, professional and direct."
+)
+
+
+def _anthropic_enabled() -> bool:
+    return bool(os.getenv("ANTHROPIC_API_KEY"))
+
+
+def _fmt_drivers(items) -> str:
+    lines = []
+    for d in items or []:
+        label = d.get("feature_label") or d.get("feature") or "?"
+        sv = d.get("shap_value")
+        if sv is not None:
+            lines.append(f"- {label}: SHAP {float(sv):+.4f} ({d.get('direction', '')})".rstrip())
+        elif d.get("note"):
+            lines.append(f"- {label}: {d['note']}")
+        else:
+            lines.append(f"- {label}")
+    return "\n".join(lines) or "- (none identified)"
+
+
+def _explanation_prompt(base, features, project, probability) -> str:
+    """Build the user prompt from real project data + SHAP drivers."""
+    features = features or {}
+    drivers = base.get("key_drivers", {}) if isinstance(base, dict) else {}
+    proj = project or {}
+    name = proj.get("project_name") or proj.get("name") or "this ESG project"
+    risks = base.get("risks", []) if isinstance(base, dict) else []
+    return "\n".join([
+        f"Project: {name}",
+        f"Predicted success probability: {probability:.0%}",
+        f"Verdict: {base['verdict']['label']} (model confidence: {base['confidence']})",
+        "",
+        "Project metrics:",
+        f"- Budget: {features.get('budget', 'n/a')} USD",
+        f"- CO2 reduction: {features.get('co2_reduction', 'n/a')} t/yr",
+        f"- Social impact score: {features.get('social_impact', 'n/a')}",
+        f"- Duration: {features.get('duration_months', 'n/a')} months",
+        f"- CO2 per dollar: {features.get('co2_per_dollar', 'n/a')}",
+        "",
+        "Positive drivers (increase success probability):",
+        _fmt_drivers(drivers.get("positive")),
+        "",
+        "Negative drivers (decrease success probability):",
+        _fmt_drivers(drivers.get("negative")),
+        "",
+        "Identified risks:",
+        "\n".join(f"- {r}" for r in risks) or "- (none)",
+        "",
+        "Write the executive summary now.",
+    ])
+
+
+def _generate_explanation_claude(base, features, project, probability, max_tokens=400) -> str:
+    """Synchronous Claude call — returns a unique executive summary for this project."""
+    import anthropic
+    client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from the environment
+    msg = client.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=max_tokens,
+        system=_COPILOT_SYSTEM,
+        messages=[{"role": "user", "content": _explanation_prompt(base, features, project, probability)}],
+    )
+    return "".join(b.text for b in msg.content if b.type == "text").strip()
+
+
+async def stream_explanation_claude(base, features, project, probability, max_tokens=400):
+    """Async generator yielding real text deltas from the Anthropic streaming API."""
+    from anthropic import AsyncAnthropic
+    client = AsyncAnthropic()  # reads ANTHROPIC_API_KEY from the environment
+    async with client.messages.stream(
+        model=ANTHROPIC_MODEL,
+        max_tokens=max_tokens,
+        system=_COPILOT_SYSTEM,
+        messages=[{"role": "user", "content": _explanation_prompt(base, features, project, probability)}],
+    ) as stream:
+        async for text in stream.text_stream:
+            yield text
 
 FEATURE_RU = {
     "budget": "budget",
@@ -95,7 +192,11 @@ def _risks(features, drivers):
     return risks[:5]
 
 
-def explain_prediction(probability, features, shap_values=None, project=None, model_version="v5"):
+def explain_prediction(probability, features, shap_values=None, project=None, model_version="v5", enrich=True):
+    """Build the structured explanation scaffold, then (unless enrich=False) generate a
+    natural-language executive summary via the real Anthropic API. Pass enrich=False to
+    return only the deterministic structure — used by the streaming endpoint, which streams
+    the summary live instead of pre-computing it."""
     verdict = _verdict(probability)
     confidence = _confidence(probability)
     drivers = _drivers_from_shap(shap_values) if shap_values else _drivers_from_features(features)
@@ -113,7 +214,18 @@ def explain_prediction(probability, features, shap_values=None, project=None, mo
         "explanation_mode": "template",
     }
 
-    if os.getenv("OPENAI_API_KEY"):
+    if not enrich:
+        return response
+
+    if _anthropic_enabled():
+        try:
+            response["executive_summary"] = _generate_explanation_claude(response, features, project, probability)
+            response["explanation_mode"] = "claude"
+            response["llm_model"] = ANTHROPIC_MODEL
+        except Exception as e:
+            log.warning("Claude explanation failed: %s", e)
+            response["llm_error"] = str(e)
+    elif os.getenv("OPENAI_API_KEY"):
         try:
             response = _enrich_with_gpt(response, features, project)
             response["explanation_mode"] = "gpt"
@@ -162,10 +274,17 @@ def _enrich_with_gpt(base, features, project):
 
 
 def health():
+    if _anthropic_enabled():
+        mode = "claude"
+    elif os.getenv("OPENAI_API_KEY"):
+        mode = "gpt"
+    else:
+        mode = "template"
     return {
         "ok": True,
-        "llm_enabled": bool(os.getenv("OPENAI_API_KEY")),
-        "explanation_mode": "gpt" if os.getenv("OPENAI_API_KEY") else "template",
+        "llm_enabled": _anthropic_enabled() or bool(os.getenv("OPENAI_API_KEY")),
+        "explanation_mode": mode,
+        "llm_model": ANTHROPIC_MODEL if _anthropic_enabled() else None,
         "supported_features": list(FEATURE_RU.keys()),
     }
 

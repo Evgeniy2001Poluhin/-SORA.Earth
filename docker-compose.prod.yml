@@ -54,6 +54,8 @@ services:
       MLFLOW_TRACKING_URI: "http://mlflow:5556"
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_API_KEY: ${ADMIN_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5}
     depends_on:
       pgbouncer:
         condition: service_started
