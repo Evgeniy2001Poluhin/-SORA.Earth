@@ -8,9 +8,10 @@ from app.services.copilot import (
     health as copilot_health,
     answer_qa,
     audience_directive,
-    stream_explanation_claude,
-    _anthropic_enabled,
+    stream_explanation_hf,
+    _hf_enabled,
 )
+from starlette.concurrency import iterate_in_threadpool
 from app.services.compliance import check as compliance_check
 
 router = APIRouter()
@@ -97,17 +98,17 @@ _SPEED_MAP = {"fast": 0.015, "normal": 0.035, "slow": 0.08}
 async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8), speed: str = Query("normal")):
     """SSE streaming variant of /copilot/explain.
 
-    When ANTHROPIC_API_KEY is set, the executive summary is streamed live token-by-token
-    from the real Anthropic API. Otherwise it falls back to word-pacing a pre-computed
-    (GPT or template) summary.
+    When HF_API_TOKEN is set, the executive summary is streamed live token-by-token
+    from the HuggingFace Inference API. Otherwise it falls back to word-pacing a
+    pre-computed (GPT or template) summary.
     """
-    use_claude = _anthropic_enabled()
-    # With Claude we stream the summary live, so skip the (blocking) enrichment call here.
+    use_hf = _hf_enabled()
+    # With HF we stream the summary live, so skip the (blocking) enrichment call here.
     base = explain_prediction(
         probability=payload.probability, features=payload.features,
         shap_values=payload.shap_values, project=payload.project,
         model_version=payload.model_version or "v5",
-        enrich=not use_claude,
+        enrich=not use_hf,
     )
     q = _build_rag_query(payload.probability, payload.features)
     sources = _retrieve_sources(q, k=k)
@@ -126,16 +127,18 @@ async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8),
     async def gen():
         yield "data: " + json.dumps({"type": "meta", "probability": payload.probability, "rag_query": q, "session_id": sid}) + "\n\n"
         summary_text = ""
-        if use_claude:
+        if use_hf:
             yield "data: " + json.dumps({"type": "section", "name": "executive_summary"}) + "\n\n"
             try:
-                async for text in stream_explanation_claude(
+                # requests is blocking — iterate the sync HF generator via a threadpool
+                # so the event loop stays responsive.
+                async for text in iterate_in_threadpool(stream_explanation_hf(
                     base, payload.features, payload.project, payload.probability,
-                ):
+                )):
                     summary_text += text
                     yield "data: " + json.dumps({"type": "token", "value": text}) + "\n\n"
             except Exception as e:
-                log.warning("Claude stream failed: %s", e)
+                log.warning("HuggingFace stream failed: %s", e)
                 err = f"[Co-Pilot LLM unavailable: {e}]"
                 yield "data: " + json.dumps({"type": "token", "value": err}) + "\n\n"
         elif exs:

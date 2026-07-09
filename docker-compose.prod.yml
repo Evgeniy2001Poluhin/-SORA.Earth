@@ -54,8 +54,8 @@ services:
       MLFLOW_TRACKING_URI: "http://mlflow:5556"
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_API_KEY: ${ADMIN_API_KEY}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5}
+      HF_API_TOKEN: ${HF_API_TOKEN}
+      HF_MODEL_URL: ${HF_MODEL_URL:-https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3}
     depends_on:
       pgbouncer:
         condition: service_started

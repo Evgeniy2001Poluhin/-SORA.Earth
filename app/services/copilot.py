@@ -5,12 +5,12 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-# Claude model for Co-Pilot explanations. Default to Haiku 4.5 (fast + cheap,
-# well-suited to high-volume real-time explanations); set ANTHROPIC_MODEL to
-# "claude-sonnet-5" for higher-quality narratives. NOTE: the legacy
-# "claude-3-5-haiku" / "claude-3-5-sonnet" IDs are retired and 404 — these are
-# their current equivalents.
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
+# HuggingFace Inference API for Co-Pilot explanations. Override the model via
+# HF_MODEL_URL if needed; auth uses HF_API_TOKEN from the environment.
+HF_MODEL_URL = os.getenv(
+    "HF_MODEL_URL",
+    "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3",
+)
 
 _COPILOT_SYSTEM = (
     "You are SORA.earth Co-Pilot, an ESG investment analyst. You are given a "
@@ -23,8 +23,17 @@ _COPILOT_SYSTEM = (
 )
 
 
-def _anthropic_enabled() -> bool:
-    return bool(os.getenv("ANTHROPIC_API_KEY"))
+def _hf_enabled() -> bool:
+    return bool(os.getenv("HF_API_TOKEN"))
+
+
+def _hf_headers() -> dict:
+    return {"Authorization": f"Bearer {os.environ.get('HF_API_TOKEN')}"}
+
+
+def _mistral_prompt(base, features, project, probability) -> str:
+    """Wrap the system + explanation prompt in Mistral instruct format."""
+    return f"<s>[INST] {_COPILOT_SYSTEM}\n\n{_explanation_prompt(base, features, project, probability)} [/INST]"
 
 
 def _fmt_drivers(items) -> str:
@@ -73,30 +82,73 @@ def _explanation_prompt(base, features, project, probability) -> str:
     ])
 
 
-def _generate_explanation_claude(base, features, project, probability, max_tokens=400) -> str:
-    """Synchronous Claude call — returns a unique executive summary for this project."""
-    import anthropic
-    client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from the environment
-    msg = client.messages.create(
-        model=ANTHROPIC_MODEL,
-        max_tokens=max_tokens,
-        system=_COPILOT_SYSTEM,
-        messages=[{"role": "user", "content": _explanation_prompt(base, features, project, probability)}],
+def _generate_explanation_hf(base, features, project, probability, max_new_tokens=500) -> str:
+    """Synchronous HuggingFace Inference API call — returns a unique executive summary."""
+    import requests
+    prompt = _mistral_prompt(base, features, project, probability)
+    response = requests.post(
+        HF_MODEL_URL,
+        headers=_hf_headers(),
+        json={"inputs": prompt, "parameters": {"max_new_tokens": max_new_tokens, "return_full_text": False}},
+        timeout=60,
     )
-    return "".join(b.text for b in msg.content if b.type == "text").strip()
+    response.raise_for_status()
+    data = response.json()
+    if isinstance(data, list) and data:
+        return str(data[0].get("generated_text", "")).strip()
+    if isinstance(data, dict):
+        if data.get("error"):
+            raise RuntimeError(str(data["error"]))
+        return str(data.get("generated_text", "")).strip()
+    return ""
 
 
-async def stream_explanation_claude(base, features, project, probability, max_tokens=400):
-    """Async generator yielding real text deltas from the Anthropic streaming API."""
-    from anthropic import AsyncAnthropic
-    client = AsyncAnthropic()  # reads ANTHROPIC_API_KEY from the environment
-    async with client.messages.stream(
-        model=ANTHROPIC_MODEL,
-        max_tokens=max_tokens,
-        system=_COPILOT_SYSTEM,
-        messages=[{"role": "user", "content": _explanation_prompt(base, features, project, probability)}],
-    ) as stream:
-        async for text in stream.text_stream:
+def stream_explanation_hf(base, features, project, probability, max_new_tokens=500):
+    """Synchronous generator yielding text pieces from the HuggingFace streaming API.
+
+    Iterate this via a threadpool (starlette.iterate_in_threadpool) from async code —
+    requests is blocking. Falls back to a single-shot yield if the endpoint doesn't
+    stream SSE tokens.
+    """
+    import json as _json
+    import requests
+    prompt = _mistral_prompt(base, features, project, probability)
+    response = requests.post(
+        HF_MODEL_URL,
+        headers=_hf_headers(),
+        json={"inputs": prompt, "parameters": {"max_new_tokens": max_new_tokens, "return_full_text": False}, "stream": True},
+        stream=True,
+        timeout=60,
+    )
+    response.raise_for_status()
+    streamed_any = False
+    for raw in response.iter_lines(decode_unicode=True):
+        if not raw:
+            continue
+        line = raw[len("data:"):].strip() if raw.startswith("data:") else raw.strip()
+        if not line or line == "[DONE]":
+            continue
+        try:
+            obj = _json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and obj.get("error"):
+            raise RuntimeError(str(obj["error"]))
+        # TGI streaming shape: {"token": {"text": "..."}, "generated_text": null}
+        piece = ""
+        if isinstance(obj, dict):
+            tok = obj.get("token")
+            if isinstance(tok, dict):
+                piece = tok.get("text", "")
+            elif obj.get("generated_text"):
+                piece = obj["generated_text"]
+        if piece:
+            streamed_any = True
+            yield piece
+    if not streamed_any:
+        # Endpoint didn't stream (returned a full response) — fall back to one-shot.
+        text = _generate_explanation_hf(base, features, project, probability, max_new_tokens)
+        if text:
             yield text
 
 FEATURE_RU = {
@@ -194,7 +246,7 @@ def _risks(features, drivers):
 
 def explain_prediction(probability, features, shap_values=None, project=None, model_version="v5", enrich=True):
     """Build the structured explanation scaffold, then (unless enrich=False) generate a
-    natural-language executive summary via the real Anthropic API. Pass enrich=False to
+    natural-language executive summary via the HuggingFace Inference API. Pass enrich=False to
     return only the deterministic structure — used by the streaming endpoint, which streams
     the summary live instead of pre-computing it."""
     verdict = _verdict(probability)
@@ -217,13 +269,13 @@ def explain_prediction(probability, features, shap_values=None, project=None, mo
     if not enrich:
         return response
 
-    if _anthropic_enabled():
+    if _hf_enabled():
         try:
-            response["executive_summary"] = _generate_explanation_claude(response, features, project, probability)
-            response["explanation_mode"] = "claude"
-            response["llm_model"] = ANTHROPIC_MODEL
+            response["executive_summary"] = _generate_explanation_hf(response, features, project, probability)
+            response["explanation_mode"] = "huggingface"
+            response["llm_model"] = HF_MODEL_URL
         except Exception as e:
-            log.warning("Claude explanation failed: %s", e)
+            log.warning("HuggingFace explanation failed: %s", e)
             response["llm_error"] = str(e)
     elif os.getenv("OPENAI_API_KEY"):
         try:
@@ -274,17 +326,17 @@ def _enrich_with_gpt(base, features, project):
 
 
 def health():
-    if _anthropic_enabled():
-        mode = "claude"
+    if _hf_enabled():
+        mode = "huggingface"
     elif os.getenv("OPENAI_API_KEY"):
         mode = "gpt"
     else:
         mode = "template"
     return {
         "ok": True,
-        "llm_enabled": _anthropic_enabled() or bool(os.getenv("OPENAI_API_KEY")),
+        "llm_enabled": _hf_enabled() or bool(os.getenv("OPENAI_API_KEY")),
         "explanation_mode": mode,
-        "llm_model": ANTHROPIC_MODEL if _anthropic_enabled() else None,
+        "llm_model": HF_MODEL_URL if _hf_enabled() else None,
         "supported_features": list(FEATURE_RU.keys()),
     }
 
