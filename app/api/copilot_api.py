@@ -1,4 +1,4 @@
-"""Co-Pilot API with RAG + Compliance Sentinel."""
+"""Co-Pilot API with smart template-based explanations, RAG + Compliance Sentinel."""
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -98,11 +98,10 @@ _SPEED_MAP = {"fast": 0.015, "normal": 0.035, "slow": 0.08}
 async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8), speed: str = Query("normal")):
     """SSE streaming variant of /copilot/explain.
 
-    When HF_API_TOKEN is set, the executive summary is streamed live token-by-token
-    from the HuggingFace Inference API. Otherwise it falls back to word-pacing a
-    pre-computed (GPT or template) summary.
+    Uses smart template-based explanations with word-by-word streaming effect.
+    No LLM required - templates are selected based on probability level and top negative factor.
     """
-    use_hf = _hf_enabled()
+    use_hf = False  # HuggingFace removed, always use templates
     # With HF we stream the summary live, so skip the (blocking) enrichment call here.
     base = explain_prediction(
         probability=payload.probability, features=payload.features,

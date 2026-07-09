@@ -1,155 +1,44 @@
-"""SORA.Earth - LLM Co-Pilot for ESG prediction explanations."""
+"""SORA.Earth - Co-Pilot for ESG prediction explanations with smart templates."""
 import os
 import logging
 from typing import Optional
 
 log = logging.getLogger(__name__)
 
-# HuggingFace Inference API for Co-Pilot explanations. Override the model via
-# HF_MODEL_URL if needed; auth uses HF_API_TOKEN from the environment.
-HF_MODEL_URL = os.getenv(
-    "HF_MODEL_URL",
-    "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3",
-)
-
-_COPILOT_SYSTEM = (
-    "You are SORA.earth Co-Pilot, an ESG investment analyst. You are given a "
-    "machine-learning success prediction for a sustainable project together with its "
-    "explainability drivers (SHAP values) and concrete project metrics. Write a concise, "
-    "natural-language executive summary for a decision-maker: explain what is driving the "
-    "prediction, reference the specific metrics and drivers you were given, and be specific "
-    "to THIS project — never generic boilerplate. Do not invent numbers that were not "
-    "provided. 2-4 sentences, professional and direct."
-)
+# Smart template-based explanations (replaces HuggingFace LLM)
+from app.services.copilot_templates import generate_smart_explanation
 
 
 def _hf_enabled() -> bool:
-    return bool(os.getenv("HF_API_TOKEN"))
+    """Legacy check - always False now (HuggingFace removed)."""
+    return False
 
 
 def _hf_headers() -> dict:
-    return {"Authorization": f"Bearer {os.environ.get('HF_API_TOKEN')}"}
-
-
-def _mistral_prompt(base, features, project, probability) -> str:
-    """Wrap the system + explanation prompt in Mistral instruct format."""
-    return f"<s>[INST] {_COPILOT_SYSTEM}\n\n{_explanation_prompt(base, features, project, probability)} [/INST]"
-
-
-def _fmt_drivers(items) -> str:
-    lines = []
-    for d in items or []:
-        label = d.get("feature_label") or d.get("feature") or "?"
-        sv = d.get("shap_value")
-        if sv is not None:
-            lines.append(f"- {label}: SHAP {float(sv):+.4f} ({d.get('direction', '')})".rstrip())
-        elif d.get("note"):
-            lines.append(f"- {label}: {d['note']}")
-        else:
-            lines.append(f"- {label}")
-    return "\n".join(lines) or "- (none identified)"
-
-
-def _explanation_prompt(base, features, project, probability) -> str:
-    """Build the user prompt from real project data + SHAP drivers."""
-    features = features or {}
-    drivers = base.get("key_drivers", {}) if isinstance(base, dict) else {}
-    proj = project or {}
-    name = proj.get("project_name") or proj.get("name") or "this ESG project"
-    risks = base.get("risks", []) if isinstance(base, dict) else []
-    return "\n".join([
-        f"Project: {name}",
-        f"Predicted success probability: {probability:.0%}",
-        f"Verdict: {base['verdict']['label']} (model confidence: {base['confidence']})",
-        "",
-        "Project metrics:",
-        f"- Budget: {features.get('budget', 'n/a')} USD",
-        f"- CO2 reduction: {features.get('co2_reduction', 'n/a')} t/yr",
-        f"- Social impact score: {features.get('social_impact', 'n/a')}",
-        f"- Duration: {features.get('duration_months', 'n/a')} months",
-        f"- CO2 per dollar: {features.get('co2_per_dollar', 'n/a')}",
-        "",
-        "Positive drivers (increase success probability):",
-        _fmt_drivers(drivers.get("positive")),
-        "",
-        "Negative drivers (decrease success probability):",
-        _fmt_drivers(drivers.get("negative")),
-        "",
-        "Identified risks:",
-        "\n".join(f"- {r}" for r in risks) or "- (none)",
-        "",
-        "Write the executive summary now.",
-    ])
-
-
-def _generate_explanation_hf(base, features, project, probability, max_new_tokens=500) -> str:
-    """Synchronous HuggingFace Inference API call — returns a unique executive summary."""
-    import requests
-    prompt = _mistral_prompt(base, features, project, probability)
-    response = requests.post(
-        HF_MODEL_URL,
-        headers=_hf_headers(),
-        json={"inputs": prompt, "parameters": {"max_new_tokens": max_new_tokens, "return_full_text": False}},
-        timeout=60,
-    )
-    response.raise_for_status()
-    data = response.json()
-    if isinstance(data, list) and data:
-        return str(data[0].get("generated_text", "")).strip()
-    if isinstance(data, dict):
-        if data.get("error"):
-            raise RuntimeError(str(data["error"]))
-        return str(data.get("generated_text", "")).strip()
-    return ""
+    """Legacy function - not used anymore."""
+    return {}
 
 
 def stream_explanation_hf(base, features, project, probability, max_new_tokens=500):
-    """Synchronous generator yielding text pieces from the HuggingFace streaming API.
+    """Legacy function for HuggingFace streaming - now returns template-based text.
 
-    Iterate this via a threadpool (starlette.iterate_in_threadpool) from async code —
-    requests is blocking. Falls back to a single-shot yield if the endpoint doesn't
-    stream SSE tokens.
+    Kept for backwards compatibility with streaming endpoint.
     """
-    import json as _json
-    import requests
-    prompt = _mistral_prompt(base, features, project, probability)
-    response = requests.post(
-        HF_MODEL_URL,
-        headers=_hf_headers(),
-        json={"inputs": prompt, "parameters": {"max_new_tokens": max_new_tokens, "return_full_text": False}, "stream": True},
-        stream=True,
-        timeout=60,
-    )
-    response.raise_for_status()
-    streamed_any = False
-    for raw in response.iter_lines(decode_unicode=True):
-        if not raw:
-            continue
-        line = raw[len("data:"):].strip() if raw.startswith("data:") else raw.strip()
-        if not line or line == "[DONE]":
-            continue
-        try:
-            obj = _json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(obj, dict) and obj.get("error"):
-            raise RuntimeError(str(obj["error"]))
-        # TGI streaming shape: {"token": {"text": "..."}, "generated_text": null}
-        piece = ""
-        if isinstance(obj, dict):
-            tok = obj.get("token")
-            if isinstance(tok, dict):
-                piece = tok.get("text", "")
-            elif obj.get("generated_text"):
-                piece = obj["generated_text"]
-        if piece:
-            streamed_any = True
-            yield piece
-    if not streamed_any:
-        # Endpoint didn't stream (returned a full response) — fall back to one-shot.
-        text = _generate_explanation_hf(base, features, project, probability, max_new_tokens)
-        if text:
-            yield text
+    # Generate smart explanation and yield it word-by-word for streaming effect
+    try:
+        smart_explanation = generate_smart_explanation(
+            probability=probability,
+            features=features,
+            shap_values=None
+        )
+        summary = smart_explanation.get("executive_summary", "")
+        if summary:
+            # Yield word by word for streaming effect
+            for word in summary.split(" "):
+                yield word + " "
+    except Exception as e:
+        log.warning("Smart template streaming failed: %s", e)
+        yield f"[Co-Pilot template generation failed: {e}]"
 
 FEATURE_RU = {
     "budget": "budget",
@@ -245,44 +134,41 @@ def _risks(features, drivers):
 
 
 def explain_prediction(probability, features, shap_values=None, project=None, model_version="v5", enrich=True):
-    """Build the structured explanation scaffold, then (unless enrich=False) generate a
-    natural-language executive summary via the HuggingFace Inference API. Pass enrich=False to
-    return only the deterministic structure — used by the streaming endpoint, which streams
-    the summary live instead of pre-computing it."""
+    """Build structured explanation using smart template-based system.
+
+    The new system uses a scenario matrix (probability level × top negative factor)
+    to generate contextually appropriate explanations without requiring an LLM.
+    """
     verdict = _verdict(probability)
     confidence = _confidence(probability)
     drivers = _drivers_from_shap(shap_values) if shap_values else _drivers_from_features(features)
-    risks = _risks(features, drivers)
-    recommendation = _recommendation(verdict["level"], confidence)
 
     response = {
         "verdict": verdict,
         "probability": round(probability, 4),
         "confidence": confidence,
         "key_drivers": drivers,
-        "risks": risks,
-        "recommendation": recommendation,
         "model_version": model_version,
-        "explanation_mode": "template",
+        "explanation_mode": "smart_template",
     }
 
     if not enrich:
         return response
 
-    if _hf_enabled():
-        try:
-            response["executive_summary"] = _generate_explanation_hf(response, features, project, probability)
-            response["explanation_mode"] = "huggingface"
-            response["llm_model"] = HF_MODEL_URL
-        except Exception as e:
-            log.warning("HuggingFace explanation failed: %s", e)
-            response["llm_error"] = str(e)
-    elif os.getenv("OPENAI_API_KEY"):
-        try:
-            response = _enrich_with_gpt(response, features, project)
-            response["explanation_mode"] = "gpt"
-        except Exception as e:
-            response["llm_error"] = str(e)
+    # Generate smart template-based explanation
+    try:
+        smart_explanation = generate_smart_explanation(
+            probability=probability,
+            features=features,
+            shap_values=shap_values
+        )
+        response.update(smart_explanation)
+    except Exception as e:
+        log.warning("Smart template generation failed: %s", e)
+        # Fallback to legacy simple template
+        response["risks"] = _risks(features, drivers)
+        response["recommendation"] = _recommendation(verdict["level"], confidence)
+        response["executive_summary"] = f"Project shows {verdict['label'].lower()} with {confidence} model confidence."
 
     return response
 
@@ -326,18 +212,22 @@ def _enrich_with_gpt(base, features, project):
 
 
 def health():
-    if _hf_enabled():
-        mode = "huggingface"
-    elif os.getenv("OPENAI_API_KEY"):
-        mode = "gpt"
-    else:
-        mode = "template"
+    """Health check for Co-Pilot service."""
+    mode = "smart_template"
+    if os.getenv("OPENAI_API_KEY"):
+        mode = "smart_template_with_gpt_fallback"
+
     return {
         "ok": True,
-        "llm_enabled": _hf_enabled() or bool(os.getenv("OPENAI_API_KEY")),
+        "llm_enabled": False,  # No LLM required anymore
         "explanation_mode": mode,
-        "llm_model": HF_MODEL_URL if _hf_enabled() else None,
+        "llm_model": None,  # Template-based, no LLM
         "supported_features": list(FEATURE_RU.keys()),
+        "scenario_matrix": {
+            "probability_levels": ["LOW", "MODERATE", "HIGH"],
+            "negative_factors": ["budget", "duration_months", "co2_reduction", "social_impact", "efficiency_score", "country_gdp_per_capita"],
+            "total_scenarios": 18,  # 3 levels × 6 factors
+        }
     }
 
 
