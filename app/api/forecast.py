@@ -1,39 +1,178 @@
-from fastapi import APIRouter, Query
+"""Time series forecasting API with model caching and async execution."""
+
+import asyncio
+import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from functools import partial
+
 import numpy as np
 import pandas as pd
+import logging
+from fastapi import APIRouter, Query, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import List
 
+from app.schemas import ForecastResponse, ForecastPoint, HistoryPoint, ForecastCacheStats
+from app.services.forecasting import ModelRegistry, forecast_cache
+
+log = logging.getLogger(__name__)
 router = APIRouter(tags=["forecast"])
 
-@router.get("/forecast")
-def forecast(horizon: int = Query(30, ge=1, le=180),
-             metric: str = Query("score", pattern="^(score|prob)$")):
-    from app.main import get_db_sync
-    from app.database import Evaluation
+_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="forecast")
 
+
+def _get_db():
+    from app.main import get_db_sync
     db = get_db_sync()
     try:
-        rows = db.query(Evaluation).order_by(Evaluation.created_at.asc()).all()
+        yield db
     finally:
         db.close()
 
-    if not rows:
-        return {"history": [], "forecast": [], "model": "linear-trend", "metric": metric}
 
-    recs = [{
-        "ds": pd.to_datetime(str(r.created_at)[:19]),
-        "y": float(r.total_score if metric == "score" else r.success_probability),
-    } for r in rows]
+def _query_time_series(db: Session, metric: str) -> pd.DataFrame:
+    """Query evaluation history and build a time series DataFrame."""
+    from app.database import Evaluation
+
+    rows = db.query(Evaluation).order_by(Evaluation.created_at.asc()).all()
+    if not rows:
+        return pd.DataFrame(columns=["ds", "y"])
+
+    if metric == "score":
+        recs = [{"ds": pd.to_datetime(str(r.created_at)[:19]), "y": float(r.total_score)}
+                for r in rows if r.total_score is not None]
+    elif metric == "co2_reduction":
+        recs = [{"ds": pd.to_datetime(str(r.created_at)[:19]), "y": float(r.co2_reduction)}
+                for r in rows if r.co2_reduction is not None]
+    else:
+        recs = [{"ds": pd.to_datetime(str(r.created_at)[:19]), "y": float(r.success_probability)}
+                for r in rows if r.success_probability is not None]
+
     df = pd.DataFrame(recs).dropna()
-    # aggregate to daily mean
+    if df.empty:
+        return df
+
+    # Aggregate to daily mean and smooth
     df = df.set_index("ds").resample("D")["y"].mean().dropna().reset_index()
     df["y"] = df["y"].rolling(7, min_periods=1, center=True).mean()
+    return df
+
+
+def _fit_and_predict(model_name: str, metric: str, df: pd.DataFrame, horizon: int, country: str = None):
+    """Fit model (with cache check) and predict. Runs in thread pool."""
+    # Check cache first
+    cached = forecast_cache.get_fitted_model(model_name, metric, df)
+    if cached:
+        return cached.predict(horizon)
+
+    # Cache miss — fit fresh model
+    forecaster = ModelRegistry.get(model_name)
+    if forecaster is None:
+        raise ValueError(f"Unknown model: {model_name}")
+
+    forecaster.fit(df, target_col="y", country=country)
+    forecast_cache.store_fitted_model(model_name, metric, df, forecaster)
+    return forecaster.predict(horizon)
+
+
+@router.get("/forecast", response_model=ForecastResponse)
+async def forecast(
+    horizon: int = Query(30, ge=1, le=180, description="Days ahead to forecast"),
+    metric: str = Query("score", pattern="^(score|prob|co2_reduction)$", description="Target metric"),
+    model: str = Query("ensemble", pattern="^(ensemble|prophet|lstm|linear)$", description="Model to use"),
+    country: str = Query(None, min_length=2, max_length=10, description="Country/region code for external regressors"),
+    db: Session = Depends(_get_db)
+):
+    """Time series forecast with production-grade models.
+
+    Fallback chain: Ensemble -> Prophet -> LinearTrend (never fails).
+    Models are cached for 5 minutes to avoid retraining on repeated requests.
+    """
+    df = _query_time_series(db, metric)
+
+    if df.empty:
+        return ForecastResponse(history=[], forecast=[], model="linear-trend", metric=metric)
+
+    history = [HistoryPoint(ds=str(d.date()), y=round(float(v), 3))
+               for d, v in zip(df["ds"], df["y"])]
 
     if len(df) < 3:
-        return {"history": [{"ds": str(d.date()), "y": round(v, 3)}
-                            for d, v in zip(df["ds"], df["y"])],
-                "forecast": [], "model": "linear-trend", "metric": metric}
+        return ForecastResponse(history=history, forecast=[], model="linear-trend", metric=metric)
 
+    # Try production models with async execution
+    if model != "linear":
+        fallback_chain = [model]
+        if model != "prophet":
+            fallback_chain.append("prophet")
+
+        for m in fallback_chain:
+            try:
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    _executor, partial(_fit_and_predict, m, metric, df, horizon, country)
+                )
+
+                forecast_pts = [
+                    ForecastPoint(ds=d, yhat=round(y, 3), yhat_lower=round(yl, 3), yhat_upper=round(yu, 3))
+                    for d, y, yl, yu in zip(result.dates, result.yhat, result.yhat_lower, result.yhat_upper)
+                ]
+
+                response = ForecastResponse(
+                    history=history,
+                    forecast=forecast_pts,
+                    model=result.model_name,
+                    metric=metric,
+                    confidence=result.confidence,
+                    metadata=result.metadata
+                )
+
+                # Store forecast in history
+                _store_forecast_history(
+                    db=db,
+                    metric=metric,
+                    model=result.model_name,
+                    horizon=horizon,
+                    country=country,
+                    forecast=forecast_pts,
+                    confidence=result.confidence,
+                    metadata=result.metadata
+                )
+
+                return response
+            except Exception as e:
+                log.warning(f"{m} failed: {e}, trying next in fallback chain")
+
+    # Fallback: Linear trend
+    return _linear_forecast(df, horizon, metric, history)
+
+
+@router.delete("/forecast/cache", response_model=ForecastCacheStats)
+async def invalidate_forecast_cache(model_name: str = Query(None)):
+    """Invalidate forecast model cache (all or specific model)."""
+    invalidated = forecast_cache.invalidate(model_name)
+    return ForecastCacheStats(cache_size=forecast_cache.size, invalidated=invalidated)
+
+
+@router.get("/forecast/cache", response_model=ForecastCacheStats)
+async def get_forecast_cache_stats():
+    """Get forecast cache statistics."""
+    return ForecastCacheStats(cache_size=forecast_cache.size)
+
+
+@router.post("/forecast/pretrain")
+async def trigger_pretrain():
+    """Manually trigger forecast model pre-training (admin)."""
+    loop = asyncio.get_event_loop()
+    from app.scheduler import scheduled_pretrain_forecast_models
+    result = await loop.run_in_executor(_executor, scheduled_pretrain_forecast_models)
+    return result
+
+
+def _linear_forecast(
+    df: pd.DataFrame, horizon: int, metric: str, history: list[HistoryPoint]
+) -> ForecastResponse:
+    """Fallback linear trend forecaster."""
     t0 = df["ds"].min()
     x = (df["ds"] - t0).dt.days.to_numpy(dtype=float)
     y = df["y"].to_numpy(dtype=float)
@@ -47,21 +186,246 @@ def forecast(horizon: int = Query(30, ge=1, le=180),
     last_day = int(x.max())
     fut_x = np.arange(last_day + 1, last_day + 1 + horizon, dtype=float)
     yhat = fit(fut_x)
+
     lo, hi = (0.0, 100.0) if metric == "score" else (0.0, 1.0)
 
-    forecast_pts = [{
-        "ds": str((t0 + timedelta(days=int(fx))).date()),
-        "yhat": round(float(np.clip(v, lo, hi)), 3),
-        "yhat_lower": round(float(np.clip(v - ci, lo, hi)), 3),
-        "yhat_upper": round(float(np.clip(v + ci, lo, hi)), 3),
-    } for fx, v in zip(fut_x, yhat)]
+    forecast_pts = [
+        ForecastPoint(
+            ds=str((t0 + timedelta(days=int(fx))).date()),
+            yhat=round(float(np.clip(v, lo, hi)), 3),
+            yhat_lower=round(float(np.clip(v - ci, lo, hi)), 3),
+            yhat_upper=round(float(np.clip(v + ci, lo, hi)), 3),
+        )
+        for fx, v in zip(fut_x, yhat)
+    ]
+
+    return ForecastResponse(
+        history=history,
+        forecast=forecast_pts,
+        model="LinearTrend",
+        metric=metric,
+        confidence="low",
+        metadata={"slope_per_day": round(float(coeffs[0]), 5), "ci95": round(ci, 3)}
+    )
+
+
+def _store_forecast_history(
+    db: Session,
+    metric: str,
+    model: str,
+    horizon: int,
+    country: str,
+    forecast: List[ForecastPoint],
+    confidence: str,
+    metadata: dict
+):
+    """Store forecast in database for historical tracking."""
+    from app.database import ForecastHistory
+
+    try:
+        forecast_json = json.dumps([
+            {"ds": pt.ds, "yhat": pt.yhat, "yhat_lower": pt.yhat_lower, "yhat_upper": pt.yhat_upper}
+            for pt in forecast
+        ])
+        metadata_json = json.dumps(metadata) if metadata else None
+
+        record = ForecastHistory(
+            metric=metric,
+            model=model,
+            horizon=horizon,
+            country=country,
+            forecast_json=forecast_json,
+            confidence=confidence,
+            metadata_json=metadata_json
+        )
+        db.add(record)
+        db.commit()
+        log.info(f"Stored forecast history: metric={metric}, model={model}, horizon={horizon}")
+    except Exception as e:
+        log.error(f"Failed to store forecast history: {e}")
+        db.rollback()
+
+
+@router.get("/forecast/history")
+async def get_forecast_history(
+    metric: str = Query(None, description="Filter by metric (score, prob, co2_reduction)"),
+    model: str = Query(None, description="Filter by model name"),
+    limit: int = Query(50, ge=1, le=500, description="Max records to return"),
+    db: Session = Depends(_get_db)
+):
+    """Get historical forecast records.
+
+    Returns past forecasts with metadata for analysis and comparison.
+    """
+    from app.database import ForecastHistory
+
+    query = db.query(ForecastHistory).order_by(ForecastHistory.created_at.desc())
+
+    if metric:
+        query = query.filter(ForecastHistory.metric == metric)
+    if model:
+        query = query.filter(ForecastHistory.model == model)
+
+    records = query.limit(limit).all()
+
+    return [
+        {
+            "id": r.id,
+            "created_at": r.created_at.isoformat(),
+            "metric": r.metric,
+            "model": r.model,
+            "horizon": r.horizon,
+            "country": r.country,
+            "forecast": json.loads(r.forecast_json),
+            "confidence": r.confidence,
+            "metadata": json.loads(r.metadata_json) if r.metadata_json else None
+        }
+        for r in records
+    ]
+
+
+@router.get("/forecast/metrics/performance")
+def get_forecast_model_performance(
+    metric_name: str = Query(None, description="Filter by metric name (score, prob, co2_reduction)"),
+    model_type: str = Query(None, description="Filter by model type (ensemble, lstm, prophet, linear)"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records"),
+    db: Session = Depends(_get_db)
+):
+    """Get forecast model performance metrics history (MAE, RMSE, R², MAPE).
+
+    Returns historical performance metrics logged during automated retraining.
+    Useful for monitoring model degradation and training trends over time.
+
+    **Example Response:**
+    ```json
+    {
+        "total": 12,
+        "metrics": [
+            {
+                "id": 1,
+                "trained_at": "2026-07-12T18:00:00",
+                "metric_name": "score",
+                "model_type": "ensemble",
+                "train_samples": 24,
+                "test_samples": 6,
+                "mae": 2.45,
+                "rmse": 3.12,
+                "mape": 3.2,
+                "r2_score": 0.92,
+                "training_duration_sec": 12.5,
+                "trigger_source": "auto_scheduler",
+                "status": "success"
+            }
+        ]
+    }
+    ```
+    """
+    from app.database import ForecastModelMetrics
+
+    query = db.query(ForecastModelMetrics)
+
+    if metric_name:
+        query = query.filter(ForecastModelMetrics.metric_name == metric_name)
+
+    if model_type:
+        query = query.filter(ForecastModelMetrics.model_type == model_type)
+
+    query = query.order_by(ForecastModelMetrics.trained_at.desc())
+
+    total = query.count()
+    records = query.limit(limit).all()
 
     return {
-        "history": [{"ds": str(d.date()), "y": round(float(v), 3)}
-                    for d, v in zip(df["ds"], df["y"])],
-        "forecast": forecast_pts,
-        "model": "linear-trend",
-        "metric": metric,
-        "slope_per_day": round(float(coeffs[0]), 5),
-        "ci95": round(ci, 3),
+        "total": total,
+        "metrics": [
+            {
+                "id": r.id,
+                "trained_at": r.trained_at.isoformat(),
+                "metric_name": r.metric_name,
+                "model_type": r.model_type,
+                "train_samples": r.train_samples,
+                "test_samples": r.test_samples,
+                "mae": r.mae,
+                "rmse": r.rmse,
+                "mape": r.mape,
+                "r2_score": r.r2_score,
+                "training_duration_sec": r.training_duration_sec,
+                "trigger_source": r.trigger_source,
+                "status": r.status,
+                "error_message": r.error_message
+            }
+            for r in records
+        ]
     }
+
+
+@router.get("/forecast/metrics/latest")
+def get_latest_forecast_metrics(
+    db: Session = Depends(_get_db)
+):
+    """Get latest performance metrics for all forecast models.
+
+    Returns the most recent MAE/RMSE/R² for each metric/model combination.
+    Useful for dashboard displays and quick health checks.
+
+    **Example Response:**
+    ```json
+    {
+        "score": {
+            "ensemble": {
+                "trained_at": "2026-07-12T18:00:00",
+                "mae": 2.45,
+                "rmse": 3.12,
+                "r2_score": 0.92,
+                "train_samples": 24
+            }
+        },
+        "prob": { ... },
+        "co2_reduction": { ... }
+    }
+    ```
+    """
+    from app.database import ForecastModelMetrics
+    from sqlalchemy import func
+
+    # Get latest record for each metric_name + model_type combination
+    subquery = (
+        db.query(
+            ForecastModelMetrics.metric_name,
+            ForecastModelMetrics.model_type,
+            func.max(ForecastModelMetrics.trained_at).label('max_trained_at')
+        )
+        .filter(ForecastModelMetrics.status == 'success')
+        .group_by(ForecastModelMetrics.metric_name, ForecastModelMetrics.model_type)
+        .subquery()
+    )
+
+    records = (
+        db.query(ForecastModelMetrics)
+        .join(
+            subquery,
+            (ForecastModelMetrics.metric_name == subquery.c.metric_name) &
+            (ForecastModelMetrics.model_type == subquery.c.model_type) &
+            (ForecastModelMetrics.trained_at == subquery.c.max_trained_at)
+        )
+        .all()
+    )
+
+    # Group by metric_name, then model_type
+    result = {}
+    for r in records:
+        if r.metric_name not in result:
+            result[r.metric_name] = {}
+
+        result[r.metric_name][r.model_type] = {
+            "trained_at": r.trained_at.isoformat(),
+            "mae": r.mae,
+            "rmse": r.rmse,
+            "mape": r.mape,
+            "r2_score": r.r2_score,
+            "train_samples": r.train_samples,
+            "test_samples": r.test_samples,
+            "training_duration_sec": r.training_duration_sec
+        }
+
+    return result

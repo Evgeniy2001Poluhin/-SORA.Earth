@@ -17,7 +17,7 @@
         "social_score": 79.5,
         "economic_score": 85.0,
         "success_probability": 98.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 73.05,
         "risk_level": "Medium"
       }
     },
@@ -38,7 +38,7 @@
         "social_score": 69.6,
         "economic_score": 85.0,
         "success_probability": 87.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 84.44,
         "risk_level": "Low"
       }
     },
@@ -59,7 +59,7 @@
         "social_score": 59.7,
         "economic_score": 85.0,
         "success_probability": 81.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 92.94,
         "risk_level": "Low"
       }
     },
@@ -80,7 +80,7 @@
         "social_score": 89.5,
         "economic_score": 26.1,
         "success_probability": 1.0,
-        "success_probability_v2": 0.0,
+        "success_probability_v2": 5.93,
         "risk_level": "Medium"
       }
     },
@@ -101,7 +101,7 @@
         "social_score": 69.6,
         "economic_score": 85.0,
         "success_probability": 100.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 95.1,
         "risk_level": "Medium"
       }
     },
@@ -122,7 +122,7 @@
         "social_score": 89.5,
         "economic_score": 16.5,
         "success_probability": 30.0,
-        "success_probability_v2": 25.0,
+        "success_probability_v2": 8.44,
         "risk_level": "Medium"
       }
     },
@@ -143,7 +143,7 @@
         "social_score": 79.1,
         "economic_score": 85.0,
         "success_probability": 98.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 92.76,
         "risk_level": "Medium"
       }
     },
@@ -164,7 +164,7 @@
         "social_score": 69.2,
         "economic_score": 85.0,
         "success_probability": 87.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 94.09,
         "risk_level": "Medium"
       }
     },
@@ -185,7 +185,7 @@
         "social_score": 59.3,
         "economic_score": 85.0,
         "success_probability": 81.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 95.59,
         "risk_level": "Medium"
       }
     },
@@ -206,7 +206,7 @@
         "social_score": 89.0,
         "economic_score": 33.5,
         "success_probability": 1.0,
-        "success_probability_v2": 0.0,
+        "success_probability_v2": 23.96,
         "risk_level": "Medium"
       }
     },
@@ -227,7 +227,7 @@
         "social_score": 69.2,
         "economic_score": 85.0,
         "success_probability": 100.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 95.59,
         "risk_level": "Medium"
       }
     },
@@ -248,7 +248,7 @@
         "social_score": 89.0,
         "economic_score": 18.9,
         "success_probability": 30.0,
-        "success_probability_v2": 25.0,
+        "success_probability_v2": 32.78,
         "risk_level": "Medium"
       }
     },
@@ -269,7 +269,7 @@
         "social_score": 78.0,
         "economic_score": 85.0,
         "success_probability": 98.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 73.05,
         "risk_level": "Medium"
       }
     },
@@ -290,7 +290,7 @@
         "social_score": 68.3,
         "economic_score": 85.0,
         "success_probability": 87.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 84.44,
         "risk_level": "Low"
       }
     },
@@ -311,7 +311,7 @@
         "social_score": 58.5,
         "economic_score": 85.0,
         "success_probability": 81.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 92.94,
         "risk_level": "Medium"
       }
     },
@@ -332,7 +332,7 @@
         "social_score": 87.8,
         "economic_score": 37.6,
         "success_probability": 1.0,
-        "success_probability_v2": 0.0,
+        "success_probability_v2": 5.93,
         "risk_level": "Medium"
       }
     },
@@ -353,7 +353,7 @@
         "social_score": 68.3,
         "economic_score": 85.0,
         "success_probability": 100.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 95.1,
         "risk_level": "Medium"
       }
     },
@@ -374,7 +374,7 @@
         "social_score": 87.8,
         "economic_score": 20.4,
         "success_probability": 30.0,
-        "success_probability_v2": 25.0,
+        "success_probability_v2": 8.44,
         "risk_level": "Medium"
       }
     },
@@ -395,7 +395,7 @@
         "social_score": 77.4,
         "economic_score": 52.6,
         "success_probability": 98.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 92.76,
         "risk_level": "Medium"
       }
     },
@@ -416,7 +416,7 @@
         "social_score": 67.7,
         "economic_score": 85.0,
         "success_probability": 87.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 94.09,
         "risk_level": "Medium"
       }
     },
@@ -437,7 +437,7 @@
         "social_score": 58.0,
         "economic_score": 85.0,
         "success_probability": 81.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 95.59,
         "risk_level": "Medium"
       }
     },
@@ -458,7 +458,7 @@
         "social_score": 87.0,
         "economic_score": 17.2,
         "success_probability": 1.0,
-        "success_probability_v2": 0.0,
+        "success_probability_v2": 23.96,
         "risk_level": "Medium"
       }
     },
@@ -479,7 +479,7 @@
         "social_score": 67.7,
         "economic_score": 83.8,
         "success_probability": 100.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 95.59,
         "risk_level": "Medium"
       }
     },
@@ -500,7 +500,7 @@
         "social_score": 87.0,
         "economic_score": 13.7,
         "success_probability": 30.0,
-        "success_probability_v2": 25.0,
+        "success_probability_v2": 32.78,
         "risk_level": "High"
       }
     },
@@ -521,7 +521,7 @@
         "social_score": 54.3,
         "economic_score": 73.0,
         "success_probability": 98.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 81.91,
         "risk_level": "Medium"
       }
     },
@@ -542,7 +542,7 @@
         "social_score": 47.5,
         "economic_score": 73.0,
         "success_probability": 87.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 88.23,
         "risk_level": "Medium"
       }
     },
@@ -563,7 +563,7 @@
         "social_score": 40.7,
         "economic_score": 73.0,
         "success_probability": 81.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 93.93,
         "risk_level": "Medium"
       }
     },
@@ -584,7 +584,7 @@
         "social_score": 61.1,
         "economic_score": 72.5,
         "success_probability": 1.0,
-        "success_probability_v2": 0.0,
+        "success_probability_v2": 6.03,
         "risk_level": "Medium"
       }
     },
@@ -605,7 +605,7 @@
         "social_score": 47.5,
         "economic_score": 73.0,
         "success_probability": 100.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 95.32,
         "risk_level": "Medium"
       }
     },
@@ -626,7 +626,7 @@
         "social_score": 61.1,
         "economic_score": 67.2,
         "success_probability": 30.0,
-        "success_probability_v2": 25.0,
+        "success_probability_v2": 9.68,
         "risk_level": "Medium"
       }
     },
@@ -647,7 +647,7 @@
         "social_score": 48.1,
         "economic_score": 85.0,
         "success_probability": 98.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 67.43,
         "risk_level": "Medium"
       }
     },
@@ -668,7 +668,7 @@
         "social_score": 42.1,
         "economic_score": 85.0,
         "success_probability": 87.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 79.26,
         "risk_level": "Medium"
       }
     },
@@ -689,7 +689,7 @@
         "social_score": 36.1,
         "economic_score": 85.0,
         "success_probability": 81.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 94.17,
         "risk_level": "Medium"
       }
     },
@@ -710,7 +710,7 @@
         "social_score": 54.1,
         "economic_score": 85.0,
         "success_probability": 1.0,
-        "success_probability_v2": 0.0,
+        "success_probability_v2": 5.81,
         "risk_level": "Medium"
       }
     },
@@ -731,7 +731,7 @@
         "social_score": 42.1,
         "economic_score": 85.0,
         "success_probability": 100.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 95.16,
         "risk_level": "Medium"
       }
     },
@@ -752,7 +752,7 @@
         "social_score": 54.1,
         "economic_score": 82.1,
         "success_probability": 30.0,
-        "success_probability_v2": 25.0,
+        "success_probability_v2": 9.27,
         "risk_level": "Medium"
       }
     },
@@ -773,7 +773,7 @@
         "social_score": 70.3,
         "economic_score": 85.0,
         "success_probability": 98.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 84.48,
         "risk_level": "Medium"
       }
     },
@@ -794,7 +794,7 @@
         "social_score": 61.5,
         "economic_score": 85.0,
         "success_probability": 87.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 89.82,
         "risk_level": "Medium"
       }
     },
@@ -815,7 +815,7 @@
         "social_score": 52.7,
         "economic_score": 85.0,
         "success_probability": 81.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 93.75,
         "risk_level": "Medium"
       }
     },
@@ -836,7 +836,7 @@
         "social_score": 79.1,
         "economic_score": 71.8,
         "success_probability": 1.0,
-        "success_probability_v2": 0.0,
+        "success_probability_v2": 7.52,
         "risk_level": "Medium"
       }
     },
@@ -857,7 +857,7 @@
         "social_score": 61.5,
         "economic_score": 85.0,
         "success_probability": 100.0,
-        "success_probability_v2": 100.0,
+        "success_probability_v2": 95.17,
         "risk_level": "Medium"
       }
     },
@@ -878,9 +878,10 @@
         "social_score": 79.1,
         "economic_score": 38.6,
         "success_probability": 30.0,
-        "success_probability_v2": 25.0,
+        "success_probability_v2": 11.98,
         "risk_level": "Medium"
       }
     }
-  ]
+  ],
+  "skipped": []
 }

@@ -31,7 +31,7 @@ class BaseIngester(ABC):
         for attempt in range(1, self.max_retries + 1):
             try:
                 return list(await self.fetch())
-            except Except:
+            except Exception as e:
                 wait = 2 ** attempt
                 log.warning(f"[{self.name}] attempt {attempt} failed: {e}; wait {wait}s")
                 if attempt == self.max_retries:

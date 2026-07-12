@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Optional
+from typing import Optional, List, Dict, Any, Literal
 
 class ProjectInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -78,3 +78,31 @@ class ESGResult(BaseModel):
     region: Optional[str] = None
     lat: Optional[float] = None
     lon: Optional[float] = None
+
+
+# ─── Forecasting Schemas ───────────────────────────────────────────────────
+
+class ForecastPoint(BaseModel):
+    ds: str = Field(..., description="Date in YYYY-MM-DD format")
+    yhat: float = Field(..., description="Point prediction")
+    yhat_lower: float = Field(..., description="Lower 90% confidence bound")
+    yhat_upper: float = Field(..., description="Upper 90% confidence bound")
+
+
+class HistoryPoint(BaseModel):
+    ds: str
+    y: float
+
+
+class ForecastResponse(BaseModel):
+    history: List[HistoryPoint]
+    forecast: List[ForecastPoint]
+    model: str
+    metric: str
+    confidence: Optional[Literal["high", "medium", "low"]] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ForecastCacheStats(BaseModel):
+    cache_size: int
+    invalidated: Optional[int] = None

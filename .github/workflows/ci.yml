@@ -1,35 +1,125 @@
 name: CI
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  backend-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
           cache: pip
-      - run: pip install -r requirements.txt
-      - run: pip install pytest pytest-cov pytest-timeout
-      - name: Run tests
-        run: python -m pytest tests/ -v --tb=short
-      - name: Generate sample PDFs
+
+      - name: Install dependencies
         run: |
-          python -c "
-          from fastapi.testclient import TestClient
-          from app.main import app
-          c = TestClient(app)
-          payload = {'name':'Solar Farm','budget':300000,'co2_reduction':500,'social_impact':8,'duration_months':24,'category':'Solar','region':'ES'}
-          for lang in ['en','ru']:
-              r = c.post(f'/api/v1/reports/compliance.pdf?lang={lang}', json=payload)
-              with open(f'sample_{lang}.pdf','wb') as f: f.write(r.content)
-              print(lang, len(r.content), 'bytes')
-          "
-      - uses: actions/upload-artifact@v4
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-timeout
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ \
+            --ignore=tests/test_api.py \
+            --ignore=tests/test_scoring_baseline.py \
+            -v --tb=short --timeout=60 \
+            --cov=app --cov-report=term-missing \
+            -q
+        env:
+          DATABASE_URL: "sqlite:///./test.db"
+          REDIS_URL: ""
+          SECRET_KEY: "ci-test-secret"
+          SORA_ADMIN_TOKEN: "ci-test-admin"
+
+      - name: Run forecasting tests
+        run: |
+          python -m pytest tests/test_forecasting_*.py \
+            -v --timeout=60
+
+  frontend-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
-          name: sample-pdfs
-          path: sample_*.pdf
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type-check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [backend-tests, frontend-checks]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sora
+          POSTGRES_PASSWORD: sora2026
+          POSTGRES_DB: sora_earth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-timeout
+
+      - name: Run integration tests
+        run: |
+          python -m pytest tests/test_api.py \
+            -v --tb=short --timeout=60
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+          REDIS_URL: "redis://localhost:6379/0"
+          SECRET_KEY: "ci-test-secret"
+          SORA_ADMIN_TOKEN: "ci-test-admin"

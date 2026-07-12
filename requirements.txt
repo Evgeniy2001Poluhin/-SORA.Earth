@@ -1,6 +1,8 @@
 alembic==1.16.5
 annotated-doc==0.0.4
 annotated-types==0.7.0
+# Time series forecasting
+prophet>=1.1.5
 anyio==4.12.1
 appnope==0.1.4
 argon2-cffi==25.1.0
@@ -102,6 +104,7 @@ networkx==3.2.1
 notebook_shim==0.2.4
 numba==0.60.0
 numpy==1.26.4
+optuna==4.9.0
 orjson==3.11.5
 overrides==7.7.0
 packaging==24.2

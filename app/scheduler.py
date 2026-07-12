@@ -459,6 +459,173 @@ def scheduled_run_ingesters():
         lock.release()
 
 
+def scheduled_pretrain_forecast_models():
+    """Pre-train forecast models and warm the cache.
+
+    Runs every 6 hours. Trains ensemble model on the latest evaluation data
+    for each metric, storing fitted models in the forecast cache so API
+    requests get instant responses.
+
+    Also calculates and logs MAE/RMSE metrics to database for monitoring.
+    """
+    from app.locks import RedisLock
+    lock = RedisLock(key="sora:lock:forecast_pretrain", timeout=300)
+    if not lock.acquire():
+        logger.warning("Forecast pretrain skipped: lock held")
+        return {"status": "skipped"}
+    try:
+        import pandas as pd
+        import numpy as np
+        from app.database import SessionLocal, Evaluation, ForecastModelMetrics
+        from app.services.forecasting import ModelRegistry, forecast_cache
+        from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+        from datetime import datetime
+
+        db = SessionLocal()
+        try:
+            rows = db.query(Evaluation).order_by(Evaluation.created_at.asc()).all()
+        finally:
+            db.close()
+
+        if not rows or len(rows) < 10:
+            logger.info("Forecast pretrain: insufficient data (%d rows)", len(rows) if rows else 0)
+            return {"status": "skipped", "reason": "insufficient_data"}
+
+        metrics_trained = []
+        for metric_name, extractor in [
+            ("score", lambda r: r.total_score),
+            ("prob", lambda r: r.success_probability),
+            ("co2_reduction", lambda r: r.co2_reduction),
+        ]:
+            recs = [{"ds": pd.to_datetime(str(r.created_at)[:19]), "y": float(extractor(r))}
+                    for r in rows if extractor(r) is not None]
+            df = pd.DataFrame(recs).dropna()
+            if len(df) < 5:
+                continue
+
+            df = df.set_index("ds").resample("D")["y"].mean().dropna().reset_index()
+            df["y"] = df["y"].rolling(7, min_periods=1, center=True).mean()
+
+            if len(df) < 3:
+                continue
+
+            try:
+                start_time = time.time()
+
+                # Split data for validation (80/20 train/test)
+                train_size = int(len(df) * 0.8)
+                train_df = df.iloc[:train_size]
+                test_df = df.iloc[train_size:]
+
+                # Train on full dataset for production
+                forecaster = ModelRegistry.get("ensemble")
+                forecaster.fit(df, target_col="y")
+
+                # Calculate metrics on test set if we have enough data
+                mae_val, rmse_val, r2_val, mape_val = None, None, None, None
+                if len(test_df) >= 3:
+                    # Predict on test set
+                    test_predictions = []
+                    for idx, row in test_df.iterrows():
+                        # Use train data up to this point for prediction
+                        hist_df = df[df['ds'] < row['ds']]
+                        if len(hist_df) >= 3:
+                            temp_forecaster = ModelRegistry.get("ensemble")
+                            temp_forecaster.fit(hist_df, target_col="y")
+                            pred = temp_forecaster.predict(horizon=1)
+                            if pred and len(pred) > 0:
+                                test_predictions.append(pred[0]['yhat'])
+                            else:
+                                test_predictions.append(np.nan)
+
+                    # Calculate metrics if we have predictions
+                    if len(test_predictions) == len(test_df) and not all(np.isnan(test_predictions)):
+                        y_true = test_df['y'].values
+                        y_pred = np.array(test_predictions)
+
+                        # Remove NaN predictions
+                        valid_mask = ~np.isnan(y_pred)
+                        y_true_clean = y_true[valid_mask]
+                        y_pred_clean = y_pred[valid_mask]
+
+                        if len(y_true_clean) > 0:
+                            mae_val = mean_absolute_error(y_true_clean, y_pred_clean)
+                            rmse_val = np.sqrt(mean_squared_error(y_true_clean, y_pred_clean))
+                            r2_val = r2_score(y_true_clean, y_pred_clean)
+
+                            # MAPE (avoid division by zero)
+                            non_zero_mask = y_true_clean != 0
+                            if non_zero_mask.sum() > 0:
+                                mape_val = np.mean(np.abs((y_true_clean[non_zero_mask] - y_pred_clean[non_zero_mask]) / y_true_clean[non_zero_mask])) * 100
+
+                training_duration = time.time() - start_time
+
+                # Store in cache
+                forecast_cache.store_fitted_model("ensemble", metric_name, df, forecaster, ttl=21600)
+
+                # Log metrics to database
+                db = SessionLocal()
+                try:
+                    metric_log = ForecastModelMetrics(
+                        trained_at=datetime.utcnow(),
+                        metric_name=metric_name,
+                        model_type="ensemble",
+                        train_samples=len(train_df) if len(test_df) >= 3 else len(df),
+                        test_samples=len(test_df) if len(test_df) >= 3 else None,
+                        mae=float(mae_val) if mae_val is not None else None,
+                        rmse=float(rmse_val) if rmse_val is not None else None,
+                        mape=float(mape_val) if mape_val is not None else None,
+                        r2_score=float(r2_val) if r2_val is not None else None,
+                        training_duration_sec=training_duration,
+                        trigger_source="auto_scheduler",
+                        status="success"
+                    )
+                    db.add(metric_log)
+                    db.commit()
+                finally:
+                    db.close()
+
+                metrics_trained.append(metric_name)
+                logger.info(
+                    "Forecast pretrain: ensemble/%s fitted (%d rows) - MAE=%.3f, RMSE=%.3f, R²=%.3f",
+                    metric_name, len(df),
+                    mae_val if mae_val is not None else -1,
+                    rmse_val if rmse_val is not None else -1,
+                    r2_val if r2_val is not None else -1
+                )
+            except Exception as e:
+                logger.warning("Forecast pretrain failed for %s: %s", metric_name, e)
+
+                # Log failure to database
+                try:
+                    db = SessionLocal()
+                    try:
+                        metric_log = ForecastModelMetrics(
+                            trained_at=datetime.utcnow(),
+                            metric_name=metric_name,
+                            model_type="ensemble",
+                            train_samples=len(df) if 'df' in locals() else 0,
+                            trigger_source="auto_scheduler",
+                            status="failed",
+                            error_message=str(e)[:500]
+                        )
+                        db.add(metric_log)
+                        db.commit()
+                    finally:
+                        db.close()
+                except Exception:
+                    pass  # Don't fail if logging fails
+
+        result = {"status": "ok", "metrics_trained": metrics_trained}
+        logger.info("Forecast pretrain complete: %s", result)
+        return result
+    except Exception as e:
+        logger.exception("Forecast pretrain failed: %s", e)
+        return {"status": "error", "error": str(e)}
+    finally:
+        lock.release()
+
+
 def init_scheduler():
     if not should_run_scheduler():
         logger.info("RUN_SCHEDULER is false, scheduler will not be started in this process")
@@ -504,6 +671,14 @@ def init_scheduler():
         IntervalTrigger(hours=24),
         id="auto_run_ingesters",
         name="Run all ingesters every 24h",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        scheduled_pretrain_forecast_models,
+        IntervalTrigger(hours=6),
+        id="auto_pretrain_forecast",
+        name="Pre-train forecast models every 6h",
         replace_existing=True,
     )
 

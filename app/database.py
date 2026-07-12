@@ -131,6 +131,41 @@ class BatchResultDB(Base):
     trigger_source = Column(String(50), nullable=False, default="manual")
 
 
+class ForecastHistory(Base):
+    __tablename__ = "forecast_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    metric = Column(String(50), nullable=False, index=True)
+    model = Column(String(50), nullable=False, index=True)
+    horizon = Column(Integer, nullable=False)
+    country = Column(String(10), nullable=True, index=True)
+    forecast_json = Column(Text, nullable=False)  # JSON array of ForecastPoint objects
+    confidence = Column(String(10), nullable=True)
+    metadata_json = Column(Text, nullable=True)  # Additional model metadata
+
+
+class ForecastModelMetrics(Base):
+    """Tracks forecast model performance metrics (MAE, RMSE) over time."""
+    __tablename__ = "forecast_model_metrics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    trained_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    metric_name = Column(String(50), nullable=False, index=True)  # 'score', 'prob', 'co2_reduction'
+    model_type = Column(String(50), nullable=False, index=True)  # 'ensemble', 'lstm', 'prophet', 'linear'
+    train_samples = Column(Integer, nullable=False)  # Number of training samples
+    test_samples = Column(Integer, nullable=True)  # Number of test samples (if validation performed)
+    mae = Column(Float, nullable=True)  # Mean Absolute Error
+    rmse = Column(Float, nullable=True)  # Root Mean Squared Error
+    mape = Column(Float, nullable=True)  # Mean Absolute Percentage Error
+    r2_score = Column(Float, nullable=True)  # R² coefficient of determination
+    training_duration_sec = Column(Float, nullable=True)  # Training time in seconds
+    trigger_source = Column(String(50), default="auto_scheduler", index=True)  # 'auto_scheduler', 'manual', 'api'
+    status = Column(String(50), nullable=False, default="success", index=True)  # 'success', 'failed', 'skipped'
+    error_message = Column(Text, nullable=True)  # Error details if failed
+    metadata_json = Column(Text, nullable=True)  # Additional metadata (hyperparameters, etc.)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine, checkfirst=True)
 

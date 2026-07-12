@@ -215,7 +215,7 @@ def shap_explain(project: Project):
     raw = shap_values[1][0].tolist() if isinstance(shap_values, list) else shap_values[0].tolist()
     vals = [float(v[1]) if isinstance(v, (list, tuple)) else float(v) for v in raw]
     feature_names = list(feats.columns)
-    return {"features": feature_names, "shap_values": vals}
+    return {"feature_names": feature_names, "shap_values": vals}
 
 
 @router.get("/predictions/history")
