@@ -533,10 +533,11 @@ def scheduled_pretrain_forecast_models():
                             temp_forecaster = ModelRegistry.get("ensemble")
                             temp_forecaster.fit(hist_df, target_col="y")
                             pred = temp_forecaster.predict(horizon=1)
-                            # pred is a ForecastResult object, access .forecast attribute
-                            if pred and hasattr(pred, 'forecast') and len(pred.forecast) > 0:
-                                test_predictions.append(pred.forecast[0]['yhat'])
+                            # pred is a ForecastResult object with .yhat list attribute
+                            if pred and hasattr(pred, 'yhat') and len(pred.yhat) > 0:
+                                test_predictions.append(pred.yhat[0])
                             elif pred and isinstance(pred, list) and len(pred) > 0:
+                                # Fallback for old-style list response
                                 test_predictions.append(pred[0]['yhat'])
                             else:
                                 test_predictions.append(np.nan)
