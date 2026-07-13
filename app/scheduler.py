@@ -492,20 +492,11 @@ def scheduled_pretrain_forecast_models():
             return {"status": "skipped", "reason": "insufficient_data"}
 
         metrics_trained = []
-        for metric_name, extractor in [
-            ("score", lambda r: r.total_score),
-            ("prob", lambda r: r.success_probability),
-            ("co2_reduction", lambda r: r.co2_reduction),
-        ]:
-            recs = [{"ds": pd.to_datetime(str(r.created_at)[:19]), "y": float(extractor(r))}
-                    for r in rows if extractor(r) is not None]
-            df = pd.DataFrame(recs).dropna()
-            if len(df) < 5:
-                continue
+        # Use centralized data loader with interpolation and synthetic extension
+        from app.services.forecasting.data_loader import load_time_series
 
-            df = df.set_index("ds").resample("D")["y"].mean().dropna().reset_index()
-            df["y"] = df["y"].rolling(7, min_periods=1, center=True).mean()
-
+        for metric_name in ["score", "prob", "co2_reduction"]:
+            df = load_time_series(db, metric_name)
             if len(df) < 3:
                 continue
 
