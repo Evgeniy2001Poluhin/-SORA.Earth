@@ -128,11 +128,16 @@ async def forecast(
                     min_ci_width = 10.0  # Minimum CI width for CO2 (±5 tons)
 
                 forecast_pts = []
+                clipped_count = 0
                 for d, y, yl, yu in zip(result.dates, result.yhat, result.yhat_lower, result.yhat_upper):
                     # Clip to valid range
                     y_clipped = max(lo, min(hi, y))
                     yl_clipped = max(lo, min(hi, yl))
                     yu_clipped = max(lo, min(hi, yu))
+
+                    # Track if significant clipping occurred
+                    if abs(y - y_clipped) > 0.01 or abs(yu - yu_clipped) > 0.01 or abs(yl - yl_clipped) > 0.01:
+                        clipped_count += 1
 
                     # Ensure minimum CI width for interpretability
                     ci_width = yu_clipped - yl_clipped
@@ -151,12 +156,18 @@ async def forecast(
                         )
                     )
 
+                # Downgrade confidence if significant clipping occurred
+                adjusted_confidence = result.confidence
+                if clipped_count > len(forecast_pts) * 0.3:  # >30% of points clipped
+                    adjusted_confidence = "low"
+                    log.warning(f"Downgraded confidence to 'low': {clipped_count}/{len(forecast_pts)} points clipped beyond valid range")
+
                 response = ForecastResponse(
                     history=history,
                     forecast=forecast_pts,
                     model=result.model_name,
                     metric=metric,
-                    confidence=result.confidence,
+                    confidence=adjusted_confidence,
                     metadata=result.metadata
                 )
 

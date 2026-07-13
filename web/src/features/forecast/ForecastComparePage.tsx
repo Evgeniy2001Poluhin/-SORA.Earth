@@ -88,16 +88,26 @@ export default function ForecastComparePage() {
       combinedData.push({ ds: h.ds, actual: h.y });
     });
 
-    // Forecasts from each model
+    // Collect all unique forecast dates from all models
+    const allForecastDates = new Set<string>();
+    queries.forEach(q => {
+      q.data?.forecast.forEach(f => allForecastDates.add(f.ds));
+    });
+
+    // Create rows for all forecast dates
+    Array.from(allForecastDates).sort().forEach(ds => {
+      combinedData.push({ ds });
+    });
+
+    // Populate forecasts by matching dates (not indices!)
     queries.forEach((q, idx) => {
       const model = MODELS[idx];
-      q.data?.forecast.forEach((f, i) => {
-        if (!combinedData[queries[0].data!.history.length + i]) {
-          combinedData[queries[0].data!.history.length + i] = { ds: f.ds };
+      q.data?.forecast.forEach(f => {
+        const row = combinedData.find(r => r.ds === f.ds);
+        if (row) {
+          row[`${model}_yhat`] = f.yhat;
+          row[`${model}_band`] = [f.yhat_lower, f.yhat_upper];
         }
-        const row = combinedData[queries[0].data!.history.length + i];
-        row[`${model}_yhat`] = f.yhat;
-        row[`${model}_band`] = [f.yhat_lower, f.yhat_upper];
       });
     });
   }
