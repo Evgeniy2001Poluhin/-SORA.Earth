@@ -635,66 +635,29 @@ def scheduled_pretrain_forecast_models():
 def refresh_forecast_metrics():
     """Keep Prometheus forecast metrics fresh for Grafana dashboard.
 
-    Calls LSTM status endpoint to update:
-    - forecast_lstm_active (0 or 1)
-    - forecast_sample_count (current samples)
-    - forecast_lstm_weight (ensemble weight)
-    - forecast_prophet_weight (ensemble weight)
-    - forecast_days_until_lstm (countdown)
+    Calls LSTM status endpoint via HTTP to trigger metric export in backend container.
+    This ensures metrics are available in the backend's /metrics/prometheus endpoint.
     """
-    from app.database import SessionLocal
+    import requests
 
-    db = SessionLocal()
     try:
-        # Import here to avoid circular dependency
-        from app.api.forecast import _query_time_series
-        from app.services.forecasting.ensemble import LSTM_MIN_ROWS, EnsembleForecaster
-        from app.metrics import metrics
-        from datetime import datetime, timedelta
-        from sqlalchemy import text
+        # Call backend LSTM status endpoint (triggers metric export)
+        # Use internal Docker network hostname
+        response = requests.get("http://backend:8000/api/v1/lstm-status", timeout=10)
 
-        # Query sample count
-        result = db.execute(text("""
-            SELECT
-                COUNT(DISTINCT created_at::date) as unique_days,
-                MAX(created_at)::date as last_date
-            FROM evaluations
-            WHERE created_at >= NOW() - INTERVAL '60 days'
-        """)).fetchone()
-
-        unique_days = result[0] if result else 0
-
-        # Load time series data
-        df = _query_time_series(db, "score")
-        n_samples = len(df)
-
-        # Check LSTM activation
-        lstm_active = n_samples >= LSTM_MIN_ROWS
-        days_remaining = max(0, LSTM_MIN_ROWS - n_samples) if not lstm_active else 0
-
-        # Get ensemble weights
-        weights = {"lstm": 0.0, "prophet": 0.9, "linear": 0.1}
-        if n_samples >= 3:
-            try:
-                ensemble = EnsembleForecaster()
-                ensemble.fit(df, "y")
-                weights = ensemble.weights
-            except Exception as e:
-                logger.warning(f"Could not fit ensemble for metrics: {e}")
-
-        # Export to Prometheus
-        metrics.set_gauge("forecast_lstm_active", 1.0 if lstm_active else 0.0)
-        metrics.set_gauge("forecast_sample_count", n_samples)
-        metrics.set_gauge("forecast_lstm_weight", weights.get("lstm", 0.0))
-        metrics.set_gauge("forecast_prophet_weight", weights.get("prophet", 0.0))
-        metrics.set_gauge("forecast_days_until_lstm", days_remaining)
-
-        logger.info(f"Forecast metrics refreshed: samples={n_samples}, lstm_active={lstm_active}, days_remaining={days_remaining}")
+        if response.status_code == 200:
+            data = response.json()
+            logger.info(
+                f"Forecast metrics refreshed via backend: "
+                f"samples={data.get('samples')}, "
+                f"lstm_active={data.get('active')}, "
+                f"days_remaining={data.get('days_remaining')}"
+            )
+        else:
+            logger.warning(f"LSTM status endpoint returned {response.status_code}")
 
     except Exception as e:
         logger.error(f"Failed to refresh forecast metrics: {e}", exc_info=True)
-    finally:
-        db.close()
 
 
 def init_scheduler():
