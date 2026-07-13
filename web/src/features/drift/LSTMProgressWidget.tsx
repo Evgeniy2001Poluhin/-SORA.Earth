@@ -15,7 +15,7 @@ type LSTMStatus = {
 export function LSTMProgressWidget() {
   const { data, isLoading } = useQuery({
     queryKey: ["lstm-status"],
-    queryFn: () => api<LSTMStatus>("/forecasting/lstm-status"),
+    queryFn: () => api<LSTMStatus>("/lstm-status"),
     refetchInterval: 30000, // Refresh every 30s
   });
 
