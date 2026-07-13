@@ -454,3 +454,84 @@ def get_latest_forecast_metrics(
         }
 
     return result
+
+
+@router.get("/lstm-status")
+async def get_lstm_status(db: Session = Depends(_get_db)):
+    """Get LSTM activation status and progress towards threshold.
+
+    Returns:
+        - active: bool - Whether LSTM is currently active in ensemble
+        - samples: int - Current number of unique days in dataset
+        - threshold: int - Required samples for LSTM activation
+        - days_remaining: int - Days until threshold (if not active)
+        - next_activation_date: str - Estimated date when LSTM will activate
+        - models_active: list - Currently active models in ensemble
+        - weights: dict - Current ensemble weights
+    """
+    from datetime import datetime, timedelta
+    from app.services.forecasting.ensemble import LSTM_MIN_ROWS
+
+    # Query current data volume
+    from sqlalchemy import text
+    result = db.execute(text("""
+        SELECT
+            COUNT(DISTINCT created_at::date) as unique_days,
+            MAX(created_at)::date as last_date
+        FROM evaluations
+        WHERE created_at >= NOW() - INTERVAL '60 days'
+    """)).fetchone()
+
+    unique_days = result[0] if result else 0
+    last_date = result[1] if result else datetime.now().date()
+
+    # Load data and check ensemble behavior
+    try:
+        df = _query_time_series(db, "score")
+        n_samples = len(df)
+
+        # Check if LSTM would activate with current data
+        lstm_active = n_samples >= LSTM_MIN_ROWS
+
+        # Calculate days remaining
+        days_remaining = max(0, LSTM_MIN_ROWS - n_samples) if not lstm_active else 0
+
+        # Estimate activation date (assuming 1 eval/day growth rate)
+        next_activation_date = None
+        if not lstm_active and days_remaining > 0:
+            next_activation_date = (last_date + timedelta(days=days_remaining)).isoformat()
+
+        # Get current ensemble weights by simulating fit
+        from app.services.forecasting import ModelRegistry
+        ensemble = ModelRegistry.get_model("ensemble")
+        try:
+            ensemble.fit(df, "y")
+            weights = ensemble.weights
+            models_active = [name for name, model in ensemble._active_models]
+        except Exception as e:
+            log.warning(f"Could not fit ensemble for status check: {e}")
+            weights = {"lstm": 0.0, "prophet": 0.9, "linear": 0.1}
+            models_active = ["Prophet", "LinearTrend"]
+
+        return {
+            "active": lstm_active,
+            "samples": n_samples,
+            "threshold": LSTM_MIN_ROWS,
+            "days_remaining": days_remaining,
+            "next_activation_date": next_activation_date,
+            "models_active": models_active,
+            "weights": weights,
+            "unique_days_raw": unique_days,
+            "last_evaluation_date": last_date.isoformat(),
+            "message": "LSTM active" if lstm_active else f"Need {days_remaining} more days of data"
+        }
+    except Exception as e:
+        log.error(f"LSTM status check failed: {e}", exc_info=True)
+        return {
+            "active": False,
+            "samples": unique_days,
+            "threshold": LSTM_MIN_ROWS,
+            "days_remaining": max(0, LSTM_MIN_ROWS - unique_days),
+            "error": str(e),
+            "message": "Error checking LSTM status"
+        }
