@@ -64,6 +64,7 @@ def _fit_and_predict(model_name: str, metric: str, df: pd.DataFrame, horizon: in
     # Check cache first
     cached = forecast_cache.get_fitted_model(model_name, metric, df)
     if cached:
+        log.debug(f"Using cached {model_name} model")
         return cached.predict(horizon)
 
     # Cache miss — fit fresh model
@@ -71,8 +72,10 @@ def _fit_and_predict(model_name: str, metric: str, df: pd.DataFrame, horizon: in
     if forecaster is None:
         raise ValueError(f"Unknown model: {model_name}")
 
+    log.info(f"Fitting {model_name} on {len(df)} samples for metric={metric}")
     forecaster.fit(df, target_col="y", country=country)
     forecast_cache.store_fitted_model(model_name, metric, df, forecaster)
+    log.info(f"{model_name} fit complete, predicting horizon={horizon}")
     return forecaster.predict(horizon)
 
 
@@ -171,7 +174,7 @@ async def forecast(
 
                 return response
             except Exception as e:
-                log.warning(f"{m} failed: {e}, trying next in fallback chain")
+                log.warning(f"{m} failed: {e}, trying next in fallback chain", exc_info=True)
 
     # Fallback: Linear trend
     return _linear_forecast(df, horizon, metric, history)
