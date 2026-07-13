@@ -18,6 +18,7 @@ const StatusPage      = lazy(() => import("../features/status/StatusPage"));
 const CompliancePage  = lazy(() => import("@/features/compliance/CompliancePage"));
 const MapPage         = lazy(() => import("@/features/map/MapPage"));
 const ForecastPage    = lazy(() => import("@/features/forecast/ForecastPage"));
+const ForecastComparePage = lazy(() => import("@/features/forecast/ForecastComparePage"));
 const RegionDetail    = lazy(() => import("../features/region/RegionDetail"));
 
 function PageLoader() {
@@ -51,6 +52,7 @@ export function App() {
             <Route path="/compliance" element={<CompliancePage />} />
             <Route path="/map" element={<MapPage />} />
             <Route path="/forecast" element={<ForecastPage />} />
+            <Route path="/forecast/compare" element={<ForecastComparePage />} />
             <Route path="/webhooks" element={<WebhooksPage />} />
             <Route path="/status" element={<StatusPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

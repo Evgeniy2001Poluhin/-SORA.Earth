@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import {
   ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, ReferenceLine,
@@ -101,7 +102,8 @@ export default function ForecastPage() {
       </header>
 
       {/* Controls */}
-      <div style={{ padding: "0 24px", display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ padding: "0 24px", display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
         {/* Horizon */}
         <div style={{ display: "flex", gap: 4 }}>
           {[14, 30, 60, 90, 180].map(h => (
@@ -144,6 +146,25 @@ export default function ForecastPage() {
             </button>
           ))}
         </div>
+        </div>
+
+        {/* Compare Models Link */}
+        <Link to="/forecast/compare" style={{
+          padding: "6px 14px",
+          borderRadius: 6,
+          background: "#16a34a",
+          color: "white",
+          textDecoration: "none",
+          fontSize: 12,
+          fontWeight: 600,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          border: "none",
+        }}>
+          <span>⚡</span>
+          Compare Models
+        </Link>
       </div>
 
       {/* Chart */}
