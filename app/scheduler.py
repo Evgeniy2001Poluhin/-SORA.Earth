@@ -723,14 +723,14 @@ def init_scheduler():
 
     scheduler.add_job(
         refresh_forecast_metrics,
-        IntervalTrigger(minutes=5),
+        IntervalTrigger(seconds=30),
         id="refresh_forecast_metrics",
-        name="Refresh Prometheus forecast metrics every 5min",
+        name="Refresh Prometheus forecast metrics every 30s",
         replace_existing=True,
     )
     from datetime import datetime, timezone
     _now = datetime.now(timezone.utc)
-    for _jid in ("auto_run_ingesters", "auto_refresh_external_data"):
+    for _jid in ("auto_run_ingesters", "auto_refresh_external_data", "refresh_forecast_metrics"):
         try:
             scheduler.modify_job(_jid, next_run_time=_now)
             logger.info("Job %s scheduled to run immediately on startup", _jid)
