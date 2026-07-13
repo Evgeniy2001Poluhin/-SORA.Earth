@@ -614,6 +614,19 @@ async def startup_event():
         except Exception:
             pass
     asyncio.create_task(_bg_refresh())
+
+    # Pre-train forecast models in background
+    async def _pretrain_forecast():
+        """Pre-train all forecast models to eliminate cold-start delay."""
+        try:
+            logger.info("Starting forecast model pre-training...")
+            from app.scheduler import scheduled_pretrain_forecast_models
+            await asyncio.to_thread(scheduled_pretrain_forecast_models)
+            logger.info("Forecast pre-training complete")
+        except Exception as e:
+            logger.warning(f"Forecast pre-training failed: {e}", exc_info=True)
+    asyncio.create_task(_pretrain_forecast())
+
     global _executor
     _executor = ProcessPoolExecutor(max_workers=4)
     app.state.executor = _executor
