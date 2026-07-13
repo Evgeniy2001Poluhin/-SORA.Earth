@@ -113,10 +113,40 @@ async def forecast(
                     _executor, partial(_fit_and_predict, m, metric, df, horizon, country)
                 )
 
-                forecast_pts = [
-                    ForecastPoint(ds=d, yhat=round(y, 3), yhat_lower=round(yl, 3), yhat_upper=round(yu, 3))
-                    for d, y, yl, yu in zip(result.dates, result.yhat, result.yhat_lower, result.yhat_upper)
-                ]
+                # Clip predictions to valid range based on metric type
+                if metric == "score":
+                    lo, hi = 0.0, 100.0
+                    min_ci_width = 5.0  # Minimum CI width for score (±2.5 points)
+                elif metric == "prob":
+                    lo, hi = 0.0, 1.0
+                    min_ci_width = 0.1  # Minimum CI width for probability (±5%)
+                else:  # co2_reduction
+                    lo, hi = 0.0, float('inf')
+                    min_ci_width = 10.0  # Minimum CI width for CO2 (±5 tons)
+
+                forecast_pts = []
+                for d, y, yl, yu in zip(result.dates, result.yhat, result.yhat_lower, result.yhat_upper):
+                    # Clip to valid range
+                    y_clipped = max(lo, min(hi, y))
+                    yl_clipped = max(lo, min(hi, yl))
+                    yu_clipped = max(lo, min(hi, yu))
+
+                    # Ensure minimum CI width for interpretability
+                    ci_width = yu_clipped - yl_clipped
+                    if ci_width < min_ci_width:
+                        # Expand interval symmetrically around point prediction
+                        expand = (min_ci_width - ci_width) / 2
+                        yl_clipped = max(lo, yl_clipped - expand)
+                        yu_clipped = min(hi, yu_clipped + expand)
+
+                    forecast_pts.append(
+                        ForecastPoint(
+                            ds=d,
+                            yhat=round(y_clipped, 3),
+                            yhat_lower=round(yl_clipped, 3),
+                            yhat_upper=round(yu_clipped, 3)
+                        )
+                    )
 
                 response = ForecastResponse(
                     history=history,
