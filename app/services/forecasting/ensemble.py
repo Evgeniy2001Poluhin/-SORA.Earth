@@ -12,11 +12,10 @@ from .linear import LinearTrendForecaster
 
 log = logging.getLogger(__name__)
 
-LSTM_MIN_ROWS = 25  # Pragmatic minimum: allows LSTM on real interpolated data
-# With 28 days typical (12 unique → 28 after interpolation), LSTM gets:
-# - 28 days input → feature engineering drops ~15-18 rows (lags/rolling)
-# - Leaves ~10 sequences for training (minimal but viable)
-# Better: low-confidence LSTM (0.2 weight) than no LSTM at all
+LSTM_MIN_ROWS = 35  # MUST match lstm.py MIN_ROWS = seq_length(30) + 5
+# Critical: This threshold must align with LSTMForecaster.fit() internal check
+# to avoid "LSTM fit failed" exceptions in production
+# With current data (~28 days after interpolation), LSTM will be skipped
 
 
 class EnsembleForecaster(BaseForecastModel):
@@ -106,7 +105,8 @@ class EnsembleForecaster(BaseForecastModel):
             except Exception as e:
                 log.warning(f"LSTM fit failed: {e}. Redistributing weight to Prophet")
                 self.weights["lstm"] = 0.0
-                self.weights["prophet"] = min(1.0, self.weights["prophet"] + 0.7)
+                # Don't let Prophet reach 1.0 - keep Linear as safety net
+                self.weights["prophet"] = min(0.9, self.weights["prophet"] + 0.7)
                 self._normalize_weights()
 
         # Fit Prophet
