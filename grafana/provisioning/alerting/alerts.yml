@@ -100,3 +100,102 @@ groups:
           severity: critical
         annotations:
           summary: "SORA app target is DOWN"
+
+      - uid: sora-forecast-mae-high
+        title: Forecast MAE Degradation (Score)
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 21600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sora_forecast_mae_current{metric="score", model="ensemble"} > 10
+              intervalMs: 1000
+              maxDataPoints: 43200
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Forecast MAE for Score metric exceeded 10 (high error rate)"
+
+      - uid: sora-forecast-mae-spike
+        title: Forecast MAE Spike (20% increase)
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 21600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: |
+                (sora_forecast_mae_current{metric="score"} - sora_forecast_mae_current{metric="score"} offset 6h)
+                / (sora_forecast_mae_current{metric="score"} offset 6h) > 0.20
+              intervalMs: 1000
+              maxDataPoints: 43200
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Forecast MAE increased by >20% compared to 6 hours ago"
+
+      - uid: sora-forecast-rmse-high
+        title: Forecast RMSE Degradation (Score)
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 21600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sora_forecast_rmse_current{metric="score", model="ensemble"} > 15
+              intervalMs: 1000
+              maxDataPoints: 43200
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Forecast RMSE for Score metric exceeded 15 (high error variance)"
+
+      - uid: sora-forecast-rmse-spike
+        title: Forecast RMSE Spike (2× baseline)
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 86400
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: |
+                sora_forecast_rmse_current{metric="score"}
+                > 2 * avg_over_time(sora_forecast_rmse_current{metric="score"}[24h] offset 24h)
+              intervalMs: 1000
+              maxDataPoints: 43200
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Forecast RMSE spiked >2× the 24h baseline (possible data quality issue)"
+
+      - uid: sora-forecast-r2-negative
+        title: Forecast R² Negative (Score)
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 21600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sora_forecast_r2_current{metric="score", model="ensemble"} < 0
+              intervalMs: 1000
+              maxDataPoints: 43200
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Forecast R² is negative — model performs worse than baseline mean predictor"

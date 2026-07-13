@@ -24,6 +24,12 @@ sora_predictions_total  = Counter("sora_predictions_total",   "Predictions serve
 sora_model_auc          = Gauge("sora_model_auc",     "Current model AUC-ROC")
 sora_model_accuracy     = Gauge("sora_model_accuracy", "Current model accuracy")
 
+# ── Forecast model performance (updated after walk-forward validation) ──
+sora_forecast_mae       = Gauge("sora_forecast_mae_current",  "Current forecast MAE",  ["metric", "model"])
+sora_forecast_rmse      = Gauge("sora_forecast_rmse_current", "Current forecast RMSE", ["metric", "model"])
+sora_forecast_r2        = Gauge("sora_forecast_r2_current",   "Current forecast R²",   ["metric", "model"])
+sora_forecast_mape      = Gauge("sora_forecast_mape_current", "Current forecast MAPE (%)", ["metric", "model"])
+
 # ── App info ──
 sora_app_info           = Info("sora_app", "Application metadata")
 sora_app_info.info({"version": "2.0.0", "platform": "SORA.Earth"})

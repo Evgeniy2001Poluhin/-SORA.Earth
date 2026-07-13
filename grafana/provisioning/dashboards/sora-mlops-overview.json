@@ -94,6 +94,71 @@
       "gridPos": {"h": 5, "w": 10, "x": 14, "y": 24},
       "targets": [{"expr": "sora_model_auc", "legendFormat": "AUC", "refId": "A"}],
       "fieldConfig": {"defaults": {"min": 0, "max": 1, "unit": "percentunit", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "gradientMode": "scheme"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.7}, {"color": "green", "value": 0.85}]}, "color": {"mode": "thresholds"}}}
+    },
+    {"type": "row", "title": "Forecast Model Performance", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 29}, "collapsed": false},
+    {
+      "type": "gauge", "title": "Current Forecast MAE (Score)",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 30},
+      "targets": [{"expr": "sora_forecast_mae_current{metric=\"score\", model=\"ensemble\"}", "legendFormat": "MAE", "refId": "A"}],
+      "fieldConfig": {"defaults": {"min": 0, "max": 20, "unit": "none", "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 5}, {"color": "orange", "value": 10}, {"color": "red", "value": 15}]}}}
+    },
+    {
+      "type": "gauge", "title": "Current Forecast RMSE (Score)",
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 30},
+      "targets": [{"expr": "sora_forecast_rmse_current{metric=\"score\", model=\"ensemble\"}", "legendFormat": "RMSE", "refId": "A"}],
+      "fieldConfig": {"defaults": {"min": 0, "max": 25, "unit": "none", "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 7}, {"color": "orange", "value": 12}, {"color": "red", "value": 18}]}}}
+    },
+    {
+      "type": "gauge", "title": "Current Forecast R² (Score)",
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 30},
+      "targets": [{"expr": "sora_forecast_r2_current{metric=\"score\", model=\"ensemble\"}", "legendFormat": "R²", "refId": "A"}],
+      "fieldConfig": {"defaults": {"min": -1, "max": 1, "unit": "percentunit", "thresholds": {"steps": [{"color": "red", "value": null}, {"color": "orange", "value": 0}, {"color": "yellow", "value": 0.5}, {"color": "green", "value": 0.8}]}}}
+    },
+    {
+      "type": "stat", "title": "Current Forecast MAPE (Score)",
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 30},
+      "targets": [{"expr": "sora_forecast_mape_current{metric=\"score\", model=\"ensemble\"}", "legendFormat": "MAPE", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "percent", "decimals": 2, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 5}, {"color": "orange", "value": 10}, {"color": "red", "value": 20}]}}}
+    },
+    {
+      "type": "timeseries", "title": "Forecast MAE Over Time (All Metrics)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
+      "targets": [
+        {"expr": "sora_forecast_mae_current{metric=\"score\"}", "legendFormat": "Score MAE", "refId": "A"},
+        {"expr": "sora_forecast_mae_current{metric=\"prob\"} * 100", "legendFormat": "Prob MAE (×100)", "refId": "B"},
+        {"expr": "sora_forecast_mae_current{metric=\"co2_reduction\"}", "legendFormat": "CO2 MAE", "refId": "C"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "none", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "pointSize": 5}}}
+    },
+    {
+      "type": "timeseries", "title": "Forecast RMSE Over Time (All Metrics)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
+      "targets": [
+        {"expr": "sora_forecast_rmse_current{metric=\"score\"}", "legendFormat": "Score RMSE", "refId": "A"},
+        {"expr": "sora_forecast_rmse_current{metric=\"prob\"} * 100", "legendFormat": "Prob RMSE (×100)", "refId": "B"},
+        {"expr": "sora_forecast_rmse_current{metric=\"co2_reduction\"}", "legendFormat": "CO2 RMSE", "refId": "C"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "none", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "pointSize": 5}}}
+    },
+    {
+      "type": "table", "title": "Latest Forecast Metrics (All Models)",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 44},
+      "targets": [
+        {"expr": "sora_forecast_mae_current", "legendFormat": "{{metric}}/{{model}}", "refId": "A", "format": "table", "instant": true},
+        {"expr": "sora_forecast_rmse_current", "legendFormat": "{{metric}}/{{model}}", "refId": "B", "format": "table", "instant": true},
+        {"expr": "sora_forecast_r2_current", "legendFormat": "{{metric}}/{{model}}", "refId": "C", "format": "table", "instant": true},
+        {"expr": "sora_forecast_mape_current", "legendFormat": "{{metric}}/{{model}}", "refId": "D", "format": "table", "instant": true}
+      ],
+      "transformations": [
+        {"id": "merge"},
+        {"id": "organize", "options": {"excludeByName": {"Time": true}, "indexByName": {"metric": 0, "model": 1, "Value #A": 2, "Value #B": 3, "Value #C": 4, "Value #D": 5}, "renameByName": {"Value #A": "MAE", "Value #B": "RMSE", "Value #C": "R²", "Value #D": "MAPE (%)"}}}
+      ],
+      "fieldConfig": {"defaults": {"custom": {"align": "left", "displayMode": "auto"}}, "overrides": [
+        {"matcher": {"id": "byName", "options": "MAE"}, "properties": [{"id": "decimals", "value": 3}, {"id": "custom.displayMode", "value": "color-background"}, {"id": "thresholds", "value": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 5}, {"color": "red", "value": 10}]}}]},
+        {"matcher": {"id": "byName", "options": "RMSE"}, "properties": [{"id": "decimals", "value": 3}, {"id": "custom.displayMode", "value": "color-background"}, {"id": "thresholds", "value": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 7}, {"color": "red", "value": 12}]}}]},
+        {"matcher": {"id": "byName", "options": "R²"}, "properties": [{"id": "decimals", "value": 3}, {"id": "custom.displayMode", "value": "color-background"}, {"id": "thresholds", "value": {"steps": [{"color": "red", "value": null}, {"color": "orange", "value": 0}, {"color": "yellow", "value": 0.5}, {"color": "green", "value": 0.8}]}}]},
+        {"matcher": {"id": "byName", "options": "MAPE (%)"}, "properties": [{"id": "decimals", "value": 2}, {"id": "custom.displayMode", "value": "color-background"}, {"id": "thresholds", "value": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 5}, {"color": "red", "value": 10}]}}]}
+      ]}
     }
   ],
   "schemaVersion": 39,

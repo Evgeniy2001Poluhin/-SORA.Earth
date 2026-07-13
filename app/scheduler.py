@@ -589,6 +589,17 @@ def scheduled_pretrain_forecast_models():
                 finally:
                     db.close()
 
+                # Update Prometheus metrics
+                from app.prom_metrics import sora_forecast_mae, sora_forecast_rmse, sora_forecast_r2, sora_forecast_mape
+                if mae_val is not None:
+                    sora_forecast_mae.labels(metric=metric_name, model="ensemble").set(mae_val)
+                if rmse_val is not None:
+                    sora_forecast_rmse.labels(metric=metric_name, model="ensemble").set(rmse_val)
+                if r2_val is not None:
+                    sora_forecast_r2.labels(metric=metric_name, model="ensemble").set(r2_val)
+                if mape_val is not None:
+                    sora_forecast_mape.labels(metric=metric_name, model="ensemble").set(mape_val)
+
                 metrics_trained.append(metric_name)
                 logger.info(
                     "Forecast pretrain: ensemble/%s fitted (%d rows) - MAE=%.3f, RMSE=%.3f, R²=%.3f",
