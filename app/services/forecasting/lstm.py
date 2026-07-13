@@ -83,8 +83,11 @@ class LSTMForecaster(BaseForecastModel):
         """
         from sklearn.preprocessing import StandardScaler
 
-        if len(df) < self.seq_length + 10:
-            raise ValueError(f"Insufficient data: {len(df)} rows, need at least {self.seq_length + 10}")
+        # Reduced minimum from seq_length+10 (40) to seq_length+5 (35)
+        # Allows LSTM on ~28 days real interpolated data
+        MIN_ROWS = self.seq_length + 5
+        if len(df) < MIN_ROWS:
+            raise ValueError(f"Insufficient data: {len(df)} rows, need at least {MIN_ROWS}")
 
         # Feature engineering
         country = kwargs.get("country")
