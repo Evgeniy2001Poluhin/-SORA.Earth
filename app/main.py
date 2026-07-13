@@ -615,20 +615,16 @@ async def startup_event():
             pass
     asyncio.create_task(_bg_refresh())
 
-    # Pre-train forecast models in background (only on first worker to avoid lock contention)
+    # Pre-train forecast models in background
+    # Note: Redis lock in scheduled_pretrain_forecast_models prevents duplicate work
+    # Multiple workers will try, but only first succeeds - others skip silently
     async def _pretrain_forecast():
         """Pre-train all forecast models to eliminate cold-start delay."""
-        import os
-        # Skip if not primary worker (Gunicorn/Uvicorn sets WORKER_ID or checks via Redis)
-        worker_id = os.getenv("WORKER_ID", "0")
-        if worker_id != "0":
-            return  # Only worker 0 pre-trains
-
         try:
-            logger.info("Starting forecast model pre-training (worker 0)...")
             from app.scheduler import scheduled_pretrain_forecast_models
-            await asyncio.to_thread(scheduled_pretrain_forecast_models)
-            logger.info("Forecast pre-training complete")
+            result = await asyncio.to_thread(scheduled_pretrain_forecast_models)
+            if result.get("status") != "skipped":
+                logger.info("Forecast pre-training complete")
         except Exception as e:
             logger.warning(f"Forecast pre-training failed: {e}", exc_info=True)
     asyncio.create_task(_pretrain_forecast())

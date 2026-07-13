@@ -12,9 +12,11 @@ from .linear import LinearTrendForecaster
 
 log = logging.getLogger(__name__)
 
-LSTM_MIN_ROWS = 40  # Reduced from 70: seq_length(30) + 10 minimum samples
-# Note: With interpolated real data (27-28 days typical), this enables LSTM
-# without polluting training with synthetic random noise
+LSTM_MIN_ROWS = 25  # Pragmatic minimum: allows LSTM on real interpolated data
+# With 28 days typical (12 unique → 28 after interpolation), LSTM gets:
+# - 28 days input → feature engineering drops ~15-18 rows (lags/rolling)
+# - Leaves ~10 sequences for training (minimal but viable)
+# Better: low-confidence LSTM (0.2 weight) than no LSTM at all
 
 
 class EnsembleForecaster(BaseForecastModel):
