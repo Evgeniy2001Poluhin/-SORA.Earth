@@ -27,18 +27,18 @@ class FeatureEngineer:
         self.lookback = lookback_window
 
     def add_lags(self, df: pd.DataFrame, target_col: str, lags: List[int] = None) -> pd.DataFrame:
-        """Add lagged features (t-1, t-7, t-30).
+        """Add lagged features (t-1, t-7).
 
         Args:
             df: Input DataFrame with target column
             target_col: Name of target column
-            lags: List of lag periods (default: [1, 7, 30])
+            lags: List of lag periods (default: [1, 7])
 
         Returns:
             DataFrame with added lag columns
         """
         if lags is None:
-            lags = [1, 7, 30]
+            lags = [1, 7]
 
         df = df.copy()
         for lag in lags:
@@ -51,13 +51,13 @@ class FeatureEngineer:
         Args:
             df: Input DataFrame
             target_col: Target column name
-            windows: Window sizes (default: [7, 30])
+            windows: Window sizes (default: [7])
 
         Returns:
             DataFrame with rolling mean and std columns
         """
         if windows is None:
-            windows = [7, 30]
+            windows = [7]
 
         df = df.copy()
         for w in windows:

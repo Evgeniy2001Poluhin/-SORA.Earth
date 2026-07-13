@@ -56,7 +56,7 @@ class LSTMForecaster(BaseForecastModel):
     then compute percentiles over the ensemble of predictions.
     """
 
-    def __init__(self, seq_length: int = 30, hidden_size: int = 128,
+    def __init__(self, seq_length: int = 14, hidden_size: int = 128,
                  dropout: float = 0.2, mc_samples: int = 50):
         super().__init__("LSTM", "1.0")
         self.seq_length = seq_length

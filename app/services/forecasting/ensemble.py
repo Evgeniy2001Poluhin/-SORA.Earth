@@ -12,10 +12,10 @@ from .linear import LinearTrendForecaster
 
 log = logging.getLogger(__name__)
 
-LSTM_MIN_ROWS = 35  # MUST match lstm.py MIN_ROWS = seq_length(30) + 5
-# Critical: This threshold must align with LSTMForecaster.fit() internal check
-# to avoid "LSTM fit failed" exceptions in production
-# With current data (~28 days after interpolation), LSTM will be skipped
+LSTM_MIN_ROWS = 25  # MUST match lstm.py MIN_ROWS = seq_length(14) + 5 + lag(7)
+# With seq_length=14 + buffer=5 + max_lag=7 = 26, set conservatively to 25
+# Feature engineering drops ~max_lag rows (7 for t-7 lag), then need seq_length rows
+# With 60 days: dropna leaves ~53 rows → 53-14=39 sequences (viable)
 
 
 class EnsembleForecaster(BaseForecastModel):
@@ -32,7 +32,7 @@ class EnsembleForecaster(BaseForecastModel):
 
     def __init__(self):
         super().__init__("Ensemble", "1.0")
-        self.lstm = LSTMForecaster(seq_length=30, hidden_size=128, dropout=0.2, mc_samples=50)
+        self.lstm = LSTMForecaster(seq_length=14, hidden_size=128, dropout=0.2, mc_samples=50)
         self.prophet = ProphetForecaster()
         self.linear = LinearTrendForecaster()
         self.weights = {"lstm": 0.5, "prophet": 0.5}  # Initial default
