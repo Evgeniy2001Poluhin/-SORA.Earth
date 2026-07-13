@@ -306,9 +306,8 @@ export default function ForecastComparePage() {
                 </tr>
               </thead>
               <tbody>
-                {MODELS.map(model => {
+                {MODELS.filter(model => currentMetrics[model]).map(model => {
                   const m = currentMetrics[model];
-                  if (!m) return null;
                   return (
                     <tr key={model} style={{ borderTop: "1px solid #2a2e33" }}>
                       <td style={{
