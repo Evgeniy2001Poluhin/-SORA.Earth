@@ -83,9 +83,9 @@ class LSTMForecaster(BaseForecastModel):
         """
         from sklearn.preprocessing import StandardScaler
 
-        # Reduced minimum from seq_length+10 (40) to seq_length+5 (35)
-        # Allows LSTM on ~28 days real interpolated data
-        MIN_ROWS = self.seq_length + 5
+        # MIN_ROWS = seq_length + max_lag + buffer
+        # With seq_length=14, max_lag=14, buffer=5 → MIN_ROWS = 33
+        MIN_ROWS = self.seq_length + 14 + 5  # 33 total
         if len(df) < MIN_ROWS:
             raise ValueError(f"Insufficient data: {len(df)} rows, need at least {MIN_ROWS}")
 

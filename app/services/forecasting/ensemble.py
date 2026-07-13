@@ -12,10 +12,11 @@ from .linear import LinearTrendForecaster
 
 log = logging.getLogger(__name__)
 
-LSTM_MIN_ROWS = 25  # MUST match lstm.py MIN_ROWS = seq_length(14) + 5 + lag(7)
-# With seq_length=14 + buffer=5 + max_lag=7 = 26, set conservatively to 25
-# Feature engineering drops ~max_lag rows (7 for t-7 lag), then need seq_length rows
-# With 60 days: dropna leaves ~53 rows → 53-14=39 sequences (viable)
+LSTM_MIN_ROWS = 33  # seq_length(14) + max_lag(14) + buffer(5) = 33
+# Feature engineering drops ~14 rows (for t-14 lag via dropna)
+# Then need seq_length=14 rows for sequences
+# Math: 33 samples - 14 (dropna) = 19 rows, 19 - 14 (seq) = 5 sequences (minimum viable)
+# Currently: 13 unique days → ~28 after interpolation → below threshold (correct behavior)
 
 
 class EnsembleForecaster(BaseForecastModel):

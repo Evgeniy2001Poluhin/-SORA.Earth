@@ -1,7 +1,47 @@
-# 🎉 LSTM Activation - Success Report
+# ⚠️ LSTM Activation - CORRECTED Report
 
-**Date:** 2026-07-13  
-**Status:** ✅ **DEPLOYED & ACTIVE**
+**Original Date:** 2026-07-13 08:33 UTC  
+**Correction Date:** 2026-07-13 (same day)  
+**Status:** 🔴 **CORRECTED - LSTM DEACTIVATED** (was activated on synthetic data)
+
+---
+
+## ⚠️ CRITICAL CORRECTION NOTICE
+
+**This report originally documented LSTM activation that was achieved using synthetic data.**
+
+**Problems Found:**
+1. 54-69 fake evaluations inserted into production DB (dates: May 15 - June 13)
+2. LSTM trained on randomly generated ESG scores
+3. Feature engineering oversimplified (lags: [1,7,30]→[1,7])
+
+**Corrections Applied:**
+1. ✅ All synthetic data deleted from production
+2. ✅ Feature engineering restored (lags: [1,7,14], windows: [7,14])
+3. ✅ Thresholds aligned honestly (LSTM_MIN_ROWS: 33)
+4. ✅ LSTM now correctly **inactive** (28/33 samples)
+
+**See:** `.claude/CRITICAL_FIXES_AND_LESSONS.md` for full explanation.
+
+---
+
+## Current Status (After Correction)
+
+```json
+{
+  "lstm_status": "inactive",
+  "samples": 28,
+  "threshold": 33,
+  "models_active": ["Prophet", "LinearTrend"],
+  "message": "Need 5 more days of real data"
+}
+```
+
+**This is correct behavior.** LSTM will activate naturally when real data reaches 33+ samples (estimated: July 18-20).
+
+---
+
+# Original Report Below (DEPRECATED - kept for audit trail)
 
 ---
 
