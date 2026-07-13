@@ -502,12 +502,12 @@ async def get_lstm_status(db: Session = Depends(_get_db)):
             next_activation_date = (last_date + timedelta(days=days_remaining)).isoformat()
 
         # Get current ensemble weights by simulating fit
-        from app.services.forecasting import ModelRegistry
-        ensemble = ModelRegistry.get_model("ensemble")
+        from app.services.forecasting.ensemble import EnsembleForecaster
+        ensemble = EnsembleForecaster()
         try:
             ensemble.fit(df, "y")
             weights = ensemble.weights
-            models_active = [name for name, model in ensemble._active_models]
+            models_active = [name.title() for name, model in ensemble._active_models]
         except Exception as e:
             log.warning(f"Could not fit ensemble for status check: {e}")
             weights = {"lstm": 0.0, "prophet": 0.9, "linear": 0.1}
