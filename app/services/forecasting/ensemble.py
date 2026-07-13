@@ -12,7 +12,9 @@ from .linear import LinearTrendForecaster
 
 log = logging.getLogger(__name__)
 
-LSTM_MIN_ROWS = 70  # seq_length(30) + 10 training samples + 30 lost to lag features
+LSTM_MIN_ROWS = 40  # Reduced from 70: seq_length(30) + 10 minimum samples
+# Note: With interpolated real data (27-28 days typical), this enables LSTM
+# without polluting training with synthetic random noise
 
 
 class EnsembleForecaster(BaseForecastModel):
@@ -82,9 +84,12 @@ class EnsembleForecaster(BaseForecastModel):
         if n_samples >= 100:
             self.weights = {"lstm": 0.7, "prophet": 0.3, "linear": 0.0}
             log.info(f"Auto-weights (n={n_samples}): LSTM=0.7, Prophet=0.3")
+        elif n_samples >= 50 and not skip_lstm:
+            self.weights = {"lstm": 0.4, "prophet": 0.6, "linear": 0.0}
+            log.info(f"Auto-weights (n={n_samples}): LSTM=0.4, Prophet=0.6 (moderate sample)")
         elif not skip_lstm:
-            self.weights = {"lstm": 0.3, "prophet": 0.7, "linear": 0.0}
-            log.info(f"Auto-weights (n={n_samples}): LSTM=0.3, Prophet=0.7 (small sample)")
+            self.weights = {"lstm": 0.2, "prophet": 0.8, "linear": 0.0}
+            log.info(f"Auto-weights (n={n_samples}): LSTM=0.2, Prophet=0.8 (small sample, conservative)")
         else:
             self.weights = {"lstm": 0.0, "prophet": 0.9, "linear": 0.1}
             log.info(f"Auto-weights (n={n_samples}): skipping LSTM (need >={LSTM_MIN_ROWS}), Prophet=0.9")

@@ -615,11 +615,17 @@ async def startup_event():
             pass
     asyncio.create_task(_bg_refresh())
 
-    # Pre-train forecast models in background
+    # Pre-train forecast models in background (only on first worker to avoid lock contention)
     async def _pretrain_forecast():
         """Pre-train all forecast models to eliminate cold-start delay."""
+        import os
+        # Skip if not primary worker (Gunicorn/Uvicorn sets WORKER_ID or checks via Redis)
+        worker_id = os.getenv("WORKER_ID", "0")
+        if worker_id != "0":
+            return  # Only worker 0 pre-trains
+
         try:
-            logger.info("Starting forecast model pre-training...")
+            logger.info("Starting forecast model pre-training (worker 0)...")
             from app.scheduler import scheduled_pretrain_forecast_models
             await asyncio.to_thread(scheduled_pretrain_forecast_models)
             logger.info("Forecast pre-training complete")
