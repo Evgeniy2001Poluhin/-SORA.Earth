@@ -55,14 +55,49 @@ class ProphetForecaster(BaseForecastModel):
         # Ensure ds is datetime
         prophet_df["ds"] = pd.to_datetime(prophet_df["ds"])
 
-        # Initialize Prophet with reasonable defaults for ESG metrics
+        # Initialize Prophet optimized for ESG metrics
+        # ESG scores have monthly/quarterly reporting patterns
+        n_samples = len(prophet_df)
+
         self.model = Prophet(
-            yearly_seasonality=True,
-            weekly_seasonality=True,
-            daily_seasonality=False,
-            uncertainty_samples=1000,  # For robust confidence intervals
-            changepoint_prior_scale=0.05  # Conservative changepoint detection
+            # Seasonality: ESG reports often monthly/quarterly
+            yearly_seasonality=False if n_samples < 60 else True,  # Need 2+ years
+            weekly_seasonality=True if n_samples >= 14 else False,  # Need 2+ weeks
+            daily_seasonality=False,  # ESG doesn't have daily patterns
+
+            # Trend detection: ESG improves gradually, detect changes early
+            changepoint_prior_scale=0.1,  # More sensitive (was 0.05 conservative)
+            changepoint_range=0.9,  # Allow changepoints in last 10% too
+
+            # Uncertainty: wider samples for small datasets
+            uncertainty_samples=1000,
+            interval_width=0.8,  # 80% CI (we'll adjust to 90% later)
+
+            # Growth: ESG scores bounded [0, 100], use logistic if needed
+            growth='linear',  # Linear for now (could be 'logistic' with cap=100)
+
+            # Seasonality flexibility
+            seasonality_mode='additive',  # ESG changes are additive, not multiplicative
+            seasonality_prior_scale=10.0  # Strong seasonality signal
         )
+
+        # Add monthly seasonality (ESG reporting cycles)
+        if n_samples >= 30:  # Need at least 1 month of data
+            self.model.add_seasonality(
+                name='monthly',
+                period=30.5,
+                fourier_order=3,  # Low order for smooth monthly pattern
+                prior_scale=5.0
+            )
+
+        # Add quarterly seasonality (many ESG reports are quarterly)
+        if n_samples >= 90:  # Need at least 1 quarter
+            self.model.add_seasonality(
+                name='quarterly',
+                period=91.25,
+                fourier_order=4,
+                prior_scale=3.0
+            )
 
         # Suppress Prophet's verbose logging
         import logging as prophet_log

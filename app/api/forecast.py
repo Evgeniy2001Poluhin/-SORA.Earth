@@ -513,6 +513,14 @@ async def get_lstm_status(db: Session = Depends(_get_db)):
             weights = {"lstm": 0.0, "prophet": 0.9, "linear": 0.1}
             models_active = ["Prophet", "LinearTrend"]
 
+        # Export metrics to Prometheus
+        from app.metrics import metrics
+        metrics.set_gauge("forecast_lstm_active", 1.0 if lstm_active else 0.0)
+        metrics.set_gauge("forecast_sample_count", n_samples)
+        metrics.set_gauge("forecast_lstm_weight", weights.get("lstm", 0.0))
+        metrics.set_gauge("forecast_prophet_weight", weights.get("prophet", 0.0))
+        metrics.set_gauge("forecast_days_until_lstm", days_remaining)
+
         return {
             "active": lstm_active,
             "samples": n_samples,

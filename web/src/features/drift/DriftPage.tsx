@@ -2,8 +2,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { driftBaselineApi } from "@/api/endpoints/driftBaseline";
 import { DriftTimeline } from "./DriftTimeline";
+import { LSTMProgressWidget } from "./LSTMProgressWidget";
 import { api } from "@/api/client";
 import "./drift.css";
+import "./lstm-progress.css";
 
 type FeatureStat = {
   baseline_mean: number;
@@ -85,6 +87,9 @@ export function DriftPage() {
       <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 28 }}>
         Real-time KS-style drift detection across {Object.keys(d.features || {}).length} model features. Auto-refresh every 5s.
       </p>
+
+      {/* LSTM Progress Widget */}
+      <LSTMProgressWidget />
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 32 }}>
         <div className="kpi">

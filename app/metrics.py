@@ -6,6 +6,7 @@ class Metrics:
     def __init__(self):
         self.counters = defaultdict(int)
         self.histograms = defaultdict(list)
+        self.gauges = {}  # For forecasting metrics (sample count, weights, etc.)
         self.start_time = time.time()
 
     def inc(self, name: str, value: int = 1):
@@ -13,6 +14,10 @@ class Metrics:
 
     def observe(self, name: str, value: float):
         self.histograms[name].append(value)
+
+    def set_gauge(self, name: str, value: float):
+        """Set a gauge metric (for values that can go up/down like sample_count)."""
+        self.gauges[name] = value
 
     def summary(self):
         result = {"uptime_seconds": round(time.time() - self.start_time, 2), "counters": dict(self.counters)}
@@ -29,6 +34,10 @@ class Metrics:
         lines.append(f"uptime_seconds {round(time.time() - self.start_time, 2)}")
         for k, v in self.counters.items():
             lines.append(f"# HELP {k} Counter")
+            lines.append(f"{k} {v}")
+        for k, v in self.gauges.items():
+            lines.append(f"# HELP {k} Gauge")
+            lines.append(f"# TYPE {k} gauge")
             lines.append(f"{k} {v}")
         for name, values in self.histograms.items():
             if values:

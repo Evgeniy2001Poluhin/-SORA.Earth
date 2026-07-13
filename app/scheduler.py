@@ -632,6 +632,71 @@ def scheduled_pretrain_forecast_models():
         lock.release()
 
 
+def refresh_forecast_metrics():
+    """Keep Prometheus forecast metrics fresh for Grafana dashboard.
+
+    Calls LSTM status endpoint to update:
+    - forecast_lstm_active (0 or 1)
+    - forecast_sample_count (current samples)
+    - forecast_lstm_weight (ensemble weight)
+    - forecast_prophet_weight (ensemble weight)
+    - forecast_days_until_lstm (countdown)
+    """
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        # Import here to avoid circular dependency
+        from app.api.forecast import _query_time_series
+        from app.services.forecasting.ensemble import LSTM_MIN_ROWS, EnsembleForecaster
+        from app.metrics import metrics
+        from datetime import datetime, timedelta
+        from sqlalchemy import text
+
+        # Query sample count
+        result = db.execute(text("""
+            SELECT
+                COUNT(DISTINCT created_at::date) as unique_days,
+                MAX(created_at)::date as last_date
+            FROM evaluations
+            WHERE created_at >= NOW() - INTERVAL '60 days'
+        """)).fetchone()
+
+        unique_days = result[0] if result else 0
+
+        # Load time series data
+        df = _query_time_series(db, "score")
+        n_samples = len(df)
+
+        # Check LSTM activation
+        lstm_active = n_samples >= LSTM_MIN_ROWS
+        days_remaining = max(0, LSTM_MIN_ROWS - n_samples) if not lstm_active else 0
+
+        # Get ensemble weights
+        weights = {"lstm": 0.0, "prophet": 0.9, "linear": 0.1}
+        if n_samples >= 3:
+            try:
+                ensemble = EnsembleForecaster()
+                ensemble.fit(df, "y")
+                weights = ensemble.weights
+            except Exception as e:
+                logger.warning(f"Could not fit ensemble for metrics: {e}")
+
+        # Export to Prometheus
+        metrics.set_gauge("forecast_lstm_active", 1.0 if lstm_active else 0.0)
+        metrics.set_gauge("forecast_sample_count", n_samples)
+        metrics.set_gauge("forecast_lstm_weight", weights.get("lstm", 0.0))
+        metrics.set_gauge("forecast_prophet_weight", weights.get("prophet", 0.0))
+        metrics.set_gauge("forecast_days_until_lstm", days_remaining)
+
+        logger.info(f"Forecast metrics refreshed: samples={n_samples}, lstm_active={lstm_active}, days_remaining={days_remaining}")
+
+    except Exception as e:
+        logger.error(f"Failed to refresh forecast metrics: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
 def init_scheduler():
     if not should_run_scheduler():
         logger.info("RUN_SCHEDULER is false, scheduler will not be started in this process")
@@ -691,6 +756,14 @@ def init_scheduler():
     scheduler.add_job(
         lambda: __import__("app.services.status_service", fromlist=["record_health"]).record_health(),
         IntervalTrigger(minutes=5), id="health_ping", replace_existing=True,
+    )
+
+    scheduler.add_job(
+        refresh_forecast_metrics,
+        IntervalTrigger(minutes=5),
+        id="refresh_forecast_metrics",
+        name="Refresh Prometheus forecast metrics every 5min",
+        replace_existing=True,
     )
     from datetime import datetime, timezone
     _now = datetime.now(timezone.utc)
