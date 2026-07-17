@@ -122,3 +122,4 @@ models/*.json
 nginx.conf.bak
 certs/
 certbot/
+web/tsconfig.tsbuildinfo
