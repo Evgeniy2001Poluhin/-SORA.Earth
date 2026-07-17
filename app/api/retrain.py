@@ -143,7 +143,12 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
 
         X = df[feature_cols].values
         y = df["success"].values
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+        # Temporal split — no shuffling for time series data
+        split_idx = int(len(X) * 0.8)
+        X_train, y_train = X[:split_idx], y[:split_idx]
+        X_test, y_test = X[split_idx:], y[split_idx:]
+        logger.info("Temporal split: train=%d, test=%d", len(X_train), len(X_test))
 
         from sklearn.preprocessing import StandardScaler
         scaler = StandardScaler()
