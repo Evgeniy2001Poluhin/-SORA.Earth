@@ -1,6 +1,7 @@
 from datetime import datetime
 import os
 
+import sqlalchemy as sa
 from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, create_engine, func
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -234,3 +235,64 @@ class HealthPing(Base):
     ts = Column(DateTime, default=datetime.utcnow, index=True)
     component = Column(String(32), index=True)
     ok = Column(Boolean, default=True)
+
+
+class EnvironmentalObservation(Base):
+    """Environmental observation from external data sources.
+
+    Stores real-time and historical environmental measurements with full
+    provenance tracking. Designed for time-series analysis with point-in-time
+    correctness.
+
+    Requirements from ROADMAP_ENV_CRISIS_2026.md Phase 1.1:
+    - Unique constraint on (source, source_record_id) prevents duplicates
+    - UTC-aware timestamps for event_time, published_at, ingested_at
+    - Separate event time (when it happened) from publication and ingestion
+    - Quality score and validity flag for data quality pipeline
+    - Indexed for efficient time-series queries
+
+    Example indicators:
+    - pm25, pm10, no2, o3, so2, co (air quality)
+    - temperature, humidity, pressure, wind_speed (weather)
+    - precipitation, heat_index, aqi (derived metrics)
+    """
+    __tablename__ = "environmental_observations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Geographic location
+    region_id = Column(String(32), nullable=False, index=True)
+    country_code = Column(String(3), nullable=True, index=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+
+    # Measurement
+    indicator = Column(String(64), nullable=False, index=True)
+    value = Column(Float, nullable=True)
+    unit = Column(String(32), nullable=True)
+
+    # Provenance
+    source = Column(String(64), nullable=False, index=True)
+    source_record_id = Column(String(128), nullable=True)
+    source_revision = Column(String(64), nullable=True)
+
+    # Temporal tracking (all UTC-aware)
+    event_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    published_at = Column(DateTime(timezone=True), nullable=True)
+    ingested_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+
+    # Data quality
+    quality_score = Column(Float, nullable=True)  # 0-100 scale
+    is_valid = Column(Boolean, nullable=False, server_default=sa.text('true'), index=True)
+
+    # Metadata (JSON for flexible extension)
+    metadata_json = Column(Text, nullable=True)
+
+    # Audit trail
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+
+    # Indexes and constraints defined in Alembic migration:
+    # - UNIQUE (source, source_record_id) WHERE source_record_id IS NOT NULL
+    # - INDEX (region_id, indicator, event_time) for time-series queries
+    # - INDEX (source, ingested_at) for source health monitoring
