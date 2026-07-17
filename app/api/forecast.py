@@ -514,12 +514,14 @@ async def get_lstm_status(db: Session = Depends(_get_db)):
             models_active = ["Prophet", "LinearTrend"]
 
         # Export metrics to Prometheus
-        from app.metrics import metrics
-        metrics.set_gauge("forecast_lstm_active", 1.0 if lstm_active else 0.0)
-        metrics.set_gauge("forecast_sample_count", n_samples)
-        metrics.set_gauge("forecast_lstm_weight", weights.get("lstm", 0.0))
-        metrics.set_gauge("forecast_prophet_weight", weights.get("prophet", 0.0))
-        metrics.set_gauge("forecast_days_until_lstm", days_remaining)
+        from app.prom_metrics import (
+            sora_forecast_samples_total,
+            sora_forecast_lstm_active,
+            sora_forecast_days_remaining,
+        )
+        sora_forecast_samples_total.set(n_samples)
+        sora_forecast_lstm_active.set(1.0 if lstm_active else 0.0)
+        sora_forecast_days_remaining.set(days_remaining)
 
         return {
             "active": lstm_active,

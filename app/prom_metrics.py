@@ -30,6 +30,11 @@ sora_forecast_rmse      = Gauge("sora_forecast_rmse_current", "Current forecast 
 sora_forecast_r2        = Gauge("sora_forecast_r2_current",   "Current forecast R²",   ["metric", "model"])
 sora_forecast_mape      = Gauge("sora_forecast_mape_current", "Current forecast MAPE (%)", ["metric", "model"])
 
+# ── Forecast LSTM status (updated via scheduler refresh) ──
+sora_forecast_samples_total   = Gauge("sora_forecast_samples_total",   "Total evaluation samples available for LSTM")
+sora_forecast_lstm_active     = Gauge("sora_forecast_lstm_active",     "LSTM model active status (1=active, 0=inactive)")
+sora_forecast_days_remaining  = Gauge("sora_forecast_days_remaining",  "Days until LSTM activation threshold")
+
 # ── App info ──
 sora_app_info           = Info("sora_app", "Application metadata")
 sora_app_info.info({"version": "2.0.0", "platform": "SORA.Earth"})
