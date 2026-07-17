@@ -1,0 +1,17 @@
+# Development dependencies
+# Install with: pip install -r requirements-dev.txt
+
+# Testing
+pytest==8.4.2
+pytest-timeout==2.4.0
+pytest-asyncio==0.24.0  # For async test support
+pytest-cov==6.0.0       # Coverage reporting
+
+# Code quality
+black==24.10.0          # Code formatting
+ruff==0.8.4             # Fast Python linter
+mypy==1.14.0            # Static type checking
+
+# Development tools
+ipython==8.31.0         # Enhanced interactive shell
+ipdb==0.13.13           # Debugger
