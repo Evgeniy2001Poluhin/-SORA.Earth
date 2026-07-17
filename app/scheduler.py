@@ -377,7 +377,15 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         new_auc = new_metrics.get("auc_roc") or new_metrics.get("roc_auc")
         promoted = True
         reject_reason = None
-        if old_auc is not None and new_auc is not None:
+
+        # Absolute quality gate: AUC must be >= 0.80
+        MIN_AUC_THRESHOLD = 0.80
+        if new_auc is not None and float(new_auc) < MIN_AUC_THRESHOLD:
+            promoted = False
+            reject_reason = f"AUC below minimum threshold: {new_auc:.4f} < {MIN_AUC_THRESHOLD}"
+            if sora_model_rejected_total: sora_model_rejected_total.inc()
+            logger.warning("Closed loop: model REJECTED - %s", reject_reason)
+        elif old_auc is not None and new_auc is not None:
             auc_delta = float(new_auc) - float(old_auc)
             if auc_delta < -0.02:
                 promoted = False
@@ -388,7 +396,12 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
                 if sora_model_promoted_total: sora_model_promoted_total.inc()
                 logger.info("Closed loop: model PROMOTED - AUC %.4f -> %.4f (delta=%+.4f)", float(old_auc), float(new_auc), auc_delta)
         else:
-            logger.info("Closed loop: old AUC unavailable, auto-promoting")
+            # Old AUC unavailable: promote only if new_auc >= threshold
+            if new_auc is not None and float(new_auc) >= MIN_AUC_THRESHOLD:
+                if sora_model_promoted_total: sora_model_promoted_total.inc()
+                logger.info("Closed loop: model PROMOTED (first model) - AUC %.4f", float(new_auc))
+            else:
+                logger.info("Closed loop: old AUC unavailable, new model meets threshold, auto-promoting")
         log_id = _start_retrain_log(trigger_source=trigger_source, job_name="closed_loop")
         _finish_retrain_log(
             log_id=log_id,
