@@ -656,7 +656,7 @@ def refresh_forecast_metrics():
     try:
         # Call backend LSTM status endpoint (triggers metric export)
         # Use internal Docker network hostname
-        response = requests.get("http://backend:8000/api/v1/lstm-status", timeout=10)
+        response = requests.get("http://app:8000/api/v1/lstm-status", timeout=10)
 
         if response.status_code == 200:
             data = response.json()
