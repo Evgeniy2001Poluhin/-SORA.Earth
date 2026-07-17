@@ -768,9 +768,64 @@ def init_scheduler():
     except ImportError:
         logger.warning("crisis_detector not available, skipping job")
 
+    # Environmental data ingestion jobs (Phase 1 Step 5)
+    try:
+        from app.services.environmental.scheduler_jobs import (
+            scheduled_openaq_ingestion,
+            scheduled_openmeteo_ingestion,
+            scheduled_source_health_check,
+            scheduled_data_quality_aggregation,
+        )
+
+        # OpenAQ air quality ingestion (every 1 hour)
+        scheduler.add_job(
+            scheduled_openaq_ingestion,
+            IntervalTrigger(hours=1),
+            id="auto_openaq_ingestion",
+            name="Ingest OpenAQ air quality data every 1h",
+            replace_existing=True,
+        )
+
+        # Open-Meteo weather ingestion (every 1 hour)
+        scheduler.add_job(
+            scheduled_openmeteo_ingestion,
+            IntervalTrigger(hours=1),
+            id="auto_openmeteo_ingestion",
+            name="Ingest Open-Meteo weather data every 1h",
+            replace_existing=True,
+        )
+
+        # Source health check (every 15 minutes)
+        scheduler.add_job(
+            scheduled_source_health_check,
+            IntervalTrigger(minutes=15),
+            id="auto_source_health_check",
+            name="Check environmental source health every 15m",
+            replace_existing=True,
+        )
+
+        # Data quality aggregation (every 1 hour)
+        scheduler.add_job(
+            scheduled_data_quality_aggregation,
+            IntervalTrigger(hours=1),
+            id="auto_data_quality_aggregation",
+            name="Aggregate data quality metrics every 1h",
+            replace_existing=True,
+        )
+
+        logger.info("Environmental ingestion jobs scheduled: OpenAQ (1h), Open-Meteo (1h), health (15m), quality (1h)")
+    except ImportError as e:
+        logger.warning("Environmental scheduler jobs not available: %s", e)
+
     from datetime import datetime, timezone
     _now = datetime.now(timezone.utc)
-    for _jid in ("auto_run_ingesters", "auto_refresh_external_data", "refresh_forecast_metrics"):
+    for _jid in (
+        "auto_run_ingesters",
+        "auto_refresh_external_data",
+        "refresh_forecast_metrics",
+        "auto_openaq_ingestion",
+        "auto_openmeteo_ingestion",
+    ):
         try:
             scheduler.modify_job(_jid, next_run_time=_now)
             logger.info("Job %s scheduled to run immediately on startup", _jid)

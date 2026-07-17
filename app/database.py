@@ -2,7 +2,7 @@ from datetime import datetime
 import os
 
 import sqlalchemy as sa
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, create_engine, func
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, JSON, create_engine, func
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv(
@@ -296,3 +296,29 @@ class EnvironmentalObservation(Base):
     # - UNIQUE (source, source_record_id) WHERE source_record_id IS NOT NULL
     # - INDEX (region_id, indicator, event_time) for time-series queries
     # - INDEX (source, ingested_at) for source health monitoring
+
+
+class EnvironmentalJobLog(Base):
+    """Execution log for environmental data scheduler jobs.
+
+    Tracks job execution history with performance metrics and error tracking.
+    Used for monitoring scheduler health, debugging failures, and calculating
+    data source quality scores.
+
+    Job types:
+    - openaq_ingestion: Hourly OpenAQ air quality data fetch
+    - openmeteo_ingestion: Hourly Open-Meteo weather data fetch
+    - source_health_check: 15-minute source availability monitoring
+    - data_quality_aggregation: Hourly quality metrics aggregation
+    """
+    __tablename__ = "environmental_job_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_name = Column(String(100), nullable=False, index=True)
+    executed_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    status = Column(String(20), nullable=False, index=True)  # success, failed, skipped
+    duration_sec = Column(Float, nullable=True)
+    records_processed = Column(Integer, nullable=True, server_default="0")
+    records_rejected = Column(Integer, nullable=True, server_default="0")
+    error_message = Column(Text, nullable=True)
+    metadata_json = Column(JSON, nullable=True)  # Job-specific metadata
