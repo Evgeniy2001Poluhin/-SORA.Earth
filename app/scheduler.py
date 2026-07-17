@@ -697,9 +697,9 @@ def init_scheduler():
 
     scheduler.add_job(
         scheduled_refresh_external_data,
-        IntervalTrigger(hours=12),
+        IntervalTrigger(hours=6),
         id="auto_refresh_external_data",
-        name="Refresh external ESG data every 12h",
+        name="Refresh external ESG data every 6h",
         replace_existing=True,
     )
 
