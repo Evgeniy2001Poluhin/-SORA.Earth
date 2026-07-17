@@ -741,6 +741,33 @@ def init_scheduler():
         name="Refresh Prometheus forecast metrics every 30s",
         replace_existing=True,
     )
+
+    # Environmental crisis detection — runs after ingesters
+    try:
+        from app.services.crisis_detector import detect_crises
+        from app.database import SessionLocal as _SL
+
+        def _scheduled_crisis_detection():
+            db = _SL()
+            try:
+                count = detect_crises(db)
+                logger.info("Crisis detection: %d violations found", count)
+            except Exception:
+                logger.exception("Crisis detection failed")
+            finally:
+                db.close()
+
+        scheduler.add_job(
+            _scheduled_crisis_detection,
+            IntervalTrigger(hours=6),
+            id="auto_crisis_detection",
+            name="Detect environmental crises every 6h",
+            replace_existing=True,
+        )
+        logger.info("Crisis detection job scheduled (every 6h)")
+    except ImportError:
+        logger.warning("crisis_detector not available, skipping job")
+
     from datetime import datetime, timezone
     _now = datetime.now(timezone.utc)
     for _jid in ("auto_run_ingesters", "auto_refresh_external_data", "refresh_forecast_metrics"):
