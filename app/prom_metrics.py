@@ -35,6 +35,33 @@ sora_forecast_samples_total   = Gauge("sora_forecast_samples_total",   "Total ev
 sora_forecast_lstm_active     = Gauge("sora_forecast_lstm_active",     "LSTM model active status (1=active, 0=inactive)")
 sora_forecast_days_remaining  = Gauge("sora_forecast_days_remaining",  "Days until LSTM activation threshold")
 
+# ── Environmental data ingestion ──
+sora_environmental_ingestion_total = Counter(
+    "sora_environmental_ingestion_total",
+    "Environmental data ingestion runs",
+    ["source", "status"]
+)
+sora_environmental_ingestion_errors_total = Counter(
+    "sora_environmental_ingestion_errors_total",
+    "Environmental data ingestion errors",
+    ["source"]
+)
+sora_environmental_source_freshness_seconds = Gauge(
+    "sora_environmental_source_freshness_seconds",
+    "Time since most recent observation (seconds)",
+    ["source"]
+)
+sora_environmental_data_quality_score = Gauge(
+    "sora_environmental_data_quality_score",
+    "Data quality score (0-100)",
+    ["source"]
+)
+sora_environmental_observations_total = Counter(
+    "sora_environmental_observations_total",
+    "Total environmental observations ingested",
+    ["source", "indicator"]
+)
+
 # ── App info ──
 sora_app_info           = Info("sora_app", "Application metadata")
 sora_app_info.info({"version": "2.0.0", "platform": "SORA.Earth"})
