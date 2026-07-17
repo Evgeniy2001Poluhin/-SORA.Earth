@@ -103,6 +103,34 @@ def _get_current_metrics():
     return {}
 
 
+def walk_forward_validate(model_class, X, y, n_splits=5):
+    """Walk-forward CV for time series. Returns mean/std AUC across folds."""
+    from sklearn.model_selection import TimeSeriesSplit
+
+    tscv = TimeSeriesSplit(n_splits=n_splits)
+    scores = []
+    try:
+        for train_idx, test_idx in tscv.split(X):
+            X_tr, X_te = X[train_idx], X[test_idx]
+            y_tr, y_te = y[train_idx], y[test_idx]
+            m = model_class()
+            m.fit(X_tr, y_tr)
+            if hasattr(m, "predict_proba"):
+                y_pred = m.predict_proba(X_te)[:, 1]
+            else:
+                y_pred = m.predict(X_te)
+            auc = roc_auc_score(y_te, y_pred)
+            scores.append(auc)
+    except Exception:
+        return {"mean_auc": None, "std_auc": None, "folds": 0}
+
+    return {
+        "mean_auc": float(np.mean(scores)),
+        "std_auc": float(np.std(scores)),
+        "folds": len(scores)
+    }
+
+
 def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
     """Actual retrain logic with persisted RetrainLog."""
     log_id = _start_retrain_log(trigger_source=trigger_source, job_name="model_retrain")
@@ -149,6 +177,11 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
         X_train, y_train = X[:split_idx], y[:split_idx]
         X_test, y_test = X[split_idx:], y[split_idx:]
         logger.info("Temporal split: train=%d, test=%d", len(X_train), len(X_test))
+
+        # Walk-forward cross-validation
+        wf = walk_forward_validate(RandomForestClassifier, X, y)
+        logger.info("Walk-forward CV: mean_auc=%.4f std=%.4f folds=%d",
+                    wf["mean_auc"] or 0, wf["std_auc"] or 0, wf["folds"])
 
         from sklearn.preprocessing import StandardScaler
         scaler = StandardScaler()
