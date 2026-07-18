@@ -113,6 +113,7 @@ jobs:
           REDIS_URL: ""
           SECRET_KEY: "ci-test-secret"
           SORA_ADMIN_TOKEN: "ci-test-admin"
+          MLFLOW_TRACKING_URI: "sqlite:///./test_mlflow.db"
 
   integration-tests:
     runs-on: ubuntu-latest
