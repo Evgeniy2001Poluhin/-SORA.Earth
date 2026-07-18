@@ -1,6 +1,11 @@
+"""Global pytest configuration for SORA.Earth test suite.
+
+IMPORTANT: This conftest is shared by ALL tests. Imports of app.main must be
+LAZY (inside fixtures, not module-level) to avoid loading ML models for tests
+that don't need FastAPI (e.g., persistence unit tests).
+"""
 import pytest
 from unittest.mock import MagicMock, patch
-from fastapi.testclient import TestClient
 
 # Create in-memory mock cache BEFORE any imports
 mock_cache = {}
@@ -98,12 +103,31 @@ def clear_redis_cache():
 
 @pytest.fixture(scope="session")
 def client():
+    """FastAPI TestClient fixture - imports app.main LAZILY.
+
+    This fixture is NOT autouse, so it only loads when explicitly requested
+    by API tests. Persistence/unit tests that don't need FastAPI should not
+    use this fixture.
+    """
+    from fastapi.testclient import TestClient
     from app.main import app
     return TestClient(app)
 
 
 @pytest.fixture(autouse=True)
 def restore_app_models():
+    """Restore ML models after test - autouse but LAZY.
+
+    Only restores models if app.main was already imported by the test.
+    If app.main is not loaded, this fixture does nothing (no import).
+    """
+    import sys
+    if 'app.main' not in sys.modules:
+        # app.main was never imported, nothing to restore
+        yield
+        return
+
+    # app.main was already imported, take snapshot
     import app.main as m
     snapshot = {
         'rf_model':          m.rf_model,
@@ -119,7 +143,17 @@ def restore_app_models():
 
 @pytest.fixture(autouse=True)
 def clear_dependency_overrides():
+    """Clear FastAPI dependency overrides - autouse but LAZY.
+
+    Only clears overrides if app.main was already imported by the test.
+    If app.main is not loaded, this fixture does nothing (no import).
+    """
     yield
+    import sys
+    if 'app.main' not in sys.modules:
+        # app.main was never imported, nothing to clear
+        return
+
     from app.main import app
     app.dependency_overrides.clear()
 
