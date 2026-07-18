@@ -103,6 +103,11 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-timeout
 
+      - name: Apply database migrations
+        run: python -m alembic upgrade head
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
       - name: Run environmental persistence tests against PostgreSQL
         run: |
           python -m pytest \
