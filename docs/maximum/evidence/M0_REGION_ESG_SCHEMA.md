@@ -149,35 +149,27 @@ class RegionESGScore(Base):
 
 ## Verification
 
-**Status:** PostgreSQL round-trip verification pending. The commands below are the planned verification procedure.
+**Status:** PostgreSQL round-trip test executed against a real PostgreSQL 16 instance in CI and **PASSED**.
 
-**Planned fresh database upgrade:**
-```bash
-python3 -m alembic upgrade head
-# Expected: region_esg_scores created with region_code PK before VIEW creation
-```
+**CI Reference:**
+- PR: https://github.com/Evgeniy2001Poluhin/-SORA.Earth/pull/12
+- Workflow run: `30123691206`
+- Job: `environmental-postgres-tests` (job ID `89582031242`)
+- Step: `Run GAP-001 Alembic bootstrap round-trip test`
+- PostgreSQL version: 16
+- Verified: 2026-07-24 UTC / 2026-07-25 UTC+04
 
-**Schema Assertion:**
-```sql
-SELECT column_name, data_type, is_nullable, column_default
-FROM information_schema.columns
-WHERE table_name = 'region_esg_scores'
-ORDER BY ordinal_position;
+**Verified stages (all passed):**
+1. Fresh upgrade — empty `public` schema to Alembic head
+2. Schema assertions against `region_esg_scores` (columns, types, nullability, primary key, unique index) and `regional_esg_snapshot` (view kind, queryable)
+3. Destructive downgrade to `31e5cc432377` — confirms `region_esg_scores` and `regional_esg_snapshot` are fully removed
+4. Re-upgrade to head — schema assertions re-pass after downgrade/upgrade cycle
+5. Idempotent upgrade — no-op, current revision unchanged
+6. Single-head / current-revision consistency check
 
--- Expected after 2e8b4493b24b:
--- region_code, text, NO, NULL
--- env_score, real, YES, NULL
--- social_score, real, YES, NULL
--- gov_score, real, YES, NULL
--- total_score, real, YES, NULL
--- confidence, real, YES, NULL
--- updated_at, timestamp with time zone, NO, now()
+**Final Alembic head:** `0b0ff6d1594e`
 
--- Expected after cb5a035aed2f (additionally):
--- id, bigint, NO, generated always as identity
--- sources_count, integer, YES, NULL
--- signals_used, integer, YES, NULL
-```
+**Scope note:** This result covers only the `Run GAP-001 Alembic bootstrap round-trip test` step. The `environmental-postgres-tests` job, and the overall PR #12 CI run, remained **FAILED** because a later, unrelated step (`Run environmental persistence tests against PostgreSQL`) and other independent checks (`backend-tests`, `frontend-checks`) failed for reasons unrelated to this migration. This document does not claim the PR or the full CI run passed — only the GAP-001 round-trip step described above.
 
 ---
 
@@ -187,5 +179,6 @@ ORDER BY ordinal_position;
 - Production schema reflects deployed state as of collection date
 - Schema may evolve through subsequent migrations
 - ORM drift tracked separately and does not block GAP-001 resolution
-- Fresh database behavior remains pending PostgreSQL round-trip verification
+- Fresh database round-trip behavior (upgrade → downgrade → re-upgrade → idempotent upgrade) confirmed PASSED in CI (PR #12, workflow run `30123691206`, job `89582031242`); see "Verification" section above for scope and limitations
+- This confirms only the GAP-001 migration step; it does not imply the overall PR or CI run passed
 - Existing production databases require no action from this migration if already stamped beyond the inserted revision; production rollout behavior remains subject to deployment review
