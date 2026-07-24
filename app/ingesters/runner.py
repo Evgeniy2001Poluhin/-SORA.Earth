@@ -10,16 +10,19 @@ from sqlalchemy import text
 from datetime import datetime, timezone
 
 from app.ingesters.base import Signal
-from app.ingesters.openaq import OpenAQIngester
 from app.ingesters.sber_veb_baseline import SberVebBaselineIngester
 from app.ingesters.rosstat import RosstatIngester
 
 log = logging.getLogger(__name__)
 
+# OpenAQ and Open-Meteo are owned exclusively by their hourly scheduled jobs
+# (scheduled_openaq_ingestion / scheduled_openmeteo_ingestion in
+# app/services/environmental/scheduler_jobs.py) — do not add them here, or
+# their signals get persisted twice (once by the hourly job, once by this
+# 24h runner).
 INGESTERS = [
     SberVebBaselineIngester,
     RosstatIngester,
-    OpenAQIngester,
 ]
 
 

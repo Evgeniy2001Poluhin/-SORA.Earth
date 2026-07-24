@@ -358,63 +358,148 @@ def test_persist_with_timezone_aware_timestamps(db_session):
 
 
 def test_persist_quality_score_mapping():
-    """Test that quality flags are mapped to 0-100 score."""
-    now = datetime.now(timezone.utc)
+    """Test that quality flags are mapped to 0-100 score.
 
-    signals = [
-        Signal(
-            region_code="DEU",
-            source="test_openaq",
-            metric="pm25_ugm3",
-            value=25.0,
-            unit="ug/m3",
-            observed_at=now,
-            metadata={"quality": "excellent"}
-        ),
-        Signal(
-            region_code="FRA",
-            source="test_openaq",
-            metric="pm25_ugm3",
-            value=50.0,
-            unit="ug/m3",
-            observed_at=now,
-            metadata={"quality": "good"}
-        ),
-        Signal(
-            region_code="GBR",
-            source="test_openaq",
-            metric="pm25_ugm3",
-            value=80.0,
-            unit="ug/m3",
-            observed_at=now,
-            metadata={"quality": "fair"}
-        ),
-    ]
-
-    result = persist_environmental_observations(signals, "test_openaq")
-
-    assert result.received == 3
-    assert result.accepted == 3
+    Uses a test-only source ("test_quality_score_mapping") not used by any
+    other test, and queries each row by full identity (source + region_id +
+    indicator + event_time) rather than region_id alone — a bare region_id
+    filter can match unrelated pre-existing rows for the same region from a
+    different source in the shared test database (e.g. real "openmeteo" data
+    for region_id="FRA"), returning an arbitrary row with .first() since there
+    is no ORDER BY. See GAP-related test-isolation fix: this previously caused
+    a nondeterministic failure unrelated to the code under test.
+    """
+    source = "test_quality_score_mapping"
+    now = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
     db = SessionLocal()
     try:
-        # Check quality scores
-        excellent = db.query(EnvironmentalObservation).filter(
-            EnvironmentalObservation.region_id == "DEU"
-        ).first()
+        db.query(EnvironmentalObservation).filter(
+            EnvironmentalObservation.source == source
+        ).delete()
+        db.commit()
+
+        signals = [
+            Signal(
+                region_code="DEU",
+                source=source,
+                metric="pm25_ugm3",
+                value=25.0,
+                unit="ug/m3",
+                observed_at=now,
+                metadata={"quality": "excellent"}
+            ),
+            Signal(
+                region_code="FRA",
+                source=source,
+                metric="pm25_ugm3",
+                value=50.0,
+                unit="ug/m3",
+                observed_at=now,
+                metadata={"quality": "good"}
+            ),
+            Signal(
+                region_code="GBR",
+                source=source,
+                metric="pm25_ugm3",
+                value=80.0,
+                unit="ug/m3",
+                observed_at=now,
+                metadata={"quality": "fair"}
+            ),
+        ]
+
+        result = persist_environmental_observations(signals, source)
+
+        assert result.received == 3
+        assert result.accepted == 3
+
+        def _fetch(region_id):
+            return db.query(EnvironmentalObservation).filter(
+                EnvironmentalObservation.source == source,
+                EnvironmentalObservation.region_id == region_id,
+                EnvironmentalObservation.indicator == "pm25_ugm3",
+                EnvironmentalObservation.event_time == now,
+            ).first()
+
+        excellent = _fetch("DEU")
+        assert excellent is not None
         assert excellent.quality_score == 100.0
 
-        good = db.query(EnvironmentalObservation).filter(
-            EnvironmentalObservation.region_id == "FRA"
-        ).first()
+        good = _fetch("FRA")
+        assert good is not None
         assert good.quality_score == 80.0
 
-        fair = db.query(EnvironmentalObservation).filter(
-            EnvironmentalObservation.region_id == "GBR"
-        ).first()
+        fair = _fetch("GBR")
+        assert fair is not None
         assert fair.quality_score == 60.0
     finally:
+        db.query(EnvironmentalObservation).filter(
+            EnvironmentalObservation.source == source
+        ).delete()
+        db.commit()
         db.close()
+
+
+def test_persist_per_signal_rejection_never_gets_persist_error_prefix():
+    """Per-signal validation failures (_signal_to_observation_dict raising
+    ValueError, caught by the inner per-signal try/except) must only ever
+    produce a "signal_<idx>: ..." error entry. The "persist_error:" prefix
+    is reserved for the outer try/except that wraps _upsert_observations()
+    and db.commit() — these are the only two `errors.append(...)` call
+    sites in persist.py, and they cannot both fire for the same failure."""
+    now = datetime.now(timezone.utc)
+    signals = [
+        Signal(region_code="DEU", source="test_openaq", metric="pm25_ugm3", value=1.0,
+               unit="ug/m3", observed_at=now),
+        Signal(region_code="", source="test_openaq", metric="pm25_ugm3", value=2.0,
+               unit="ug/m3", observed_at=now),  # invalid: empty region_code
+    ]
+
+    db = SessionLocal()
+    try:
+        db.query(EnvironmentalObservation).filter(
+            EnvironmentalObservation.source == "test_openaq"
+        ).delete()
+        db.commit()
+
+        result = persist_environmental_observations(signals, "test_openaq")
+
+        assert result.rejected == 1
+        assert any(e.startswith("signal_1:") for e in result.errors)
+        assert not any(e.startswith("persist_error:") for e in result.errors)
+    finally:
+        db.query(EnvironmentalObservation).filter(
+            EnvironmentalObservation.source == "test_openaq"
+        ).delete()
+        db.commit()
+        db.close()
+
+
+def test_persist_fatal_db_error_always_gets_persist_error_prefix():
+    """DB/upsert/commit-level failures must always surface as "persist_error:",
+    never as "signal_<idx>:" — proven by forcing _upsert_observations to raise
+    for an otherwise entirely valid batch (so there is no per-signal rejection
+    to conflate with the fatal error)."""
+    from unittest.mock import patch
+
+    now = datetime.now(timezone.utc)
+    signals = [
+        Signal(region_code="DEU", source="test_openaq", metric="pm25_ugm3", value=1.0,
+               unit="ug/m3", observed_at=now),
+    ]
+
+    with patch(
+        "app.ingesters.persist._upsert_observations",
+        side_effect=RuntimeError("db exploded"),
+    ):
+        result = persist_environmental_observations(signals, "test_openaq")
+
+    assert result.accepted == 0
+    assert result.rejected == 0  # no per-signal validation failure occurred
+    assert len(result.errors) == 1
+    assert result.errors[0].startswith("persist_error:")
+    assert "db exploded" in result.errors[0]
 
 
 @pytest.mark.skipif(
