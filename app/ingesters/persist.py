@@ -219,8 +219,12 @@ def _upsert_observations(
 
         # Use RETURNING with xmax check to distinguish INSERT vs UPDATE
         # xmax=0 indicates a newly inserted row (not an update)
+        # index_where must match the partial unique index's predicate
+        # (ix_environmental_observations_source_record_unique), or Postgres
+        # can't infer it as the ON CONFLICT target.
         upsert_stmt = stmt.on_conflict_do_update(
             index_elements=["source", "source_record_id"],
+            index_where=text("source_record_id IS NOT NULL"),
             set_=update_dict
         ).returning(
             EnvironmentalObservation.id,
