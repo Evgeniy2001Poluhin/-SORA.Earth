@@ -16,6 +16,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Materialize Git LFS models
+        run: git lfs pull
 
       - uses: actions/setup-python@v5
         with:
