@@ -26,12 +26,14 @@
 |----------|-------|
 | Category | DB |
 | Severity | P0 — BLOCKER |
-| Status | OPEN |
+| Status | IMPLEMENTED / CI VERIFICATION PENDING |
 | Evidence | `alembic/versions/a1b2c3d4e5f6_regional_esg_snapshot_view.py:29` fails with `UndefinedTable` |
 | Root Cause | Model `RegionESGScore` defined at `app/database.py:194` but no migration creates the table |
 | Impact | CI fails, fresh DB cannot be provisioned, Alembic upgrade fails |
-| Fix | Create migration before `a1b2c3d4e5f6` that creates `region_esg_scores` table |
-| Effort | 30 min |
+| Fix | Created migration `2e8b4493b24b` before `a1b2c3d4e5f6` that creates `region_esg_scores` table |
+| Implementation | `alembic/versions/2e8b4493b24b_create_region_esg_scores_table.py` |
+| Verification | PostgreSQL round-trip test: `scripts/test_alembic_bootstrap_gap001.sh` |
+| Effort | 2 hours (implementation + test development + evidence) |
 | Owner | TBD |
 
 ### GAP-002: Scheduler Jobs Don't Persist Signals
@@ -159,6 +161,23 @@
 | Effort | 4 hours |
 | Owner | TBD |
 
+### GAP-017: ORM/Production Schema Drift (region_esg_scores PRIMARY KEY)
+| Property | Value |
+|----------|-------|
+| Category | DB |
+| Severity | P1 — HIGH |
+| Status | OPEN |
+| Evidence | Production has `PRIMARY KEY (region_code)`, ORM expects `PRIMARY KEY (id)` |
+| Root Cause | Origin unknown; production schema and ORM metadata diverge |
+| Impact | Potential ORM identity-map, merge, refresh, delete, and write-correctness risks |
+| Discovered | GAP-001 investigation (2026-07-24) |
+| Analysis Required | Audit all `RegionESGScore` query patterns, check `Session.get()` usage, relationship/FK impact |
+| Fix Options | (1) Update ORM to match production (region_code PK), OR (2) Migrate production to id PK |
+| Recommendation | Decision pending full impact analysis |
+| Effort | 3 hours (audit + ORM change + tests) |
+| Owner | TBD |
+| Evidence Doc | `docs/maximum/evidence/M0_REGION_ESG_SCHEMA.md` |
+
 ---
 
 ## P2 — Medium Priority
@@ -221,13 +240,13 @@
 
 ## Summary
 
-| Priority | Open | Closed | Total |
-|----------|------|--------|-------|
-| P0 Blocker | 3 | 0 | 3 |
-| P0 Security | 2 | 0 | 2 |
-| P1 | 5 | 0 | 5 |
-| P2 | 6 | 0 | 6 |
-| **Total** | **16** | **0** | **16** |
+| Priority | Open | In Progress | Closed | Total |
+|----------|------|-------------|--------|-------|
+| P0 Blocker | 2 | 1 | 0 | 3 |
+| P0 Security | 2 | 0 | 0 | 2 |
+| P1 | 6 | 0 | 0 | 6 |
+| P2 | 6 | 0 | 0 | 6 |
+| **Total** | **16** | **1** | **0** | **17** |
 
 ---
 
