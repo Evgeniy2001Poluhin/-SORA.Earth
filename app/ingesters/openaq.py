@@ -292,7 +292,7 @@ class OpenAQIngester(BaseIngester):
             issues.append("negative_value")
 
         # Determine overall quality
-        if any(issue in ["out_of_range", "negative_value"] for issue in issues):
+        if any(issue == "negative_value" or issue.startswith("out_of_range[") for issue in issues):
             return DataQuality.INVALID, issues
 
         if len(issues) == 0:
