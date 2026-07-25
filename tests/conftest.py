@@ -1,3 +1,8 @@
+import os
+
+# Prevent APScheduler from starting in tests
+os.environ.setdefault("RUN_SCHEDULER", "false")
+
 import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
@@ -122,6 +127,31 @@ def clear_dependency_overrides():
     yield
     from app.main import app
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_scheduler_on_session_end():
+    """Ensure APScheduler is shut down after test session.
+
+    This is a safety net for tests that start the scheduler without cleanup.
+    Prevents background jobs from running after pytest exits.
+    """
+    yield
+
+    # After all tests complete, check if scheduler is still running
+    import sys
+    if 'app.scheduler' in sys.modules:
+        from app.scheduler import scheduler
+        if scheduler.running:
+            from app.scheduler import shutdown_scheduler
+            shutdown_scheduler()
+            # Fail the test session - scheduler leak is a critical bug
+            raise AssertionError(
+                "APScheduler was still running after test session! "
+                "A test likely started it without cleanup. "
+                "This causes background jobs to execute after pytest exits, "
+                "leading to HTTP requests and I/O errors."
+            )
 
 
 @pytest.fixture(autouse=True)

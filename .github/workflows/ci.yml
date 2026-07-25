@@ -40,6 +40,7 @@ jobs:
           REDIS_URL: ""
           SECRET_KEY: "ci-test-secret"
           SORA_ADMIN_TOKEN: "ci-test-admin"
+          SORA_OFFLINE: "1"
 
       - name: Run forecasting tests
         run: |
