@@ -6,6 +6,17 @@ import {
 } from "recharts";
 import { api } from "@/api/client";
 
+/** Model-specific extras returned alongside a forecast; see app/services/forecasting. */
+type ForecastMetadata = {
+  weights?: Record<string, number>;
+  models_used?: string[];
+  total_weight?: number;
+  mc_samples?: number;
+  avg_ci_width?: number;
+  slope_per_day?: number;
+  autoregressive?: boolean;
+};
+
 type HistPoint = { ds: string; y: number };
 type FcPoint = { ds: string; yhat: number; yhat_lower: number; yhat_upper: number };
 type ForecastResponse = {
@@ -14,7 +25,7 @@ type ForecastResponse = {
   model: string;
   metric: string;
   confidence?: "high" | "medium" | "low";
-  metadata?: Record<string, any>;
+  metadata?: ForecastMetadata;
 };
 
 type MetricsResponse = {

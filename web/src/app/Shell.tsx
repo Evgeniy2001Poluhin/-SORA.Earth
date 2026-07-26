@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import OnboardingTour from "./OnboardingTour";
-import { useTheme } from "./ThemeProvider";
+import { useTheme } from "./theme-context";
 import { ModelBadge } from "../components/ModelBadge";
 import "./shell.css";
 

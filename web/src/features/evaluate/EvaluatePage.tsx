@@ -42,8 +42,11 @@ export function EvaluatePage() {
   const [lastRun, setLastRun] = useState<(EvaluateRequest & { total_score?: number }) | null>(null);
   const [activeTab, setActiveTab] = useState<string>("project");
   const [searchParams, setSearchParams] = useSearchParams();
+  // Only the snapshot id present on first render should load a snapshot; the
+  // effect clears the param, so reading searchParams reactively would re-fire it.
+  const [initialSnapshotId] = useState(() => searchParams.get("snapshot"));
   useEffect(() => {
-    const sid = searchParams.get("snapshot");
+    const sid = initialSnapshotId;
     if (!sid) return;
     historyApi.getById(Number(sid)).then((it: HistoryItem) => {
       // History rows use the backend field names; map once so lastRun carries the
@@ -62,7 +65,7 @@ export function EvaluatePage() {
       setActiveTab("project");
       setSearchParams({}, { replace: true });
     }).catch(() => {});
-  }, []);
+  }, [initialSnapshotId, setSearchParams]);
 
   const evalMut = useMutation({ mutationFn: evaluateApi.evaluate });
   const rankMut = useMutation({ mutationFn: evaluateApi.ranking });
@@ -115,13 +118,6 @@ export function EvaluatePage() {
     w.document.close(); setTimeout(()=>w.print(), 300);
   };
 
-  useEffect(()=>{
-    if (!countryList.length) return;
-    if (!countryList.includes(form.country)) {
-      // если в списке нет текущей — оставим как есть, но форсанём re-render селекта
-      setForm(s=>({...s}));
-    }
-  }, [countryList]);
   return (
     <div className="ev">
       <section className="ev-hero">

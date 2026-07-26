@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { copilotApi, type CopilotSessionSummary } from "../../api/endpoints/copilot";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { copilotApi } from "../../api/endpoints/copilot";
 
 interface Props {
   currentId: string | null;
@@ -12,8 +13,7 @@ interface Props {
 const LS_KEY = "copilot.sidebar.collapsed";
 
 export function SessionsSidebar({ currentId, onSelect, onNew, tick = 0, refreshToken = 0 }: Props) {
-  const [sessions, setSessions] = useState<CopilotSessionSummary[]>([]);
-  const [loading, setLoading] = useState(false);
+  const qc = useQueryClient();
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem(LS_KEY) === "1"; } catch { return false; }
   });
@@ -26,31 +26,33 @@ export function SessionsSidebar({ currentId, onSelect, onNew, tick = 0, refreshT
     });
   };
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const r = await copilotApi.listSessions();
-      setSessions(r.sessions || []);
-    } catch {
-      setSessions([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load, tick, refreshToken]);
+  // Session list is server state; tick/refreshToken are cache-busting inputs.
+  const query = useQuery({
+    queryKey: ["copilot-sessions", tick, refreshToken],
+    queryFn: async () => (await copilotApi.listSessions()).sessions ?? [],
+  });
+  const sessions = query.data ?? [];
+  const loading = query.isPending;
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (!confirm("Delete this chat?")) return;
     try {
       await copilotApi.deleteSession(id);
-      setSessions((arr) => arr.filter((s) => s.id !== id));
+      qc.invalidateQueries({ queryKey: ["copilot-sessions"] });
     } catch { /* not fatal */ }
   };
 
+  // Date.now() during render is impure; hold the clock in state and advance it
+  // on an interval so relative timestamps still refresh.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
   const fmtTime = (ms: number) => {
-    const diff = Date.now() - ms;
+    const diff = now - ms;
     const m = Math.floor(diff / 60000);
     if (m < 1) return "just now";
     if (m < 60) return m + "m";
