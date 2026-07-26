@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { evaluateApi } from "@/api/endpoints/evaluate";
-import type { EvaluateRequest, EvaluateResponse } from "@/api/types";
+import type { EvaluateRequest, EvaluateResponse, EvaluateProjectRequest } from "@/api/types";
 import "./compare.css";
 
 const PRESETS: { id: string; label: string; body: EvaluateRequest }[] = [
@@ -76,8 +76,8 @@ export function ComparePage() {
   const B = useSide(PRESETS[1].body, "wind");
 
   const runBoth = () => {
-    const payloadA = { ...A.form, region: A.form.country } as any;
-    const payloadB = { ...B.form, region: B.form.country } as any;
+    const payloadA: EvaluateProjectRequest = { ...A.form, region: A.form.country };
+    const payloadB: EvaluateProjectRequest = { ...B.form, region: B.form.country };
     A.mut.mutate(payloadA);
     B.mut.mutate(payloadB);
   };

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useParams, Link } from "react-router-dom";
 import "./region-detail.css";
 
@@ -92,7 +92,7 @@ export default function RegionDetail() {
       {esg && (
         <div className="rd-kpis">
           {kpis.map(k => (
-            <div key={k.label} className="rd-card" style={{ "--score-color": colorForScore(k.v) } as any}>
+            <div key={k.label} className="rd-card" style={{ "--score-color": colorForScore(k.v) } as CSSProperties}>
               <div className="label">{k.label}</div>
               <div className="value">{k.v.toFixed(1)}</div>
             </div>
@@ -101,7 +101,7 @@ export default function RegionDetail() {
       )}
 
       <div className="rd-row">
-        <div className="rd-card" style={{ "--score-color": confColor } as any}>
+        <div className="rd-card" style={{ "--score-color": confColor } as CSSProperties}>
           <div className="label">Confidence</div>
           <div className="value">{data.confidence != null ? (data.confidence * 100).toFixed(0) + "%" : "-"}</div>
           {data.confidence != null && (
