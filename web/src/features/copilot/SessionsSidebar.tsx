@@ -21,7 +21,7 @@ export function SessionsSidebar({ currentId, onSelect, onNew, tick = 0, refreshT
   const toggle = () => {
     setCollapsed((c) => {
       const next = !c;
-      try { localStorage.setItem(LS_KEY, next ? "1" : "0"); } catch {}
+      try { localStorage.setItem(LS_KEY, next ? "1" : "0"); } catch { /* not fatal */ }
       return next;
     });
   };
@@ -46,7 +46,7 @@ export function SessionsSidebar({ currentId, onSelect, onNew, tick = 0, refreshT
     try {
       await copilotApi.deleteSession(id);
       setSessions((arr) => arr.filter((s) => s.id !== id));
-    } catch {}
+    } catch { /* not fatal */ }
   };
 
   const fmtTime = (ms: number) => {

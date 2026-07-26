@@ -73,7 +73,6 @@ export function DriftPage() {
   }
 
   const noData = d.status === "insufficient_data" || d.status === "no_baseline";
-  const isStable = noData || d.status === "stable";
   const statusLabel = noData ? "NO BASELINE" : (d.drift_detected ? "DRIFT DETECTED" : "STABLE");
   const statusColor = noData ? "var(--muted)" : (d.drift_detected ? "#EF4444" : "#2FE0A6");
   const features = Object.entries(d.features || {}).sort(

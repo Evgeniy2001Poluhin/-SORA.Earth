@@ -20,7 +20,6 @@ const PARAMS = [
 
 export function WhatIf({ form, lastRun }: Props) {
   const wi = useMutation({ mutationFn: evaluateApi.whatIf });
-  const evalMut = useMutation({ mutationFn: evaluateApi.evaluate });
   const base = lastRun || form;
   const [paramKey, setParamKey] = useState("budget_usd");
   const [sweepData, setSweepData] = useState<Array<{x:number; total:number}>>([]);

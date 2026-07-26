@@ -48,7 +48,7 @@ export function CalibrationPage() {
   });
 
   const submit = (v: FormValues) => mut.mutate(v);
-  const usePreset = (k: PresetKey) => { reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
+  const applyPreset = (k: PresetKey) => { reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
 
   const chartData = data ? [
     { model: "rf_v1",         proba: data.models.rf_v1.proba,         weight: data.models.rf_v1.weight, nd: data.models.rf_v1.near_deterministic },
@@ -68,7 +68,7 @@ export function CalibrationPage() {
 
       <div className="calib-presets">
         {PRESET_KEYS.map((k) => (
-          <button key={k} type="button" className="preset-btn" onClick={() => usePreset(k)}>{k}</button>
+          <button key={k} type="button" className="preset-btn" onClick={() => applyPreset(k)}>{k}</button>
         ))}
       </div>
 

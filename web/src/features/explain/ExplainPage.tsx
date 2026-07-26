@@ -49,7 +49,7 @@ export function ExplainPage() {
   });
 
   const submit = (v: FormValues) => mut.mutate(v);
-  const usePreset = (k: PresetKey) => { reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
+  const applyPreset = (k: PresetKey) => { reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
 
   const contribs = json?.top_contributions ?? [];
   const maxAbs = Math.max(1e-9, ...contribs.map((c) => Math.abs(c.shap_value)));
@@ -64,7 +64,7 @@ export function ExplainPage() {
 
       <div className="explain-presets">
         {PRESET_KEYS.map((k) => (
-          <button key={k} type="button" className="preset-btn" onClick={() => usePreset(k)}>{k}</button>
+          <button key={k} type="button" className="preset-btn" onClick={() => applyPreset(k)}>{k}</button>
         ))}
         {elapsed !== null && (
           <span className="elapsed-pill">

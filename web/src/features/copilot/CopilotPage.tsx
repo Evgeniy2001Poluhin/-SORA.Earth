@@ -97,7 +97,7 @@ export function CopilotPage() {
   });
 
   const submit = (v: FormValues) => { setActivePreset(null); mut.mutate(v); };
-  const usePreset = (k: PresetKey) => { setActivePreset(k); reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
+  const applyPreset = (k: PresetKey) => { setActivePreset(k); reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
 
   const runStream = async (v: FormValues) => {
     setStreaming(true);
@@ -177,7 +177,7 @@ export function CopilotPage() {
                 key={k}
                 type="button"
                 className={"preset-btn" + (activePreset === k ? " active" : "")}
-                onClick={() => usePreset(k)}
+                onClick={() => applyPreset(k)}
               >
                 {k}
               </button>

@@ -23,7 +23,7 @@ export const useAuth = create<AuthState>((set) => ({
     try {
       const t = await authApi.login({ username: u, password: p });
       client.set(t.access_token);
-      try { sessionStorage.setItem(TOKEN_KEY, t.access_token); } catch (e) { /* ignore */ }
+      try { sessionStorage.setItem(TOKEN_KEY, t.access_token); } catch { /* storage unavailable */ }
       const me = await authApi.me();
       set({ token: t.access_token, user: me, loading: false });
     } catch (e) {
@@ -33,20 +33,20 @@ export const useAuth = create<AuthState>((set) => ({
   },
   logout: () => {
     client.set(null);
-    try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) { /* ignore */ }
+    try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* storage unavailable */ }
     set({ token: null, user: null });
   },
   hydrate: async () => {
     let tok: string | null = null;
-    try { tok = sessionStorage.getItem(TOKEN_KEY); } catch (e) { tok = null; }
+    try { tok = sessionStorage.getItem(TOKEN_KEY); } catch { tok = null; }
     if (!tok) return;
     client.set(tok);
     try {
       const me = await authApi.me();
       set({ token: tok, user: me });
-    } catch (e) {
+    } catch {
       client.set(null);
-      try { sessionStorage.removeItem(TOKEN_KEY); } catch (_e) { /* ignore */ }
+      try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* storage unavailable */ }
     }
   },
 }));
