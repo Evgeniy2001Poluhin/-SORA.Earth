@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import { MarkdownAnswer } from "./MarkdownAnswer";
 import { SessionsSidebar } from "./SessionsSidebar";
 import { useMutation } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { copilotApi } from "@/api/endpoints/copilot";
 import type { CopilotRequest, CopilotResponse } from "@/api/endpoints/copilot";
@@ -29,10 +29,13 @@ const PRESETS: Record<PresetKey, FormValues> = {
 const PRESET_KEYS: PresetKey[] = ["HIGH", "MODERATE", "LOW"];
 
 export function CopilotPage() {
-  const { register, handleSubmit, reset, watch } = useForm<FormValues>({ defaultValues: PRESETS.HIGH });
+  const { register, handleSubmit, reset, control } = useForm<FormValues>({ defaultValues: PRESETS.HIGH });
   const [result, setResult] = useState<CopilotResponse | null>(null);
   const [activePreset, setActivePreset] = useState<PresetKey | null>("HIGH");
-  const probability = watch("probability");
+  // useWatch rather than watch(): the value is only read to render a label, and
+  // watch() returns a new function result on every render, which the React
+  // Compiler cannot memoize.
+  const probability = useWatch({ control, name: "probability" });
   const [streamMode, setStreamMode] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [streaming, setStreaming] = useState(false);
