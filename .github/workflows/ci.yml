@@ -16,6 +16,41 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Verify Git LFS model artifacts
+        shell: bash
+        run: |
+          git lfs ls-files
+
+          python - <<'PY'
+          from pathlib import Path
+
+          required = [
+              Path("models/scaler.pkl"),
+              Path("models/model.pkl"),
+              Path("models/xgb_model.pkl"),
+              Path("models/stacking_meta.pkl"),
+              Path("models/best_threshold.pkl"),
+          ]
+
+          pointer_prefix = b"version https://git-lfs.github.com/spec/v1"
+
+          for path in required:
+              if not path.is_file():
+                  raise SystemExit(f"Required LFS artifact is missing: {path}")
+
+              content = path.read_bytes()
+
+              if content.startswith(pointer_prefix):
+                  raise SystemExit(f"LFS artifact is still a pointer: {path}")
+
+              if not content:
+                  raise SystemExit(f"LFS artifact is empty: {path}")
+
+              print(f"Materialized: {path} ({len(content)} bytes)")
+          PY
 
       - uses: actions/setup-python@v5
         with:
@@ -26,6 +61,17 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install pytest pytest-cov pytest-timeout
+
+      - name: Verify backend model loading
+        env:
+          SORA_OFFLINE: "1"
+          RUN_SCHEDULER: "false"
+        run: |
+          python - <<'PY'
+          from app.main import app
+
+          print(f"Backend import successful: {type(app).__name__}")
+          PY
 
       - name: Run tests
         run: |
