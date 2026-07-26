@@ -78,7 +78,7 @@ describe("WhatIf request payload", () => {
 
   it("does not fire the request when a value is missing entirely", async () => {
     const spy = vi.spyOn(evaluateApi, "whatIf");
-    const { budget_usd: _omitted, ...withoutBudget } = FORM;
+    const withoutBudget = { ...FORM, budget_usd: undefined };
     renderWithQuery(<WhatIf form={withoutBudget} lastRun={null} />);
 
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
