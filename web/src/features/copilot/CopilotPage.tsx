@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { copilotApi } from "@/api/endpoints/copilot";
 import type { CopilotRequest, CopilotResponse } from "@/api/endpoints/copilot";
 import "./copilot.css";
+import { errorMessage } from "@/lib/errors";
 
 interface FormValues {
   probability: number;
@@ -92,7 +93,7 @@ export function CopilotPage() {
       return copilotApi.explain(body);
     },
     onSuccess: (r) => { setResult(r); if (r.session_id) setCurrentSessionId(r.session_id); setSidebarTick(t=>t+1); toast.success("Explanation generated"); },
-    onError: (e: any) => toast.error("Failed: " + (e?.message ?? "unknown")),
+    onError: (e: unknown) => toast.error("Failed: " + errorMessage(e)),
   });
 
   const submit = (v: FormValues) => { setActivePreset(null); mut.mutate(v); };

@@ -194,11 +194,12 @@ export default function ForecastPage() {
               <Tooltip
                 contentStyle={{ background: "#15181b", border: "1px solid #2a2e33", borderRadius: 8 }}
                 labelFormatter={(l) => `Date: ${l}`}
-                formatter={(value: any, name: any) => {
-                  if (name === "90% CI" && Array.isArray(value))
-                    return [`${value[0].toFixed(2)} — ${value[1].toFixed(2)}`, name];
-                  if (typeof value === "number") return [value.toFixed(3), name];
-                  return [value, name];
+                formatter={(value: unknown, name: unknown) => {
+                  const label = String(name ?? "");
+                  if (label === "90% CI" && Array.isArray(value))
+                    return [`${Number(value[0]).toFixed(2)} — ${Number(value[1]).toFixed(2)}`, label];
+                  if (typeof value === "number") return [value.toFixed(3), label];
+                  return [String(value ?? ""), label];
                 }}
               />
               <Legend />

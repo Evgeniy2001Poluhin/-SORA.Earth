@@ -13,6 +13,8 @@ import type { EvaluateRequest, EvaluateResponse, ExplainResponse, RiskLevel } fr
 import { UncertaintyCard } from "./UncertaintyCard";
 import { fmtNum, fmtMoney, clamp } from "@/lib/format";
 import "./evaluate.css";
+import { errorMessage } from "@/lib/errors";
+import type { HistoryItem } from "@/api/endpoints/history";
 
 const PRESETS: { id:string; label:string; body:EvaluateRequest }[] = [
   { id:"solar",  label:"Solar Energy",     body:{ project_name:"Solar Farm",           country:"Sweden",  budget_usd:150000, co2_reduction_tons_per_year:340, social_impact_score:9, project_duration_months:18 } },
@@ -37,22 +39,26 @@ export function EvaluatePage() {
   const { data: countries } = useQuery({ queryKey:["countries"], queryFn: evaluateApi.countries });
   const [form, setForm] = useState<EvaluateRequest>(PRESETS[0].body);
   const [activePreset, setActivePreset] = useState("solar");
-  const [lastRun, setLastRun] = useState<any>(null);
+  const [lastRun, setLastRun] = useState<(EvaluateRequest & { total_score?: number }) | null>(null);
   const [activeTab, setActiveTab] = useState<string>("project");
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const sid = searchParams.get("snapshot");
     if (!sid) return;
-    historyApi.getById(Number(sid)).then((it: any) => {
-      setForm({
+    historyApi.getById(Number(sid)).then((it: HistoryItem) => {
+      // History rows use the backend field names; map once so lastRun carries the
+      // same *_usd / *_score shape the form does. WhatIf and UncertaintyCard read
+      // lastRun by those names and would otherwise see nothing from a snapshot.
+      const snapshot: EvaluateRequest = {
         project_name: it.name || "Snapshot " + sid,
         country: it.region,
         budget_usd: it.budget,
         co2_reduction_tons_per_year: it.co2_reduction,
         social_impact_score: it.social_impact,
         project_duration_months: it.duration_months,
-      } as any);
-      setLastRun({ ...it, region: it.region });
+      };
+      setForm(snapshot);
+      setLastRun({ ...snapshot, total_score: it.total_score });
       setActiveTab("project");
       setSearchParams({}, { replace: true });
     }).catch(() => {});
@@ -75,7 +81,7 @@ export function EvaluatePage() {
       await Promise.all([ evalMut.mutateAsync(payload), explainMut.mutateAsync(payload), rankMut.mutateAsync(payload) ]);
       setLastRun(payload);
       toast.success("Evaluation complete"); }
-    catch(e:any){ toast.error(e.message); }
+    catch(e: unknown){ toast.error(errorMessage(e)); }
   };
 
   const downloadPDF = () => {
@@ -184,7 +190,7 @@ export function EvaluatePage() {
               </div>
               {activeTab === "mc" ? (
                 <MonteCarlo
-                  data={mcMut.data as any}
+                  data={mcMut.data}
                   loading={mcMut.isPending}
                   onRun={(n)=>mcMut.mutate({ ...form, region: form.country, n })}
                 />
@@ -195,7 +201,7 @@ export function EvaluatePage() {
                 </>
               ) : activeTab === "ranking" ? (
                 <CountryRanking
-                  data={rankMut.data as any}
+                  data={rankMut.data}
                   loading={rankMut.isPending}
                   currentCountry={form.country}
                   onPickCountry={(c)=>setField("country", c)}
@@ -203,7 +209,7 @@ export function EvaluatePage() {
               ) : (<>
               <div className="ev-result-head">
                 <div className="ev-meta mono">
-                  <span>{String(lastRun?.region || lastRun?.country || form.country).toUpperCase()}</span><span className="sep">·</span>
+                  <span>{String(lastRun?.country || form.country).toUpperCase()}</span><span className="sep">·</span>
                   <span>{lastRun?.project_duration_months ?? form.project_duration_months} MO</span><span className="sep">·</span>
                   <span>{fmtMoney(lastRun?.budget_usd ?? form.budget_usd)}</span>
                 </div>

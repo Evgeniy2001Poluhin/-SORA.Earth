@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { explainApi } from "@/api/endpoints/explain";
 import type { ExplainLocalRequest, ExplainLocalResponse } from "@/api/types";
 import "./explain.css";
+import { errorMessage } from "@/lib/errors";
 
 interface FormValues {
   budget: number;
@@ -45,7 +46,7 @@ export function ExplainPage() {
       setElapsed(ms);
       toast.success("Rendered in " + ms.toFixed(0) + "ms");
     },
-    onError: (e: any) => toast.error("Explain failed: " + (e?.message ?? "unknown")),
+    onError: (e: unknown) => toast.error("Explain failed: " + errorMessage(e)),
   });
 
   const submit = (v: FormValues) => mut.mutate(v);

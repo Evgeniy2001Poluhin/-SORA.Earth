@@ -7,6 +7,7 @@ import { calibrationApi } from "@/api/endpoints/calibration";
 import type { DiscrepancyResponse, ExplainLocalRequest } from "@/api/types";
 import "./calibration.css";
 import { BrierReliabilityPanel } from "./BrierReliabilityPanel";
+import { errorMessage } from "@/lib/errors";
 
 interface FormValues {
   budget: number;
@@ -44,7 +45,7 @@ export function CalibrationPage() {
   const mut = useMutation({
     mutationFn: (b: ExplainLocalRequest) => calibrationApi.discrepancy(b),
     onSuccess: (r) => { setData(r); toast.success("Discrepancy computed"); },
-    onError: (e: any) => toast.error("Failed: " + (e?.message ?? "unknown")),
+    onError: (e: unknown) => toast.error("Failed: " + errorMessage(e)),
   });
 
   const submit = (v: FormValues) => mut.mutate(v);

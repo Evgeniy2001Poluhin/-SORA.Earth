@@ -6,6 +6,7 @@ import { LSTMProgressWidget } from "./LSTMProgressWidget";
 import { api } from "@/api/client";
 import "./drift.css";
 import "./lstm-progress.css";
+import { errorMessage } from "@/lib/errors";
 
 type FeatureStat = {
   baseline_mean: number;
@@ -47,12 +48,12 @@ export function DriftPage() {
   const fitMut = useMutation({
     mutationFn: () => driftBaselineApi.fit(),
     onSuccess: (r) => { toast.success("Baseline fitted: " + r.n_samples + " samples"); qc.invalidateQueries({ queryKey: ["drift"] }); qc.invalidateQueries({ queryKey: ["drift-baseline"] }); },
-    onError: (e: any) => toast.error("Fit failed: " + (e?.message ?? "unknown")),
+    onError: (e: unknown) => toast.error("Fit failed: " + errorMessage(e)),
   });
   const delMut = useMutation({
     mutationFn: () => driftBaselineApi.remove(),
     onSuccess: () => { toast.success("Baseline deleted"); qc.setQueryData(["drift-baseline"], (old: any) => ({ ...(old ?? {}), exists: false })); qc.invalidateQueries({ queryKey: ["drift"] }); qc.invalidateQueries({ queryKey: ["drift-baseline"] }); },
-    onError: (e: any) => toast.error("Delete failed: " + (e?.message ?? "unknown")),
+    onError: (e: unknown) => toast.error("Delete failed: " + errorMessage(e)),
   });
   const simMut = useMutation({
     mutationFn: (mode: "stable" | "drift") => driftBaselineApi.simulate(mode, 50),
