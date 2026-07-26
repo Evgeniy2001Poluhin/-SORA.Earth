@@ -172,13 +172,14 @@ def get_experiment_stats():
             result["_source"] = "retrain_log"
     except Exception as e:
         result["_sqlite_error"] = str(e)
-    try:
-        experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
-        if experiment:
-            runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], max_results=100)
-            result["total_runs"] = len(runs)
-    except Exception:
-        pass
+    if not _OFFLINE:
+        try:
+            experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
+            if experiment:
+                runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], max_results=100)
+                result["total_runs"] = len(runs)
+        except Exception:
+            pass
     return result
 
 

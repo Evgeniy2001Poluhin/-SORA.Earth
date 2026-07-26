@@ -86,8 +86,13 @@ jobs:
           REDIS_URL: ""
           SECRET_KEY: "ci-test-secret"
           SORA_ADMIN_TOKEN: "ci-test-admin"
+          SORA_OFFLINE: "1"
+          RUN_SCHEDULER: "false"
 
       - name: Run forecasting tests
+        env:
+          SORA_OFFLINE: "1"
+          RUN_SCHEDULER: "false"
         run: |
           python -m pytest tests/test_forecasting_*.py \
             -v --timeout=60
