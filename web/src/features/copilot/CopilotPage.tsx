@@ -59,8 +59,8 @@ export function CopilotPage() {
         });
       }
       toast.success("Loaded chat");
-    } catch (e: any) {
-      toast.error("Load failed: " + (e?.message ?? "unknown"));
+    } catch (e: unknown) {
+      toast.error("Load failed: " + errorMessage(e));
     }
   }, []);
 
@@ -144,8 +144,8 @@ export function CopilotPage() {
         }
       }
       toast.success("Stream complete");
-    } catch (e: any) {
-      toast.error("Stream failed: " + (e?.message ?? "unknown"));
+    } catch (e: unknown) {
+      toast.error("Stream failed: " + errorMessage(e));
     } finally {
       setStreaming(false);
     }

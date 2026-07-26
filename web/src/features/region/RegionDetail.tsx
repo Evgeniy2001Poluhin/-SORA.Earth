@@ -12,7 +12,10 @@ type Indicator = {
   points_count: number;
 };
 
+/** GET /api/v1/map/russia/{code} answers with a region, or an error envelope. */
 type RegionDetailData = {
+  error?: string;
+  detail?: string;
   region: {
     code: string;
     name: string;
@@ -59,7 +62,7 @@ export default function RegionDetail() {
 
   if (err) return <div className="rd-page" style={{ color: RED }}>Error: {err}</div>;
   if (!data) return <div className="rd-page" style={{ color: "var(--muted)" }}>Loading {code}...</div>;
-  if ((data as any).error || (data as any).detail) {
+  if (data.error || data.detail) {
     return <div className="rd-page" style={{ color: "var(--muted)" }}>Region not found: {code}</div>;
   }
 
