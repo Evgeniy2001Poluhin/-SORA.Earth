@@ -27,19 +27,25 @@ export function WhatIf({ form, lastRun }: Props) {
 
   const param = PARAMS.find(p=>p.key===paramKey)!;
 
-  // Tornado on mount/lastRun change — debounced 400ms to avoid request avalanche
+  // Tornado on mount/lastRun change — debounced 400ms to avoid request avalanche.
+  // lastRun is spread from a possibly-absent previous run, so fall back to the
+  // live form rather than posting undefined numbers.
+  const budget = base?.budget_usd ?? form.budget_usd;
+  const co2 = base?.co2_reduction_tons_per_year ?? form.co2_reduction_tons_per_year;
+  const social = base?.social_impact_score ?? form.social_impact_score;
   useEffect(()=>{
     if (!base?.country) return;
+    if (budget === undefined || co2 === undefined || social === undefined) return;
     const id = setTimeout(() => {
       wi.reset();
       wi.mutate({
         ...base, region: base.country,
-        budget: base.budget_usd, co2_reduction: base.co2_reduction_tons_per_year, social_impact: base.social_impact_score,
+        budget, co2_reduction: co2, social_impact: social,
       });
     }, 400);
     return () => clearTimeout(id);
-  // eslint-disable-next-line
-  },[base?.budget_usd, base?.co2_reduction_tons_per_year, base?.social_impact_score, base?.country]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[budget, co2, social, base?.country]);
 
   // Sweep: 12 points across param range
   const runSweep = async () => {
