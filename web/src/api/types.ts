@@ -111,7 +111,7 @@ export interface UncertaintyResponse {
   tree_distribution: { std: number; n_trees: number; min: number; max: number; p5: number; p95: number };
   confidence: "high" | "medium" | "low";
   uncertainty: { method: string; mean: number; std: number; ci_90: [number, number]; n_trees: number };
-  reliability: string;
+  reliability: "high" | "medium" | "low";
 }
 
 export interface DriftBaselineStatus {
