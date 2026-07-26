@@ -81,7 +81,10 @@ export function ComparePage() {
     A.mut.mutate(payloadA);
     B.mut.mutate(payloadB);
   };
-  useEffect(() => { runBoth(); /* eslint-disable-next-line */ }, []);
+  // Run the initial comparison once on mount; runBoth reads current form state
+  // and re-running it on every render would restart both mutations in a loop.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { runBoth(); }, []);
 
   const ra = A.mut.data, rb = B.mut.data;
   const diff = useMemo(() => {

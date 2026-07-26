@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { MarkdownAnswer } from "./MarkdownAnswer";
 import { SessionsSidebar } from "./SessionsSidebar";
 import { useMutation } from "@tanstack/react-query";
@@ -35,7 +35,6 @@ export function CopilotPage() {
   const [streamMode, setStreamMode] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [streamSpeed, setStreamSpeed] = useState<"fast" | "normal" | "slow">(() => { try { const v = localStorage.getItem("copilot.streamSpeed"); return (v === "fast" || v === "slow" || v === "normal") ? v : "normal"; } catch { return "normal"; } });
   const abortRef = useRef<AbortController | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sidebarTick, setSidebarTick] = useState(0);

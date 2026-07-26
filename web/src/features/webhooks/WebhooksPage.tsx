@@ -1,27 +1,32 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 type Sub = { id:number; url:string; event_type:string; active:boolean; created_at:string };
 type Del = { id:number; subscription_id:number; event_type:string; status_code:number; ok:boolean; error:string; created_at:string };
 const API = "/api/v1/webhooks";
 
 export default function WebhooksPage() {
-  const [subs, setSubs] = useState<Sub[]>([]);
-  const [dels, setDels] = useState<Del[]>([]);
+  const qc = useQueryClient();
   const [url, setUrl] = useState("");
   const [secret, setSecret] = useState<string|null>(null);
 
-  const load = async () => {
-    setSubs(await (await fetch(API)).json());
-    setDels(await (await fetch(API+"/deliveries")).json());
-  };
-  useEffect(() => { load(); }, []);
+  const { data: subs = [] } = useQuery<Sub[]>({
+    queryKey: ["webhooks", "subscriptions"],
+    queryFn: async () => (await fetch(API)).json(),
+  });
+  const { data: dels = [] } = useQuery<Del[]>({
+    queryKey: ["webhooks", "deliveries"],
+    queryFn: async () => (await fetch(API + "/deliveries")).json(),
+  });
+
+  const reload = () => qc.invalidateQueries({ queryKey: ["webhooks"] });
 
   const add = async () => {
     const r = await fetch(API, { method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ url, event_type:"drift" }) });
-    const d = await r.json(); setSecret(d.secret); setUrl(""); load();
+    const d = await r.json(); setSecret(d.secret); setUrl(""); reload();
   };
-  const del = async (id:number) => { await fetch(`${API}/${id}`, { method:"DELETE" }); load(); };
+  const del = async (id:number) => { await fetch(`${API}/${id}`, { method:"DELETE" }); reload(); };
 
   return (
     <div className="webhooks-page" style={{padding:24}}>
