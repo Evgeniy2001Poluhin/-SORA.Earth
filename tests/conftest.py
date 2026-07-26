@@ -133,3 +133,97 @@ def clear_external_cache():
     except Exception:
         pass
     yield
+
+
+# --- offline / scheduler isolation -------------------------------------------
+#
+# SORA_OFFLINE=1 is meant to guarantee that a test run touches no external
+# service. It used to be a convention rather than an enforced boundary: a test
+# that assigned RUN_SCHEDULER directly started the real BackgroundScheduler,
+# whose ingestion jobs then reached api.open-meteo.com from inside CI.
+#
+# These fixtures turn the convention into a boundary.
+
+_ALLOWED_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _offline_mode() -> bool:
+    import os
+    return os.getenv("SORA_OFFLINE", "0") == "1"
+
+
+@pytest.fixture(autouse=True)
+def block_external_network(monkeypatch):
+    """Fail fast on any outbound connection while SORA_OFFLINE=1.
+
+    Loopback stays open so the FastAPI TestClient and local sqlite keep working.
+    """
+    if not _offline_mode():
+        yield
+        return
+
+    import socket
+
+    real_create_connection = socket.create_connection
+    real_connect = socket.socket.connect
+
+    def _host_of(address):
+        if isinstance(address, tuple) and address:
+            return str(address[0])
+        return str(address)
+
+    def guarded_create_connection(address, *args, **kwargs):
+        host = _host_of(address)
+        if host not in _ALLOWED_HOSTS:
+            raise RuntimeError(
+                f"Blocked external connection to {host} while SORA_OFFLINE=1. "
+                "Mock the client or guard the call site."
+            )
+        return real_create_connection(address, *args, **kwargs)
+
+    def guarded_connect(self, address, *args, **kwargs):
+        host = _host_of(address)
+        if self.family in (socket.AF_INET, socket.AF_INET6) and host not in _ALLOWED_HOSTS:
+            raise RuntimeError(
+                f"Blocked external connection to {host} while SORA_OFFLINE=1. "
+                "Mock the client or guard the call site."
+            )
+        return real_connect(self, address, *args, **kwargs)
+
+    real_getaddrinfo = socket.getaddrinfo
+
+    def guarded_getaddrinfo(host, port, *args, **kwargs):
+        # Every outbound connection resolves first, including the asyncio
+        # transports that httpx.AsyncClient uses and that never touch
+        # socket.create_connection.
+        if str(host) not in _ALLOWED_HOSTS:
+            raise RuntimeError(
+                f"Blocked external DNS lookup for {host} while SORA_OFFLINE=1. "
+                "Mock the client or guard the call site."
+            )
+        return real_getaddrinfo(host, port, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "create_connection", guarded_create_connection)
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    monkeypatch.setattr(socket, "getaddrinfo", guarded_getaddrinfo)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def no_scheduler_left_running():
+    """A test that starts the scheduler must also stop it.
+
+    A BackgroundScheduler thread outlives the test that created it and keeps
+    firing ingestion and retrain jobs for the rest of the session.
+    """
+    yield
+    try:
+        from app.scheduler import scheduler
+    except Exception:
+        return
+    if scheduler.running:
+        scheduler.remove_all_jobs()
+        scheduler.shutdown(wait=False)
+        raise AssertionError(
+            "Test left the APScheduler running; shut it down in a finally block."
+        )
