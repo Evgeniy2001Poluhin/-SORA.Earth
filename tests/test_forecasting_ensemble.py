@@ -4,7 +4,7 @@ import pytest
 import pandas as pd
 import numpy as np
 
-from app.services.forecasting.ensemble import EnsembleForecaster, LSTM_MIN_ROWS
+from app.services.forecasting.ensemble import EnsembleForecaster
 
 
 @pytest.fixture
@@ -18,10 +18,9 @@ def large_timeseries():
 
 @pytest.fixture
 def small_timeseries():
-    """Generate a sample below LSTM_MIN_ROWS so LSTM is skipped entirely."""
-    periods = LSTM_MIN_ROWS - 8
-    dates = pd.date_range(start="2026-01-01", periods=periods, freq="D")
-    y = np.linspace(60, 70, periods) + np.random.normal(0, 2, periods)
+    """Generate small sample (n<100) for Prophet dominance."""
+    dates = pd.date_range(start="2026-01-01", periods=50, freq="D")
+    y = np.linspace(60, 70, 50) + np.random.normal(0, 2, 50)
     df = pd.DataFrame({"ds": dates, "y": y})
     return df
 
