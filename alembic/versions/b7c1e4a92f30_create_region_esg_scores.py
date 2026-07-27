@@ -405,8 +405,103 @@ def upgrade() -> None:
     op.execute(CONVERGE_SQL)
 
 
+SAFE_DOWNGRADE_SQL = r"""
+DO $downgrade$
+DECLARE
+    v_regclass oid := to_regclass('region_esg_scores');
+    v_rows     bigint;
+    v_pk       text[];
+    v_bad      text[];
+    v_deps     text[];
+    v_fks      int;
+BEGIN
+    IF v_regclass IS NULL THEN
+        RAISE NOTICE 'region_esg_scores is absent; nothing to do';
+        RETURN;
+    END IF;
+
+    SELECT count(*) INTO v_rows FROM region_esg_scores;
+    IF v_rows > 0 THEN
+        RAISE EXCEPTION
+            'region_esg_scores holds % row(s). Alembic cannot tell whether this '
+            'table was created by the upgrade or converted from data that '
+            'predates it, so dropping it could destroy production records. '
+            'Refusing. Take a backup and drop it manually if that is intended.',
+            v_rows;
+    END IF;
+
+    SELECT array_agg(a.attname ORDER BY a.attname) INTO v_pk
+      FROM pg_constraint con
+      JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ANY (con.conkey)
+     WHERE con.conrelid = v_regclass AND con.contype = 'p';
+    IF v_pk IS DISTINCT FROM ARRAY['id']::name[] THEN
+        RAISE EXCEPTION
+            'region_esg_scores does not carry the canonical primary key on id '
+            '(found %); this is not the schema the upgrade produced. Refusing.', v_pk;
+    END IF;
+
+    SELECT array_agg(format('%s is %s', a.attname, format_type(a.atttypid, NULL)) ORDER BY a.attname)
+      INTO v_bad
+      FROM pg_attribute a
+      JOIN (VALUES ('region_code', 'character varying'),
+                   ('env_score', 'double precision'),
+                   ('social_score', 'double precision'),
+                   ('gov_score', 'double precision'),
+                   ('total_score', 'double precision'),
+                   ('confidence', 'double precision'),
+                   ('sources_count', 'integer'),
+                   ('signals_used', 'integer'),
+                   ('updated_at', 'timestamp with time zone')
+           ) AS want(name, typ) ON want.name = a.attname
+     WHERE a.attrelid = v_regclass AND a.attnum > 0 AND NOT a.attisdropped
+       AND format_type(a.atttypid, NULL) <> want.typ;
+    IF v_bad IS NOT NULL THEN
+        RAISE EXCEPTION
+            'region_esg_scores has non-canonical column type(s): %; this is not '
+            'the schema the upgrade produced. Refusing.', v_bad;
+    END IF;
+
+    SELECT array_agg(DISTINCT dep.relname || ' (' || dep.relkind::text || ')')
+      INTO v_deps
+      FROM pg_depend d
+      JOIN pg_rewrite rw ON rw.oid = d.objid
+      JOIN pg_class dep  ON dep.oid = rw.ev_class
+     WHERE d.refobjid = v_regclass AND dep.oid <> v_regclass;
+    IF v_deps IS NOT NULL THEN
+        RAISE EXCEPTION
+            'region_esg_scores still has dependent object(s): %. Refusing.', v_deps;
+    END IF;
+
+    SELECT count(*) INTO v_fks
+      FROM pg_constraint WHERE confrelid = v_regclass AND contype = 'f';
+    IF v_fks > 0 THEN
+        RAISE EXCEPTION
+            'region_esg_scores is referenced by % foreign key(s). Refusing.', v_fks;
+    END IF;
+
+    DROP INDEX IF EXISTS ix_region_esg_scores_region_code;
+    DROP TABLE region_esg_scores;
+    RAISE NOTICE 'dropped an empty, canonical region_esg_scores';
+END
+$downgrade$;
+"""
+
+
 def downgrade() -> None:
-    # regional_esg_snapshot selects from this table, so it has to go first.
-    op.execute("DROP VIEW IF EXISTS regional_esg_snapshot")
-    op.execute("DROP INDEX IF EXISTS ix_region_esg_scores_region_code")
-    op.execute("DROP TABLE IF EXISTS region_esg_scores")
+    """Refuse to roll back over data rather than dropping it.
+
+    The upgrade both creates this table on an empty database and converges one
+    that already exists, and Alembic records no provenance, so after the fact
+    there is no way to tell which happened. An unconditional DROP TABLE would
+    therefore destroy rows this migration never created.
+
+    The drop proceeds only when the table is empty, carries exactly the schema
+    the upgrade produces, and has no dependents or foreign keys. Anything else
+    raises. Rolling back a populated database is a manual operation with its own
+    backup and restore plan.
+
+    No attempt is made to reverse the type conversion: double precision back to
+    real is lossy, and moving the primary key back to region_code would undo the
+    alignment with RegionESGScore.
+    """
+    op.execute(SAFE_DOWNGRADE_SQL)

@@ -610,3 +610,135 @@ def test_view_without_any_acl_is_handled(db):
     _run(db)  # must not raise
 
     assert _pk_columns(db) == ["id"]
+
+
+# --------------------------------------------------------------- safe downgrade
+
+
+def _downgrade_sql() -> str:
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / f"{MIGRATION_MODULE}.py"
+    spec = importlib.util.spec_from_file_location(MIGRATION_MODULE + "_dn", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.SAFE_DOWNGRADE_SQL
+
+
+def _downgrade(engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(text(_downgrade_sql()))
+
+
+def _table_exists(engine) -> bool:
+    with engine.begin() as conn:
+        return conn.execute(text("SELECT to_regclass('region_esg_scores') IS NOT NULL")).scalar()
+
+
+def test_downgrade_is_a_no_op_when_the_table_is_absent(db):
+    _downgrade(db)  # must not raise
+    assert not _table_exists(db)
+
+
+def test_downgrade_drops_an_empty_canonical_table(db):
+    _run(db)
+    assert _table_exists(db)
+
+    _downgrade(db)
+
+    assert not _table_exists(db)
+
+
+def test_downgrade_refuses_a_populated_table(db):
+    _run(db)
+    with db.begin() as conn:
+        conn.execute(text("INSERT INTO region_esg_scores (region_code) VALUES ('RU-MOW')"))
+
+    with pytest.raises(Exception, match="row"):
+        _downgrade(db)
+
+    assert _table_exists(db)
+    with db.begin() as conn:
+        assert conn.execute(text("SELECT count(*) FROM region_esg_scores")).scalar() == 1
+
+
+def test_downgrade_refuses_a_non_canonical_table(db):
+    """A table the upgrade did not produce must not be dropped by its downgrade."""
+    with db.begin() as conn:
+        conn.execute(text(f"""
+            CREATE TABLE region_esg_scores (
+                {LEGACY_COLUMNS},
+                CONSTRAINT pk_region_esg_scores PRIMARY KEY (region_code)
+            )
+        """))
+
+    with pytest.raises(Exception, match="canonical primary key"):
+        _downgrade(db)
+
+    assert _table_exists(db)
+
+
+def test_downgrade_refuses_when_a_dependent_view_remains(db):
+    _run(db)
+    with db.begin() as conn:
+        conn.execute(text(
+            "CREATE VIEW leftover AS SELECT region_code FROM region_esg_scores"
+        ))
+
+    with pytest.raises(Exception, match="dependent object"):
+        _downgrade(db)
+
+    assert _table_exists(db)
+
+
+def test_downgrade_refuses_when_a_foreign_key_references_the_table(db):
+    _run(db)
+    with db.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE child (rid BIGINT REFERENCES region_esg_scores(id))"
+        ))
+
+    with pytest.raises(Exception, match="foreign key"):
+        _downgrade(db)
+
+    assert _table_exists(db)
+
+
+def test_second_downgrade_is_safe(db):
+    _run(db)
+    _downgrade(db)
+
+    _downgrade(db)  # absent now; must be a no-op, not an error
+
+    assert not _table_exists(db)
+
+
+def test_upgrade_downgrade_round_trip_on_an_empty_table(db):
+    _run(db)
+    _downgrade(db)
+    _run(db)
+
+    assert _pk_columns(db) == ["id"]
+    assert _has_unique_index(db, "ix_region_esg_scores_region_code")
+
+
+def test_production_like_upgrade_with_rows_then_downgrade_refuses(db):
+    """The case the policy exists for: converted production data must survive."""
+    _make_production_like(db)
+    _run(db)
+
+    with pytest.raises(Exception, match="row"):
+        _downgrade(db)
+
+    assert _table_exists(db)
+    with db.begin() as conn:
+        assert conn.execute(text("SELECT count(*) FROM region_esg_scores")).scalar() == 2
+
+
+def test_downgrade_sql_is_emitted_offline_without_an_inspector():
+    sql = _downgrade_sql()
+    assert "DO $downgrade$" in sql
+    assert "RAISE EXCEPTION" in sql
+    assert "DROP TABLE region_esg_scores" in sql
+    assert "sa.inspect" not in sql
