@@ -23,6 +23,8 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 PRED_LOG = os.path.join(ROOT_DIR, "data", "predictions_log.csv")
 PROJECTS_CSV = os.path.join(ROOT_DIR, "data", "projects.csv")
 MODELS_DIR = os.path.join(ROOT_DIR, "models")
+# Bulk upload reads only from here; the caller never supplies an absolute path.
+UPLOADS_DIR = os.environ.get("SORA_UPLOADS_DIR", os.path.join(ROOT_DIR, "data", "uploads"))
 
 
 
@@ -395,13 +397,36 @@ def data_refresh(
     }
 
 
+def _resolve_upload_path(file_path: str) -> str:
+    """Resolve file_path inside UPLOADS_DIR, rejecting anything that escapes it.
+
+    file_path arrives from the caller, so absolute paths, traversal segments and
+    symlinks pointing outside the directory all have to be refused. realpath is
+    taken on both sides so a symlink cannot be used to step out after resolution.
+    """
+    candidate = os.path.realpath(os.path.join(UPLOADS_DIR, file_path))
+    root = os.path.realpath(UPLOADS_DIR)
+    if candidate != root and not candidate.startswith(root + os.sep):
+        raise HTTPException(400, "file_path must stay inside the uploads directory")
+    return candidate
+
+
 @router.post("/data/bulk-upload")
-def data_bulk_upload(file_path: str, auto_retrain: bool = False):
-    """Upload CSV with columns: budget,co2_reduction,social_impact,duration_months,success"""
-    if not os.path.exists(file_path):
+def data_bulk_upload(
+    file_path: str,
+    auto_retrain: bool = False,
+    _admin=Depends(require_admin),
+):
+    """Upload CSV with columns: budget,co2_reduction,social_impact,duration_months,success
+
+    Appends to the training set and can trigger a retrain, so it is admin-only and
+    reads only from UPLOADS_DIR.
+    """
+    resolved = _resolve_upload_path(file_path)
+    if not os.path.isfile(resolved):
         raise HTTPException(400, f"File not found: {file_path}")
     try:
-        df_new = pd.read_csv(file_path)
+        df_new = pd.read_csv(resolved)
     except Exception as e:
         raise HTTPException(400, f"CSV parse error: {e}")
     required = ["budget", "co2_reduction", "social_impact", "duration_months", "success"]
