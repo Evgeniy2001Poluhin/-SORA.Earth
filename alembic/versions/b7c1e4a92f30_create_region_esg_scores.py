@@ -434,7 +434,9 @@ BEGIN
       FROM pg_constraint con
       JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ANY (con.conkey)
      WHERE con.conrelid = v_regclass AND con.contype = 'p';
-    IF v_pk IS DISTINCT FROM ARRAY['id']::name[] THEN
+    -- v_pk is declared text[]; array_agg(attname) is name[] and is coerced into
+    -- it on assignment, so the literal must stay text[] rather than be cast.
+    IF v_pk IS DISTINCT FROM ARRAY['id'] THEN
         RAISE EXCEPTION
             'region_esg_scores does not carry the canonical primary key on id '
             '(found %); this is not the schema the upgrade produced. Refusing.', v_pk;
