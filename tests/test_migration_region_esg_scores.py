@@ -484,3 +484,129 @@ def test_production_like_second_run_is_a_no_op(db):
     assert _pk_columns(db) == ["id"]
     with db.begin() as conn:
         assert conn.execute(text("SELECT count(*) FROM region_esg_scores")).scalar() == 2
+
+
+# ------------------------------------------------ view metadata and ACL safety
+
+
+def test_public_grant_on_the_view_is_restored(db):
+    """grantee 0 is PUBLIC; regrole renders it as "-", which is not an identifier."""
+    _make_production_like(db)
+    with db.begin() as conn:
+        conn.execute(text("GRANT SELECT ON regional_esg_snapshot TO PUBLIC"))
+
+    _run(db)
+
+    with db.begin() as conn:
+        acl = conn.execute(text("""
+            SELECT array_to_string(c.relacl, ',') FROM pg_class c
+             WHERE c.relname = 'regional_esg_snapshot'
+               AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())
+        """)).scalar()
+    assert acl is not None and "=r/" in acl, f"PUBLIC SELECT was not restored: {acl}"
+
+
+def test_view_owner_is_restored(db):
+    _make_production_like(db)
+    with db.begin() as conn:
+        owner_before = conn.execute(text("""
+            SELECT pg_get_userbyid(c.relowner) FROM pg_class c
+             WHERE c.relname = 'regional_esg_snapshot'
+               AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())
+        """)).scalar()
+
+    _run(db)
+
+    with db.begin() as conn:
+        owner_after = conn.execute(text("""
+            SELECT pg_get_userbyid(c.relowner) FROM pg_class c
+             WHERE c.relname = 'regional_esg_snapshot'
+               AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())
+        """)).scalar()
+    assert owner_after == owner_before
+
+
+def test_view_comment_is_restored(db):
+    _make_production_like(db)
+    with db.begin() as conn:
+        conn.execute(text("COMMENT ON VIEW regional_esg_snapshot IS 'ESG snapshot for the map API'"))
+
+    _run(db)
+
+    with db.begin() as conn:
+        comment = conn.execute(text("""
+            SELECT obj_description(c.oid, 'pg_class') FROM pg_class c
+             WHERE c.relname = 'regional_esg_snapshot'
+               AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())
+        """)).scalar()
+    assert comment == "ESG snapshot for the map API"
+
+
+def test_view_with_unsupported_options_fails_before_any_ddl(db):
+    """security_barrier cannot survive CREATE VIEW ... AS <def>, so refuse."""
+    _make_production_like(db)
+    with db.begin() as conn:
+        conn.execute(text("ALTER VIEW regional_esg_snapshot SET (security_barrier = true)"))
+    types_before = _column_types(db)
+
+    with pytest.raises(Exception, match="view options"):
+        _run(db)
+
+    assert _column_types(db) == types_before, "nothing may be altered before the guard fires"
+    with db.begin() as conn:
+        still_there = conn.execute(text("""
+            SELECT count(*) FROM pg_class c
+             WHERE c.relname = 'regional_esg_snapshot' AND c.relkind = 'v'
+               AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())
+        """)).scalar()
+    assert still_there == 1, "the view must not have been dropped"
+
+
+def test_view_with_column_comments_fails_before_any_ddl(db):
+    _make_production_like(db)
+    with db.begin() as conn:
+        conn.execute(text("COMMENT ON COLUMN regional_esg_snapshot.e_score IS 'environmental'"))
+    types_before = _column_types(db)
+
+    with pytest.raises(Exception, match="column comment"):
+        _run(db)
+
+    assert _column_types(db) == types_before
+
+
+def test_unexpected_dependent_view_fails_before_any_ddl(db):
+    """A second dependent view would be destroyed or block the ALTER halfway."""
+    _make_production_like(db)
+    with db.begin() as conn:
+        conn.execute(text(
+            "CREATE VIEW another_dependent AS SELECT region_code FROM region_esg_scores"
+        ))
+    types_before = _column_types(db)
+
+    with pytest.raises(Exception, match="dependent object"):
+        _run(db)
+
+    assert _column_types(db) == types_before
+    with db.begin() as conn:
+        views = conn.execute(text("""
+            SELECT count(*) FROM pg_class c
+             WHERE c.relkind = 'v'
+               AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())
+        """)).scalar()
+    assert views == 2, "both views must survive the refusal"
+
+
+def test_view_without_any_acl_is_handled(db):
+    """relacl is NULL when only default privileges apply; aclexplode(NULL) is empty."""
+    _make_production_like(db)
+    with db.begin() as conn:
+        acl = conn.execute(text("""
+            SELECT c.relacl FROM pg_class c
+             WHERE c.relname = 'regional_esg_snapshot'
+               AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())
+        """)).scalar()
+    assert acl is None, "fixture assumption: no explicit grants yet"
+
+    _run(db)  # must not raise
+
+    assert _pk_columns(db) == ["id"]

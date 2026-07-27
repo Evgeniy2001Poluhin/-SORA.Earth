@@ -63,6 +63,9 @@ DECLARE
     v_view_def   text;
     v_view_owner text;
     v_view_grants text[];
+    v_view_opts  text[];
+    v_view_comment text;
+    v_unexpected_deps text[];
     v_grant      text;
     v_col        text;
     v_max_id     bigint;
@@ -174,18 +177,66 @@ BEGIN
             END IF;
         END IF;
 
+        -- Every dependent object has to be known before anything is dropped:
+        -- an unexpected one would be destroyed or would block the ALTER halfway.
+        SELECT array_agg(DISTINCT dep.relname || ' (' || dep.relkind || ')')
+          INTO v_unexpected_deps
+          FROM pg_depend d
+          JOIN pg_rewrite rw ON rw.oid = d.objid
+          JOIN pg_class dep  ON dep.oid = rw.ev_class
+         WHERE d.refobjid = v_regclass
+           AND dep.oid <> v_regclass
+           AND dep.relname <> 'regional_esg_snapshot';
+
+        IF v_unexpected_deps IS NOT NULL THEN
+            RAISE EXCEPTION
+                'region_esg_scores has dependent object(s) this migration does not '
+                'know how to preserve: %. Refusing to continue.', v_unexpected_deps;
+        END IF;
+
         -- A view over these columns blocks ALTER COLUMN TYPE, so capture it
-        -- exactly -- definition, owner and grants -- and restore it afterwards.
-        SELECT c.oid, pg_get_viewdef(c.oid, true), pg_get_userbyid(c.relowner)
-          INTO v_view_oid, v_view_def, v_view_owner
+        -- exactly and restore it afterwards.
+        SELECT c.oid, pg_get_viewdef(c.oid, true), pg_get_userbyid(c.relowner),
+               c.reloptions, obj_description(c.oid, 'pg_class')
+          INTO v_view_oid, v_view_def, v_view_owner, v_view_opts, v_view_comment
           FROM pg_class c
          WHERE c.relname = 'regional_esg_snapshot'
            AND c.relkind = 'v'
            AND c.relnamespace = (SELECT relnamespace FROM pg_class WHERE oid = v_regclass);
 
         IF v_view_oid IS NOT NULL THEN
-            SELECT array_agg(format('GRANT %s ON regional_esg_snapshot TO %I',
-                                    acl.privilege_type, acl.grantee::regrole))
+            -- CREATE VIEW ... AS <def> carries none of these, so refuse rather
+            -- than silently drop them.
+            IF v_view_opts IS NOT NULL THEN
+                RAISE EXCEPTION
+                    'regional_esg_snapshot carries view options % (security_barrier, '
+                    'security_invoker or check_option) that recreating it would lose. '
+                    'Refusing to continue.', v_view_opts;
+            END IF;
+
+            IF EXISTS (SELECT 1 FROM pg_attribute a
+                        WHERE a.attrelid = v_view_oid AND a.attnum > 0
+                          AND col_description(v_view_oid, a.attnum) IS NOT NULL) THEN
+                RAISE EXCEPTION
+                    'regional_esg_snapshot has column comment(s) that recreating it '
+                    'would lose. Refusing to continue.';
+            END IF;
+
+            -- Restorability is checked before the DROP: the transaction would roll
+            -- back either way, but failing here names the cause instead of surfacing
+            -- an obscure permission error midway through the DDL.
+            IF NOT pg_has_role(current_user, v_view_owner, 'MEMBER') THEN
+                RAISE EXCEPTION
+                    'current user cannot restore regional_esg_snapshot to its owner %. '
+                    'Refusing to continue.', v_view_owner;
+            END IF;
+
+            -- grantee 0 is PUBLIC, which has no row in pg_roles and renders as "-"
+            -- through regrole; it needs the PUBLIC keyword, not a quoted identifier.
+            SELECT array_agg(format('GRANT %s ON regional_esg_snapshot TO %s',
+                                    acl.privilege_type,
+                                    CASE WHEN acl.grantee = 0 THEN 'PUBLIC'
+                                         ELSE quote_ident(pg_get_userbyid(acl.grantee)) END))
               INTO v_view_grants
               FROM (SELECT (aclexplode(c.relacl)).* FROM pg_class c WHERE c.oid = v_view_oid) acl;
 
@@ -216,6 +267,9 @@ BEGIN
         IF v_view_oid IS NOT NULL THEN
             EXECUTE 'CREATE VIEW regional_esg_snapshot AS ' || v_view_def;
             EXECUTE format('ALTER VIEW regional_esg_snapshot OWNER TO %I', v_view_owner);
+            IF v_view_comment IS NOT NULL THEN
+                EXECUTE format('COMMENT ON VIEW regional_esg_snapshot IS %L', v_view_comment);
+            END IF;
             IF v_view_grants IS NOT NULL THEN
                 FOREACH v_grant IN ARRAY v_view_grants LOOP
                     EXECUTE v_grant;
