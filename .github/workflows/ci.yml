@@ -207,6 +207,17 @@ jobs:
           alembic downgrade -1
           alembic upgrade head
 
+      - name: Offline SQL generation
+        run: |
+          alembic upgrade 31e5cc432377:b7c1e4a92f30 --sql > /tmp/offline.sql
+          grep -q 'DO \$migration\$' /tmp/offline.sql
+          echo "Offline script generated without an Inspector"
+
+      - name: Convergence scenarios against PostgreSQL
+        run: |
+          python -m pytest tests/test_migration_region_esg_scores.py \
+            -v --tb=short --timeout=120
+
   integration-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
