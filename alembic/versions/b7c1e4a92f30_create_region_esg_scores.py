@@ -57,6 +57,16 @@ DECLARE
     v_dup_ids    bigint;
     v_null_ids   bigint;
     v_fk_count   int;
+    v_unrecognised text[];
+    v_max_code_len int;
+    v_view_oid   oid;
+    v_view_def   text;
+    v_view_owner text;
+    v_view_grants text[];
+    v_grant      text;
+    v_col        text;
+    v_max_id     bigint;
+    v_seq        text;
 BEGIN
     ----------------------------------------------------------------- scenario A
     IF v_regclass IS NULL THEN
@@ -117,10 +127,102 @@ BEGIN
        AND a.attnum > 0 AND NOT a.attisdropped
        AND format_type(a.atttypid, NULL) <> want.typ;
 
+    ------------------------------------------- canonicalise recognised legacy types
+    -- Production carries region_code as text and the score columns as real,
+    -- neither of which matches RegionESGScore. Accepting them as equivalent
+    -- would leave a clean install, the ORM metadata and production permanently
+    -- disagreeing, so they are converted rather than tolerated. Only these two
+    -- shapes are recognised; anything else still reaches the RAISE below.
     IF v_bad_types IS NOT NULL THEN
-        RAISE EXCEPTION
-            'region_esg_scores exists with incompatible column type(s): %. '
-            'Refusing to continue.', v_bad_types;
+        -- Serialise against another migration attempting the same conversion.
+        PERFORM pg_advisory_xact_lock(hashtext('region_esg_scores_converge'));
+
+        SELECT array_agg(format('%s is %s', a.attname, format_type(a.atttypid, NULL)) ORDER BY a.attname)
+          INTO v_unrecognised
+          FROM pg_attribute a
+          JOIN (VALUES
+                  ('region_code',   'character varying', 'text'),
+                  ('env_score',     'double precision',  'real'),
+                  ('social_score',  'double precision',  'real'),
+                  ('gov_score',     'double precision',  'real'),
+                  ('total_score',   'double precision',  'real'),
+                  ('confidence',    'double precision',  'real'),
+                  ('sources_count', 'integer',           'integer'),
+                  ('signals_used',  'integer',           'integer'),
+                  ('updated_at',    'timestamp with time zone', 'timestamp with time zone')
+               ) AS want(name, canonical, legacy) ON want.name = a.attname
+         WHERE a.attrelid = v_regclass
+           AND a.attnum > 0 AND NOT a.attisdropped
+           AND format_type(a.atttypid, NULL) NOT IN (want.canonical, want.legacy);
+
+        IF v_unrecognised IS NOT NULL THEN
+            RAISE EXCEPTION
+                'region_esg_scores has column type(s) that are neither canonical '
+                'nor a recognised legacy shape: %. Refusing to continue.', v_unrecognised;
+        END IF;
+
+        -- Guard the narrowing conversion before touching anything.
+        IF EXISTS (SELECT 1 FROM pg_attribute a
+                    WHERE a.attrelid = v_regclass AND a.attname = 'region_code'
+                      AND format_type(a.atttypid, NULL) = 'text') THEN
+            SELECT max(length(region_code)) INTO v_max_code_len FROM region_esg_scores;
+            IF coalesce(v_max_code_len, 0) > 10 THEN
+                RAISE EXCEPTION
+                    'region_code holds value(s) up to % characters; converting to '
+                    'VARCHAR(10) would truncate data. Refusing to continue.',
+                    v_max_code_len;
+            END IF;
+        END IF;
+
+        -- A view over these columns blocks ALTER COLUMN TYPE, so capture it
+        -- exactly -- definition, owner and grants -- and restore it afterwards.
+        SELECT c.oid, pg_get_viewdef(c.oid, true), pg_get_userbyid(c.relowner)
+          INTO v_view_oid, v_view_def, v_view_owner
+          FROM pg_class c
+         WHERE c.relname = 'regional_esg_snapshot'
+           AND c.relkind = 'v'
+           AND c.relnamespace = (SELECT relnamespace FROM pg_class WHERE oid = v_regclass);
+
+        IF v_view_oid IS NOT NULL THEN
+            SELECT array_agg(format('GRANT %s ON regional_esg_snapshot TO %I',
+                                    acl.privilege_type, acl.grantee::regrole))
+              INTO v_view_grants
+              FROM (SELECT (aclexplode(c.relacl)).* FROM pg_class c WHERE c.oid = v_view_oid) acl;
+
+            EXECUTE 'DROP VIEW regional_esg_snapshot';
+            RAISE NOTICE 'dropped regional_esg_snapshot for the duration of the conversion';
+        END IF;
+
+        -- real -> double precision is widening and lossless.
+        FOR v_col IN
+            SELECT a.attname FROM pg_attribute a
+             WHERE a.attrelid = v_regclass AND a.attnum > 0 AND NOT a.attisdropped
+               AND format_type(a.atttypid, NULL) = 'real'
+        LOOP
+            EXECUTE format(
+                'ALTER TABLE region_esg_scores ALTER COLUMN %I TYPE DOUBLE PRECISION '
+                'USING %I::double precision', v_col, v_col);
+            RAISE NOTICE 'converted % from real to double precision', v_col;
+        END LOOP;
+
+        IF EXISTS (SELECT 1 FROM pg_attribute a
+                    WHERE a.attrelid = v_regclass AND a.attname = 'region_code'
+                      AND format_type(a.atttypid, NULL) = 'text') THEN
+            ALTER TABLE region_esg_scores
+                ALTER COLUMN region_code TYPE VARCHAR(10) USING region_code::varchar(10);
+            RAISE NOTICE 'converted region_code from text to VARCHAR(10)';
+        END IF;
+
+        IF v_view_oid IS NOT NULL THEN
+            EXECUTE 'CREATE VIEW regional_esg_snapshot AS ' || v_view_def;
+            EXECUTE format('ALTER VIEW regional_esg_snapshot OWNER TO %I', v_view_owner);
+            IF v_view_grants IS NOT NULL THEN
+                FOREACH v_grant IN ARRAY v_view_grants LOOP
+                    EXECUTE v_grant;
+                END LOOP;
+            END IF;
+            RAISE NOTICE 'restored regional_esg_snapshot with its owner and grants';
+        END IF;
     END IF;
 
     ------------------------------------------------------------- surrogate id
@@ -195,6 +297,50 @@ BEGIN
         CREATE UNIQUE INDEX ix_region_esg_scores_region_code
             ON region_esg_scores (region_code);
         RAISE NOTICE 'created unique index on region_code';
+    END IF;
+
+    ------------------------------------------------------------ identity state
+    -- Rows that predate the identity column keep their ids, so the sequence has
+    -- to be moved past them or the next insert collides.
+    SELECT pg_get_serial_sequence('region_esg_scores', 'id') INTO v_seq;
+    IF v_seq IS NOT NULL THEN
+        SELECT max(id) INTO v_max_id FROM region_esg_scores;
+        IF v_max_id IS NOT NULL THEN
+            PERFORM setval(v_seq, v_max_id, true);
+            RAISE NOTICE 'identity sequence aligned to max(id) = %', v_max_id;
+        END IF;
+    END IF;
+
+    ------------------------------------------------------------- postconditions
+    -- Fail loudly rather than reporting success on a half-converted table.
+    IF (SELECT array_agg(a.attname ORDER BY a.attname)
+          FROM pg_constraint con
+          JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ANY (con.conkey)
+         WHERE con.conrelid = v_regclass AND con.contype = 'p')
+       IS DISTINCT FROM ARRAY['id']::name[] THEN
+        RAISE EXCEPTION 'postcondition failed: primary key is not on id';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM pg_attribute a
+                JOIN (VALUES ('region_code', 'character varying'),
+                             ('env_score', 'double precision'),
+                             ('social_score', 'double precision'),
+                             ('gov_score', 'double precision'),
+                             ('total_score', 'double precision'),
+                             ('confidence', 'double precision')
+                     ) AS want(name, typ) ON want.name = a.attname
+               WHERE a.attrelid = v_regclass
+                 AND a.attnum > 0 AND NOT a.attisdropped
+                 AND format_type(a.atttypid, NULL) <> want.typ) THEN
+        RAISE EXCEPTION 'postcondition failed: column types are not canonical';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_index i
+                     JOIN pg_class ic ON ic.oid = i.indexrelid
+                    WHERE i.indrelid = v_regclass
+                      AND ic.relname = 'ix_region_esg_scores_region_code'
+                      AND i.indisunique) THEN
+        RAISE EXCEPTION 'postcondition failed: region_code is not uniquely indexed';
     END IF;
 END
 $migration$;
