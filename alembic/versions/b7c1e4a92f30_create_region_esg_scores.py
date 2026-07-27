@@ -179,7 +179,7 @@ BEGIN
 
         -- Every dependent object has to be known before anything is dropped:
         -- an unexpected one would be destroyed or would block the ALTER halfway.
-        SELECT array_agg(DISTINCT dep.relname || ' (' || dep.relkind || ')')
+        SELECT array_agg(DISTINCT dep.relname || ' (' || dep.relkind::text || ')')
           INTO v_unexpected_deps
           FROM pg_depend d
           JOIN pg_rewrite rw ON rw.oid = d.objid
