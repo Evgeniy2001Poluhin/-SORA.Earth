@@ -76,8 +76,9 @@ def _pk_columns(engine) -> list[str]:
 def _has_unique_index(engine, name: str) -> bool:
     with engine.begin() as conn:
         row = conn.execute(text("""
-            SELECT indexdef FROM pg_indexes
-             WHERE tablename = 'region_esg_scores' AND indexname = :n
+            SELECT pg_get_indexdef(i.indexrelid) FROM pg_index i
+              JOIN pg_class ic ON ic.oid = i.indexrelid
+             WHERE i.indrelid = to_regclass('region_esg_scores') AND ic.relname = :n
         """), {"n": name}).fetchone()
     return bool(row) and "UNIQUE" in row[0]
 
@@ -106,8 +107,9 @@ def test_empty_database_creates_the_orm_schema(db):
 
     with db.begin() as conn:
         cols = dict(conn.execute(text("""
-            SELECT column_name, data_type FROM information_schema.columns
-             WHERE table_name = 'region_esg_scores'
+            SELECT a.attname, format_type(a.atttypid, NULL) FROM pg_attribute a
+             WHERE a.attrelid = to_regclass('region_esg_scores')
+               AND a.attnum > 0 AND NOT a.attisdropped
         """)).fetchall())
 
     assert cols["id"] == "bigint"
@@ -279,11 +281,15 @@ def test_dependent_view_survives_convergence(db):
     _run(db)
 
     with db.begin() as conn:
-        views = [r[0] for r in conn.execute(text("""
-            SELECT table_name FROM information_schema.views
-             WHERE table_name = 'regional_esg_snapshot'
-        """)).fetchall()]
-    assert views == ["regional_esg_snapshot"]
+        # Scoped to the throwaway schema: a same-named view may exist elsewhere.
+        exists = conn.execute(text("""
+            SELECT count(*) FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE c.relname = 'regional_esg_snapshot'
+               AND c.relkind = 'v'
+               AND n.nspname = current_schema()
+        """)).scalar()
+    assert exists == 1
     assert _pk_columns(db) == ["id"]
 
 
@@ -295,9 +301,10 @@ def test_migration_is_idempotent_across_repeated_runs(db):
     assert _pk_columns(db) == ["id"]
     with db.begin() as conn:
         count = conn.execute(text("""
-            SELECT count(*) FROM pg_indexes
-             WHERE tablename = 'region_esg_scores'
-               AND indexname = 'ix_region_esg_scores_region_code'
+            SELECT count(*) FROM pg_index i
+              JOIN pg_class ic ON ic.oid = i.indexrelid
+             WHERE i.indrelid = to_regclass('region_esg_scores')
+               AND ic.relname = 'ix_region_esg_scores_region_code'
         """)).scalar()
     assert count == 1
 
