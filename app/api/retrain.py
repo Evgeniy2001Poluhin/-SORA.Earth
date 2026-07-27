@@ -13,6 +13,7 @@ import torch
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from app.auth import require_api_key
+from app.paths import data_dir, models_dir
 
 router = APIRouter(prefix="/model", tags=["mlops"])
 
@@ -20,9 +21,9 @@ from app.scheduler import _start_retrain_log, _finish_retrain_log
 logger = __import__("logging").getLogger("sora_earth")
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PRED_LOG = os.path.join(ROOT_DIR, "data", "predictions_log.csv")
-PROJECTS_CSV = os.path.join(ROOT_DIR, "data", "projects.csv")
-MODELS_DIR = os.path.join(ROOT_DIR, "models")
+PRED_LOG = os.path.join(data_dir(), "predictions_log.csv")
+PROJECTS_CSV = os.path.join(data_dir(), "projects.csv")
+MODELS_DIR = models_dir()
 
 
 

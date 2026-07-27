@@ -72,6 +72,66 @@ redis_patcher = patch('redis.from_url', return_value=mock_client)
 redis_patcher.start()
 
 
+# --- artifact isolation (issue #20) -----------------------------------------
+# Redirect the artifact roots onto a throwaway copy BEFORE importing app
+# modules, which resolve them once at import time. Without this the suite
+# rewrites models/meta.json and appends rows to data/projects.csv — the tracked
+# training set — on every run. It has to be a copy rather than an empty
+# directory: the same two roots hold the projects CSV and the pickled models
+# the endpoints read back.
+import atexit
+import os
+import shutil
+import subprocess
+import tempfile
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ARTIFACT_TMP = tempfile.mkdtemp(prefix="sora-test-artifacts-")
+atexit.register(shutil.rmtree, _ARTIFACT_TMP, True)
+
+for _dirname, _envvar in (("data", "SORA_DATA_DIR"), ("models", "SORA_MODELS_DIR")):
+    if os.environ.get(_envvar):
+        continue  # honour an explicit override, e.g. from CI
+    _scratch = os.path.join(_ARTIFACT_TMP, _dirname)
+    shutil.copytree(os.path.join(_REPO_ROOT, _dirname), _scratch)
+    os.environ[_envvar] = _scratch
+
+
+def _dirty_artifacts():
+    """Tracked paths under data/ and models/ that differ from HEAD."""
+    try:
+        proc = subprocess.run(
+            ["git", "status", "--porcelain", "--", "data", "models"],
+            cwd=_REPO_ROOT, capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()  # no git available; nothing to guard
+    if proc.returncode != 0:
+        return set()
+    # Untracked entries start with "??" and are somebody else's business.
+    return {ln[3:] for ln in proc.stdout.splitlines() if ln and not ln.startswith("??")}
+
+
+_ARTIFACTS_DIRTY_AT_START = _dirty_artifacts()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Fail the run if it left tracked artifacts modified.
+
+    Compared against a snapshot taken at start-up so a developer's own
+    uncommitted edits under data/ or models/ do not trip this.
+    """
+    newly_dirty = _dirty_artifacts() - _ARTIFACTS_DIRTY_AT_START
+    if not newly_dirty:
+        return
+    session.exitstatus = 1
+    print(
+        "\nERROR: this run modified tracked artifacts:\n  "
+        + "\n  ".join(sorted(newly_dirty))
+        + "\nGenerated files belong under SORA_DATA_DIR / SORA_MODELS_DIR."
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def mock_redis_session():
     """Setup Redis mock for the entire test session."""

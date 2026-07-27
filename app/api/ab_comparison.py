@@ -7,8 +7,9 @@ from fastapi.responses import FileResponse
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, brier_score_loss, log_loss
 from sklearn.model_selection import train_test_split
 
+from app.paths import data_dir, models_dir
+
 router = APIRouter(prefix="/model", tags=["ab-comparison"])
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 @router.get("/ab-comparison")
@@ -16,7 +17,7 @@ def ab_comparison():
     """Compare RF v1, Stacking v2, Calibrated v2 on held-out test set."""
     import app.main as m
 
-    csv_path = os.path.join(ROOT, "data", "projects.csv")
+    csv_path = os.path.join(data_dir(), "projects.csv")
     if not os.path.exists(csv_path):
         raise HTTPException(404, "Training data not found")
 
@@ -38,7 +39,7 @@ def ab_comparison():
 
             pr_v2 = float(m.ensemble_model_v2.predict_proba(feats_v2)[0][1]) if m.ensemble_model_v2 else pr_v1
 
-            cal_path = os.path.join(ROOT, "models", "rf_model_cal.pkl")
+            cal_path = os.path.join(models_dir(), "rf_model_cal.pkl")
             if os.path.exists(cal_path):
                 with open(cal_path, "rb") as f:
                     cal = pickle.load(f)
@@ -112,7 +113,7 @@ def ab_comparison_plot():
     ax.grid(True, alpha=0.3, axis="y")
 
     plt.tight_layout()
-    out = os.path.join(ROOT, "data", "ab_comparison.png")
+    out = os.path.join(data_dir(), "ab_comparison.png")
     plt.savefig(out, dpi=150, bbox_inches="tight")
     plt.close()
 
