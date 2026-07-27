@@ -217,7 +217,9 @@ def test_incompatible_column_type_fails_fast(db):
             )
         """))
 
-    with pytest.raises(Exception, match="incompatible column type"):
+    # TEXT is neither the canonical double precision nor the recognised legacy
+    # real, so it reaches the unrecognised-shape guard.
+    with pytest.raises(Exception, match="neither canonical nor a recognised legacy"):
         _run(db)
 
 
