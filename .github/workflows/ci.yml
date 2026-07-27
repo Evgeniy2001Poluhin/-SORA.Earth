@@ -226,7 +226,101 @@ jobs:
       - name: Convergence scenarios against PostgreSQL
         run: |
           python -m pytest tests/test_migration_region_esg_scores.py \
+            tests/test_migration_converge_on_head.py \
             -v --tb=short --timeout=120
+
+      # The bootstrap above starts empty, so it never exercises the case this
+      # chain actually has to survive: a deployment already recorded at
+      # 0b0ff6d1594e, carrying the legacy table that create_all() left behind.
+      # b7c1e4a92f30 is an ancestor of that revision and is therefore treated
+      # as applied without ever running, so only e3f8a7c15d92 converges it.
+      - name: Catch-up convergence on a database already past b7c1e4a92f30
+        env:
+          CATCHUP_URL: "postgresql://sora:sora2026@localhost:5432/sora_catchup"
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          admin = create_engine(os.environ["DATABASE_URL"], isolation_level="AUTOCOMMIT")
+          with admin.connect() as conn:
+              conn.execute(text("DROP DATABASE IF EXISTS sora_catchup"))
+              conn.execute(text("CREATE DATABASE sora_catchup"))
+          admin.dispose()
+
+          engine = create_engine(os.environ["CATCHUP_URL"])
+          with engine.begin() as conn:
+              conn.execute(text("""
+                  CREATE TABLE region_esg_scores (
+                      region_code   text PRIMARY KEY,
+                      env_score     real,
+                      social_score  real,
+                      gov_score     real,
+                      total_score   real,
+                      confidence    real,
+                      updated_at    timestamptz NOT NULL DEFAULT now()
+                  )"""))
+              # what cb5a035aed2f added on top of it
+              conn.execute(text("ALTER TABLE region_esg_scores "
+                                "ADD COLUMN id BIGINT GENERATED ALWAYS AS IDENTITY"))
+              conn.execute(text("ALTER TABLE region_esg_scores ADD COLUMN sources_count INTEGER"))
+              conn.execute(text("ALTER TABLE region_esg_scores ADD COLUMN signals_used INTEGER"))
+              conn.execute(text("CREATE UNIQUE INDEX ix_region_esg_scores_id "
+                                "ON region_esg_scores(id)"))
+              conn.execute(text("""
+                  CREATE VIEW regional_esg_snapshot AS
+                  SELECT region_code, env_score AS e_score, social_score AS s_score,
+                         gov_score AS g_score, total_score AS score, confidence,
+                         ARRAY[]::text[] AS sources_used, updated_at AS computed_at
+                    FROM region_esg_scores"""))
+              conn.execute(text("""
+                  INSERT INTO region_esg_scores
+                         (region_code, env_score, social_score, gov_score, total_score, confidence)
+                  SELECT 'RU-' || lpad(g::text, 3, '0'), 50+g*0.1, 60+g*0.1, 55+g*0.1, 58+g*0.1, 0.8
+                    FROM generate_series(1, 85) g"""))
+              conn.execute(text("CREATE TABLE alembic_version "
+                                "(version_num varchar(32) NOT NULL PRIMARY KEY)"))
+              conn.execute(text("INSERT INTO alembic_version VALUES ('0b0ff6d1594e')"))
+          engine.dispose()
+          print("legacy database staged at 0b0ff6d1594e with 85 rows")
+          PY
+
+          DATABASE_URL="$CATCHUP_URL" alembic upgrade head
+
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(os.environ["CATCHUP_URL"])
+          with engine.begin() as conn:
+              columns = dict(conn.execute(text("""
+                  SELECT a.attname, format_type(a.atttypid, a.atttypmod)
+                    FROM pg_attribute a
+                   WHERE a.attrelid = 'region_esg_scores'::regclass
+                     AND a.attnum > 0 AND NOT a.attisdropped""")).fetchall())
+              pk = [r[0] for r in conn.execute(text("""
+                  SELECT a.attname FROM pg_constraint con
+                    JOIN pg_attribute a ON a.attrelid = con.conrelid
+                                       AND a.attnum = ANY (con.conkey)
+                   WHERE con.conrelid = 'region_esg_scores'::regclass
+                     AND con.contype = 'p'""")).fetchall()]
+              rows = conn.execute(text("SELECT count(*) FROM region_esg_scores")).scalar()
+              view_rows = conn.execute(text("SELECT count(*) FROM regional_esg_snapshot")).scalar()
+
+          assert pk == ["id"], f"primary key was not moved to id: {pk}"
+          assert columns["region_code"] == "character varying(10)", columns["region_code"]
+          for score in ("env_score", "social_score", "gov_score", "total_score", "confidence"):
+              assert columns[score] == "double precision", f"{score} is {columns[score]}"
+          assert rows == 85, f"rows were lost: {rows}"
+          assert view_rows == 85, f"view lost rows: {view_rows}"
+          print("legacy database converged, 85 rows and the view intact")
+          PY
+
+      - name: Offline SQL generation for the catch-up revision
+        run: |
+          alembic upgrade 0b0ff6d1594e:e3f8a7c15d92 --sql > /tmp/offline_catchup.sql
+          grep -q 'DO \$migration\$' /tmp/offline_catchup.sql
+          echo "Catch-up offline script generated without an Inspector"
 
   integration-tests:
     runs-on: ubuntu-latest
