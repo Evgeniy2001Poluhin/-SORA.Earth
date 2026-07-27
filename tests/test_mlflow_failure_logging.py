@@ -78,9 +78,12 @@ def test_get_experiment_stats_distinguishes_failure_from_an_empty_experiment(onl
         with caplog.at_level("WARNING", logger="app.mlflow_tracking"):
             stats = mlflow_tracking.get_experiment_stats()
 
+    # No field is added to the result: this dict is returned verbatim by
+    # GET /api/v1/mlflow/stats, so the warning is the signal, not the payload.
     assert stats["total_runs"] == 0
-    assert stats.get("_mlflow_error") == "Boom", "an outage must be distinguishable from empty"
-    assert any("get_experiment_stats" in r.getMessage() for r in caplog.records)
+    assert "_mlflow_error" not in stats, "the public response contract must not change"
+    assert any("get_experiment_stats" in r.getMessage() and "Boom" in r.getMessage()
+               for r in caplog.records)
 
 
 def test_successful_path_logs_no_warning(online, caplog):
@@ -89,7 +92,6 @@ def test_successful_path_logs_no_warning(online, caplog):
             stats = mlflow_tracking.get_experiment_stats()
 
     assert stats["total_runs"] == 0
-    assert "_mlflow_error" not in stats, "an empty experiment is not an error"
     assert not [r for r in caplog.records if "MLflow" in r.getMessage()]
 
 
@@ -100,6 +102,14 @@ def test_offline_mode_never_calls_mlflow(monkeypatch):
         assert mlflow_tracking.log_prediction("rf_v1", {"budget": 1}) is None
         assert mlflow_tracking.log_evaluation("P", PROJECT, "Low") is None
         assert mlflow_tracking.log_model_registry(object(), "rf_v1", {}) is None
+
+    # get_experiment_stats is the path the offline guard was added to, so it has
+    # to be covered too: the lookup must not happen at all.
+    with patch.object(mlflow_tracking.mlflow, "get_experiment_by_name",
+                      side_effect=AssertionError("MLflow was contacted while offline")):
+        stats = mlflow_tracking.get_experiment_stats()
+    assert stats["total_runs"] == 0
+    assert stats["experiment"] == mlflow_tracking.EXPERIMENT_NAME
 
 
 def test_no_payload_or_model_contents_are_logged(online, caplog):
@@ -112,3 +122,46 @@ def test_no_payload_or_model_contents_are_logged(online, caplog):
     joined = " ".join(r.getMessage() for r in caplog.records)
     assert "super-secret-value" not in joined
     assert "123456789" not in joined
+
+
+@pytest.mark.parametrize("message, secret", [
+    ("api_key: super-secret", "super-secret"),
+    ("token: abc123", "abc123"),
+    ("password:hunter2", "hunter2"),
+    ('"api_key": "json-secret"', "json-secret"),
+    ("SECRET = Caps", "Caps"),
+])
+def test_sanitizer_redacts_colon_and_quoted_separators(message, secret):
+    """= is not the only separator these appear with in the wild."""
+    assert secret not in mlflow_tracking._sanitized(Boom(message))
+
+
+def test_sanitizer_handles_ipv6_and_schemeless_uris():
+    out = mlflow_tracking._sanitized(Boom("connect to http://u:p@[::1]:5556/api failed"))
+    assert "u:p@" not in out
+    out = mlflow_tracking._sanitized(Boom("connect to //user:pw@host/path failed"))
+    assert "user:pw" not in out
+
+
+def test_sanitizer_survives_an_exception_whose_str_raises():
+    class Hostile(Exception):
+        def __str__(self):
+            raise ValueError("no string for you")
+
+    assert mlflow_tracking._sanitized(Hostile()) == "<unprintable>"
+
+
+def test_sanitizer_flattens_a_multiline_message():
+    out = mlflow_tracking._sanitized(Boom("first line\nsecond line\r\nthird"))
+    assert "\n" not in out and "\r" not in out
+
+
+def test_warning_arguments_carry_no_exception_object(online, caplog):
+    """Only strings reach the logger, so no handler can re-render the exception."""
+    with patch.object(mlflow_tracking.mlflow, "start_run", side_effect=Boom("x")):
+        with caplog.at_level("WARNING", logger="app.mlflow_tracking"):
+            mlflow_tracking.log_prediction("rf_v1", {"budget": 1})
+
+    record = [r for r in caplog.records if "MLflow" in r.getMessage()][0]
+    assert all(isinstance(a, str) for a in record.args), record.args
+    assert record.exc_info is None, "a traceback can carry the URI and request details"

@@ -24,7 +24,9 @@ _MAX_DETAIL = 200
 _REDACT = (
     re.compile(r"//[^/@\s]*@"),
     re.compile(r"\?[^\s]*"),
-    re.compile(r"(?i)(token|password|secret|api[_-]?key)=[^\s&]*"),
+    # = and : both appear in the wild, and JSON-ish payloads wrap either side
+    # in quotes: api_key=x, api_key: x, "api_key": "x".
+    re.compile(r"""(?i)(token|password|secret|api[_-]?key)["']?\s*[:=]\s*["']?[^\s&"']*"""),
 )
 
 
@@ -35,7 +37,11 @@ def _sanitized(exc: Exception) -> str:
     carry userinfo, so the message is redacted rather than logged verbatim.
     Control characters are neutralised so a failure cannot forge log lines.
     """
-    text = str(exc)
+    try:
+        text = str(exc)
+    except Exception:
+        # An exception whose __str__ raises must not take the caller down with it.
+        return "<unprintable>"
     for pattern in _REDACT:
         text = pattern.sub("[redacted]", text)
     text = "".join(ch if ch.isprintable() else " " for ch in text)
@@ -220,10 +226,11 @@ def get_experiment_stats():
                 runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], max_results=100)
                 result["total_runs"] = len(runs)
         except Exception as e:
-            # total_runs stays 0, so the log line is the only way to tell an
-            # outage from an empty experiment.
+            # total_runs stays 0 either way. The warning is deliberately the only
+            # signal: this dict is returned verbatim by GET /api/v1/mlflow/stats
+            # (app/api/infra.py), so adding a field here would change a public
+            # response and leak an internal exception class to clients.
             _log_mlflow_failure("get_experiment_stats", e)
-            result["_mlflow_error"] = type(e).__name__
     return result
 
 
