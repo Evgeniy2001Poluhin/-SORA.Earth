@@ -25,8 +25,14 @@ _REDACT = (
     re.compile(r"//[^/@\s]*@"),
     re.compile(r"\?[^\s]*"),
     # = and : both appear in the wild, and JSON-ish payloads wrap either side
-    # in quotes: api_key=x, api_key: x, "api_key": "x".
-    re.compile(r"""(?i)(token|password|secret|api[_-]?key)["']?\s*[:=]\s*["']?[^\s&"']*"""),
+    # in quotes: api_key=x, api_key: x, "api_key": "x". A quoted value is taken
+    # whole -- stopping at whitespace would leave the tail of
+    # api_key: "super secret" in the log.
+    re.compile(
+        r"""(?ix)(token|password|secret|api[_-]?key)["']?\s*[:=]\s*(
+            "(?:\\.|[^"\\])*" | '(?:\\.|[^'\\])*' | [^\s&]+
+        )"""
+    ),
 )
 
 

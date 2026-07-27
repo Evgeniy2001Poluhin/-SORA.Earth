@@ -162,6 +162,18 @@ def test_warning_arguments_carry_no_exception_object(online, caplog):
         with caplog.at_level("WARNING", logger="app.mlflow_tracking"):
             mlflow_tracking.log_prediction("rf_v1", {"budget": 1})
 
-    record = [r for r in caplog.records if "MLflow" in r.getMessage()][0]
+    record = next(r for r in caplog.records if "MLflow" in r.getMessage())
     assert all(isinstance(a, str) for a in record.args), record.args
     assert record.exc_info is None, "a traceback can carry the URI and request details"
+
+
+@pytest.mark.parametrize("message, secret", [
+    ('api_key: "super secret value"', "secret value"),
+    ("password: 'two words here'", "words here"),
+    ('"api_key": "json secret value"', "secret value"),
+    ('token="escaped \\" quote inside"', "quote inside"),
+])
+def test_sanitizer_takes_a_quoted_secret_whole(message, secret):
+    """Stopping at whitespace left the tail of a quoted credential in the log."""
+    out = mlflow_tracking._sanitized(Boom(message))
+    assert secret not in out, out
