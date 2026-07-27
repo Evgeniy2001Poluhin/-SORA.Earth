@@ -401,6 +401,20 @@ def data_refresh(
     }
 
 
+def _safe_for_log(value: str, limit: int = 200) -> str:
+    """Neutralise caller-supplied text before it reaches an audit line.
+
+    file_path comes from the request, so a newline in it would let a caller
+    forge additional audit entries. Non-printable characters are replaced rather
+    than stripped, so tampering stays visible, and a leading spreadsheet formula
+    trigger is quoted in case the log is later opened in a spreadsheet.
+    """
+    cleaned = "".join(ch if ch.isprintable() else "?" for ch in value[:limit])
+    if cleaned[:1] in ("=", "+", "-", "@"):
+        cleaned = "'" + cleaned
+    return cleaned
+
+
 def _resolve_upload_path(file_path: str) -> str:
     """Resolve file_path inside UPLOADS_DIR, rejecting anything that escapes it.
 
@@ -541,7 +555,8 @@ def data_bulk_upload(
     reads only from UPLOADS_DIR, and replaces the dataset atomically under an
     interprocess lock. Every outcome is audited.
     """
-    actor = getattr(_admin, "username", None) or "admin"
+    actor = _safe_for_log(str(getattr(_admin, "username", None) or "admin"), 64)
+    safe_name = _safe_for_log(file_path)
     started = datetime.utcnow().isoformat()
 
     def _audit(outcome: str, rows: int = 0, detail: str = "") -> None:
@@ -550,7 +565,7 @@ def data_bulk_upload(
         logger.info(
             "bulk_upload actor=%s action=data_bulk_upload file=%s rows=%d "
             "auto_retrain=%s result=%s started_at=%s%s",
-            actor, file_path, rows, auto_retrain, outcome, started,
+            actor, safe_name, rows, auto_retrain, outcome, started,
             f" detail={detail}" if detail else "",
         )
 

@@ -321,3 +321,28 @@ def test_audit_records_actor_action_rows_and_result(uploads_dir, as_admin, tmp_p
     assert "rows=2" in line
     assert "result=uploaded" in line
     assert str(uploads_dir) not in line, "the audit line must not carry server paths"
+
+
+def test_audit_line_cannot_be_forged_with_a_newline(uploads_dir, as_admin, caplog):
+    """A newline in the caller-supplied name must not create a second log entry."""
+    from app.api import retrain
+
+    hostile = "evil\nbulk_upload actor=root action=data_bulk_upload result=uploaded"
+
+    with caplog.at_level("INFO", logger="sora_earth"):
+        client.post(ENDPOINT, params={"file_path": hostile})
+
+    audit = [r.getMessage() for r in caplog.records if "bulk_upload" in r.getMessage()]
+    for line in audit:
+        assert "\n" not in line, "a caller must not be able to inject a line break"
+        assert "actor=root" not in line, "a caller must not be able to forge an actor"
+    assert retrain._safe_for_log("a\nb") == "a?b"
+
+
+def test_audit_quotes_a_leading_formula_trigger(uploads_dir, as_admin):
+    """Audit lines may be opened in a spreadsheet; neutralise formula triggers."""
+    from app.api import retrain
+
+    assert retrain._safe_for_log("=cmd()").startswith("'=")
+    assert retrain._safe_for_log("+1").startswith("'+")
+    assert retrain._safe_for_log("normal.csv") == "normal.csv"
