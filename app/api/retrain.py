@@ -1,7 +1,9 @@
 from fastapi import Depends
 from app.auth import require_admin
 """Model retraining and metrics API."""
-import os, csv, pickle, json, time
+import contextlib
+import fcntl
+import os, csv, pickle, json, stat, tempfile, time
 from datetime import datetime
 
 import numpy as np
@@ -25,6 +27,8 @@ PROJECTS_CSV = os.path.join(ROOT_DIR, "data", "projects.csv")
 MODELS_DIR = os.path.join(ROOT_DIR, "models")
 # Bulk upload reads only from here; the caller never supplies an absolute path.
 UPLOADS_DIR = os.environ.get("SORA_UPLOADS_DIR", os.path.join(ROOT_DIR, "data", "uploads"))
+MAX_UPLOAD_BYTES = int(os.environ.get("SORA_MAX_UPLOAD_BYTES", 50 * 1024 * 1024))
+DATASET_LOCK = os.path.join(ROOT_DIR, "data", ".projects.csv.lock")
 
 
 
@@ -400,15 +404,129 @@ def data_refresh(
 def _resolve_upload_path(file_path: str) -> str:
     """Resolve file_path inside UPLOADS_DIR, rejecting anything that escapes it.
 
-    file_path arrives from the caller, so absolute paths, traversal segments and
-    symlinks pointing outside the directory all have to be refused. realpath is
-    taken on both sides so a symlink cannot be used to step out after resolution.
+    Kept for callers that only need the resolved name. Reading goes through
+    _open_upload, which anchors on a directory descriptor instead.
     """
     candidate = os.path.realpath(os.path.join(UPLOADS_DIR, file_path))
     root = os.path.realpath(UPLOADS_DIR)
     if candidate != root and not candidate.startswith(root + os.sep):
         raise HTTPException(400, "file_path must stay inside the uploads directory")
     return candidate
+
+
+def _open_upload(file_path: str) -> int:
+    """Open the upload once, anchored to UPLOADS_DIR, and return the descriptor.
+
+    Resolving a path and then opening it by name is a time-of-check/time-of-use
+    gap: between the two, the name can be repointed at another file. Everything
+    downstream therefore reads from this one descriptor, never from the path
+    again.
+
+    Anchoring uses dir_fd, so the lookup is performed relative to an already
+    opened UPLOADS_DIR and cannot be redirected by replacing the directory
+    itself. O_NOFOLLOW refuses a symlink as the final component.
+
+    Known limitation: O_NOFOLLOW guards only the last component. An intermediate
+    directory in a nested path could still be a symlink. Closing that fully needs
+    openat2(RESOLVE_BENEATH), which CPython does not expose; until then, keep
+    UPLOADS_DIR writable only by the service account.
+    """
+    if os.path.isabs(file_path):
+        raise HTTPException(400, "file_path must be relative to the uploads directory")
+    parts = [p for p in file_path.replace("\\", "/").split("/") if p not in ("", ".")]
+    if any(p == ".." for p in parts):
+        raise HTTPException(400, "file_path must stay inside the uploads directory")
+    if not parts:
+        raise HTTPException(400, "file_path must name a file")
+
+    try:
+        dir_fd = os.open(UPLOADS_DIR, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    except OSError:
+        raise HTTPException(400, "uploads directory is unavailable")
+
+    try:
+        try:
+            fd = os.open(
+                os.path.join(*parts),
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=dir_fd,
+            )
+        except FileNotFoundError:
+            raise HTTPException(400, f"File not found: {file_path}")
+        except OSError:
+            # ELOOP when the final component is a symlink, EACCES, and so on.
+            raise HTTPException(400, f"File is not readable: {file_path}")
+    finally:
+        os.close(dir_fd)
+
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise HTTPException(400, "file_path must name a regular file")
+        if st.st_size > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                413, f"File exceeds the {MAX_UPLOAD_BYTES} byte upload limit"
+            )
+        if st.st_size == 0:
+            raise HTTPException(400, "File is empty")
+    except HTTPException:
+        os.close(fd)
+        raise
+    except OSError:
+        os.close(fd)
+        raise HTTPException(400, "File could not be inspected")
+
+    return fd
+
+
+def _replace_projects_csv(df_merged) -> None:
+    """Replace the training set atomically, so a failure cannot truncate it.
+
+    Written to a temporary file in the same directory -- therefore the same
+    filesystem, which os.replace requires -- then flushed, fsynced and renamed.
+    The directory is fsynced afterwards so the rename itself survives a crash.
+    """
+    directory = os.path.dirname(PROJECTS_CSV)
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".projects-", suffix=".csv")
+    try:
+        with os.fdopen(fd, "w", newline="") as tmp:
+            df_merged.to_csv(tmp, index=False)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_path, PROJECTS_CSV)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    try:
+        dir_fd = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except OSError:
+        # Not every filesystem allows fsync on a directory; the rename is still
+        # atomic, only its durability across a crash is weaker.
+        pass
+
+
+@contextlib.contextmanager
+def _dataset_lock():
+    """Serialise read-modify-write on projects.csv across processes."""
+    os.makedirs(os.path.dirname(DATASET_LOCK), exist_ok=True)
+    fd = os.open(DATASET_LOCK, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise HTTPException(409, "Another upload is in progress; retry shortly")
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 @router.post("/data/bulk-upload")
@@ -419,35 +537,73 @@ def data_bulk_upload(
 ):
     """Upload CSV with columns: budget,co2_reduction,social_impact,duration_months,success
 
-    Appends to the training set and can trigger a retrain, so it is admin-only and
-    reads only from UPLOADS_DIR.
+    Appends to the training set and can trigger a retrain, so it is admin-only,
+    reads only from UPLOADS_DIR, and replaces the dataset atomically under an
+    interprocess lock. Every outcome is audited.
     """
-    resolved = _resolve_upload_path(file_path)
-    if not os.path.isfile(resolved):
-        raise HTTPException(400, f"File not found: {file_path}")
+    actor = getattr(_admin, "username", None) or "admin"
+    started = datetime.utcnow().isoformat()
+
+    def _audit(outcome: str, rows: int = 0, detail: str = "") -> None:
+        # Deliberately no server paths: the caller only ever learns the name it
+        # supplied, never where the uploads directory lives.
+        logger.info(
+            "bulk_upload actor=%s action=data_bulk_upload file=%s rows=%d "
+            "auto_retrain=%s result=%s started_at=%s%s",
+            actor, file_path, rows, auto_retrain, outcome, started,
+            f" detail={detail}" if detail else "",
+        )
+
+    fd = _open_upload(file_path)
     try:
-        df_new = pd.read_csv(resolved)
-    except Exception as e:
-        raise HTTPException(400, f"CSV parse error: {e}")
+        with os.fdopen(fd, "rb") as handle:
+            try:
+                df_new = pd.read_csv(handle)
+            except Exception as e:
+                _audit("rejected_unparseable", detail=type(e).__name__)
+                raise HTTPException(400, f"CSV parse error: {type(e).__name__}")
+    except HTTPException:
+        raise
+
     required = ["budget", "co2_reduction", "social_impact", "duration_months", "success"]
     missing = [c for c in required if c not in df_new.columns]
     if missing:
+        _audit("rejected_missing_columns", detail=",".join(missing))
         raise HTTPException(400, f"Missing columns: {missing}")
+    if len(df_new) == 0:
+        _audit("rejected_no_rows")
+        raise HTTPException(400, "CSV contains no rows")
     invalid = df_new[~df_new["success"].isin([0, 1])]
     if len(invalid) > 0:
+        _audit("rejected_invalid_rows", rows=len(invalid))
         raise HTTPException(400, f"{len(invalid)} rows have invalid success values (must be 0 or 1)")
-    df_existing = pd.read_csv(PROJECTS_CSV)
-    df_merged = pd.concat([df_existing, df_new], ignore_index=True)
-    df_merged.to_csv(PROJECTS_CSV, index=False)
+
+    # Validation is complete; only now is the dataset touched, and only under the
+    # lock so two uploads cannot interleave their read-modify-write.
+    with _dataset_lock():
+        df_existing = pd.read_csv(PROJECTS_CSV)
+        df_merged = pd.concat([df_existing, df_new], ignore_index=True)
+        try:
+            _replace_projects_csv(df_merged)
+        except Exception as e:
+            _audit("failed_write", rows=len(df_new), detail=type(e).__name__)
+            raise HTTPException(500, "Failed to persist the dataset; it is unchanged")
+
+    _audit("uploaded", rows=len(df_new))
     result = {
         "status": "uploaded",
         "rows_added": len(df_new),
         "total_samples": len(df_merged),
     }
+
+    # Retraining runs only after the replacement is durable.
     if auto_retrain:
         try:
             retrain_result = _do_retrain(min_samples=50, trigger_source="auto")
             result["retrain"] = retrain_result["metrics"]
+            _audit("retrain_ok", rows=len(df_new))
         except Exception as e:
-            result["retrain_error"] = str(e)
+            # The dataset write already succeeded, so this is reported, not rolled back.
+            result["retrain_error"] = type(e).__name__
+            _audit("retrain_failed", rows=len(df_new), detail=type(e).__name__)
     return result
