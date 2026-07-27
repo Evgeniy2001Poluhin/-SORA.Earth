@@ -153,7 +153,11 @@ jobs:
       SECRET_KEY: "ci-test-secret"
       SORA_ADMIN_TOKEN: "ci-test-admin"
     steps:
+      # tests/conftest.py imports app.main, which unpickles the LFS models, so
+      # the scenario step needs them materialised like backend-tests does.
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - uses: actions/setup-python@v5
         with:
