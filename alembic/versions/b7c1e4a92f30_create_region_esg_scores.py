@@ -48,7 +48,7 @@ depends_on = None
 CONVERGE_SQL = r"""
 DO $migration$
 DECLARE
-    v_regclass   oid := to_regclass('public.region_esg_scores');
+    v_regclass   oid := to_regclass('region_esg_scores');
     v_pk_cols    text[];
     v_pk_name    text;
     v_missing    text[];
@@ -87,9 +87,10 @@ BEGIN
               ('signals_used'), ('updated_at')
            ) AS expected(name)
      WHERE NOT EXISTS (
-              SELECT 1 FROM information_schema.columns c
-               WHERE c.table_name = 'region_esg_scores'
-                 AND c.column_name = expected.name);
+              SELECT 1 FROM pg_attribute a
+               WHERE a.attrelid = v_regclass
+                 AND a.attnum > 0 AND NOT a.attisdropped
+                 AND a.attname = expected.name);
 
     IF v_missing IS NOT NULL THEN
         RAISE EXCEPTION
@@ -98,9 +99,9 @@ BEGIN
             'converting it automatically could lose data.', v_missing;
     END IF;
 
-    SELECT array_agg(format('%s is %s', c.column_name, c.data_type) ORDER BY c.column_name)
+    SELECT array_agg(format('%s is %s', a.attname, format_type(a.atttypid, NULL)) ORDER BY a.attname)
       INTO v_bad_types
-      FROM information_schema.columns c
+      FROM pg_attribute a
       JOIN (VALUES
               ('region_code',   'character varying'),
               ('env_score',     'double precision'),
@@ -111,9 +112,10 @@ BEGIN
               ('sources_count', 'integer'),
               ('signals_used',  'integer'),
               ('updated_at',    'timestamp with time zone')
-           ) AS want(name, typ) ON want.name = c.column_name
-     WHERE c.table_name = 'region_esg_scores'
-       AND c.data_type <> want.typ;
+           ) AS want(name, typ) ON want.name = a.attname
+     WHERE a.attrelid = v_regclass
+       AND a.attnum > 0 AND NOT a.attisdropped
+       AND format_type(a.atttypid, NULL) <> want.typ;
 
     IF v_bad_types IS NOT NULL THEN
         RAISE EXCEPTION
@@ -122,9 +124,11 @@ BEGIN
     END IF;
 
     ------------------------------------------------------------- surrogate id
-    SELECT c.data_type INTO v_id_type
-      FROM information_schema.columns c
-     WHERE c.table_name = 'region_esg_scores' AND c.column_name = 'id';
+    SELECT format_type(a.atttypid, NULL) INTO v_id_type
+      FROM pg_attribute a
+     WHERE a.attrelid = v_regclass
+       AND a.attnum > 0 AND NOT a.attisdropped
+       AND a.attname = 'id';
 
     IF v_id_type IS NULL THEN
         ALTER TABLE region_esg_scores
@@ -184,9 +188,10 @@ BEGIN
     ALTER TABLE region_esg_scores ALTER COLUMN region_code SET NOT NULL;
 
     IF NOT EXISTS (
-            SELECT 1 FROM pg_indexes
-             WHERE tablename = 'region_esg_scores'
-               AND indexname = 'ix_region_esg_scores_region_code') THEN
+            SELECT 1 FROM pg_index i
+              JOIN pg_class ic ON ic.oid = i.indexrelid
+             WHERE i.indrelid = v_regclass
+               AND ic.relname = 'ix_region_esg_scores_region_code') THEN
         CREATE UNIQUE INDEX ix_region_esg_scores_region_code
             ON region_esg_scores (region_code);
         RAISE NOTICE 'created unique index on region_code';
