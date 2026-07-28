@@ -364,21 +364,27 @@ def test_view_owner_grants_and_comment_survive_the_conversion(db):
         _exec(db, "GRANT SELECT ON regional_esg_snapshot TO PUBLIC")
 
         owner_before = _scalar(db, """
-            SELECT pg_get_userbyid(relowner) FROM pg_class
-             WHERE relname = 'regional_esg_snapshot' AND relkind = 'v'
+            SELECT pg_get_userbyid(c.relowner) FROM pg_class c
+             WHERE c.relname = 'regional_esg_snapshot' AND c.relkind = 'v'
+             AND c.relnamespace = (SELECT relnamespace FROM pg_class
+                                    WHERE oid = to_regclass('region_esg_scores'))
         """)
 
         _converge(db)
 
         owner_after = _scalar(db, """
-            SELECT pg_get_userbyid(relowner) FROM pg_class
-             WHERE relname = 'regional_esg_snapshot' AND relkind = 'v'
+            SELECT pg_get_userbyid(c.relowner) FROM pg_class c
+             WHERE c.relname = 'regional_esg_snapshot' AND c.relkind = 'v'
+             AND c.relnamespace = (SELECT relnamespace FROM pg_class
+                                    WHERE oid = to_regclass('region_esg_scores'))
         """)
         assert owner_after == owner_before, "view owner changed"
 
         comment = _scalar(db, """
             SELECT obj_description(c.oid, 'pg_class') FROM pg_class c
              WHERE c.relname = 'regional_esg_snapshot' AND c.relkind = 'v'
+             AND c.relnamespace = (SELECT relnamespace FROM pg_class
+                                    WHERE oid = to_regclass('region_esg_scores'))
         """)
         assert comment == "map_russia API source", f"view comment lost: {comment!r}"
 
@@ -392,7 +398,9 @@ def test_view_owner_grants_and_comment_survive_the_conversion(db):
                       FROM (SELECT (aclexplode(c.relacl)).*
                               FROM pg_class c
                              WHERE c.relname = 'regional_esg_snapshot'
-                               AND c.relkind = 'v') acl
+                               AND c.relkind = 'v'
+                               AND c.relnamespace = (SELECT relnamespace FROM pg_class
+                                                      WHERE oid = to_regclass('region_esg_scores'))) acl
                 """)).fetchall()
             }
 
