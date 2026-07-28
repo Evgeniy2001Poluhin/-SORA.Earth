@@ -8,6 +8,13 @@ const ICONS: Record<number, React.ReactNode> = {
   4: <path d="M4 12l5 5L20 6" />,
 };
 
+/** Defined at module scope: a component created during render remounts its
+ *  subtree on every parent render. */
+const Svg = ({ d }: { d: React.ReactNode }) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="1.6" strokeLinecap="square">{d}</svg>
+);
+
 export default function TourTooltip({
   index, size, step, backProps, primaryProps, skipProps, tooltipProps, isLastStep,
 }: TooltipRenderProps) {
@@ -34,10 +41,6 @@ export default function TourTooltip({
     letterSpacing: "0.08em", textTransform: "uppercase", border: "none",
     borderRadius: 0, padding: "11px 22px", cursor: "pointer",
   };
-  const Svg = ({ d }: { d: React.ReactNode }) => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="1.6" strokeLinecap="square">{d}</svg>
-  );
   return (
     <div {...tooltipProps} style={card}>
       <div style={{ height: 2, background: "rgba(255,255,255,0.07)" }}>

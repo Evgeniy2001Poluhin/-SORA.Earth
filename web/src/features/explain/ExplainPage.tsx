@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { explainApi } from "@/api/endpoints/explain";
 import type { ExplainLocalRequest, ExplainLocalResponse } from "@/api/types";
 import "./explain.css";
+import { errorMessage } from "@/lib/errors";
 
 interface FormValues {
   budget: number;
@@ -45,11 +46,11 @@ export function ExplainPage() {
       setElapsed(ms);
       toast.success("Rendered in " + ms.toFixed(0) + "ms");
     },
-    onError: (e: any) => toast.error("Explain failed: " + (e?.message ?? "unknown")),
+    onError: (e: unknown) => toast.error("Explain failed: " + errorMessage(e)),
   });
 
   const submit = (v: FormValues) => mut.mutate(v);
-  const usePreset = (k: PresetKey) => { reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
+  const applyPreset = (k: PresetKey) => { reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
 
   const contribs = json?.top_contributions ?? [];
   const maxAbs = Math.max(1e-9, ...contribs.map((c) => Math.abs(c.shap_value)));
@@ -64,7 +65,7 @@ export function ExplainPage() {
 
       <div className="explain-presets">
         {PRESET_KEYS.map((k) => (
-          <button key={k} type="button" className="preset-btn" onClick={() => usePreset(k)}>{k}</button>
+          <button key={k} type="button" className="preset-btn" onClick={() => applyPreset(k)}>{k}</button>
         ))}
         {elapsed !== null && (
           <span className="elapsed-pill">

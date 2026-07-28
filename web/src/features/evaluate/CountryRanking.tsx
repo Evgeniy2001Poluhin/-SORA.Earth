@@ -1,17 +1,13 @@
 import { useMemo } from "react";
+import type { EvaluateRankingEntry, EvaluateRankingResponse } from "@/api/types";
 
-type Row = {
-  country: string;
-  region?: string;
-  total_score: number;
-  environment_score: number;
-  social_score: number;
-  economic_score: number;
-  risk_level: string;
-};
+/** A ranking entry that actually carries a score. */
+type ScoredRow = EvaluateRankingEntry & { total_score: number };
+
+const isScored = (r: EvaluateRankingEntry): r is ScoredRow => Number.isFinite(r.total_score);
 
 type Props = {
-  data: { count: number; ranking: Row[] } | undefined;
+  data: EvaluateRankingResponse | undefined;
   loading: boolean;
   currentCountry: string;
   onPickCountry: (c: string) => void;
@@ -19,7 +15,9 @@ type Props = {
 
 export default function CountryRanking(props: Props) {
   const { data, loading, currentCountry, onPickCountry } = props;
-  const rows = data && data.ranking ? data.ranking : [];
+  // /evaluate/ranking emits {country, error} for countries that failed to score;
+  // those rows have no total_score to render.
+  const rows = useMemo(() => (data?.ranking ?? []).filter(isScored), [data]);
   const maxScore = useMemo(() => {
     let m = 100;
     for (const r of rows) if (r.total_score > m) m = r.total_score;

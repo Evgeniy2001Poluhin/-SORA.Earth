@@ -6,6 +6,17 @@ import {
 } from "recharts";
 import { api } from "@/api/client";
 
+/** Model-specific extras returned alongside a forecast; see app/services/forecasting. */
+type ForecastMetadata = {
+  weights?: Record<string, number>;
+  models_used?: string[];
+  total_weight?: number;
+  mc_samples?: number;
+  avg_ci_width?: number;
+  slope_per_day?: number;
+  autoregressive?: boolean;
+};
+
 type HistPoint = { ds: string; y: number };
 type FcPoint = { ds: string; yhat: number; yhat_lower: number; yhat_upper: number };
 type ForecastResponse = {
@@ -14,7 +25,7 @@ type ForecastResponse = {
   model: string;
   metric: string;
   confidence?: "high" | "medium" | "low";
-  metadata?: Record<string, any>;
+  metadata?: ForecastMetadata;
 };
 
 type MetricsResponse = {
@@ -189,11 +200,12 @@ export default function ForecastComparePage() {
               <Tooltip
                 contentStyle={{ background: "#15181b", border: "1px solid #2a2e33", borderRadius: 8 }}
                 labelFormatter={(l) => `Date: ${l}`}
-                formatter={(value: any, name: any) => {
+                formatter={(value: unknown, name: unknown) => {
+                  const label = String(name ?? "");
                   if (Array.isArray(value))
-                    return [`${value[0].toFixed(2)} — ${value[1].toFixed(2)}`, name];
-                  if (typeof value === "number") return [value.toFixed(3), name];
-                  return [value, name];
+                    return [`${Number(value[0]).toFixed(2)} — ${Number(value[1]).toFixed(2)}`, label];
+                  if (typeof value === "number") return [value.toFixed(3), label];
+                  return [String(value ?? ""), label];
                 }}
               />
               <Legend />
