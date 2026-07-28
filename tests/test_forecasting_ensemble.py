@@ -46,7 +46,7 @@ def test_ensemble_auto_weights_large_sample(large_timeseries):
 
 
 def test_ensemble_auto_weights_small_sample(small_timeseries):
-    """Test auto-weight selection logic for small samples."""
+    """Test that LSTM is active for n=50 (above LSTM_MIN_ROWS=33 threshold)."""
     forecaster = EnsembleForecaster()
 
     try:
@@ -57,8 +57,9 @@ def test_ensemble_auto_weights_small_sample(small_timeseries):
     # At least one model must have succeeded and have non-zero weight
     active_weight = max(forecaster.weights.values())
     assert active_weight > 0
-    # LSTM should NOT be active for n=50 (below LSTM_MIN_ROWS threshold)
-    assert forecaster.weights.get("lstm", 0.0) == 0.0
+    # n=50 >= LSTM_MIN_ROWS=33, so LSTM should be active with moderate weight
+    assert forecaster.weights.get("lstm", 0.0) > 0.0
+    assert forecaster.weights.get("prophet", 0.0) > forecaster.weights.get("lstm", 0.0)  # Prophet dominant
 
 
 @pytest.mark.integration
