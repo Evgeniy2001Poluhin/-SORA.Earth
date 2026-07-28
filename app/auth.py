@@ -97,6 +97,10 @@ def _jwt_decode(token: str) -> dict:
 # indistinguishable from a strong one until a table leaks.
 ARGON2_FLOOR = {"time_cost": 2, "memory_cost": 19 * 1024, "parallelism": 1}
 ARGON2_DEFAULTS = {"time_cost": 3, "memory_cost": 64 * 1024, "parallelism": 4}
+# A ceiling as well as a floor: memory_cost is allocated per concurrent
+# verification, so a mistyped value denies service just as effectively as a
+# weak one -- in the opposite direction and just as quietly.
+ARGON2_CEILING = {"time_cost": 32, "memory_cost": 1024 * 1024, "parallelism": 16}
 
 
 def _argon2_params() -> dict:
@@ -116,6 +120,11 @@ def _argon2_params() -> dict:
             raise RuntimeError(
                 f"SORA_ARGON2_{name.upper()}={value} is below the floor "
                 f"{ARGON2_FLOOR[name]}. Refusing to weaken password hashing."
+            )
+        if value > ARGON2_CEILING[name]:
+            raise RuntimeError(
+                f"SORA_ARGON2_{name.upper()}={value} exceeds the ceiling "
+                f"{ARGON2_CEILING[name]}. A cost this high denies service."
             )
         params[name] = value
     return params
@@ -189,6 +198,22 @@ def upgrade_password_hash(user: dict, plain: str) -> bool:
     return True
 
 
+def _account_key(username: str) -> str:
+    """A fixed-width, opaque bucket key for an attacker-supplied username.
+
+    Two reasons it is not the username itself. The key space has to be bounded
+    -- an arbitrary-length string straight into a dict is a memory vector -- and
+    raw usernames should not sit in a limiter table that ends up in a heap dump
+    or a diagnostic endpoint.
+
+    Case and surrounding whitespace are folded so that "Admin " and "admin"
+    share one budget; otherwise trivial variations would each buy a fresh
+    allowance against the same account.
+    """
+    normalised = username.strip().casefold()[:256]
+    return hashlib.sha256(normalised.encode("utf-8", "replace")).hexdigest()[:32]
+
+
 def authenticate(username: str, password: str, users: dict | None = None,
                  client_ip: str | None = None) -> Optional[dict]:
     """Look up, verify, and migrate the stored hash. None when either fails.
@@ -201,7 +226,7 @@ def authenticate(username: str, password: str, users: dict | None = None,
     if client_ip is not None:
         # Before the expensive verification, not after.
         _login_limiter.check(f"login-ip:{client_ip}")
-        _login_limiter.check(f"login-user:{username}")
+        _login_limiter.check(f"login-user:{_account_key(username)}")
     store = USERS_DB if users is None else users
     user = store.get(username)
     if not user or not verify_password(password, user.get("hashed_password", "")):

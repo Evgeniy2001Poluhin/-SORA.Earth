@@ -6,13 +6,14 @@ from app.auth import (
     require_api_key, require_admin_apikey,
 )
 from app.audit import record_audit
+from app.rate_limit import client_address
 from app.metrics import metrics
 
 router = APIRouter()
 
 @router.post("/auth/login", response_model=Token, tags=["auth"])
 def login(req: LoginRequest, request: Request):
-    ip = request.client.host if request.client else "unknown"
+    ip = client_address(request)
     user = authenticate(req.username, req.password, client_ip=ip)
     if not user:
         record_audit(req.username, "login_failed", "/auth/login", "POST", ip)

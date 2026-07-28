@@ -11,6 +11,7 @@ from app.auth import (
     require_auth, require_admin, require_api_key, require_admin_apikey,
 )
 from app.audit import record_audit, get_audit_log
+from app.rate_limit import client_address
 from app.metrics import metrics
 
 router = APIRouter()
@@ -20,7 +21,7 @@ class RefreshRequest(BaseModel):
 
 @router.post("/auth/login", response_model=Token, tags=["auth"])
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = client_address(request)
     user = authenticate(form_data.username, form_data.password, client_ip=client_ip)
     if not user:
         record_audit(form_data.username, "login_failed", "/auth/login", "POST",
@@ -41,7 +42,7 @@ class JsonLoginRequest(BaseModel):
 
 @router.post("/auth/login-json", response_model=Token, tags=["auth"])
 def login_json(request: Request, body: JsonLoginRequest):
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = client_address(request)
     user = authenticate(body.username, body.password, client_ip=client_ip)
     if not user:
         record_audit(body.username, "login_failed", "/auth/login-json", "POST",
