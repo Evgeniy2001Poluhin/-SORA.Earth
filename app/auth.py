@@ -100,7 +100,14 @@ ARGON2_DEFAULTS = {"time_cost": 3, "memory_cost": 64 * 1024, "parallelism": 4}
 # A ceiling as well as a floor: memory_cost is allocated per concurrent
 # verification, so a mistyped value denies service just as effectively as a
 # weak one -- in the opposite direction and just as quietly.
-ARGON2_CEILING = {"time_cost": 32, "memory_cost": 1024 * 1024, "parallelism": 16}
+# No container in docker-compose.prod.yml declares a memory limit, so a
+# mistyped cost is bounded only by host RAM. memory_cost is allocated per
+# concurrent verification, so at p=4 a 1 GiB setting reserves 4 GiB for a
+# single login burst. The ceiling is therefore set from what the process can
+# survive rather than from what Argon2 permits: 256 MiB at p=8 is 2 GiB in the
+# worst case, which is recoverable. Raise it deliberately alongside a declared
+# container limit, not by accident.
+ARGON2_CEILING = {"time_cost": 10, "memory_cost": 256 * 1024, "parallelism": 8}
 
 
 def _argon2_params() -> dict:

@@ -27,15 +27,20 @@ def request_from(peer: str | None, headers: dict | None = None):
 
 
 def test_buckets_are_dropped_once_they_age_out():
+    """Retirement is incremental by design: a full scan per request is the
+    cost the bound exists to avoid. So the table drains over successive calls
+    rather than in one, and what matters is that it drains at all."""
     limiter = RateLimiter(max_requests=5, window_seconds=1)
     for i in range(50):
         limiter.check(f"k{i}")
     assert len(limiter.requests) == 50
 
     time.sleep(1.05)
-    limiter.check("trigger-a-prune")
+    for i in range(20):
+        limiter.check(f"live{i}")
 
-    assert len(limiter.requests) == 1, "aged-out buckets were not released"
+    stale = [k for k in limiter.requests if k.startswith("k")]
+    assert not stale, f"{len(stale)} aged-out buckets were never released"
 
 
 def test_the_table_is_capped_against_a_cardinality_flood():
@@ -140,3 +145,85 @@ def test_the_defaults_sit_inside_both_bounds():
     params = _argon2_params()
     for name, floor in ARGON2_FLOOR.items():
         assert floor <= params[name] <= ARGON2_CEILING[name]
+
+
+# ------------------------------------------------ cost of the bound itself
+
+
+def test_a_saturated_table_does_not_get_slower():
+    """The memory cap must not become a CPU amplifier.
+
+    Scanning or sorting the whole table per request would mean every caller
+    pays for the table once an attacker has filled it. Filling it is cheap for
+    the attacker, so that trade has to not exist.
+    """
+    limiter = RateLimiter(max_requests=5, window_seconds=60, max_buckets=2_000)
+
+    empty = time.perf_counter()
+    for i in range(2_000):
+        limiter.check(f"warm{i}")
+    fill = time.perf_counter() - empty
+
+    saturated = time.perf_counter()
+    for i in range(2_000):
+        limiter.check(f"flood{i}")
+    after = time.perf_counter() - saturated
+
+    assert len(limiter.requests) <= 2_000
+    # Linear behaviour would make the second pass several times the first.
+    assert after < fill * 3, f"saturated inserts cost {after:.3f}s vs {fill:.3f}s empty"
+
+
+def test_a_hundred_thousand_distinct_keys_stay_bounded():
+    limiter = RateLimiter(max_requests=5, window_seconds=60, max_buckets=1_000)
+    for i in range(100_000):
+        limiter.check(f"u{i}")
+    assert len(limiter.requests) <= 1_000
+
+
+def test_recent_callers_survive_a_flood_of_single_use_keys():
+    """Eviction takes the least recently seen, which is what a flood looks like."""
+    limiter = RateLimiter(max_requests=10_000, window_seconds=60, max_buckets=100)
+    limiter.check("regular-caller")
+
+    for i in range(1_000):
+        limiter.check(f"throwaway{i}")
+        limiter.check("regular-caller")
+
+    assert "regular-caller" in limiter.requests, \
+        "a returning caller was evicted ahead of 1000 single-use keys"
+    assert len(limiter.requests) <= 100
+
+
+def test_an_exhausted_address_creates_no_account_buckets():
+    """Otherwise one address could mint the whole table before being stopped."""
+    from app.auth import _login_limiter, authenticate
+
+    _login_limiter.requests.clear()
+    ip = "203.0.113.200"
+    users = {}
+
+    for i in range(_login_limiter.max_requests):
+        authenticate(f"name{i}", "x", users, client_ip=ip)
+    buckets_after_budget = len(_login_limiter.requests)
+
+    for i in range(500):
+        try:
+            authenticate(f"blocked{i}", "x", users, client_ip=ip)
+        except HTTPException:
+            pass
+
+    assert len(_login_limiter.requests) == buckets_after_budget, \
+        "rejected requests still created account buckets"
+    _login_limiter.requests.clear()
+
+
+def test_the_clock_is_monotonic():
+    """A wall-clock adjustment would either free every budget or freeze them."""
+    import inspect
+
+    from app import rate_limit
+
+    source = inspect.getsource(rate_limit.RateLimiter)
+    assert "time.monotonic()" in source
+    assert "time.time()" not in source

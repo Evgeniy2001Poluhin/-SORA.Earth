@@ -1,71 +1,92 @@
 import ipaddress
 import os
+import threading
 import time
-from collections import defaultdict
+from collections import OrderedDict
 from fastapi import Request, HTTPException
 
 
 class RateLimiter:
-    """Fixed-window counter with a bounded key space.
+    """Fixed-window counter over a bounded, LRU-ordered key space.
 
     The bound matters: keys derived from anything a caller supplies -- a
-    username, a header -- let an attacker mint a new bucket per request. With
-    an unbounded dict that is a memory-exhaustion vector that costs the
-    attacker nothing. Buckets are therefore dropped as soon as they empty, and
-    the table is capped; past the cap the least recently touched buckets go
-    first, which is exactly the set an attacker floods with.
+    username, a header -- let an attacker mint a bucket per request. Unbounded,
+    that is memory exhaustion for free.
+
+    The *cost* of the bound matters just as much. Scanning or sorting the whole
+    table on each request turns a memory cap into a CPU amplifier: once the
+    table is full, every further request pays for the whole table. So the
+    entries are held in an OrderedDict kept in least-recently-touched order,
+    which makes both eviction and expiry O(1) amortised -- the front is always
+    the oldest, so a short sweep from the front is enough and a full scan is
+    never needed.
+
+    Time comes from a monotonic clock; a wall-clock adjustment would otherwise
+    either free every budget at once or freeze them.
 
     The counter lives in the process. With several workers the effective budget
     is multiplied by the worker count, so this is defence in depth rather than
-    the primary control -- see GAP note in app/auth.py.
+    the primary control -- see issue #36.
     """
 
     MAX_BUCKETS = 10_000
+    SWEEP_PER_CALL = 8
 
     def __init__(self, max_requests: int = 100, window_seconds: int = 60,
                  max_buckets: int | None = None):
         self.max_requests = max_requests
         self.window = window_seconds
         self.max_buckets = max_buckets or self.MAX_BUCKETS
-        self.requests = defaultdict(list)
+        self.requests: "OrderedDict[str, list]" = OrderedDict()
+        self._lock = threading.Lock()
 
-    def _drop_expired(self, now: float):
-        for k in [k for k, hits in self.requests.items()
-                  if not hits or now - hits[-1] >= self.window]:
-            del self.requests[k]
+    def _sweep(self, now: float):
+        """Retire a bounded number of the oldest buckets.
 
-    def _enforce_cap(self):
-        """Cap after insertion, so the table never exceeds the bound.
-
-        Oldest last-seen first: a flood of single-use keys is evicted before
-        buckets belonging to callers who keep coming back, which is the
-        opposite of what insertion order would give.
+        Every touch moves its bucket to the back, so the front is the least
+        recently seen. The moment the front is still inside the window,
+        everything behind it is too, and the sweep can stop.
         """
-        excess = len(self.requests) - self.max_buckets
-        if excess <= 0:
-            return
-        for k, _ in sorted(self.requests.items(), key=lambda kv: kv[1][-1])[:excess]:
-            del self.requests[k]
+        for _ in range(self.SWEEP_PER_CALL):
+            if not self.requests:
+                return
+            _, hits = next(iter(self.requests.items()))
+            if hits and now - hits[-1] < self.window:
+                return
+            self.requests.popitem(last=False)
 
     def check(self, key: str):
-        now = time.time()
-        self._drop_expired(now)
-        hits = [t for t in self.requests.get(key, ()) if now - t < self.window]
-        if len(hits) >= self.max_requests:
+        now = time.monotonic()
+        with self._lock:
+            self._sweep(now)
+            hits = [t for t in self.requests.get(key, ()) if now - t < self.window]
+            if len(hits) >= self.max_requests:
+                self.requests[key] = hits
+                self.requests.move_to_end(key)
+                raise HTTPException(
+                    status_code=429,
+                    detail="Rate limit exceeded",
+                    headers={"Retry-After": str(self.window)},
+                )
+            hits.append(now)
             self.requests[key] = hits
-            raise HTTPException(
-                status_code=429,
-                detail="Rate limit exceeded",
-                headers={"Retry-After": str(self.window)},
-            )
-        hits.append(now)
-        self.requests[key] = hits
-        self._enforce_cap()
+            self.requests.move_to_end(key)
+            # At most one eviction per insertion, from the front: a flood of
+            # single-use keys is discarded before buckets belonging to callers
+            # who keep coming back.
+            while len(self.requests) > self.max_buckets:
+                self.requests.popitem(last=False)
 
     def get_usage(self, key: str):
-        now = time.time()
-        self.requests[key] = [t for t in self.requests[key] if now - t < self.window]
-        return {"used": len(self.requests[key]), "limit": self.max_requests, "window_seconds": self.window}
+        now = time.monotonic()
+        with self._lock:
+            hits = [t for t in self.requests.get(key, ()) if now - t < self.window]
+            if hits:
+                self.requests[key] = hits
+                self.requests.move_to_end(key)
+            elif key in self.requests:
+                del self.requests[key]
+        return {"used": len(hits), "limit": self.max_requests, "window_seconds": self.window}
 
 
 
