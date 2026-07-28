@@ -214,29 +214,58 @@ def test_scheduled_pretrain_forecast_models_data_quality():
         mock_lock.release.assert_called_once()
 
 
-def test_scheduled_pretrain_forecast_models_registered_in_scheduler():
+def test_scheduled_pretrain_forecast_models_registered_in_scheduler(monkeypatch):
     """Test that forecast pretraining job is registered in the scheduler."""
-    from app.scheduler import scheduler, init_scheduler
-    import os
+    from app.scheduler import scheduler, init_scheduler, shutdown_scheduler
+    from unittest.mock import MagicMock
 
-    # Set environment to enable scheduler
-    os.environ['SORA_SCHEDULER'] = '1'
-    os.environ['RUN_SCHEDULER'] = 'true'
+    # Use monkeypatch to set environment (auto-cleanup)
+    monkeypatch.setenv("SORA_SCHEDULER", "1")
+    monkeypatch.setenv("RUN_SCHEDULER", "true")
 
-    # Initialize scheduler (will be no-op if already running)
-    if not scheduler.running:
-        init_scheduler()
+    # Record if scheduler was already running before this test
+    was_running = scheduler.running
 
-    # Find the forecast pretraining job
-    jobs = scheduler.get_jobs()
-    forecast_job = None
-    for job in jobs:
-        if job.id == "auto_pretrain_forecast":
-            forecast_job = job
-            break
+    # Create mock functions with proper __name__ attributes
+    # These will be called immediately by scheduler.start() so they must not make HTTP calls
+    def noop_job(*args, **kwargs):
+        return {"status": "mocked"}
 
-    # Verify job exists and is configured correctly
-    assert forecast_job is not None, "Forecast pretraining job not found in scheduler"
-    assert "Pre-train forecast models" in forecast_job.name
-    assert "6" in str(forecast_job.trigger)  # 6-hour interval
-    assert forecast_job.func.__name__ == "scheduled_pretrain_forecast_models"
+    mock_pretrain = MagicMock(side_effect=noop_job)
+    mock_pretrain.__name__ = "scheduled_pretrain_forecast_models"
+    mock_run_ingesters = MagicMock(side_effect=noop_job)
+    mock_openaq = MagicMock(side_effect=noop_job)
+    mock_openmeteo = MagicMock(side_effect=noop_job)
+    mock_refresh_data = MagicMock(side_effect=noop_job)
+    mock_refresh_metrics = MagicMock(side_effect=noop_job)
+
+    monkeypatch.setattr("app.scheduler.scheduled_pretrain_forecast_models", mock_pretrain)
+    monkeypatch.setattr("app.scheduler.scheduled_run_ingesters", mock_run_ingesters)
+    monkeypatch.setattr("app.services.environmental.scheduler_jobs.scheduled_openaq_ingestion", mock_openaq)
+    monkeypatch.setattr("app.services.environmental.scheduler_jobs.scheduled_openmeteo_ingestion", mock_openmeteo)
+    monkeypatch.setattr("app.scheduler.scheduled_refresh_external_data", mock_refresh_data)
+    monkeypatch.setattr("app.scheduler.refresh_forecast_metrics", mock_refresh_metrics)
+
+    try:
+        # Initialize scheduler (will be no-op if already running)
+        if not was_running:
+            init_scheduler()
+
+        # Find the forecast pretraining job
+        jobs = scheduler.get_jobs()
+        forecast_job = None
+        for job in jobs:
+            if job.id == "auto_pretrain_forecast":
+                forecast_job = job
+                break
+
+        # Verify job exists and is configured correctly
+        assert forecast_job is not None, "Forecast pretraining job not found in scheduler"
+        assert "Pre-train forecast models" in forecast_job.name
+        assert "6" in str(forecast_job.trigger)  # 6-hour interval
+        assert forecast_job.func.__name__ == "scheduled_pretrain_forecast_models"
+
+    finally:
+        # Cleanup: shutdown scheduler if WE started it
+        if not was_running and scheduler.running:
+            shutdown_scheduler()
