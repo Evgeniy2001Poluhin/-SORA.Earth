@@ -274,10 +274,14 @@ def _verify_and_upgrade_under_gate(plain: str, stored: str,
     again, and the two Argon2 operations of one login would no longer be
     accounted together.
 
-    When the hash is stale the upgrade happens here or not at all -- there is no
-    deferred queue and nothing runs after the response. A skipped upgrade is
-    retried by the next successful login, which is the same mechanism that
-    migrates the account in the first place.
+    A stale hash is therefore always replaced on a successful verification:
+    holding the slot already, there is no second admission to fail and no
+    reason to skip. Nothing is deferred and nothing runs after the response.
+
+    Should a future store make persisting the new hash fallible -- these records
+    live in a process dictionary today -- the login must still succeed, and the
+    replacement is simply attempted again at the next successful login. That is
+    the same mechanism that migrates a legacy account in the first place.
     """
     if not _verify_slots.acquire(blocking=False):
         raise HTTPException(
