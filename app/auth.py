@@ -5,6 +5,9 @@ Pure Python JWT (HS256) — no external deps
 import hashlib, hmac, json, os, time, base64
 from datetime import datetime, timezone
 from typing import Optional
+
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHash, VerificationError, VerifyMismatchError
 from fastapi import Depends, HTTPException, Security, Header, status
 from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
 from pydantic import BaseModel, Field
@@ -69,16 +72,104 @@ def _jwt_decode(token: str) -> dict:
         raise ValueError("Token expired")
     return payload
 
+# --- password hashing -------------------------------------------------------
+#
+# Argon2id at the argon2-cffi defaults: time_cost=3, memory_cost=64 MiB,
+# parallelism=4, which costs roughly 150 ms to hash and 130 ms to verify on
+# commodity hardware. The cost is deliberately not configurable: the only
+# reason to expose it would be to lower it, and a weak setting is
+# indistinguishable from a strong one until a table leaks.
+#
+# Two legacy formats are still accepted so that no existing account is locked
+# out, and both are upgraded in place on the next successful login:
+#
+#   $argon2id$...          current
+#   <hex salt>$<sha256>    legacy, salted but a single fast round
+#   <sha256>               legacy, unsalted -- rainbow-table material
+#
+# A single SHA-256 round is the wrong primitive for passwords whether or not it
+# is salted: commodity GPUs evaluate it in the billions per second.
+_password_hasher = PasswordHasher()
+
+ARGON2_PREFIX = "$argon2"
+
+
 def _hash_password(password: str) -> str:
-    salt = os.urandom(16).hex()
-    h = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-    return f"{salt}${h}"
+    return _password_hasher.hash(password)
+
+
+def _verify_legacy_sha256(plain: str, hashed: str) -> bool:
+    """Constant-time check against either legacy format."""
+    if "$" in hashed:
+        salt, stored = hashed.split("$", 1)
+        candidate = hashlib.sha256(f"{salt}{plain}".encode()).hexdigest()
+    else:
+        salt, stored = "", hashed
+        candidate = hashlib.sha256(plain.encode()).hexdigest()
+    return hmac.compare_digest(candidate, stored)
+
 
 def verify_password(plain: str, hashed: str) -> bool:
-    if "$" not in hashed:
-        return hashlib.sha256(plain.encode()).hexdigest() == hashed
-    salt, h = hashed.split("$", 1)
-    return hmac.compare_digest(hashlib.sha256(f"{salt}{plain}".encode()).hexdigest(), h)
+    if not hashed:
+        return False
+    if hashed.startswith(ARGON2_PREFIX):
+        try:
+            return _password_hasher.verify(hashed, plain)
+        except (VerifyMismatchError, VerificationError, InvalidHash):
+            return False
+    return _verify_legacy_sha256(plain, hashed)
+
+
+def needs_rehash(hashed: str) -> bool:
+    """True when the stored hash is not Argon2id at the current parameters."""
+    if not hashed or not hashed.startswith(ARGON2_PREFIX):
+        return True
+    try:
+        return _password_hasher.check_needs_rehash(hashed)
+    except InvalidHash:
+        return True
+
+
+def upgrade_password_hash(user: dict, plain: str) -> bool:
+    """Re-hash in place after a successful login. Returns True if it changed.
+
+    Called only once the password has already been verified, so the plaintext
+    is known-good. This is what keeps the legacy formats from becoming
+    permanent: every active account migrates the next time its owner signs in.
+    """
+    if not needs_rehash(user.get("hashed_password", "")):
+        return False
+    user["hashed_password"] = _hash_password(plain)
+    return True
+
+
+def authenticate(username: str, password: str, users: dict | None = None) -> Optional[dict]:
+    """Look up, verify, and migrate the stored hash. None when either fails.
+
+    Every login path goes through here deliberately. Verifying and upgrading in
+    separate places invites a fourth login route that authenticates correctly
+    but forgets the upgrade, which would keep the legacy formats alive
+    indefinitely and quietly.
+    """
+    store = USERS_DB if users is None else users
+    user = store.get(username)
+    if not user or not verify_password(password, user.get("hashed_password", "")):
+        return None
+    upgrade_password_hash(user, password)
+    return user
+
+
+def legacy_hash_count(users: dict | None = None) -> int:
+    """How many stored hashes are still not Argon2id.
+
+    The unsalted branch above can only be deleted once this reaches zero and
+    stays there, so the removal date is evidence rather than a guess.
+    """
+    store = USERS_DB if users is None else users
+    return sum(
+        1 for u in store.values()
+        if not str(u.get("hashed_password", "")).startswith(ARGON2_PREFIX)
+    )
 
 # Load default users from environment (fallback to dev passwords only in dev mode)
 def _get_default_password(role: str, dev_default: str) -> str:
