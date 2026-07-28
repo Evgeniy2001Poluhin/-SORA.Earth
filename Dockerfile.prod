@@ -1,3 +1,24 @@
+# Stage 0: SPA build
+#
+# The frontend used to be built by hand and part of its output committed, which
+# left a tracked index.html pointing at hashed bundles that were never in git.
+# A clean clone could not serve a working page, and production only worked
+# because the host directory was bind-mounted in. Building here makes the image
+# the source of truth (issue #21).
+FROM node:20-slim AS spa
+
+WORKDIR /src
+
+# Manifests first, so npm ci re-runs when dependencies change rather than on
+# every source edit.
+COPY web/package.json web/package-lock.json ./web/
+RUN cd web && npm ci
+
+COPY web/ ./web/
+# vite.config.ts points outDir at ../app/static/spa, so the bundle lands in
+# /src/app/static/spa.
+RUN cd web && npm run build
+
 # Stage 1: builder
 FROM python:3.11-slim AS builder
 
@@ -45,6 +66,10 @@ WORKDIR /app
 
 COPY --from=builder --chown=app:app /root/.local /home/app/.local
 COPY --chown=app:app app/         ./app/
+# app/static/spa is excluded from the build context, so it arrives only from
+# the SPA stage — never from whatever the person running the build happens to
+# have lying around.
+COPY --from=spa --chown=app:app /src/app/static/spa ./app/static/spa
 COPY --chown=app:app data/        ./data/
 COPY --chown=app:app run_scheduler.py ./
 COPY --chown=app:app alembic.ini  ./
@@ -57,3 +82,16 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://localhost:8000/health || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "./entrypoint.sh"]
+
+# Stage 3: nginx
+#
+# nginx serves /assets/ itself (see nginx.conf) so that a missing bundle 404s
+# instead of the backend's SPA catch-all answering with index.html. That means
+# it needs the same build output the backend has, and it now takes it from the
+# same stage rather than from a host directory.
+#
+# This stage is last, so `docker build` with no --target lands here. Both
+# services in docker-compose.prod.yml name their target explicitly.
+FROM nginx:1.27-alpine AS nginx-spa
+
+COPY --from=spa /src/app/static/spa /usr/share/nginx/spa
