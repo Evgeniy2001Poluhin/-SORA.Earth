@@ -100,13 +100,21 @@ ARGON2_DEFAULTS = {"time_cost": 3, "memory_cost": 64 * 1024, "parallelism": 4}
 # A ceiling as well as a floor: memory_cost is allocated per concurrent
 # verification, so a mistyped value denies service just as effectively as a
 # weak one -- in the opposite direction and just as quietly.
-# No container in docker-compose.prod.yml declares a memory limit, so a
-# mistyped cost is bounded only by host RAM. memory_cost is allocated per
-# concurrent verification, so at p=4 a 1 GiB setting reserves 4 GiB for a
-# single login burst. The ceiling is therefore set from what the process can
-# survive rather than from what Argon2 permits: 256 MiB at p=8 is 2 GiB in the
-# worst case, which is recoverable. Raise it deliberately alongside a declared
-# container limit, not by accident.
+# memory_cost is the total for one hash operation. parallelism splits that
+# total across lanes -- it does not multiply it. Measured on this build, m=256
+# MiB costs ~256 MiB of peak RSS at p=1, 2, 4 and 8 alike.
+#
+# So the multiplier is concurrency, not parallelism: N verifications in flight
+# hold roughly N x memory_cost at once. Nothing in the app caps N -- the rate
+# limiter bounds requests per key per minute, not simultaneous ones -- and no
+# container in docker-compose.prod.yml declares a memory limit, so a mistyped
+# cost is bounded only by host RAM.
+#
+# 256 MiB is therefore a configuration guard rather than a proof of safety: it
+# keeps a typo from reserving gigabytes per verification, while eight
+# concurrent logins at the ceiling would still hold ~2 GiB. Bounding N belongs
+# with a declared container limit and an admission bound, and should come
+# before this ceiling is raised.
 ARGON2_CEILING = {"time_cost": 10, "memory_cost": 256 * 1024, "parallelism": 8}
 
 
@@ -205,6 +213,9 @@ def upgrade_password_hash(user: dict, plain: str) -> bool:
     return True
 
 
+_ACCOUNT_KEY_SECRET = os.urandom(32)
+
+
 def _account_key(username: str) -> str:
     """A fixed-width, opaque bucket key for an attacker-supplied username.
 
@@ -216,9 +227,16 @@ def _account_key(username: str) -> str:
     Case and surrounding whitespace are folded so that "Admin " and "admin"
     share one budget; otherwise trivial variations would each buy a fresh
     allowance against the same account.
+
+    Keyed rather than a bare digest: a plain SHA-256 of a username is reversible
+    by dictionary, so a heap dump would reveal which accounts were recently
+    active. The key is random per process rather than derived from SECRET_KEY --
+    the buckets are ephemeral anyway, so there is nothing to correlate across
+    restarts, and no production secret is drawn into a new domain.
     """
     normalised = username.strip().casefold()[:256]
-    return hashlib.sha256(normalised.encode("utf-8", "replace")).hexdigest()[:32]
+    return hmac.new(_ACCOUNT_KEY_SECRET, normalised.encode("utf-8", "replace"),
+                    hashlib.sha256).hexdigest()[:32]
 
 
 def authenticate(username: str, password: str, users: dict | None = None,

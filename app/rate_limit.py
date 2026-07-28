@@ -39,6 +39,9 @@ class RateLimiter:
         self.max_buckets = max_buckets or self.MAX_BUCKETS
         self.requests: "OrderedDict[str, list]" = OrderedDict()
         self._lock = threading.Lock()
+        # Buckets examined during cleanup, cumulative. Asserted in tests: a
+        # timing comparison would be flaky, but the count is exact.
+        self.inspected = 0
 
     def _sweep(self, now: float):
         """Retire a bounded number of the oldest buckets.
@@ -51,6 +54,7 @@ class RateLimiter:
             if not self.requests:
                 return
             _, hits = next(iter(self.requests.items()))
+            self.inspected += 1
             if hits and now - hits[-1] < self.window:
                 return
             self.requests.popitem(last=False)
@@ -94,6 +98,15 @@ class RateLimiter:
 # nginx's address rather than the caller's. Keying a per-source limit on it
 # would collapse every client into one bucket -- which stops being a control on
 # abuse and becomes an outage for everyone else.
+#
+# The default trusts the RFC1918 ranges because in this deployment *external*
+# traffic can only arrive through nginx: docker-compose.prod.yml publishes
+# ports for nginx alone, the backend declares none, and nginx overwrites
+# X-Real-IP with $remote_addr. That is weaker than trusting nginx's exact
+# address, though -- any other container on the same private network could also
+# reach the backend and claim an address. Narrowing this to the compose subnet,
+# or setting SORA_TRUSTED_PROXIES explicitly, is the stronger configuration and
+# is tracked as hardening rather than done here.
 #
 # The proxy-supplied header is only believed when the peer is itself a trusted
 # proxy. A peer address cannot be forged over TCP, so that check is what makes

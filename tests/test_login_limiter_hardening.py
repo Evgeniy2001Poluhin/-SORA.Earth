@@ -150,28 +150,37 @@ def test_the_defaults_sit_inside_both_bounds():
 # ------------------------------------------------ cost of the bound itself
 
 
-def test_a_saturated_table_does_not_get_slower():
+def test_cleanup_inspects_a_bounded_number_of_buckets():
     """The memory cap must not become a CPU amplifier.
 
-    Scanning or sorting the whole table per request would mean every caller
-    pays for the table once an attacker has filled it. Filling it is cheap for
-    the attacker, so that trade has to not exist.
+    Scanning or sorting the table per request would mean every caller pays for
+    the whole table once an attacker has filled it, and filling it is cheap. The
+    count is asserted rather than the wall time: timing comparisons are flaky,
+    the number of buckets examined is exact.
     """
-    limiter = RateLimiter(max_requests=5, window_seconds=60, max_buckets=2_000)
-
-    empty = time.perf_counter()
-    for i in range(2_000):
+    limiter = RateLimiter(max_requests=5, window_seconds=60, max_buckets=5_000)
+    for i in range(5_000):
         limiter.check(f"warm{i}")
-    fill = time.perf_counter() - empty
 
-    saturated = time.perf_counter()
-    for i in range(2_000):
-        limiter.check(f"flood{i}")
-    after = time.perf_counter() - saturated
+    limiter.inspected = 0
+    for i in range(100):
+        limiter.check(f"more{i}")
 
-    assert len(limiter.requests) <= 2_000
-    # Linear behaviour would make the second pass several times the first.
-    assert after < fill * 3, f"saturated inserts cost {after:.3f}s vs {fill:.3f}s empty"
+    assert limiter.inspected <= 100 * RateLimiter.SWEEP_PER_CALL, (
+        f"{limiter.inspected} buckets examined over 100 calls against a table "
+        f"of {len(limiter.requests)} -- cleanup is not bounded"
+    )
+
+
+def test_no_full_table_scan_or_sort_remains():
+    """Structural, so a future edit cannot quietly reintroduce the cost."""
+    import inspect
+
+    from app import rate_limit
+
+    source = inspect.getsource(rate_limit.RateLimiter)
+    assert "sorted(" not in source, "a sort over the table is back"
+    assert "for k, hits in self.requests.items()" not in source
 
 
 def test_a_hundred_thousand_distinct_keys_stay_bounded():
@@ -227,3 +236,64 @@ def test_the_clock_is_monotonic():
     source = inspect.getsource(rate_limit.RateLimiter)
     assert "time.monotonic()" in source
     assert "time.time()" not in source
+
+
+def test_the_lock_is_not_held_during_password_verification():
+    """Argon2 takes ~130 ms. Holding the limiter lock across it would serialise
+    every login in the process behind one verification."""
+    import inspect
+
+    from app import auth
+
+    source = inspect.getsource(auth.authenticate)
+    limiter_line = source.index("_login_limiter.check")
+    verify_line = source.index("verify_password")
+    assert limiter_line < verify_line
+    assert "with _login_limiter" not in source, "the lock must not span the verify"
+
+
+def test_concurrent_checks_cannot_overspend_one_bucket():
+    """check() is a read-modify-write; the GIL makes each step atomic, not the
+    sequence."""
+    import threading
+
+    limiter = RateLimiter(max_requests=50, window_seconds=60)
+    allowed = []
+    barrier = threading.Barrier(8)
+
+    def hammer():
+        barrier.wait()
+        for _ in range(20):
+            try:
+                limiter.check("shared")
+                allowed.append(1)
+            except HTTPException:
+                pass
+
+    threads = [threading.Thread(target=hammer) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(allowed) == 50, f"{len(allowed)} calls admitted against a budget of 50"
+
+
+def test_retry_after_is_a_positive_whole_number_of_seconds():
+    limiter = RateLimiter(max_requests=1, window_seconds=42)
+    limiter.check("k")
+    with pytest.raises(HTTPException) as excinfo:
+        limiter.check("k")
+
+    value = excinfo.value.headers["Retry-After"]
+    assert value.isdigit() and int(value) > 0
+
+
+def test_the_account_key_is_keyed_not_a_bare_digest():
+    """A plain digest of a username is reversible by dictionary."""
+    import hashlib
+
+    from app.auth import _account_key
+
+    bare = hashlib.sha256("admin".encode()).hexdigest()[:32]
+    assert _account_key("admin") != bare
