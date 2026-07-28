@@ -317,3 +317,131 @@ def test_refuses_an_unrecognised_column_type(db):
 
     with pytest.raises(Exception, match="neither canonical nor a recognised legacy shape"):
         _converge(db)
+
+
+# ------------------------------------------- metadata preservation and lineage
+
+
+def test_the_historical_bootstrap_does_not_run_on_an_existing_deployment():
+    """The premise of this revision, asserted rather than assumed.
+
+    b7c1e4a92f30 is an ancestor of the revision production records, so Alembic
+    treats it as applied and never executes it. If that ever stopped being
+    true, this revision would be redundant — and if the reverse happened and
+    the catch-up fell behind the recorded version, it would be inert. The path
+    from 0b0ff6d1594e to head must therefore be exactly this one revision.
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    root = Path(__file__).resolve().parents[1]
+    script = ScriptDirectory.from_config(Config(str(root / "alembic.ini")))
+
+    path = [rev.revision for rev in script.iterate_revisions("head", "0b0ff6d1594e")]
+
+    assert path == ["e3f8a7c15d92"], (
+        f"expected only the catch-up between 0b0ff6d1594e and head, got {path}"
+    )
+    assert "b7c1e4a92f30" not in path, "the historical bootstrap must not be in this path"
+
+
+@requires_postgres
+def test_view_owner_grants_and_comment_survive_the_conversion(db):
+    """The view is dropped and recreated, so everything it carried must return.
+
+    CREATE VIEW ... AS <definition> restores none of this on its own: the owner
+    reverts to whoever runs the migration, the ACL resets to owner-only, and the
+    comment is gone. On production that would silently revoke access for
+    whatever role reads regional_esg_snapshot.
+    """
+    _exec(db, "DROP ROLE IF EXISTS sora_view_reader")
+    _exec(db, "CREATE ROLE sora_view_reader")
+    try:
+        _exec(db, LEGACY_PRODUCTION_DDL)
+        _seed(db)
+        _exec(db, "COMMENT ON VIEW regional_esg_snapshot IS 'map_russia API source'")
+        _exec(db, "GRANT SELECT ON regional_esg_snapshot TO sora_view_reader")
+        _exec(db, "GRANT SELECT ON regional_esg_snapshot TO PUBLIC")
+
+        owner_before = _scalar(db, """
+            SELECT pg_get_userbyid(relowner) FROM pg_class
+             WHERE relname = 'regional_esg_snapshot' AND relkind = 'v'
+        """)
+
+        _converge(db)
+
+        owner_after = _scalar(db, """
+            SELECT pg_get_userbyid(relowner) FROM pg_class
+             WHERE relname = 'regional_esg_snapshot' AND relkind = 'v'
+        """)
+        assert owner_after == owner_before, "view owner changed"
+
+        comment = _scalar(db, """
+            SELECT obj_description(c.oid, 'pg_class') FROM pg_class c
+             WHERE c.relname = 'regional_esg_snapshot' AND c.relkind = 'v'
+        """)
+        assert comment == "map_russia API source", f"view comment lost: {comment!r}"
+
+        with db.begin() as conn:
+            grants = {
+                (row[0], row[1])
+                for row in conn.execute(text("""
+                    SELECT CASE WHEN acl.grantee = 0 THEN 'PUBLIC'
+                                ELSE pg_get_userbyid(acl.grantee) END,
+                           acl.privilege_type
+                      FROM (SELECT (aclexplode(c.relacl)).*
+                              FROM pg_class c
+                             WHERE c.relname = 'regional_esg_snapshot'
+                               AND c.relkind = 'v') acl
+                """)).fetchall()
+            }
+
+        assert ("sora_view_reader", "SELECT") in grants, f"named grant lost: {grants}"
+        assert ("PUBLIC", "SELECT") in grants, f"PUBLIC grant lost: {grants}"
+    finally:
+        _exec(db, "DROP OWNED BY sora_view_reader CASCADE")
+        _exec(db, "DROP ROLE IF EXISTS sora_view_reader")
+
+
+@requires_postgres
+def test_next_insert_takes_max_id_plus_one(db):
+    """Rows predate the identity column, so the sequence starts behind them."""
+    _exec(db, LEGACY_PRODUCTION_DDL)
+    _seed(db)
+    max_before = _scalar(db, "SELECT max(id) FROM region_esg_scores")
+
+    _converge(db)
+
+    _exec(db, "INSERT INTO region_esg_scores (region_code, total_score) VALUES ('RU-901', 1.0)")
+    assert _scalar(db, "SELECT id FROM region_esg_scores WHERE region_code = 'RU-901'") == max_before + 1
+
+
+@requires_postgres
+def test_a_second_convergence_is_a_no_op_down_to_the_view(db):
+    """Idempotency has to hold for the view too, not just the table.
+
+    The conversion branch is skipped once the types are canonical, so the view
+    must not be dropped and recreated a second time — that would reset its
+    owner and ACL on a database that is already correct.
+    """
+    _exec(db, "DROP ROLE IF EXISTS sora_view_reader2")
+    _exec(db, "CREATE ROLE sora_view_reader2")
+    try:
+        _exec(db, LEGACY_PRODUCTION_DDL)
+        _seed(db)
+        _converge(db)
+        _exec(db, "GRANT SELECT ON regional_esg_snapshot TO sora_view_reader2")
+
+        columns_once, pk_once = _columns(db), _pk(db)
+        view_oid_once = _scalar(db, "SELECT to_regclass('regional_esg_snapshot')::oid")
+
+        _converge(db)
+
+        assert _columns(db) == columns_once
+        assert _pk(db) == pk_once
+        assert _scalar(db, "SELECT to_regclass('regional_esg_snapshot')::oid") == view_oid_once, \
+            "the view was recreated on a second run; it should have been left alone"
+        assert _scalar(db, "SELECT count(*) FROM region_esg_scores") == 85
+    finally:
+        _exec(db, "DROP OWNED BY sora_view_reader2 CASCADE")
+        _exec(db, "DROP ROLE IF EXISTS sora_view_reader2")
