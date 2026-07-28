@@ -108,13 +108,6 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-timeout
 
-      - name: Run GAP-001 Alembic bootstrap round-trip test
-        run: ./scripts/test_alembic_bootstrap_gap001.sh
-        env:
-          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
-          ALLOW_DESTRUCTIVE_TEST_DB: "1"
-          APP_ENV: test
-
       - name: Run environmental persistence tests against PostgreSQL
         run: |
           python -m pytest \

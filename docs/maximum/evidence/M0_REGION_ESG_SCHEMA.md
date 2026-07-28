@@ -129,7 +129,10 @@ class RegionESGScore(Base):
 
 ## Implementation: GAP-001
 
-**Migration:** `2e8b4493b24b_create_region_esg_scores_table.py`
+**Migration:** reassigned to PR #23, `b7c1e4a92f30_create_region_esg_scores.py`.
+The approach recorded below describes the migration this PR originally carried;
+it was removed to avoid a duplicate-head collision with #23. Retained as the
+schema analysis that motivated the fix.
 
 **Approach:**
 1. Create prerequisite migration inserting between `31e5cc432377` and `a1b2c3d4e5f6`

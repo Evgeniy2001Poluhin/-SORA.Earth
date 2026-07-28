@@ -26,16 +26,31 @@
 |----------|-------|
 | Category | DB |
 | Severity | P0 — BLOCKER |
-| Status | CLOSED / VERIFIED IN CI |
+| Status | REASSIGNED TO PR #23 |
 | Evidence | `alembic/versions/a1b2c3d4e5f6_regional_esg_snapshot_view.py:29` fails with `UndefinedTable` |
 | Root Cause | Model `RegionESGScore` defined at `app/database.py:194` but no migration creates the table |
 | Impact | CI fails, fresh DB cannot be provisioned, Alembic upgrade fails |
-| Fix | Created migration `2e8b4493b24b` before `a1b2c3d4e5f6` that creates `region_esg_scores` table |
-| Implementation | `alembic/versions/2e8b4493b24b_create_region_esg_scores_table.py` |
-| Verification | PostgreSQL round-trip test `scripts/test_alembic_bootstrap_gap001.sh` executed against real PostgreSQL 16 in CI and **PASSED**. PR [#12](https://github.com/Evgeniy2001Poluhin/-SORA.Earth/pull/12), workflow run [30123691206](https://github.com/Evgeniy2001Poluhin/-SORA.Earth/actions/runs/30123691206), job `environmental-postgres-tests` (job ID `89582031242`), step `Run GAP-001 Alembic bootstrap round-trip test`. Verified stages: fresh upgrade → schema assertions → downgrade to `31e5cc432377` → re-upgrade → idempotent upgrade → single-head/current-revision checks. Final Alembic head: `0b0ff6d1594e`. This step passed; the `environmental-postgres-tests` job and the overall PR run remained FAILED due to a later, unrelated step (`Run environmental persistence tests against PostgreSQL`) and other independent checks (`backend-tests`, `frontend-checks`) — full details in `docs/maximum/evidence/M0_REGION_ESG_SCHEMA.md`. |
+| Fix | **Reassigned to PR #23.** This PR no longer carries a migration for GAP-001 — see note below |
+| Implementation | `alembic/versions/b7c1e4a92f30_create_region_esg_scores.py` (PR #23) |
+| Verification | *Superseded — describes the removed migration, kept as history.* PostgreSQL round-trip test `scripts/test_alembic_bootstrap_gap001.sh` (since removed) executed against real PostgreSQL 16 in CI and **PASSED**. PR [#12](https://github.com/Evgeniy2001Poluhin/-SORA.Earth/pull/12), workflow run [30123691206](https://github.com/Evgeniy2001Poluhin/-SORA.Earth/actions/runs/30123691206), job `environmental-postgres-tests` (job ID `89582031242`), step `Run GAP-001 Alembic bootstrap round-trip test`. Verified stages: fresh upgrade → schema assertions → downgrade to `31e5cc432377` → re-upgrade → idempotent upgrade → single-head/current-revision checks. Final Alembic head: `0b0ff6d1594e`. This step passed; the `environmental-postgres-tests` job and the overall PR run remained FAILED due to a later, unrelated step (`Run environmental persistence tests against PostgreSQL`) and other independent checks (`backend-tests`, `frontend-checks`) — full details in `docs/maximum/evidence/M0_REGION_ESG_SCHEMA.md`. Current verification for GAP-001 lives in PR #23 (`migration-bootstrap`, 38 convergence scenarios). |
 | Verified | 2026-07-24 UTC / 2026-07-25 UTC+04 |
 | Effort | 2 hours (implementation + test development + evidence) |
 | Owner | TBD |
+
+
+> **Reassignment note (2026-07-28).** GAP-001 was fixed independently in PR #23
+> with migration `b7c1e4a92f30`, inserted at the same point in the chain. Two
+> migrations creating one table cannot coexist: whichever one loses the
+> `down_revision` conflict is left with no descendant and becomes a second
+> head, after which `alembic upgrade head` refuses to run at all. `2e8b4493b24b`
+> and `scripts/test_alembic_bootstrap_gap001.sh` were therefore removed from
+> this PR, and it no longer modifies the Alembic chain.
+>
+> `b7c1e4a92f30` was kept because it converges onto `RegionESGScore` rather
+> than freezing the divergence, is idempotent on a database where the table
+> already exists, and refuses a destructive downgrade over populated data.
+> Convergence for deployments already past the head is handled separately by
+> PR #27.
 
 ### GAP-002: Scheduler Jobs Don't Persist Signals
 | Property | Value |
