@@ -246,10 +246,14 @@ def test_the_lock_is_not_held_during_password_verification():
     from app import auth
 
     source = inspect.getsource(auth.authenticate)
-    limiter_line = source.index("_login_limiter.check")
-    verify_line = source.index("verify_password")
-    assert limiter_line < verify_line
+    assert source.index("_login_limiter.check") < source.index("_verify_under_gate"), \
+        "the rate limit must be spent before the expensive work, not after"
     assert "with _login_limiter" not in source, "the lock must not span the verify"
+
+    # The verification itself must not reach for the limiter at all.
+    gate = inspect.getsource(auth._verify_under_gate)
+    assert "_login_limiter" not in gate
+    assert "_lock" not in gate
 
 
 def test_concurrent_checks_cannot_overspend_one_bucket():

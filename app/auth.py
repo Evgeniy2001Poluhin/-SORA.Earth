@@ -10,6 +10,8 @@ from argon2 import PasswordHasher
 
 from app.rate_limit import RateLimiter
 from argon2.exceptions import InvalidHash, VerificationError, VerifyMismatchError
+import threading
+
 from fastapi import Depends, HTTPException, Security, Header, status
 from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
 from pydantic import BaseModel, Field
@@ -213,6 +215,56 @@ def upgrade_password_hash(user: dict, plain: str) -> bool:
     return True
 
 
+
+
+# Argon2 is expensive on purpose, and the rate limiter bounds attempts per key
+# per window -- not how many are in flight at once. A burst spread across
+# distinct addresses and accounts stays inside every budget while starting
+# arbitrarily many verifications together, and N of them hold roughly
+# N x memory_cost. Four concurrent verifications at the default 64 MiB is
+# ~256 MiB; without a gate the same burst at the 256 MiB ceiling is unbounded.
+#
+# The gate is a semaphore rather than a queue: waiting would convert memory
+# pressure into latency for everyone, so a saturated process sheds load instead
+# and says so.
+def _verify_concurrency() -> int:
+    raw = os.getenv("SORA_PASSWORD_VERIFY_CONCURRENCY", "4")
+    try:
+        value = int(raw)
+    except ValueError:
+        raise RuntimeError(
+            f"SORA_PASSWORD_VERIFY_CONCURRENCY must be an integer, got {raw!r}"
+        ) from None
+    if not 1 <= value <= 16:
+        raise RuntimeError(
+            f"SORA_PASSWORD_VERIFY_CONCURRENCY={value} is outside 1..16."
+        )
+    return value
+
+
+VERIFY_CONCURRENCY = _verify_concurrency()
+_verify_slots = threading.BoundedSemaphore(VERIFY_CONCURRENCY)
+
+# Compared against when the account does not exist, so that an unknown user
+# costs the same as a known one. Without it the miss returns before any hashing
+# happens, and the difference is a timing oracle for which accounts exist.
+_ABSENT_ACCOUNT_HASH = _password_hasher.hash(os.urandom(32).hex())
+
+
+def _verify_under_gate(plain: str, stored: str) -> bool:
+    """Run one verification, or shed the request if the process is saturated."""
+    if not _verify_slots.acquire(blocking=False):
+        raise HTTPException(
+            status_code=503,
+            detail="Server busy, retry shortly",
+            headers={"Retry-After": "1"},
+        )
+    try:
+        return verify_password(plain, stored)
+    finally:
+        _verify_slots.release()
+
+
 _ACCOUNT_KEY_SECRET = os.urandom(32)
 
 
@@ -254,9 +306,20 @@ def authenticate(username: str, password: str, users: dict | None = None,
         _login_limiter.check(f"login-user:{_account_key(username)}")
     store = USERS_DB if users is None else users
     user = store.get(username)
-    if not user or not verify_password(password, user.get("hashed_password", "")):
+    # The comparison runs whether or not the account exists, against a hash
+    # nobody holds, so a miss costs the same as a hit.
+    stored = user.get("hashed_password", "") if user else _ABSENT_ACCOUNT_HASH
+    matched = _verify_under_gate(password, stored)
+    if not user or not matched:
         return None
-    upgrade_password_hash(user, password)
+    if needs_rehash(user.get("hashed_password", "")):
+        # Re-hashing is Argon2 too, so it takes a slot like the verification.
+        if not _verify_slots.acquire(blocking=False):
+            return user  # authenticated; the upgrade waits for a quieter moment
+        try:
+            upgrade_password_hash(user, password)
+        finally:
+            _verify_slots.release()
     return user
 
 
