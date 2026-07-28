@@ -182,3 +182,130 @@ def test_login_over_http_upgrades_a_legacy_hash(client, route, payload):
         assert verify_password("viewer123", stored)
     finally:
         USERS_DB["viewer"]["hashed_password"] = original
+
+
+# ------------------------------------------------- cost floor and DoS bounding
+
+
+def test_the_cost_floor_cannot_be_configured_away(monkeypatch):
+    """Raising the parameters is expected; lowering them past OWASP's floor is not.
+
+    _argon2_params() is exercised directly rather than by reloading the module.
+    A reload rebinds USERS_DB, the limiter and the hasher, while the route
+    modules keep references to the previous objects — the two then disagree
+    about which store is live, and the damage surfaces in an unrelated test
+    later in the session.
+    """
+    from app.auth import ARGON2_FLOOR, _argon2_params
+
+    monkeypatch.setenv("SORA_ARGON2_MEMORY_COST", str(ARGON2_FLOOR["memory_cost"] - 1))
+    with pytest.raises(RuntimeError, match="Refusing to weaken password hashing"):
+        _argon2_params()
+
+
+def test_a_non_integer_cost_is_refused(monkeypatch):
+    from app.auth import _argon2_params
+
+    monkeypatch.setenv("SORA_ARGON2_TIME_COST", "lots")
+    with pytest.raises(RuntimeError, match="must be an integer"):
+        _argon2_params()
+
+
+def test_raising_the_cost_is_allowed(monkeypatch):
+    from app.auth import ARGON2_DEFAULTS, _argon2_params
+
+    raised = ARGON2_DEFAULTS["time_cost"] + 1
+    monkeypatch.setenv("SORA_ARGON2_TIME_COST", str(raised))
+    assert _argon2_params()["time_cost"] == raised
+
+
+def test_the_floor_is_exactly_at_the_boundary(monkeypatch):
+    """At the floor is allowed; one below is not."""
+    from app.auth import ARGON2_FLOOR, _argon2_params
+
+    monkeypatch.setenv("SORA_ARGON2_MEMORY_COST", str(ARGON2_FLOOR["memory_cost"]))
+    assert _argon2_params()["memory_cost"] == ARGON2_FLOOR["memory_cost"]
+
+
+def test_defaults_apply_when_nothing_is_set(monkeypatch):
+    from app.auth import ARGON2_DEFAULTS, ARGON2_FLOOR, _argon2_params
+
+    for name in ARGON2_DEFAULTS:
+        monkeypatch.delenv(f"SORA_ARGON2_{name.upper()}", raising=False)
+
+    params = _argon2_params()
+    assert params == ARGON2_DEFAULTS
+    for name, floor in ARGON2_FLOOR.items():
+        assert params[name] >= floor, f"the default for {name} is below its own floor"
+
+
+def test_login_is_rate_limited_per_source_address():
+    """Argon2 makes login expensive by design, so it has to be bounded.
+
+    Without this, an unauthenticated caller can spend ~130 ms of CPU and 64 MiB
+    per request with no ceiling.
+    """
+    from fastapi import HTTPException
+
+    from app.auth import _login_limiter
+
+    users = {"u": user_with(_hash_password(PASSWORD))}
+    ip = "203.0.113.77"
+    _login_limiter.requests.clear()
+
+    for _ in range(_login_limiter.max_requests):
+        authenticate("u", "wrong", users, client_ip=ip)
+
+    with pytest.raises(HTTPException) as excinfo:
+        authenticate("u", PASSWORD, users, client_ip=ip)
+    assert excinfo.value.status_code == 429
+    _login_limiter.requests.clear()
+
+
+def test_the_budget_is_spent_per_account_as_well_as_per_address():
+    """A distributed attempt on one account must also be bounded."""
+    from fastapi import HTTPException
+
+    from app.auth import _login_limiter
+
+    users = {"target": user_with(_hash_password(PASSWORD))}
+    _login_limiter.requests.clear()
+
+    for i in range(_login_limiter.max_requests):
+        authenticate("target", "wrong", users, client_ip=f"198.51.100.{i}")
+
+    with pytest.raises(HTTPException) as excinfo:
+        authenticate("target", PASSWORD, users, client_ip="198.51.100.250")
+    assert excinfo.value.status_code == 429
+    _login_limiter.requests.clear()
+
+
+def test_the_limit_is_checked_before_the_expensive_verification():
+    """Otherwise the limiter would not protect the thing it exists to protect."""
+    from fastapi import HTTPException
+
+    from app.auth import _login_limiter
+
+    _login_limiter.requests.clear()
+    ip = "192.0.2.10"
+    for _ in range(_login_limiter.max_requests):
+        authenticate("nobody", "x", {}, client_ip=ip)
+
+    with pytest.raises(HTTPException):
+        # No such user, so a verification would never run -- reaching 429 here
+        # proves the check happens before the lookup rather than after it.
+        authenticate("nobody", "x", {}, client_ip=ip)
+    _login_limiter.requests.clear()
+
+
+def test_authenticate_without_an_address_is_not_limited():
+    """Internal callers that have no request context still work."""
+    users = {"u": user_with(_hash_password(PASSWORD))}
+    for _ in range(_login_limiter_max() + 5):
+        assert authenticate("u", PASSWORD, users) is users["u"]
+
+
+def _login_limiter_max() -> int:
+    from app.auth import _login_limiter
+
+    return _login_limiter.max_requests

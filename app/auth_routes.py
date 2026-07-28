@@ -20,7 +20,8 @@ class RefreshRequest(BaseModel):
 
 @router.post("/auth/login", response_model=Token, tags=["auth"])
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
-    user = authenticate(form_data.username, form_data.password)
+    client_ip = request.client.host if request.client else "unknown"
+    user = authenticate(form_data.username, form_data.password, client_ip=client_ip)
     if not user:
         record_audit(form_data.username, "login_failed", "/auth/login", "POST",
                      request.client.host if request.client else "unknown")
@@ -40,7 +41,8 @@ class JsonLoginRequest(BaseModel):
 
 @router.post("/auth/login-json", response_model=Token, tags=["auth"])
 def login_json(request: Request, body: JsonLoginRequest):
-    user = authenticate(body.username, body.password)
+    client_ip = request.client.host if request.client else "unknown"
+    user = authenticate(body.username, body.password, client_ip=client_ip)
     if not user:
         record_audit(body.username, "login_failed", "/auth/login-json", "POST",
                      request.client.host if request.client else "unknown")

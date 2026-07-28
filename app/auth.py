@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from argon2 import PasswordHasher
+
+from app.rate_limit import RateLimiter
 from argon2.exceptions import InvalidHash, VerificationError, VerifyMismatchError
 from fastapi import Depends, HTTPException, Security, Header, status
 from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
@@ -89,9 +91,53 @@ def _jwt_decode(token: str) -> dict:
 #
 # A single SHA-256 round is the wrong primitive for passwords whether or not it
 # is salted: commodity GPUs evaluate it in the billions per second.
-_password_hasher = PasswordHasher()
+# OWASP's floor for Argon2id. Raising the parameters as hardware improves is
+# expected and is why they are read from the environment at all; lowering them
+# past this point is refused outright, because a weak setting is
+# indistinguishable from a strong one until a table leaks.
+ARGON2_FLOOR = {"time_cost": 2, "memory_cost": 19 * 1024, "parallelism": 1}
+ARGON2_DEFAULTS = {"time_cost": 3, "memory_cost": 64 * 1024, "parallelism": 4}
+
+
+def _argon2_params() -> dict:
+    params = {}
+    for name, default in ARGON2_DEFAULTS.items():
+        raw = os.getenv(f"SORA_ARGON2_{name.upper()}")
+        if raw is None:
+            params[name] = default
+            continue
+        try:
+            value = int(raw)
+        except ValueError:
+            raise RuntimeError(
+                f"SORA_ARGON2_{name.upper()} must be an integer, got {raw!r}"
+            ) from None
+        if value < ARGON2_FLOOR[name]:
+            raise RuntimeError(
+                f"SORA_ARGON2_{name.upper()}={value} is below the floor "
+                f"{ARGON2_FLOOR[name]}. Refusing to weaken password hashing."
+            )
+        params[name] = value
+    return params
+
+
+_password_hasher = PasswordHasher(**_argon2_params())
 
 ARGON2_PREFIX = "$argon2"
+
+# Login is the only unauthenticated endpoint that does deliberately expensive
+# work: an Argon2id verification costs ~130 ms and allocates 64 MiB by design.
+# Nothing else rate-limits it -- SlowAPIMiddleware is a pass-through stub and
+# rate_limiter.check() is called from exactly one analytics endpoint -- so
+# without this a handful of concurrent clients can saturate the process by
+# guessing passwords. The budget is spent per source address and per account
+# separately, so one address cannot exhaust an account's allowance and a
+# distributed attempt on a single account is still bounded.
+#
+# The counter lives in the process, so with multiple workers the effective
+# limit is per worker. That is a real limitation and the reason this is a
+# bound rather than a lockout.
+_login_limiter = RateLimiter(max_requests=10, window_seconds=60)
 
 
 def _hash_password(password: str) -> str:
@@ -143,7 +189,8 @@ def upgrade_password_hash(user: dict, plain: str) -> bool:
     return True
 
 
-def authenticate(username: str, password: str, users: dict | None = None) -> Optional[dict]:
+def authenticate(username: str, password: str, users: dict | None = None,
+                 client_ip: str | None = None) -> Optional[dict]:
     """Look up, verify, and migrate the stored hash. None when either fails.
 
     Every login path goes through here deliberately. Verifying and upgrading in
@@ -151,6 +198,10 @@ def authenticate(username: str, password: str, users: dict | None = None) -> Opt
     but forgets the upgrade, which would keep the legacy formats alive
     indefinitely and quietly.
     """
+    if client_ip is not None:
+        # Before the expensive verification, not after.
+        _login_limiter.check(f"login-ip:{client_ip}")
+        _login_limiter.check(f"login-user:{username}")
     store = USERS_DB if users is None else users
     user = store.get(username)
     if not user or not verify_password(password, user.get("hashed_password", "")):

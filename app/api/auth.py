@@ -13,7 +13,7 @@ router = APIRouter()
 @router.post("/auth/login", response_model=Token, tags=["auth"])
 def login(req: LoginRequest, request: Request):
     ip = request.client.host if request.client else "unknown"
-    user = authenticate(req.username, req.password)
+    user = authenticate(req.username, req.password, client_ip=ip)
     if not user:
         record_audit(req.username, "login_failed", "/auth/login", "POST", ip)
         raise HTTPException(status_code=401, detail="Invalid credentials")
