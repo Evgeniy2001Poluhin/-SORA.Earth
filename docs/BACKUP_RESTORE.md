@@ -52,7 +52,8 @@ after the restore, and requires them to be identical. The fingerprint covers:
 
 - the Alembic revision
 - every table and every view
-- every column, with type, nullability and default
+- every column, with type — including declared width and numeric precision, so
+  a `varchar(64)` narrowed to `varchar(10)` is visible — nullability and default
 - every constraint, with its full definition
 - every index, with its full definition
 - the row count of every table

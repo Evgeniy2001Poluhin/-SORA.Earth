@@ -59,7 +59,13 @@ SELECT 'view', table_name
  WHERE table_schema = 'public'
  ORDER BY table_name;
 
+-- data_type alone says "character varying" for both varchar(10) and
+-- varchar(64), so a width change would slip through unnoticed — exactly the
+-- change the convergence migration makes to region_code. Length and numeric
+-- precision are appended so the fingerprint can see it.
 SELECT 'column', table_name || '.' || column_name || ' ' || data_type
+       || coalesce('(' || character_maximum_length || ')', '')
+       || coalesce('(' || numeric_precision || ',' || numeric_scale || ')', '')
        || ' null=' || is_nullable || ' default=' || coalesce(column_default, '-')
   FROM information_schema.columns
  WHERE table_schema = 'public'
