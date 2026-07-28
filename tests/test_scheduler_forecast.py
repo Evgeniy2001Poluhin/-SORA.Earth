@@ -216,56 +216,33 @@ def test_scheduled_pretrain_forecast_models_data_quality():
 
 def test_scheduled_pretrain_forecast_models_registered_in_scheduler(monkeypatch):
     """Test that forecast pretraining job is registered in the scheduler."""
-    from app.scheduler import scheduler, init_scheduler, shutdown_scheduler
-    from unittest.mock import MagicMock
+    from app.scheduler import scheduler, init_scheduler
 
-    # Use monkeypatch to set environment (auto-cleanup)
+    # monkeypatch, not os.environ: assigning RUN_SCHEDULER directly leaked into
+    # every later test in the session, which started the real ingestion jobs and
+    # sent live requests to the upstream data providers.
     monkeypatch.setenv("SORA_SCHEDULER", "1")
     monkeypatch.setenv("RUN_SCHEDULER", "true")
 
-    # Record if scheduler was already running before this test
-    was_running = scheduler.running
-
-    # Create mock functions with proper __name__ attributes
-    # These will be called immediately by scheduler.start() so they must not make HTTP calls
-    def noop_job(*args, **kwargs):
-        return {"status": "mocked"}
-
-    mock_pretrain = MagicMock(side_effect=noop_job)
-    mock_pretrain.__name__ = "scheduled_pretrain_forecast_models"
-    mock_run_ingesters = MagicMock(side_effect=noop_job)
-    mock_openaq = MagicMock(side_effect=noop_job)
-    mock_openmeteo = MagicMock(side_effect=noop_job)
-    mock_refresh_data = MagicMock(side_effect=noop_job)
-    mock_refresh_metrics = MagicMock(side_effect=noop_job)
-
-    monkeypatch.setattr("app.scheduler.scheduled_pretrain_forecast_models", mock_pretrain)
-    monkeypatch.setattr("app.scheduler.scheduled_run_ingesters", mock_run_ingesters)
-    monkeypatch.setattr("app.services.environmental.scheduler_jobs.scheduled_openaq_ingestion", mock_openaq)
-    monkeypatch.setattr("app.services.environmental.scheduler_jobs.scheduled_openmeteo_ingestion", mock_openmeteo)
-    monkeypatch.setattr("app.scheduler.scheduled_refresh_external_data", mock_refresh_data)
-    monkeypatch.setattr("app.scheduler.refresh_forecast_metrics", mock_refresh_metrics)
-
+    registered_here = not scheduler.running and not scheduler.get_jobs()
     try:
-        # Initialize scheduler (will be no-op if already running)
-        if not was_running:
-            init_scheduler()
+        if registered_here:
+            # start=False: the ingestion jobs carry next_run_time=now, so starting
+            # the scheduler here fires live requests to the upstream providers.
+            init_scheduler(start=False)
 
-        # Find the forecast pretraining job
-        jobs = scheduler.get_jobs()
-        forecast_job = None
-        for job in jobs:
-            if job.id == "auto_pretrain_forecast":
-                forecast_job = job
-                break
+        forecast_job = next(
+            (job for job in scheduler.get_jobs() if job.id == "auto_pretrain_forecast"),
+            None,
+        )
 
-        # Verify job exists and is configured correctly
         assert forecast_job is not None, "Forecast pretraining job not found in scheduler"
         assert "Pre-train forecast models" in forecast_job.name
         assert "6" in str(forecast_job.trigger)  # 6-hour interval
         assert forecast_job.func.__name__ == "scheduled_pretrain_forecast_models"
-
     finally:
-        # Cleanup: shutdown scheduler if WE started it
-        if not was_running and scheduler.running:
-            shutdown_scheduler()
+        # Leave no registered jobs behind: a later start would fire them all.
+        if registered_here:
+            scheduler.remove_all_jobs()
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
