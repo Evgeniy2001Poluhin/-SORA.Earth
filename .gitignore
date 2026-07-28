@@ -123,3 +123,7 @@ nginx.conf.bak
 certs/
 certbot/
 web/tsconfig.tsbuildinfo
+
+# Interprocess lock for the training dataset, created by the bulk-upload
+# endpoint (app/api/retrain.py). Runtime artifact, never committed.
+data/.projects.csv.lock
