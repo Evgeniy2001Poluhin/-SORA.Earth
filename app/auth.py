@@ -2,7 +2,7 @@
 SORA.Earth JWT Authentication + RBAC + API Keys
 Pure Python JWT (HS256) — no external deps
 """
-import hashlib, hmac, json, os, time, base64
+import hashlib, hmac, json, logging, os, time, base64
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -187,7 +187,17 @@ def verify_password(plain: str, hashed: str) -> bool:
     if hashed.startswith(ARGON2_PREFIX):
         try:
             return _password_hasher.verify(hashed, plain)
-        except (VerifyMismatchError, VerificationError, InvalidHash):
+        except VerifyMismatchError:
+            return False
+        except (VerificationError, InvalidHash) as exc:
+            # Not a wrong password: the stored value is damaged or the backend
+            # failed. The caller still sees plain bad credentials, but silently
+            # folding this into that path would hide a corrupted record for as
+            # long as nobody tried to log in twice. Neither the hash nor the
+            # password is logged.
+            logging.getLogger("sora_earth").error(
+                "password hash could not be evaluated: %s", type(exc).__name__
+            )
             return False
     return _verify_legacy_sha256(plain, hashed)
 
@@ -248,11 +258,27 @@ _verify_slots = threading.BoundedSemaphore(VERIFY_CONCURRENCY)
 # Compared against when the account does not exist, so that an unknown user
 # costs the same as a known one. Without it the miss returns before any hashing
 # happens, and the difference is a timing oracle for which accounts exist.
+# Built once, at import. Doing it per request would make an unknown account
+# cost a hash *and* a verify -- turning the defence against enumeration into a
+# cheaper way to burn CPU than a real login.
 _ABSENT_ACCOUNT_HASH = _password_hasher.hash(os.urandom(32).hex())
 
 
-def _verify_under_gate(plain: str, stored: str) -> bool:
-    """Run one verification, or shed the request if the process is saturated."""
+def _verify_and_upgrade_under_gate(plain: str, stored: str,
+                                  user: dict | None) -> bool:
+    """Verify, and re-hash if needed, under a single slot.
+
+    One acquisition covers both. Releasing between them and taking a second
+    slot would put the same login through the gate twice: the bound would still
+    hold, but a request that already passed admission could be made to compete
+    again, and the two Argon2 operations of one login would no longer be
+    accounted together.
+
+    When the hash is stale the upgrade happens here or not at all -- there is no
+    deferred queue and nothing runs after the response. A skipped upgrade is
+    retried by the next successful login, which is the same mechanism that
+    migrates the account in the first place.
+    """
     if not _verify_slots.acquire(blocking=False):
         raise HTTPException(
             status_code=503,
@@ -260,7 +286,10 @@ def _verify_under_gate(plain: str, stored: str) -> bool:
             headers={"Retry-After": "1"},
         )
     try:
-        return verify_password(plain, stored)
+        matched = verify_password(plain, stored)
+        if matched and user is not None and needs_rehash(stored):
+            upgrade_password_hash(user, plain)
+        return matched
     finally:
         _verify_slots.release()
 
@@ -309,17 +338,8 @@ def authenticate(username: str, password: str, users: dict | None = None,
     # The comparison runs whether or not the account exists, against a hash
     # nobody holds, so a miss costs the same as a hit.
     stored = user.get("hashed_password", "") if user else _ABSENT_ACCOUNT_HASH
-    matched = _verify_under_gate(password, stored)
-    if not user or not matched:
+    if not _verify_and_upgrade_under_gate(password, stored, user):
         return None
-    if needs_rehash(user.get("hashed_password", "")):
-        # Re-hashing is Argon2 too, so it takes a slot like the verification.
-        if not _verify_slots.acquire(blocking=False):
-            return user  # authenticated; the upgrade waits for a quieter moment
-        try:
-            upgrade_password_hash(user, password)
-        finally:
-            _verify_slots.release()
     return user
 
 

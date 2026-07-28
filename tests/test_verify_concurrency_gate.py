@@ -13,6 +13,7 @@ from fastapi import HTTPException
 
 from app.auth import (
     VERIFY_CONCURRENCY,
+    _ABSENT_ACCOUNT_HASH,
     _hash_password,
     _verify_slots,
     authenticate,
@@ -164,3 +165,86 @@ def test_an_out_of_range_concurrency_is_refused(monkeypatch):
     monkeypatch.setenv("SORA_PASSWORD_VERIFY_CONCURRENCY", "many")
     with pytest.raises(RuntimeError, match="must be an integer"):
         _verify_concurrency()
+
+
+# -------------------------------------------------- lifetimes and error paths
+
+
+def test_the_absent_account_hash_is_built_once_at_import():
+    """Rebuilding it per request would make an unknown account cost a hash and
+    a verify -- a cheaper way to burn CPU than a real login."""
+    import inspect
+
+    from app import auth
+
+    source = inspect.getsource(auth.authenticate)
+    assert "_password_hasher.hash" not in source
+    assert "_ABSENT_ACCOUNT_HASH" in source
+
+    gate = inspect.getsource(auth._verify_and_upgrade_under_gate)
+    assert "_password_hasher.hash" not in gate
+
+
+def test_the_absent_account_hash_is_stable_and_valid():
+    first = _ABSENT_ACCOUNT_HASH
+    authenticate("nobody", "x", {})
+    from app.auth import _ABSENT_ACCOUNT_HASH as second
+
+    assert first == second, "the dummy hash was rebuilt"
+    assert first.startswith("$argon2id$")
+
+
+def test_an_unknown_account_costs_exactly_one_verification(monkeypatch):
+    import app.auth as auth_module
+
+    calls = []
+    real = auth_module.verify_password
+    monkeypatch.setattr(auth_module, "verify_password",
+                        lambda p, h: (calls.append(h), real(p, h))[1])
+
+    authenticate("nobody-at-all", "x", {})
+
+    assert len(calls) == 1, f"{len(calls)} verifications for one unknown user"
+    assert calls[0] == _ABSENT_ACCOUNT_HASH
+
+
+def test_verify_and_rehash_share_one_slot():
+    """Releasing between them would put one login through the gate twice."""
+    import inspect
+
+    from app import auth
+
+    gate = inspect.getsource(auth._verify_and_upgrade_under_gate)
+    assert gate.count("_verify_slots.acquire") == 1
+    assert gate.count("_verify_slots.release") == 1
+    assert "upgrade_password_hash" in gate, "the rehash must happen inside the slot"
+
+    caller = inspect.getsource(auth.authenticate)
+    assert "_verify_slots" not in caller, "the caller must not take a second slot"
+
+
+def test_a_damaged_stored_hash_fails_the_login_and_is_reported(caplog):
+    """Folding it into bad credentials would hide a corrupt record until
+    somebody noticed they could never log in."""
+    import logging
+
+    users = {"u": user_with("$argon2id$v=19$m=65536,t=3,p=4$not-real-base64$xx")}
+
+    with caplog.at_level(logging.ERROR, logger="sora_earth"):
+        assert authenticate("u", PASSWORD, users) is None
+
+    assert any("could not be evaluated" in r.message for r in caplog.records)
+    for record in caplog.records:
+        assert PASSWORD not in record.getMessage()
+        assert "argon2id" not in record.getMessage()
+
+
+def test_a_wrong_password_is_not_reported_as_a_backend_failure(caplog):
+    import logging
+
+    users = {"u": user_with(_hash_password(PASSWORD))}
+
+    with caplog.at_level(logging.ERROR, logger="sora_earth"):
+        assert authenticate("u", "wrong", users) is None
+
+    assert not any("could not be evaluated" in r.message for r in caplog.records)
