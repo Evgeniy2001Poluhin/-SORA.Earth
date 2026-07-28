@@ -1,12 +1,13 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { MarkdownAnswer } from "./MarkdownAnswer";
 import { SessionsSidebar } from "./SessionsSidebar";
 import { useMutation } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { copilotApi } from "@/api/endpoints/copilot";
 import type { CopilotRequest, CopilotResponse } from "@/api/endpoints/copilot";
 import "./copilot.css";
+import { errorMessage } from "@/lib/errors";
 
 interface FormValues {
   probability: number;
@@ -28,14 +29,16 @@ const PRESETS: Record<PresetKey, FormValues> = {
 const PRESET_KEYS: PresetKey[] = ["HIGH", "MODERATE", "LOW"];
 
 export function CopilotPage() {
-  const { register, handleSubmit, reset, watch } = useForm<FormValues>({ defaultValues: PRESETS.HIGH });
+  const { register, handleSubmit, reset, control } = useForm<FormValues>({ defaultValues: PRESETS.HIGH });
   const [result, setResult] = useState<CopilotResponse | null>(null);
   const [activePreset, setActivePreset] = useState<PresetKey | null>("HIGH");
-  const probability = watch("probability");
+  // useWatch rather than watch(): the value is only read to render a label, and
+  // watch() returns a new function result on every render, which the React
+  // Compiler cannot memoize.
+  const probability = useWatch({ control, name: "probability" });
   const [streamMode, setStreamMode] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [streamSpeed, setStreamSpeed] = useState<"fast" | "normal" | "slow">(() => { try { const v = localStorage.getItem("copilot.streamSpeed"); return (v === "fast" || v === "slow" || v === "normal") ? v : "normal"; } catch { return "normal"; } });
   const abortRef = useRef<AbortController | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sidebarTick, setSidebarTick] = useState(0);
@@ -59,8 +62,8 @@ export function CopilotPage() {
         });
       }
       toast.success("Loaded chat");
-    } catch (e: any) {
-      toast.error("Load failed: " + (e?.message ?? "unknown"));
+    } catch (e: unknown) {
+      toast.error("Load failed: " + errorMessage(e));
     }
   }, []);
 
@@ -93,11 +96,11 @@ export function CopilotPage() {
       return copilotApi.explain(body);
     },
     onSuccess: (r) => { setResult(r); if (r.session_id) setCurrentSessionId(r.session_id); setSidebarTick(t=>t+1); toast.success("Explanation generated"); },
-    onError: (e: any) => toast.error("Failed: " + (e?.message ?? "unknown")),
+    onError: (e: unknown) => toast.error("Failed: " + errorMessage(e)),
   });
 
   const submit = (v: FormValues) => { setActivePreset(null); mut.mutate(v); };
-  const usePreset = (k: PresetKey) => { setActivePreset(k); reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
+  const applyPreset = (k: PresetKey) => { setActivePreset(k); reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
 
   const runStream = async (v: FormValues) => {
     setStreaming(true);
@@ -144,8 +147,8 @@ export function CopilotPage() {
         }
       }
       toast.success("Stream complete");
-    } catch (e: any) {
-      toast.error("Stream failed: " + (e?.message ?? "unknown"));
+    } catch (e: unknown) {
+      toast.error("Stream failed: " + errorMessage(e));
     } finally {
       setStreaming(false);
     }
@@ -177,7 +180,7 @@ export function CopilotPage() {
                 key={k}
                 type="button"
                 className={"preset-btn" + (activePreset === k ? " active" : "")}
-                onClick={() => usePreset(k)}
+                onClick={() => applyPreset(k)}
               >
                 {k}
               </button>

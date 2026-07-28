@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import RussiaMap, { type MapMode } from "./RussiaMap";
 import { useRussiaMap } from "@/hooks/useRussiaMap";
-import { RUSSIA_REGIONS, FD_COLORS, type RussianRegion } from "@/data/russia_regions";
+import { RUSSIA_REGIONS, FD_COLORS, type RussianRegion, type EnrichedRussianRegion } from "@/data/russia_regions";
 
 type FD = RussianRegion["district"];
 const ALL_FD: FD[] = ["ЦФО", "СЗФО", "ЮФО", "СКФО", "ПФО", "УФО", "СФО", "ДФО"];
@@ -26,7 +26,7 @@ export default function RussiaMapModal({
   const [activeFD, setActiveFD] = useState<Set<FD>>(new Set(ALL_FD));
   const [search, setSearch] = useState("");
   const [mode, setMode] = useState<MapMode>("population");
-  const [selected, setSelected] = useState<RussianRegion | null>(null);
+  const [selected, setSelected] = useState<EnrichedRussianRegion | null>(null);
 
   const { data: apiRegions } = useRussiaMap();
   const enrichedRegions = useMemo(() => {
@@ -233,32 +233,32 @@ export default function RussiaMapModal({
                     ESG Score
                   </div>
                   <Row k="Total" v={Number(selected.esgScore).toFixed(1)} />
-                  {(selected as any).esgBreakdown && (
+                  {selected.esgBreakdown && (
                     <>
-                      <Row k="E (environmental)" v={Number((selected as any).esgBreakdown.e_score).toFixed(1)} color="#5A9A6F" />
-                      <Row k="S (social)"        v={Number((selected as any).esgBreakdown.s_score).toFixed(1)} color="#8FB069" />
-                      <Row k="G (governance)"    v={Number((selected as any).esgBreakdown.g_score).toFixed(1)} color="#C9A96E" />
+                      <Row k="E (environmental)" v={Number(selected.esgBreakdown.e_score).toFixed(1)} color="#5A9A6F" />
+                      <Row k="S (social)"        v={Number(selected.esgBreakdown.s_score).toFixed(1)} color="#8FB069" />
+                      <Row k="G (governance)"    v={Number(selected.esgBreakdown.g_score).toFixed(1)} color="#C9A96E" />
                     </>
                   )}
-                  {(selected as any).confidence != null && (
+                  {selected.confidence != null && (
                     <Row
                       k="Confidence"
-                      v={`${((selected as any).confidence * 100).toFixed(0)}%`}
+                      v={`${(selected.confidence * 100).toFixed(0)}%`}
                       color={
-                        (selected as any).confidence >= 0.67 ? "#5A9A6F"
-                        : (selected as any).confidence >= 0.34 ? "#C9A96E"
+                        selected.confidence >= 0.67 ? "#5A9A6F"
+                        : selected.confidence >= 0.34 ? "#C9A96E"
                         : "#B85C5C"
                       }
                     />
                   )}
-                  {(selected as any).sourcesUsed?.length > 0 && (
+                  {selected.sourcesUsed && selected.sourcesUsed.length > 0 && (
                     <div style={{ marginTop: 8, fontSize: 11, opacity: 0.55 }}>
-                      Sources: {(selected as any).sourcesUsed.join(", ")}
+                      Sources: {selected.sourcesUsed.join(", ")}
                     </div>
                   )}
-                  {(selected as any).updatedAt && (
+                  {selected.updatedAt && (
                     <div style={{ marginTop: 4, fontSize: 10, opacity: 0.4 }}>
-                      Updated: {new Date((selected as any).updatedAt).toLocaleString("ru-RU")}
+                      Updated: {new Date(selected.updatedAt).toLocaleString("ru-RU")}
                     </div>
                   )}
                 </div>

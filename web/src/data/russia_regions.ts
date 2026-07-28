@@ -9,6 +9,25 @@ export interface RussianRegion {
   esgScore?: number;
 }
 
+/** Per-pillar ESG breakdown as returned by GET /api/v1/map/russia. */
+export interface RegionEsgBreakdown {
+  score: number;
+  e_score: number;
+  s_score: number;
+  g_score: number;
+}
+
+/**
+ * A static region merged with the live values from /api/v1/map/russia.
+ * RussiaMapModal builds these; RussiaMap renders the extra fields when present.
+ */
+export interface EnrichedRussianRegion extends RussianRegion {
+  esgBreakdown?: RegionEsgBreakdown;
+  confidence?: number;
+  sourcesUsed?: string[];
+  updatedAt?: string | null;
+}
+
 export const RUSSIA_REGIONS: RussianRegion[] = [
   { code: "RU-MOW", name: "Москва", capital: "Москва", district: "ЦФО", lat: 55.7558, lon: 37.6176, population: 13149803 },
   { code: "RU-MOS", name: "Московская область", capital: "Красногорск", district: "ЦФО", lat: 55.8316, lon: 37.3295, population: 8524665 },

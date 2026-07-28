@@ -25,7 +25,6 @@ const BAND_COLOR: Record<string, string> = {
 const WORLD_BOUNDS: LatLngBoundsExpression = [[-65, -Infinity], [82, Infinity]];
 
 const radiusByEsg = (esg: number) => 3 + (esg / 100) * 4;
-const haloRadius  = (esg: number) => 4 + (esg / 100) * 5;
 
 export default function MapPage() {
   const [ruOpen, setRuOpen] = useState(false);

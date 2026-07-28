@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useParams, Link } from "react-router-dom";
 import "./region-detail.css";
 
@@ -12,7 +12,10 @@ type Indicator = {
   points_count: number;
 };
 
+/** GET /api/v1/map/russia/{code} answers with a region, or an error envelope. */
 type RegionDetailData = {
+  error?: string;
+  detail?: string;
   region: {
     code: string;
     name: string;
@@ -59,7 +62,7 @@ export default function RegionDetail() {
 
   if (err) return <div className="rd-page" style={{ color: RED }}>Error: {err}</div>;
   if (!data) return <div className="rd-page" style={{ color: "var(--muted)" }}>Loading {code}...</div>;
-  if ((data as any).error || (data as any).detail) {
+  if (data.error || data.detail) {
     return <div className="rd-page" style={{ color: "var(--muted)" }}>Region not found: {code}</div>;
   }
 
@@ -92,7 +95,7 @@ export default function RegionDetail() {
       {esg && (
         <div className="rd-kpis">
           {kpis.map(k => (
-            <div key={k.label} className="rd-card" style={{ "--score-color": colorForScore(k.v) } as any}>
+            <div key={k.label} className="rd-card" style={{ "--score-color": colorForScore(k.v) } as CSSProperties}>
               <div className="label">{k.label}</div>
               <div className="value">{k.v.toFixed(1)}</div>
             </div>
@@ -101,7 +104,7 @@ export default function RegionDetail() {
       )}
 
       <div className="rd-row">
-        <div className="rd-card" style={{ "--score-color": confColor } as any}>
+        <div className="rd-card" style={{ "--score-color": confColor } as CSSProperties}>
           <div className="label">Confidence</div>
           <div className="value">{data.confidence != null ? (data.confidence * 100).toFixed(0) + "%" : "-"}</div>
           {data.confidence != null && (

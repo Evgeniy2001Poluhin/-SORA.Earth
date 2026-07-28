@@ -1,9 +1,5 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-
-type Theme = "dark" | "light";
-type Ctx = { theme: Theme; toggle: () => void };
-
-const ThemeCtx = createContext<Ctx>({ theme: "dark", toggle: () => {} });
+import { useEffect, useState, type ReactNode } from "react";
+import { ThemeCtx, type Theme } from "./theme-context";
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   // Diploma lock: default to dark; ignore stale "light" in localStorage.
@@ -20,5 +16,3 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     </ThemeCtx.Provider>
   );
 }
-
-export const useTheme = () => useContext(ThemeCtx);
