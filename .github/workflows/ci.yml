@@ -168,6 +168,14 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-timeout
 
+      # The removed GAP-001 bootstrap script used to bring the schema up as a
+      # side effect of its round-trip. The persistence tests need the tables to
+      # exist, so the chain is now run explicitly rather than incidentally.
+      - name: alembic upgrade head
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
       - name: Run environmental persistence tests against PostgreSQL
         run: |
           python -m pytest \
