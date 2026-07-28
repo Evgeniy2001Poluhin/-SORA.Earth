@@ -454,7 +454,11 @@ def full_pipeline_run(trigger_source="full_pipeline", force: bool = False):
 
 
 def scheduled_run_ingesters():
-    """Run all registered ingesters (Rosstat, Sber/VEB, OpenAQ)."""
+    """Run all registered ingesters (Rosstat, Sber/VEB).
+
+    OpenAQ and Open-Meteo are intentionally excluded: they are owned solely by
+    their hourly scheduled_openaq_ingestion/scheduled_openmeteo_ingestion jobs.
+    """
     from app.locks import RedisLock
     lock = RedisLock(key="sora:lock:ingesters", timeout=600)
     if not lock.acquire():
