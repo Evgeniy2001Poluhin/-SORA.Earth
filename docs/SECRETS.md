@@ -97,8 +97,36 @@ so a forgotten key can never start an outbound call by itself — which the
 previous arrangement allowed: the gate was the presence of `OPENAI_API_KEY`, and
 the endpoint defaulted to `api.openai.com`.
 
-Plain `http://` is accepted only to `localhost`, `127.0.0.1` or `ollama`. The
-request carries project data and the key; anywhere else must be TLS.
+### Endpoint validation
+
+The base URL comes from deployment configuration only — no request influences it.
+It is still validated, because a misconfigured or tampered endpoint is the case
+this protects against, not a hostile provider:
+
+| refused | why |
+|---|---|
+| credentials in the URL | a URL travels wherever it is logged, and the credential with it |
+| a query string or fragment | a base URL is a prefix, not a request; anything appended is smuggled into every call |
+| any scheme but http/https | |
+| no host | |
+| plain `http://` to a remote host | the request carries project data and the key |
+
+Plain `http://` is accepted only to `localhost`, `127.0.0.1`, `::1`, `ollama` or
+`host.docker.internal` — the addresses where the hop never leaves the machine.
+
+### Addressing a self-hosted Ollama
+
+The address depends on where the application runs, and getting it wrong is the
+usual first mistake: **`localhost` inside a container is the container**, not the
+host.
+
+| application | Ollama | base URL |
+|---|---|---|
+| on the host | on the host | `http://localhost:11434/v1` |
+| Compose service | Compose service | `http://ollama:11434/v1` |
+| in Docker | on the host | `http://host.docker.internal:11434/v1` |
+
+The OpenAI client requires *some* value for the API key; Ollama ignores it.
 
 ### OpenAI and OpenRouter are retired
 

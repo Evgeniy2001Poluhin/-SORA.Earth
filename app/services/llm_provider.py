@@ -31,12 +31,21 @@ same for either:
 """
 import logging
 import os
+from urllib.parse import urlparse
 
 log = logging.getLogger("sora_earth")
 
 _LEGACY = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "LLM_MODEL")
 
 _TRUE = {"1", "true", "yes", "on"}
+
+# Hosts where plain http never leaves the machine. `host.docker.internal` is
+# included because that is how a container reaches a server on its own host --
+# `localhost` from inside a container is the container, which is the mistake this
+# list exists to make unnecessary.
+SELF_HOSTED_HOSTS = frozenset({
+    "localhost", "127.0.0.1", "::1", "ollama", "host.docker.internal",
+})
 
 
 class LLMConfigError(RuntimeError):
@@ -86,15 +95,44 @@ def settings(environ=None) -> dict:
             "naming where it lives."
         )
 
+    parsed = urlparse(base_url)
+
+    if parsed.scheme not in ("http", "https"):
+        raise LLMConfigError(
+            f"COPILOT_LLM_BASE_URL has scheme {parsed.scheme or '(none)'!r}; "
+            "only http and https are supported."
+        )
+
+    # Credentials in the URL travel wherever the URL travels: into logs, into
+    # the client's own error messages, into a traceback. The key has its own
+    # variable for that reason.
+    if parsed.username or parsed.password:
+        raise LLMConfigError(
+            "COPILOT_LLM_BASE_URL contains credentials. Use COPILOT_LLM_API_KEY; "
+            "a URL ends up in logs and error messages, and the credential with it."
+        )
+
+    # A base URL is a prefix, not a request. Anything appended here is either a
+    # mistake or an attempt to smuggle a parameter into every call.
+    if parsed.query or parsed.fragment:
+        raise LLMConfigError(
+            "COPILOT_LLM_BASE_URL carries a query string or fragment. "
+            "It must be a bare endpoint prefix."
+        )
+
+    if not parsed.hostname:
+        raise LLMConfigError("COPILOT_LLM_BASE_URL names no host.")
+
     # http is allowed only for a host-local server. Anything else must be TLS:
     # the prompt carries project data, and the key travels with it.
-    if base_url.startswith("http://"):
-        host = base_url.split("://", 1)[1].split("/")[0].split(":")[0]
-        if host not in ("localhost", "127.0.0.1", "::1", "ollama"):
-            raise LLMConfigError(
-                "COPILOT_LLM_BASE_URL uses http:// to a non-local host. "
-                "The request carries project data and the key; use https."
-            )
+    #
+    # `ollama` resolves inside a Compose network, where the hop never leaves the
+    # host either. It is not a general permission for plain-http hostnames.
+    if parsed.scheme == "http" and parsed.hostname not in SELF_HOSTED_HOSTS:
+        raise LLMConfigError(
+            f"COPILOT_LLM_BASE_URL uses http:// to {parsed.hostname!r}, which is "
+            "not host-local. The request carries project data and the key; use https."
+        )
     return {"base_url": base_url, "model": model, "api_key": api_key}
 
 

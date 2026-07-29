@@ -113,3 +113,84 @@ def test_nothing_names_a_provider_we_cannot_administer():
     source = inspect.getsource(llm_provider)
     for name in ("api.openai.com", "openrouter.ai", "gpt-4o"):
         assert name not in source.split('"""')[2], f"{name} is configured again"
+
+
+# ----------------------------------------------------- endpoint validation
+
+
+@pytest.fixture
+def enabled_with(monkeypatch):
+    """Enable the LLM and let each test supply only the URL under test."""
+    def configure(url):
+        monkeypatch.setenv("COPILOT_LLM_ENABLED", "true")
+        monkeypatch.setenv("COPILOT_LLM_MODEL", "m")
+        monkeypatch.setenv("COPILOT_LLM_API_KEY", "k")
+        monkeypatch.setenv("COPILOT_LLM_BASE_URL", url)
+    return configure
+
+
+def test_credentials_in_the_url_are_refused(enabled_with):
+    """A URL travels wherever it is logged, and the credential with it. The key
+    has its own variable precisely so it does not end up in a traceback."""
+    enabled_with("https://user:token@llm.example/v1")
+    with pytest.raises(LLMConfigError, match="contains credentials"):
+        settings()
+
+
+@pytest.mark.parametrize("url", [
+    "https://llm.example/v1?key=smuggled",
+    "https://llm.example/v1#fragment",
+])
+def test_a_query_or_fragment_is_refused(enabled_with, url):
+    """A base URL is a prefix, not a request. Anything appended is either a
+    mistake or a parameter smuggled into every call."""
+    enabled_with(url)
+    with pytest.raises(LLMConfigError, match="query string or fragment"):
+        settings()
+
+
+@pytest.mark.parametrize("url", ["ftp://llm.example/v1", "file:///etc/passwd", "gopher://x/1"])
+def test_only_http_schemes_are_accepted(enabled_with, url):
+    enabled_with(url)
+    with pytest.raises(LLMConfigError, match="only http and https"):
+        settings()
+
+
+def test_a_url_with_no_host_is_refused(enabled_with):
+    enabled_with("https:///v1")
+    with pytest.raises(LLMConfigError, match="names no host"):
+        settings()
+
+
+@pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "ollama", "host.docker.internal"])
+def test_the_self_hosted_hosts_accept_plain_http(enabled_with, host):
+    """These are the three ways a self-hosted server is addressed, and none of
+    them leaves the machine."""
+    enabled_with(f"http://{host}:11434/v1")
+    assert settings()["base_url"].startswith("http://")
+
+
+def test_the_endpoint_and_key_are_absent_from_health(monkeypatch):
+    """Health is a public endpoint. It reports what the Co-Pilot will do, not
+    where it will do it."""
+    import json
+
+    from app.services import copilot
+
+    monkeypatch.setenv("COPILOT_LLM_ENABLED", "true")
+    monkeypatch.setenv("COPILOT_LLM_BASE_URL", "https://private-endpoint.invalid/v1")
+    monkeypatch.setenv("COPILOT_LLM_MODEL", "m")
+    monkeypatch.setenv("COPILOT_LLM_API_KEY", "a-key-that-must-not-appear")
+
+    blob = json.dumps(copilot.health())
+
+    assert "private-endpoint" not in blob
+    assert "a-key-that-must-not-appear" not in blob
+
+
+def test_a_refusal_never_quotes_the_key(enabled_with, monkeypatch):
+    monkeypatch.setenv("COPILOT_LLM_API_KEY", "secret-key-value")
+    enabled_with("https://user:secret-key-value@llm.example/v1")
+    with pytest.raises(LLMConfigError) as excinfo:
+        settings()
+    assert "secret-key-value" not in str(excinfo.value)
