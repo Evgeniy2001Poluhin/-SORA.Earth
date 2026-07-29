@@ -128,6 +128,32 @@ host.
 
 The OpenAI client requires *some* value for the API key; Ollama ignores it.
 
+`host.docker.internal` resolves on its own only under Docker Desktop. On Linux
+Docker Engine — which is what production runs — it has to be granted:
+
+```yaml
+services:
+  backend:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
+Without that line the third row simply fails to resolve, and the Co-Pilot falls
+back to `smart_template` with nothing obviously wrong.
+
+### What this validation is and is not
+
+It is **configuration hardening for a deployment-controlled endpoint**. The base
+URL comes from the environment and no request influences it, so there is no
+user-driven SSRF vector to prevent; what it guards against is a mistyped or
+tampered configuration.
+
+It is deliberately not a general SSRF firewall. It does not restrict ports,
+disable redirects, re-check the destination after DNS resolution, or exclude
+cloud metadata addresses. Adding those would turn a provider adapter into a
+network policy engine, and the threat it would answer — an operator who can
+already set environment variables — has better options available to it.
+
 ### OpenAI and OpenRouter are retired
 
 Not because their endpoints are unreachable. `api.openai.com` answers — it
