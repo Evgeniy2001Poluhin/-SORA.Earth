@@ -15,7 +15,7 @@ concurrency:
 jobs:
   backend-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,6 +57,9 @@ jobs:
 
               print(f"Materialized: {path} ({len(content)} bytes)")
           PY
+
+      - name: Materialize Git LFS models
+        run: git lfs pull
 
       - uses: actions/setup-python@v5
         with:
@@ -131,6 +134,56 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  environmental-postgres-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sora
+          POSTGRES_PASSWORD: sora2026
+          POSTGRES_DB: sora_earth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-timeout
+
+      # The removed GAP-001 bootstrap script used to bring the schema up as a
+      # side effect of its round-trip. The persistence tests need the tables to
+      # exist, so the chain is now run explicitly rather than incidentally.
+      - name: alembic upgrade head
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
+      - name: Run environmental persistence tests against PostgreSQL
+        run: |
+          python -m pytest \
+            tests/test_environmental_persist.py \
+            -v --tb=short --timeout=120
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+          REDIS_URL: ""
+          SECRET_KEY: "ci-test-secret"
+          SORA_ADMIN_TOKEN: "ci-test-admin"
+          MLFLOW_TRACKING_URI: "sqlite:///./test_mlflow.db"
 
   integration-tests:
     runs-on: ubuntu-latest

@@ -8,6 +8,16 @@ from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timezone
 import time
 
+from app.ingesters.persist import PersistResult
+
+
+def _fake_persist_result(n=1, rejected=0, errors=None):
+    return PersistResult(
+        received=n + rejected, inserted=n, updated=0,
+        rejected=rejected, duplicates=0, accepted=n,
+        errors=errors or [],
+    )
+
 
 @pytest.fixture
 def mock_redis_lock():
@@ -32,6 +42,7 @@ def mock_db_session():
 class TestOpenAQIngestion:
     """Tests for scheduled_openaq_ingestion job."""
 
+    @patch("app.ingesters.persist.persist_environmental_observations")
     @patch("app.ingesters.openaq.OpenAQIngester")
     @patch("app.services.environmental.scheduler_jobs._run_async_job")
     @patch("app.services.environmental.scheduler_jobs._log_job_execution")
@@ -40,9 +51,16 @@ class TestOpenAQIngestion:
         mock_log,
         mock_run_async,
         mock_ingester_class,
+        mock_persist,
         mock_redis_lock,
     ):
-        """Test successful OpenAQ ingestion with valid data."""
+        """Test successful OpenAQ ingestion with valid data.
+
+        persist_environmental_observations is mocked so this stays a unit test
+        (no live DB writes with a production-shaped source="openaq" value) and
+        so accounting can be pinned to a known PersistResult independent of
+        whatever a real upsert would return.
+        """
         from app.services.environmental.scheduler_jobs import scheduled_openaq_ingestion
         from app.ingesters.base import Signal
 
@@ -68,6 +86,7 @@ class TestOpenAQIngestion:
             ),
         ]
         mock_run_async.return_value = mock_signals
+        mock_persist.return_value = _fake_persist_result(n=2, rejected=0)
 
         # Execute job
         result = scheduled_openaq_ingestion()
@@ -77,14 +96,19 @@ class TestOpenAQIngestion:
         assert result["signals_count"] == 2
         assert result["valid_count"] == 2
         assert result["rejected_count"] == 0
+        assert result["persisted"] == 2
         assert "duration_sec" in result
+        mock_persist.assert_called_once_with(mock_signals, "openaq")
 
-        # Verify logging was called
+        # Verify logging was called with PersistResult-derived accounting,
+        # not the raw fetched/quality-flag counts.
         mock_log.assert_called_once()
         log_call = mock_log.call_args
         assert log_call[1]["job_name"] == "openaq_ingestion"
         assert log_call[1]["status"] == "success"
         assert log_call[1]["records_processed"] == 2
+        assert log_call[1]["records_rejected"] == 0
+        assert log_call[1]["metadata"]["fetched_count"] == 2
 
     @patch("app.services.environmental.scheduler_jobs._log_job_execution")
     def test_lock_held_skips_execution(self, mock_log):
@@ -138,6 +162,7 @@ class TestOpenAQIngestion:
 class TestOpenMeteoIngestion:
     """Tests for scheduled_openmeteo_ingestion job."""
 
+    @patch("app.ingesters.persist.persist_environmental_observations")
     @patch("app.ingesters.openmeteo.OpenMeteoIngester")
     @patch("app.services.environmental.scheduler_jobs._run_async_job")
     @patch("app.services.environmental.scheduler_jobs._log_job_execution")
@@ -146,9 +171,14 @@ class TestOpenMeteoIngestion:
         mock_log,
         mock_run_async,
         mock_ingester_class,
+        mock_persist,
         mock_redis_lock,
     ):
-        """Test successful Open-Meteo ingestion."""
+        """Test successful Open-Meteo ingestion.
+
+        persist_environmental_observations is mocked so this stays a unit test
+        (no live DB writes with a production-shaped source="openmeteo" value).
+        """
         from app.services.environmental.scheduler_jobs import scheduled_openmeteo_ingestion
         from app.ingesters.base import Signal
 
@@ -164,12 +194,19 @@ class TestOpenMeteoIngestion:
             ),
         ]
         mock_run_async.return_value = mock_signals
+        mock_persist.return_value = _fake_persist_result(n=1, rejected=0)
 
         result = scheduled_openmeteo_ingestion()
 
         assert result["status"] == "success"
         assert result["signals_count"] == 1
+        assert result["persisted"] == 1
         assert "duration_sec" in result
+        mock_persist.assert_called_once_with(mock_signals, "openmeteo")
+
+        log_call = mock_log.call_args
+        assert log_call[1]["records_processed"] == 1
+        assert log_call[1]["records_rejected"] == 0
 
 
 class TestSourceHealthCheck:

@@ -81,6 +81,47 @@ def _run_async_job(coro):
     return loop.run_until_complete(coro)
 
 
+def _is_fatal_persist_error(persist_result) -> bool:
+    """True if the whole batch failed (DB-level error), not just per-signal rejects.
+
+    persist_environmental_observations() never raises — a fatal failure (e.g. the
+    upsert statement itself erroring, or the transaction failing to commit) is only
+    signalled via a "persist_error: ..." entry in PersistResult.errors, distinct
+    from the per-signal "signal_<idx>: ..." validation-rejection entries.
+    """
+    return any(e.startswith("persist_error:") for e in persist_result.errors)
+
+
+def _accepted_indicator_counts(signals, persist_result) -> Dict[str, int]:
+    """Map indicator -> count of signals actually persisted (accepted), for
+    Prometheus observation counters that must reflect accepted records, not
+    the raw fetch count.
+
+    Rejected signal indices are derived from the "signal_<idx>: ..." entries
+    persist_environmental_observations() appends to PersistResult.errors for
+    per-signal validation failures (missing region_code/metric/value). Must
+    only be called after confirming _is_fatal_persist_error() is False —
+    on a fatal batch failure nothing was actually persisted.
+    """
+    if _is_fatal_persist_error(persist_result):
+        return {}
+
+    rejected_indices = set()
+    for err in persist_result.errors:
+        if err.startswith("signal_"):
+            try:
+                rejected_indices.add(int(err.split("_", 1)[1].split(":", 1)[0]))
+            except (IndexError, ValueError):
+                continue
+
+    counts: Dict[str, int] = {}
+    for idx, signal in enumerate(signals):
+        if idx in rejected_indices:
+            continue
+        counts[signal.metric] = counts.get(signal.metric, 0) + 1
+    return counts
+
+
 def _log_job_execution(
     job_name: str,
     status: str,
@@ -138,10 +179,12 @@ def scheduled_openaq_ingestion():
     """
     from app.locks import RedisLock
     from app.ingesters.openaq import OpenAQIngester
+    from app.ingesters.persist import persist_environmental_observations
     from app.prom_metrics import (
         sora_environmental_ingestion_total,
         sora_environmental_ingestion_errors_total,
         sora_environmental_source_freshness_seconds,
+        sora_environmental_observations_total,
     )
 
     job_name = "openaq_ingestion"
@@ -159,13 +202,28 @@ def scheduled_openaq_ingestion():
         # Run async ingester
         ingester = OpenAQIngester()
         signals = _run_async_job(ingester.fetch())
+        fetched_count = len(signals)
 
-        # Calculate metrics
-        valid_signals = [s for s in signals if s.metadata.get("quality") != "invalid"]
-        rejected_count = len(signals) - len(valid_signals)
+        # Fetch-time quality flag: informational only. NOT the authoritative
+        # persisted-rejection count — that comes from PersistResult below.
+        quality_valid_signals = [s for s in signals if s.metadata.get("quality") != "invalid"]
+        quality_invalid_count = fetched_count - len(quality_valid_signals)
 
-        # Update Prometheus metrics
+        # Persist signals to environmental_observations (upsert on source, source_record_id).
+        # This is the single source of truth for accepted/rejected counts; success is
+        # only declared below once this has actually completed without a fatal error.
+        persist_result = persist_environmental_observations(signals, "openaq")
+
+        if _is_fatal_persist_error(persist_result):
+            raise RuntimeError(f"persistence failed for openaq: {persist_result.errors}")
+
+        # Update Prometheus metrics only after persistence has succeeded, counting
+        # accepted (persisted) records rather than fetched ones.
         sora_environmental_ingestion_total.labels(source="openaq", status="success").inc()
+        for indicator, count in _accepted_indicator_counts(signals, persist_result).items():
+            sora_environmental_observations_total.labels(
+                source="openaq", indicator=indicator
+            ).inc(count)
 
         # Calculate data freshness (time since most recent observation)
         if signals:
@@ -180,29 +238,39 @@ def scheduled_openaq_ingestion():
 
         duration = time.time() - start_time
 
-        # Log to database
+        # Log to database: records_processed/rejected reflect what was actually
+        # persisted (PersistResult), never the fetch-time quality-flag count.
         _log_job_execution(
             job_name=job_name,
             status="success",
             duration_sec=duration,
-            records_processed=len(signals),
-            records_rejected=rejected_count,
+            records_processed=persist_result.accepted,
+            records_rejected=persist_result.rejected,
             metadata={
-                "valid_signals": len(valid_signals),
+                "fetched_count": fetched_count,
+                "quality_valid_count": len(quality_valid_signals),
+                "quality_invalid_count": quality_invalid_count,
                 "parameters": list(set(s.metric for s in signals)),
+                "persist_inserted": persist_result.inserted,
+                "persist_updated": persist_result.updated,
+                "persist_duplicates": persist_result.duplicates,
+                "persist_errors": persist_result.errors[:5] if persist_result.errors else [],
             }
         )
 
         logger.info(
-            "OpenAQ ingestion completed: %d signals (%d valid, %d rejected) in %.2fs",
-            len(signals), len(valid_signals), rejected_count, duration
+            "OpenAQ ingestion completed: fetched %d signals, persisted %d accepted / "
+            "%d rejected (%d inserted, %d updated) in %.2fs",
+            fetched_count, persist_result.accepted, persist_result.rejected,
+            persist_result.inserted, persist_result.updated, duration
         )
 
         return {
             "status": "success",
-            "signals_count": len(signals),
-            "valid_count": len(valid_signals),
-            "rejected_count": rejected_count,
+            "signals_count": fetched_count,
+            "valid_count": len(quality_valid_signals),
+            "rejected_count": quality_invalid_count,
+            "persisted": persist_result.accepted,
             "duration_sec": duration,
         }
 
@@ -236,10 +304,12 @@ def scheduled_openmeteo_ingestion():
     """
     from app.locks import RedisLock
     from app.ingesters.openmeteo import OpenMeteoIngester
+    from app.ingesters.persist import persist_environmental_observations
     from app.prom_metrics import (
         sora_environmental_ingestion_total,
         sora_environmental_ingestion_errors_total,
         sora_environmental_source_freshness_seconds,
+        sora_environmental_observations_total,
     )
 
     job_name = "openmeteo_ingestion"
@@ -257,9 +327,23 @@ def scheduled_openmeteo_ingestion():
         # Run async ingester
         ingester = OpenMeteoIngester()
         signals = _run_async_job(ingester.fetch())
+        fetched_count = len(signals)
 
-        # Update Prometheus metrics
+        # Persist signals to environmental_observations (upsert on source, source_record_id).
+        # Single source of truth for accepted/rejected counts; success is only
+        # declared below once this has actually completed without a fatal error.
+        persist_result = persist_environmental_observations(signals, "openmeteo")
+
+        if _is_fatal_persist_error(persist_result):
+            raise RuntimeError(f"persistence failed for openmeteo: {persist_result.errors}")
+
+        # Update Prometheus metrics only after persistence has succeeded, counting
+        # accepted (persisted) records rather than fetched ones.
         sora_environmental_ingestion_total.labels(source="openmeteo", status="success").inc()
+        for indicator, count in _accepted_indicator_counts(signals, persist_result).items():
+            sora_environmental_observations_total.labels(
+                source="openmeteo", indicator=indicator
+            ).inc(count)
 
         # Calculate data freshness
         if signals:
@@ -274,26 +358,36 @@ def scheduled_openmeteo_ingestion():
 
         duration = time.time() - start_time
 
-        # Log to database
+        # Log to database: records_processed/rejected reflect what was actually
+        # persisted (PersistResult), never the raw fetch count.
         _log_job_execution(
             job_name=job_name,
             status="success",
             duration_sec=duration,
-            records_processed=len(signals),
+            records_processed=persist_result.accepted,
+            records_rejected=persist_result.rejected,
             metadata={
+                "fetched_count": fetched_count,
                 "regions_count": len(set(s.region_code for s in signals)),
                 "variables": list(set(s.metric for s in signals)),
+                "persist_inserted": persist_result.inserted,
+                "persist_updated": persist_result.updated,
+                "persist_duplicates": persist_result.duplicates,
+                "persist_errors": persist_result.errors[:5] if persist_result.errors else [],
             }
         )
 
         logger.info(
-            "Open-Meteo ingestion completed: %d signals in %.2fs",
-            len(signals), duration
+            "Open-Meteo ingestion completed: fetched %d signals, persisted %d accepted / "
+            "%d rejected (%d inserted, %d updated) in %.2fs",
+            fetched_count, persist_result.accepted, persist_result.rejected,
+            persist_result.inserted, persist_result.updated, duration
         )
 
         return {
             "status": "success",
-            "signals_count": len(signals),
+            "signals_count": fetched_count,
+            "persisted": persist_result.accepted,
             "duration_sec": duration,
         }
 
