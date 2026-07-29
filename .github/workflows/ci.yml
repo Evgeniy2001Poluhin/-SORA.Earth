@@ -237,3 +237,99 @@ jobs:
           REDIS_URL: "redis://localhost:6379/0"
           SECRET_KEY: "ci-test-secret"
           SORA_ADMIN_TOKEN: "ci-test-admin"
+
+  # A clean database must be reachable from migrations alone. Production was
+  # bootstrapped with Base.metadata.create_all(), which is not reproducible from
+  # the repository, so this gate runs the chain against an empty PostgreSQL.
+  migration-bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sora
+          POSTGRES_PASSWORD: sora2026
+          POSTGRES_DB: sora_bootstrap
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_bootstrap"
+      SORA_OFFLINE: "1"
+      RUN_SCHEDULER: "false"
+      SECRET_KEY: "ci-test-secret"
+      SORA_ADMIN_TOKEN: "ci-test-admin"
+    steps:
+      # tests/conftest.py imports app.main, which unpickles the LFS models, so
+      # the scenario step needs them materialised like backend-tests does.
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-timeout
+
+      - name: Assert the database starts empty
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          tables = inspect(engine).get_table_names()
+          assert tables == [], f"database is not empty: {tables}"
+          print("Database is empty, as required for a bootstrap test")
+          PY
+
+      - name: alembic upgrade head
+        run: alembic upgrade head
+
+      - name: Verify schema and single head
+        run: |
+          alembic current
+          alembic heads
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          inspector = inspect(engine)
+          tables = set(inspector.get_table_names())
+          views = set(inspector.get_view_names())
+
+          # region_esg_scores backs the regional_esg_snapshot view; both must
+          # exist after a migration-only bootstrap.
+          required_tables = {"alembic_version", "region_esg_scores"}
+          missing = required_tables - tables
+          assert not missing, f"missing tables after upgrade head: {sorted(missing)}"
+          assert "regional_esg_snapshot" in views, f"view missing, have: {sorted(views)}"
+          print(f"{len(tables)} tables, {len(views)} views")
+          PY
+
+      - name: downgrade and upgrade round-trip
+        run: |
+          alembic downgrade -1
+          alembic upgrade head
+
+      - name: Offline SQL generation
+        run: |
+          alembic upgrade 31e5cc432377:b7c1e4a92f30 --sql > /tmp/offline.sql
+          grep -q 'DO \$migration\$' /tmp/offline.sql
+          echo "Offline script generated without an Inspector"
+
+      - name: Convergence scenarios against PostgreSQL
+        run: |
+          python -m pytest tests/test_migration_region_esg_scores.py \
+            -v --tb=short --timeout=120
