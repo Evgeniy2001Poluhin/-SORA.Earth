@@ -144,6 +144,46 @@ test — in every case the database was never touched:
 The first is what the header authentication is for. Signing only the ciphertext
 would have let that edit through to a reader that believed the algorithm line.
 
+### What the drill proves, and what it does not
+
+Two distinctions are worth keeping apart, because conflating them overstates the
+guarantee.
+
+**Verified** — the fingerprint compares these before and after, and they matched:
+
+| | count |
+|---|---|
+| tables | 16 |
+| columns, with type, nullability and default | 181 |
+| indexes, with definition | 63 |
+| constraints, with definition | 16 |
+| views | 1 |
+| row counts, per table | 16 |
+| content hash of `region_esg_scores` | 1 |
+| Alembic revision | 1 |
+
+**Restored but not verified.** `pg_dump -F c` carries these and `pg_restore`
+puts them back; the fingerprint simply does not compare them, so a fault in that
+path would not be caught here:
+
+- current values of sequences
+- extensions
+- triggers and functions
+- large objects
+
+**Not restored at all.** These are outside what a single-database dump can carry,
+or are dropped deliberately:
+
+- roles — cluster-level, not in a database dump
+- ownership and grants — `pg_restore --no-owner` discards them, because
+  reproducing ownership needs the same roles to exist and can require superuser
+- database-level settings
+
+This is a **database** backup, not a cluster backup. Restoring into a fresh
+cluster gives back the data and the schema; it does not give back who owned what.
+Whether that matters is a deployment question, and the honest answer is that it
+has not been tested either way.
+
 **The actual RPO today is undefined.** Not poor — undefined. Nothing takes a
 backup on a schedule, so what would come back is whatever someone last ran by
 hand, of unknown age. Restoring in seconds does not help with that.
