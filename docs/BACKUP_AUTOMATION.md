@@ -108,6 +108,47 @@ Both the backup and the target are explicit and neither has a default.
 decision with a rollback plan, not a command. The payload is checked against the
 manifest before anything touches PostgreSQL, and no plaintext survives the run.
 
+## Promotion is not an atomic swap
+
+The restore *construction* is atomic — `--single-transaction`, into a staging
+database, discarded on any failure. Taking the name afterwards is not, and
+calling it "promotion" should not suggest otherwise:
+
+```
+DROP DATABASE target
+ALTER DATABASE staging RENAME TO target
+```
+
+Two statements, not one. Between them the target does not exist, and a process
+that dies in the gap leaves it that way. Both statements also fail outright if
+anyone is connected — measured:
+
+```
+ALTER DATABASE stg RENAME TO tgt
+ERROR:  database "stg" is being accessed by other users
+DETAIL:  There is 1 other session using the database.
+```
+
+So a running application defeats the swap rather than surviving it, and a
+connection pool that reconnects during the gap will find nothing there.
+
+**This script therefore refuses production.** `sora_earth` and `postgres` are on
+`BACKUP_PROTECTED_DATABASES` and the restore exits before doing anything. What
+is automated here is restoring into a disposable target — a drill, a copy for
+investigation — not replacing a live database.
+
+### Replacing a live database is a runbook, not a command
+
+It needs, in order: owner approval, maintenance mode, writers stopped, sessions
+inspected and terminated, the pool paused. Then rename the current target to a
+**rollback name** rather than dropping it, rename staging into place, reconnect,
+run smoke checks, and keep the rollback database until the result is accepted.
+Dropping it is a separate approved action, later.
+
+The difference that matters: never drop the old database before a rollback name
+exists. This script's `DROP` then `RENAME` is acceptable for a disposable target
+precisely because there is nothing to roll back to.
+
 ## RPO: what is claimed and what is not
 
 These are different things and conflating them is how a backup policy becomes
