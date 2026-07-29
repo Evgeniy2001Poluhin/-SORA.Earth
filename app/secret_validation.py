@@ -43,7 +43,10 @@ def _fault(name: str, value: str, minimum: int) -> str | None:
     if any(value.startswith(prefix) for prefix in _DEV_PREFIXES):
         return "still carries the development default prefix"
     if len(value) < minimum:
-        return f"is {len(value)} characters; at least {minimum} are required"
+        # The threshold is public -- it is in this file. The actual length is
+        # not: it narrows a guess, and it ends up in whatever log captured the
+        # startup failure.
+        return f"is shorter than the required {minimum} characters"
     return None
 
 

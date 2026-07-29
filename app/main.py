@@ -1,3 +1,11 @@
+# First, before anything else imports a secret or opens a socket. A placeholder
+# that gets as far as serving traffic is signing tokens anyone holding the same
+# public example can forge, so production refuses to start rather than start
+# wrongly. Development is untouched.
+from app.secret_validation import enforce as _enforce_secrets
+
+_enforce_secrets()
+
 from app import cache, external_data
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

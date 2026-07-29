@@ -28,13 +28,35 @@ only the public half and cannot read what it wrote.
 
 **Real key material, in tracked documentation.** Four files — the security
 audit and rotation guides — quoted the OpenAI and OpenRouter keys they had been
-written to report. Truncated prefixes rather than working keys, but a prefix is
-still identifying material, and a document that reports a leak by reproducing it
-is its own finding. 25 occurrences, redacted here.
+written to report. **25 occurrences, redacted here.**
 
-They entered in commit `bb5aeb4`. **They remain in history**, and removing them
-requires a rewrite, which is an owner decision and is not done here. The
-documents themselves record that rotation was still outstanding.
+What the fragments are is not the same as what they prove. They are shorter than
+a complete key, which is why no scanner rule for a full key matched them — but a
+fragment being short says nothing about whether the credential it came from was
+ever revoked, and key formats differ enough between vendors and eras that
+inferring anything from length is unsound. Treat them as identifying material
+belonging to a credential of **unknown validity**.
+
+They entered in commit `bb5aeb4`. **They remain in history**, so:
+
+- **owner verification is required** before any claim that this risk is closed;
+- **rotation, not redaction, is the remedy** — the fragments are gone from the
+  tree, which is not the same as the credential being dead;
+- **rewriting history is neither done nor sufficient.** It invalidates every
+  outstanding branch and pull request, and it does not revoke anything. A secret
+  that reached a remote is in every clone, fork and cache already.
+
+| status | |
+|---|---|
+| active valid credentials detected by the scanner | 0 |
+| historical secret fragments | 25, in 4 documents, commit `bb5aeb4` |
+| credential validity | **unknown** |
+| owner rotation verification | **required** |
+| rotations performed here | none |
+| history rewritten | no |
+
+"No active credentials detected" means the scanner found none it can recognise.
+It is not a demonstration that none exist.
 
 **False positives, from one broad rule.** `generic-api-key` matched three
 What-If form field names — `co2_reduction_tons` and friends — in the source and
@@ -122,10 +144,16 @@ within retention, or those backups become unreadable.
 
 ## If a secret is exposed
 
+0. **Establish identity.** Find the credential a fragment belongs to, in the
+   OpenAI and OpenRouter consoles. If identity cannot be *disproved*, treat the
+   credential as compromised — the burden runs that way round, not the other.
 1. **Contain.** Revoke at the provider before anything else. A rotated-but-not-revoked key is still a live key.
 2. **Rotate**, following the table above.
 3. **Invalidate sessions** if the signing secret was involved.
 4. **Look for use** — provider logs, application logs, unexpected spend.
 5. **Assess reach.** A secret in git history is in every clone and every fork. Rotation is the fix; history rewriting is cleanup, and needs owner approval because it invalidates every outstanding branch and pull request.
 6. **Redeploy and verify.**
-7. **Write down** what was exposed, for how long, and what was done — without reproducing the value, which is how these four documents became a finding in the first place.
+7. **Record the rotation evidence outside Git** — the provider's own audit
+   trail, not a file in the repository. Writing it here is how these four
+   documents became a finding.
+8. **Write down** what was exposed, for how long, and what was done — without reproducing the value, which is how these four documents became a finding in the first place.
