@@ -386,3 +386,49 @@ def test_cleanup_only_removes_a_lock_this_run_still_holds():
     assert "LOCK_TOKEN" in text
     assert 'token" 2>/dev/null || echo "")" = "$LOCK_TOKEN"' in text, \
         "cleanup does not check the lock is still ours"
+
+
+# ------------------------------------------------------- restore atomicity
+
+
+def test_the_restore_is_atomic_and_fails_closed():
+    """A non-zero exit is not a rollback.
+
+    pg_restore reports failure but does not undo the statements it already
+    applied, so without a transaction the target is left partially populated --
+    worse than empty, because it looks usable. Measured on PostgreSQL 16 with a
+    dump whose GRANT names a role the target cluster lacks:
+
+        without --single-transaction:  exit 1, and 50 rows sitting in the table
+        with it:                       exit 1, and the relation does not exist
+    """
+    text = (SCRIPTS / "backup_restore.sh").read_text()
+    assert "--single-transaction" in text
+    assert "--exit-on-error" in text
+
+
+def test_the_target_is_not_dropped_before_a_good_restore_exists():
+    """Dropping first destroys what was there before the replacement is known
+    to work. The failing restore above would have left nothing to go back to."""
+    # Comments explain the ordering and mention the same tokens, so only code
+    # is inspected -- otherwise the prose decides the outcome.
+    code = "\n".join(
+        line for line in (SCRIPTS / "backup_restore.sh").read_text().splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+    staging_created = code.index('CREATE DATABASE \\"$STAGING\\"')
+    restore_runs = code.index("--single-transaction")
+    target_dropped = code.index('DROP DATABASE IF EXISTS \\"$TARGET\\"')
+    promoted = code.index("RENAME TO")
+
+    assert staging_created < restore_runs, "staging must exist before the restore"
+    assert restore_runs < target_dropped, "the target is dropped before the restore proves out"
+    assert target_dropped < promoted, "the rename must follow the drop"
+
+
+def test_a_failed_restore_discards_the_staging_database():
+    text = (SCRIPTS / "backup_restore.sh").read_text()
+    assert "drop_staging" in text
+    assert "trap 'rm -rf \"$WORK\"; drop_staging' EXIT" in text, \
+        "staging must be dropped on every exit path, not just the happy one"

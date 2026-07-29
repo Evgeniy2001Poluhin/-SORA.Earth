@@ -191,15 +191,33 @@ scripts run:
 `--no-owner` suppresses ownership; it says nothing about privileges. Grants are
 in the dump and are restored — provided the roles are there to receive them.
 
-The second row has a consequence worth knowing before an incident:
-`pg_restore` **exits 1** in that case. The table and its rows arrive intact and
-only the ACLs are missing, but `backup_restore.sh` runs under `set -e`, so the
-restore reports failure. That is the right default — the restore was not
-faithful — but an operator seeing it should know the data is present and the
-privileges are not.
+### A non-zero exit is not a rollback
 
-Restoring into a cluster that already has the roles avoids this entirely. The
-drill target does, which is why the drill does not show it.
+`pg_restore` exits 1 when the GRANT fails — but reporting failure is not the
+same as undoing anything. It does not roll back the statements it already
+applied, so an ordinary restore leaves the target **partially populated**, which
+is worse than empty because it looks usable. Measured:
+
+| restore | exit | what is in the database afterwards |
+|---|---|---|
+| plain `pg_restore` | 1 | the table, with all 50 rows |
+| `--single-transaction --exit-on-error` | 1 | nothing — `relation "t" does not exist` |
+
+The first row is the trap: an operator sees a failure, finds a populated
+database, and reasonably concludes it mostly worked. What is missing is the
+privileges, and nothing says so.
+
+So the restore is transactional, and it does not touch the target until it has
+something good to put there:
+
+```
+create staging → restore into it → drop the target → rename staging into place
+```
+
+An earlier version dropped the target first. That destroys what was there
+before the replacement is known to work — the failing restore above would have
+left nothing to go back to. Verified: with the role missing, a target holding
+its own data came through untouched.
 
 This is a **database** backup, not a cluster backup.
 
