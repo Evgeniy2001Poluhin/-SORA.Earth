@@ -134,7 +134,7 @@ class TestAuthEdgeCases:
         assert r.status_code in [200, 401, 403]
 
     def test_invalid_api_key(self):
-        r = client.get("/api/v1/model/feature-importance", headers={"X-API-Key": "invalid-key-12345"})
+        r = client.get("/api/v1/model/feature-importance", headers={"X-API-Key": "not-a-real-credential-invalid-by-design"})
         assert r.status_code in [200, 403]
 
 

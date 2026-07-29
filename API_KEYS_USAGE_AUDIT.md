@@ -309,12 +309,12 @@ OPENAQ_API_KEY=
 # Cost: ~$1-5/month at 1K predictions (gpt-4o-mini)
 # 
 # Option 1: OpenAI Platform
-OPENAI_API_KEY=sk-proj-YOUR_KEY_HERE
+OPENAI_API_KEY=sk-<redacted: see SECRETS.md>
 # OPENAI_BASE_URL=https://api.openai.com/v1 (default)
 # LLM_MODEL=gpt-4o-mini (default)
 #
 # Option 2: OpenRouter (multi-model with free tier)
-# OPENAI_API_KEY=sk-or-v1-YOUR_KEY_HERE
+# OPENAI_API_KEY=sk-<redacted: see SECRETS.md>
 # OPENAI_BASE_URL=https://openrouter.ai/api/v1
 # LLM_MODEL=openai/gpt-4o-mini,qwen/qwen3-next-80b-a3b-instruct:free
 #
@@ -402,7 +402,7 @@ docker-compose logs scheduler | grep openaq
 **OpenRouter Free Tier Alternative:**
 ```bash
 # .env configuration for zero-cost option
-OPENAI_API_KEY=sk-or-v1-YOUR_KEY
+OPENAI_API_KEY=sk-<redacted: see SECRETS.md>
 OPENAI_BASE_URL=https://openrouter.ai/api/v1
 LLM_MODEL=qwen/qwen3-next-80b-a3b-instruct:free,z-ai/glm-4.5-air:free
 ```

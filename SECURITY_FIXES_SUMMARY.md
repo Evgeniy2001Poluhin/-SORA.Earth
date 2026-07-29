@@ -9,8 +9,8 @@
 ## 🚨 Issues Found
 
 ### 1. **API Keys Exposed in .env** (CRITICAL)
-- OpenAI key: `sk-proj-hEHc0Ymh...` (20 visible chars)
-- OpenRouter key: `sk-or-v1-6d4048dd...` (20 visible chars)
+- OpenAI key: `sk-<redacted: see SECRETS.md>...` (20 visible chars)
+- OpenRouter key: `sk-<redacted: see SECRETS.md>...` (20 visible chars)
 - **Risk:** Keys could be used to make unauthorized API calls, incur charges
 - **Scope:** Local `.env` file only (NOT in git history ✅)
 
@@ -114,14 +114,14 @@ class ProjectInput(BaseModel):
 ```bash
 # 1. OpenAI Platform
 # Visit: https://platform.openai.com/api-keys
-# Find key: sk-proj-hEHc0Ymh...
+# Find key: sk-<redacted: see SECRETS.md>...
 # Click: Revoke
 # Create: New secret key
 # Copy: New key to .env
 
 # 2. OpenRouter
 # Visit: https://openrouter.ai/keys
-# Find key: sk-or-v1-6d4048dd...
+# Find key: sk-<redacted: see SECRETS.md>...
 # Click: Revoke/Delete
 # Create: New key
 # Copy: New key to .env
@@ -230,8 +230,8 @@ docker compose -f docker-compose.prod.yml logs -f backend | head -50
 
 After completing manual steps, verify:
 
-- [ ] Old OpenAI key (`sk-proj-hEHc0Ymh...`) revoked on platform.openai.com
-- [ ] Old OpenRouter key (`sk-or-v1-6d4048dd...`) revoked on openrouter.ai
+- [ ] Old OpenAI key (`sk-<redacted: see SECRETS.md>...`) revoked on platform.openai.com
+- [ ] Old OpenRouter key (`sk-<redacted: see SECRETS.md>...`) revoked on openrouter.ai
 - [ ] New OpenAI key generated and added to `.env`
 - [ ] New JWT secret (64 chars) in `.env`
 - [ ] New admin token (64 chars) in `.env`

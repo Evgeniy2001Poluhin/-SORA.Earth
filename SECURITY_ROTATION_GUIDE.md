@@ -20,39 +20,39 @@
 
 ## 🚨 STEP 1: Rotate OpenAI API Keys
 
-### 1a. OpenAI (sk-proj-hEHc0Ymh...)
+### 1a. OpenAI (sk-<redacted: see SECRETS.md>...)
 
 ```bash
 # 1. Go to https://platform.openai.com/api-keys
-# 2. Find key "sk-proj-hEHc0Ymh..." or matching name
+# 2. Find key "sk-<redacted: see SECRETS.md>..." or matching name
 # 3. Click "Revoke" → Confirm deletion
 # 4. Click "Create new secret key"
 # 5. Copy new key immediately (shown only once!)
 # 6. Update .env:
-#    OPENAI_API_KEY=sk-proj-NEW_KEY_HERE
+#    OPENAI_API_KEY=sk-<redacted: see SECRETS.md>
 ```
 
 **Current exposed key (first 20 chars):**
 ```
-sk-proj-hEHc0Ymhlb3ZvqRE4wg0...
+sk-<redacted: see SECRETS.md>...
 ```
 
-### 1b. OpenRouter (sk-or-v1-6d4048dd...)
+### 1b. OpenRouter (sk-<redacted: see SECRETS.md>...)
 
 ```bash
 # 1. Go to https://openrouter.ai/keys
-# 2. Find key "sk-or-v1-6d4048dd..." or matching name
+# 2. Find key "sk-<redacted: see SECRETS.md>..." or matching name
 # 3. Click "Revoke" or delete key
 # 4. Click "Create new key"
 # 5. Copy new key
 # 6. Update .env:
-#    OPENAI_API_KEY=sk-or-v1-NEW_KEY_HERE
+#    OPENAI_API_KEY=sk-<redacted: see SECRETS.md>
 #    OPENAI_BASE_URL=https://openrouter.ai/api/v1
 ```
 
 **Current exposed key (first 20 chars):**
 ```
-sk-or-v1-6d4048dd01c6c91e...
+sk-<redacted: see SECRETS.md>...
 ```
 
 ---
@@ -136,7 +136,7 @@ After rotation, verify:
 # Local development
 cd ~/sora_earth_ai_platform
 
-# 1. Check .env has new keys (no sk-proj-hEHc0Ymh or sk-or-v1-6d4048dd)
+# 1. Check .env has new keys (no sk-<redacted: see SECRETS.md> or sk-<redacted: see SECRETS.md>)
 grep "OPENAI_API_KEY" .env
 # Should show NEW key or be empty/commented
 
@@ -250,8 +250,8 @@ docker compose -f docker-compose.prod.yml exec postgres \
 ```bash
 # === ACTIONS REQUIRED ===
 
-1. Revoke old OpenAI key (sk-proj-hEHc0Ymh...)
-2. Revoke old OpenRouter key (sk-or-v1-6d4048dd...)
+1. Revoke old OpenAI key (sk-<redacted: see SECRETS.md>...)
+2. Revoke old OpenRouter key (sk-<redacted: see SECRETS.md>...)
 3. Generate new keys and update .env locally
 4. If production exists: rotate keys there too (SSH + regenerate)
 5. Verify .env permissions: chmod 600 .env
