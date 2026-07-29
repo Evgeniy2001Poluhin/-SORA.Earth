@@ -12,7 +12,7 @@ rotated.
 | `POSTGRES_PASSWORD` | application and backup connections | **production** | environment / Docker secret | platform |
 | `SORA_DEFAULT_{ADMIN,ANALYST,VIEWER}_PASSWORD` | seeds the built-in accounts | production | environment | platform |
 | `SENTRY_DSN` | error reporting | optional | environment | platform |
-| `OPENAI_API_KEY` | RAG endpoints | optional | environment | account holder |
+| `COPILOT_LLM_API_KEY` | optional Co-Pilot prose rewrite | **no** — off by default | environment | whoever owns the chosen provider |
 | `OPENAQ_API_KEY` | air-quality ingestion | optional | environment | account holder |
 | `TELEGRAM_BOT_TOKEN`, `SMTP_PASSWORD` | alert delivery | optional | environment | platform |
 | `BACKUP_S3_ACCESS_KEY_FILE`, `BACKUP_S3_SECRET_KEY_FILE` | backup upload | backup only | **file**, never argv | platform |
@@ -79,6 +79,55 @@ Checked before acting on them:
 | `k8s/deployment.yaml` carries a JWT placeholder | **no** — it uses `secretKeyRef` |
 | hardcoded database credentials in `scripts/` | **none found** |
 
+## The Co-Pilot's LLM: three modes, one of them the default
+
+The Co-Pilot computes its verdict, probability, confidence and drivers from the
+model and from templates. An LLM only rewrites the prose of `executive_summary`
+and answers follow-up questions. Nothing a caller relies on depends on a service
+being reachable, and a test asserts that contract.
+
+| mode | configuration | external dependency |
+|---|---|---|
+| `smart_template` | **default**, nothing to set | none |
+| self-hosted | `COPILOT_LLM_BASE_URL=http://ollama:11434/v1` | none leaves the host |
+| managed | any OpenAI-compatible endpoint over https | the provider |
+
+There is **no default endpoint**. Enabling the LLM means naming where it lives,
+so a forgotten key can never start an outbound call by itself — which the
+previous arrangement allowed: the gate was the presence of `OPENAI_API_KEY`, and
+the endpoint defaulted to `api.openai.com`.
+
+Plain `http://` is accepted only to `localhost`, `127.0.0.1` or `ollama`. The
+request carries project data and the key; anywhere else must be TLS.
+
+### OpenAI and OpenRouter are retired
+
+Not because their endpoints are unreachable. `api.openai.com` answers — it
+returns 401. The reason is that **the accounts cannot be administered from
+here**: a key cannot be created, rotated or revoked. A credential you cannot
+revoke is a standing risk, and what it bought was nicer wording.
+
+The `openai` package stays in requirements. It is a client for the OpenAI *wire
+format*, which is what Ollama and the managed alternatives speak; it is not a
+binding to that company.
+
+```
+DEPENDENCY_STATUS      OpenAI/OpenRouter retired from configuration
+CREDENTIAL_CONSUMPTION none — no code path reads those variables
+PROVIDER_REVOCATION    unverified; the consoles are not reachable from here
+OWNER_FOLLOW_UP        if account access returns, locate and revoke the
+                       corresponding credentials and review usage logs
+```
+
+Retired variables are **ignored with a warning, not rejected**. Refusing to
+start over a forgotten line in an old deployment file would turn a no-op into an
+outage during whatever change surfaced it.
+
+Note for scope: other foreign services remain in use and are reachable —
+Open-Meteo, OpenAQ, the World Bank and OECD all answer, and unlike the LLM they
+are functional dependencies of the environmental pipeline. This change is about
+one provider that cannot be administered, not about foreign services generally.
+
 ## Scanning
 
 `.gitleaks.toml` holds the rules and a deliberately small allowlist. Nothing
@@ -132,7 +181,7 @@ The same shape for each, differing only in where the new value goes.
 | `POSTGRES_PASSWORD` | `openssl rand -base64 32` | `ALTER ROLE … PASSWORD`, then update the app and the backup job **together** | both connect; a backup completes |
 | S3 credentials | provider console | write to the credential files, no restart needed | a backup uploads and its manifest appears |
 | `BACKUP_RECIPIENT_KEY` | `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072` | public half to the backup host, private half **elsewhere** | a new backup restores in a drill |
-| `OPENAI_API_KEY` and other vendor keys | vendor console | set, restart | the endpoint that uses it answers |
+| `COPILOT_LLM_API_KEY` | chosen provider | set, restart | the Co-Pilot health endpoint reports `smart_template_with_llm_rewrite` |
 
 Rotating the database password and the backup credentials in the wrong order
 leaves backups failing silently until someone looks. Change them together and

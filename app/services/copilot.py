@@ -1,5 +1,7 @@
 """SORA.Earth - Co-Pilot for ESG prediction explanations with smart templates."""
 import os
+
+from app.services import llm_provider
 import logging
 from typing import Optional
 
@@ -177,11 +179,9 @@ def explain_prediction(probability, features, shap_values=None, project=None, mo
 def _chat_completion(messages, max_tokens=350, temperature=0.4):
     """Call OpenRouter/OpenAI with model fallback. LLM_MODEL may be comma-separated."""
     import openai
-    client = openai.OpenAI(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-    )
-    models = [m.strip() for m in os.getenv("LLM_MODEL", "gpt-4o-mini").split(",") if m.strip()]
+    cfg = llm_provider.settings()
+    client = openai.OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
+    models = [m.strip() for m in cfg["model"].split(",") if m.strip()]
     last_err = None
     for model in models:
         try:
@@ -196,8 +196,6 @@ def _chat_completion(messages, max_tokens=350, temperature=0.4):
 
 
 def _enrich_with_gpt(base, features, project):
-    import openai
-    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
     prompt = (
         "Rewrite this ESG project prediction explanation in natural language. "
         "Verdict: " + base["verdict"]["label"] + ". "
@@ -213,13 +211,13 @@ def _enrich_with_gpt(base, features, project):
 
 def health():
     """Health check for Co-Pilot service."""
-    mode = "smart_template"
-    if os.getenv("OPENAI_API_KEY"):
-        mode = "smart_template_with_gpt_fallback"
+    mode = llm_provider.mode()
 
     return {
         "ok": True,
-        "llm_enabled": False,  # No LLM required anymore
+        # Disabled is a healthy state, not a degraded one: the verdict,
+        # probability, drivers and risks never depended on an LLM.
+        "llm_enabled": llm_provider.enabled(),
         "explanation_mode": mode,
         "llm_model": None,  # Template-based, no LLM
         "supported_features": list(FEATURE_RU.keys()),
@@ -255,14 +253,12 @@ def answer_qa(question: str, context: str, sources: list, audience: str = "execu
             for s in sources[:4]
         )
 
-    if not os.getenv("OPENAI_API_KEY"):
+    if not llm_provider.enabled():
         ans = (f"Based on the prior explanation and {len(sources)} retrieved sources, "
                f"the answer to '{question}' depends on the key drivers already identified. "
                f"Audience: {audience}. {audience_directive(audience)}")
         return {"answer": ans, "mode": "template", "tokens_used": 0}
 
-    import openai
-    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
     system = (
         "You are SORA.earth Co-Pilot, answering follow-up questions about an ESG project prediction. "
         + audience_directive(audience)
