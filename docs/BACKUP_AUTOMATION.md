@@ -171,18 +171,37 @@ path would not be caught here:
 - triggers and functions
 - large objects
 
-**Not restored at all.** These are outside what a single-database dump can carry,
-or are dropped deliberately:
+**Not carried at all:**
 
-- roles — cluster-level, not in a database dump
-- ownership and grants — `pg_restore --no-owner` discards them, because
-  reproducing ownership needs the same roles to exist and can require superuser
+- roles — cluster-level, absent from a single-database dump
 - database-level settings
 
-This is a **database** backup, not a cluster backup. Restoring into a fresh
-cluster gives back the data and the schema; it does not give back who owned what.
-Whether that matters is a deployment question, and the honest answer is that it
-has not been tested either way.
+**Ownership** is deliberately not restored: `pg_restore --no-owner`. Reproducing
+it needs the same roles to exist and can require superuser.
+
+**Grants are a separate question from ownership**, and the answer is not the one
+that sounds obvious. Measured on PostgreSQL 16 with the exact commands these
+scripts run:
+
+| target cluster | outcome |
+|---|---|
+| grantee role exists | ACL restored **byte-identically**, named grant and `PUBLIC` alike |
+| grantee role absent | the whole `GRANT` group fails; **every ACL on that table is lost**, including the `PUBLIC` grant that did not depend on the missing role |
+
+`--no-owner` suppresses ownership; it says nothing about privileges. Grants are
+in the dump and are restored — provided the roles are there to receive them.
+
+The second row has a consequence worth knowing before an incident:
+`pg_restore` **exits 1** in that case. The table and its rows arrive intact and
+only the ACLs are missing, but `backup_restore.sh` runs under `set -e`, so the
+restore reports failure. That is the right default — the restore was not
+faithful — but an operator seeing it should know the data is present and the
+privileges are not.
+
+Restoring into a cluster that already has the roles avoids this entirely. The
+drill target does, which is why the drill does not show it.
+
+This is a **database** backup, not a cluster backup.
 
 **The actual RPO today is undefined.** Not poor — undefined. Nothing takes a
 backup on a schedule, so what would come back is whatever someone last ran by
