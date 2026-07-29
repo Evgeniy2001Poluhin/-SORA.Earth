@@ -33,13 +33,26 @@ The backup host must not be able to read its own backups. A passphrase fails
 that: whatever encrypts also decrypts, so compromising the machine that runs the
 schedule hands over the archive with it.
 
-The scheme is hybrid, which is what `age` and GPG do internally:
+A **versioned OpenSSL envelope with encrypt-then-MAC**. The shape is the same
+one `age` and GPG use — a sealed data key over a symmetric payload — but this is
+not that format and has had none of its review. It is narrower, and the header
+exists so the algorithms can change later without a reader guessing.
 
 | object | contents |
 |---|---|
+| `payload.hdr` | envelope version and algorithm identifiers, in the clear |
 | `payload.enc` | AES-256-CBC under a per-backup data key |
-| `payload.mac` | HMAC-SHA256 over the ciphertext |
-| `payload.key` | the data key, sealed to an RSA public key with OAEP |
+| `payload.mac` | HMAC-SHA256 over **header ‖ ciphertext** |
+| `payload.key` | the data key, IV and MAC key, sealed to an RSA public key with OAEP |
+
+The keys are independent, not one key reused: 80 random bytes per backup, split
+into a 32-byte AES key, a 32-byte HMAC key and a 16-byte IV. Using one key for
+both confidentiality and authentication weakens each.
+
+The header is authenticated **together with** the ciphertext. Signing only the
+ciphertext would leave the parameters describing it unprotected, which is how
+downgrade attacks on otherwise sound constructions work. An unrecognised version
+is refused before the payload is touched at all.
 
 Built on OpenSSL because neither `age` nor GPG is present in this environment,
 and a script that needs a package nobody installed is a schedule that never
@@ -105,7 +118,7 @@ fiction:
 | **Proposed RPO** | ≤ 6 hours, on a four-times-daily schedule |
 | **Configured schedule** | none — nothing is installed |
 | **Observed interval** | none — no scheduled run has happened |
-| **Verified restore** | yes, against PostgreSQL 16: fingerprint identical across 295 lines, 85 rows and the view intact |
+| **Verified restore** | yes, against PostgreSQL 16 — see below |
 
 **The actual RPO today is undefined.** Not poor — undefined. Nothing takes a
 backup on a schedule, so what would come back is whatever someone last ran by
@@ -113,6 +126,24 @@ hand, of unknown age. Restoring in seconds does not help with that.
 
 Choosing the schedule is a decision about acceptable data loss, and installing
 it is an owner action. Nothing here touches production.
+
+## What the restore evidence means
+
+Two numbers appear in the drill output and they measure different things:
+
+| | |
+|---|---|
+| **85** | rows in `region_esg_scores` — the seeded production shape |
+| **295** | lines in the fingerprint, one per recorded fact |
+
+The fingerprint is not a row dump. It records the Alembic revision, every table,
+every view, every column with its type, nullability and default, every
+constraint with its definition, every index with its definition, a row count for
+each table, and an MD5 over the ordered contents of `region_esg_scores`.
+
+Comparing those 295 lines before and after a restore is what makes "identical"
+mean something: a dump that restored the rows but lost an index, a constraint or
+the revision would differ, and a row count alone would not notice.
 
 ## Portability
 

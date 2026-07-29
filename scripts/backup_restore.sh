@@ -45,7 +45,7 @@ store_get "$BACKUP_ID/manifest.json" "$WORK/manifest.json"
 EXPECTED_SHA="$(sed -n 's/.*"payload_sha256"[^"]*"\([^"]*\)".*/\1/p' "$WORK/manifest.json")"
 
 echo "==> fetch"
-for part in payload.enc payload.mac payload.key; do
+for part in payload.enc payload.hdr payload.mac payload.key; do
     store_get "$BACKUP_ID/$part" "$WORK/$part"
 done
 

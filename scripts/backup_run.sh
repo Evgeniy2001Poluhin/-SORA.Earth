@@ -33,6 +33,7 @@ BACKUP_KEEP_WEEKLY="${BACKUP_KEEP_WEEKLY:-8}"
 WORK=""
 BACKUP_ID=""
 RELEASE_LOCK=""
+LOCK_TOKEN=""
 
 # Sanitised: an alert path is exactly where a secret gets copied into someone
 # else's log.
@@ -53,7 +54,13 @@ alert() {  # <event> <detail>
 cleanup() {
     local status=$?
     [ -n "$WORK" ] && rm -rf "$WORK"
-    [ -n "${RELEASE_LOCK:-}" ] && rm -rf "$RELEASE_LOCK"
+    if [ -n "${RELEASE_LOCK:-}" ] && [ -n "${LOCK_TOKEN:-}" ]; then
+        # Only if it is still ours. Removing a lock someone else now holds
+        # would let two runs overlap precisely when one already went wrong.
+        if [ "$(cat "$RELEASE_LOCK/token" 2>/dev/null || echo "")" = "$LOCK_TOKEN" ]; then
+            rm -rf "$RELEASE_LOCK"
+        fi
+    fi
     if [ $status -ne 0 ]; then
         alert backup_failed "stage exited $status"
     fi
@@ -74,9 +81,26 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     # A crashed run leaves the directory behind. Reclaim it only when the
     # recorded process is demonstrably gone -- never on age alone, which would
     # eventually let two runs overlap on a slow database.
+    STALE_HOST="$(cat "$LOCK_DIR/host" 2>/dev/null || echo "")"
     STALE_PID="$(cat "$LOCK_DIR/pid" 2>/dev/null || echo "")"
-    if [ -n "$STALE_PID" ] && ! kill -0 "$STALE_PID" 2>/dev/null; then
-        echo "reclaiming a lock left by process $STALE_PID" >&2
+    STALE_START="$(cat "$LOCK_DIR/start" 2>/dev/null || echo "")"
+    THIS_HOST="$(hostname)"
+    # A pid is not an identity: the kernel reuses numbers, and an unrelated
+    # process wearing a dead owner's pid would make this lock look held for
+    # ever. The owner is (host, pid, process start time) together -- reuse
+    # gives a different start time, and a lock from another host is never ours
+    # to reclaim.
+    LIVE=1
+    if [ "$STALE_HOST" != "$THIS_HOST" ]; then
+        LIVE=1                                    # someone else's; leave it
+    elif [ -z "$STALE_PID" ] || ! kill -0 "$STALE_PID" 2>/dev/null; then
+        LIVE=0
+    else
+        NOW_START="$(ps -o lstart= -p "$STALE_PID" 2>/dev/null | tr -s ' ' || echo "")"
+        [ -n "$STALE_START" ] && [ "$NOW_START" != "$STALE_START" ] && LIVE=0
+    fi
+    if [ "$LIVE" = "0" ]; then
+        echo "reclaiming a lock left by a process that is gone" >&2
         rm -rf "$LOCK_DIR"
         mkdir "$LOCK_DIR" 2>/dev/null || {
             echo "lost the race to reclaim the lock" >&2; exit 75; }
@@ -87,6 +111,12 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     fi
 fi
 echo $$ > "$LOCK_DIR/pid"
+hostname > "$LOCK_DIR/host"
+ps -o lstart= -p $$ 2>/dev/null | tr -s ' ' > "$LOCK_DIR/start" || true
+# A token so cleanup removes only the lock this run actually holds, never one
+# a later run took after we were reclaimed.
+LOCK_TOKEN="$(openssl rand -hex 16)"
+echo "$LOCK_TOKEN" > "$LOCK_DIR/token"
 RELEASE_LOCK="$LOCK_DIR"
 
 store_ready
@@ -132,7 +162,7 @@ cat > "$WORK/metadata.json" <<META
 META
 
 echo "==> upload"
-for part in payload.enc payload.mac payload.key payload.enc.sha256 fingerprint metadata.json; do
+for part in payload.enc payload.hdr payload.mac payload.key payload.enc.sha256 fingerprint metadata.json; do
     store_put "$WORK/$part" "$BACKUP_ID/$part"
 done
 

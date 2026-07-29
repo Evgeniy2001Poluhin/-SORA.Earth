@@ -55,8 +55,11 @@ def keypair(tmp_path_factory):
 
 
 def bash(snippet, env=None, cwd=REPO):
+    # errors="replace": a deliberately corrupted file is echoed back in an error
+    # message, and the harness must not fail on the bytes it went looking for.
     return subprocess.run(["bash", "-c", textwrap.dedent(snippet)],
-                          capture_output=True, text=True, env=env, cwd=cwd)
+                          capture_output=True, text=True, errors="replace",
+                          env=env, cwd=cwd)
 
 
 # ----------------------------------------------------------------- encryption
@@ -120,6 +123,7 @@ def make_backup(store, backup_id, *, complete=True, sha="abc", size=10):
     d = store.prefix / backup_id
     d.mkdir(parents=True)
     (d / "payload.enc").write_bytes(b"x" * size)
+    (d / "payload.hdr").write_text("sora-backup-envelope/1\naes-256-cbc/hmac-sha256/rsa-oaep-sha256\n")
     (d / "payload.mac").write_text("mac")
     (d / "payload.key").write_text("key")
     (d / "metadata.json").write_text(json.dumps({"backup_id": backup_id}))
@@ -291,3 +295,94 @@ def test_the_scripts_run_on_the_bash_the_platform_ships():
         )
         assert "mapfile" not in code, f"{script.name} uses mapfile (bash 4+)"
         assert "declare -A" not in code, f"{script.name} uses an associative array (bash 4+)"
+
+
+# ------------------------------------------------------- envelope integrity
+
+
+@pytest.fixture
+def sealed(tmp_path, keypair):
+    """One encrypted payload, ready to be damaged in specific ways."""
+    plain = tmp_path / "plain"
+    plain.write_bytes(b"KNOWN-PLAINTEXT-MARKER" * 2000)
+    bash(f"""
+        source scripts/backup_crypt.sh
+        backup_encrypt {plain} {keypair.recipient} {tmp_path}/s
+    """)
+    return types_ns(dir=tmp_path, prefix=tmp_path / "s", plain=plain)
+
+
+def attempt_decrypt(sealed, keypair, out="out"):
+    return bash(f"""
+        source scripts/backup_crypt.sh
+        backup_decrypt {sealed.prefix} {keypair.identity} {sealed.dir}/{out}
+    """)
+
+
+@pytest.mark.parametrize("part", ["enc", "hdr", "mac", "key"])
+def test_tampering_with_any_part_is_refused(sealed, keypair, part):
+    """Signing only the ciphertext would leave the parameters describing it
+    unprotected, which is how downgrade attacks on sound constructions work."""
+    target = Path(f"{sealed.prefix}.{part}")
+    data = target.read_bytes()
+    target.write_bytes(data[:20] + bytes([data[20] ^ 0xFF]) + data[21:])
+
+    result = attempt_decrypt(sealed, keypair, out=f"out-{part}")
+
+    assert result.returncode != 0, f"a damaged .{part} was accepted"
+    assert not (sealed.dir / f"out-{part}").exists(), \
+        f"plaintext was written despite a damaged .{part}"
+
+
+def test_an_unknown_envelope_version_is_refused(sealed, keypair):
+    Path(f"{sealed.prefix}.hdr").write_text("sora-backup-envelope/99\nwhatever\n")
+
+    result = attempt_decrypt(sealed, keypair, out="future")
+
+    assert result.returncode != 0
+    assert "unknown envelope version" in result.stderr
+    assert not (sealed.dir / "future").exists()
+
+
+def test_the_same_plaintext_encrypts_differently_each_time(tmp_path, keypair):
+    """A fresh key and IV per backup: identical dumps must not be linkable."""
+    plain = tmp_path / "same"
+    plain.write_bytes(b"identical contents" * 1000)
+    for run in ("a", "b"):
+        bash(f"""
+            source scripts/backup_crypt.sh
+            backup_encrypt {plain} {keypair.recipient} {tmp_path}/{run}
+        """)
+
+    assert (tmp_path / "a.enc").read_bytes() != (tmp_path / "b.enc").read_bytes()
+    assert (tmp_path / "a.key").read_bytes() != (tmp_path / "b.key").read_bytes()
+
+
+def test_the_ciphertext_does_not_contain_the_plaintext(sealed):
+    assert b"KNOWN-PLAINTEXT-MARKER" not in Path(f"{sealed.prefix}.enc").read_bytes()
+
+
+def test_the_keys_are_independent_not_one_key_reused():
+    """Using one key for confidentiality and authentication weakens both."""
+    text = (SCRIPTS / "backup_crypt.sh").read_text()
+    assert "skip=0  count=32" in text.replace("skip=0 count=32", "skip=0  count=32")
+    assert "skip=32 count=32" in text
+    assert "skip=64 count=16" in text
+
+
+# --------------------------------------------------------------- lock owner
+
+
+def test_the_lock_records_more_than_a_pid():
+    """A pid is not an identity: the kernel reuses numbers, and an unrelated
+    process wearing a dead owner's pid would hold this lock for ever."""
+    text = (SCRIPTS / "backup_run.sh").read_text()
+    for field in ("host", "start", "token"):
+        assert f'"$LOCK_DIR/{field}"' in text, f"the lock does not record {field}"
+
+
+def test_cleanup_only_removes_a_lock_this_run_still_holds():
+    text = (SCRIPTS / "backup_run.sh").read_text()
+    assert "LOCK_TOKEN" in text
+    assert 'token" 2>/dev/null || echo "")" = "$LOCK_TOKEN"' in text, \
+        "cleanup does not check the lock is still ours"
