@@ -120,6 +120,30 @@ fiction:
 | **Observed interval** | none — no scheduled run has happened |
 | **Verified restore** | yes, against PostgreSQL 16 — see below |
 
+### Drill result
+
+Backup and restore of a database carrying the production shape, PostgreSQL 16:
+
+```
+fingerprints IDENTICAL — 295 lines
+  181 column     63 index      16 table
+   16 rows       16 constraint  1 view
+    1 content hash              1 alembic revision
+```
+
+Refusals, exercised against the objects as actually stored rather than in a unit
+test — in every case the database was never touched:
+
+| damage | outcome |
+|---|---|
+| algorithm line rewritten in the header | refused: payload failed authentication |
+| one byte flipped in the ciphertext | refused: checksum disagrees with the manifest |
+| manifest claiming a different checksum | refused: checksum disagrees with the manifest |
+| none | restored |
+
+The first is what the header authentication is for. Signing only the ciphertext
+would have let that edit through to a reader that believed the algorithm line.
+
 **The actual RPO today is undefined.** Not poor — undefined. Nothing takes a
 backup on a schedule, so what would come back is whatever someone last ran by
 hand, of unknown age. Restoring in seconds does not help with that.
