@@ -85,12 +85,18 @@ esac
 
 # -------------------------------------------------------------------- lock file
 export BACKUP_RUNTIME_DIR="$good"
-passwd_before="$(wc -c < /etc/passwd)"
-ln -sf /etc/passwd "$good/sym.lock"
+# The target is a decoy inside $WORK, never a real file. If the refusal in
+# acquire_backup_lock ever regresses, `exec 9>"$lockfile"` truncates whatever the
+# symlink points at -- and this suite runs as root in a CI container, so aiming it
+# at /etc/passwd made a regression destructive. Checking the size afterwards
+# reports the damage; it does not prevent it.
+decoy="$WORK/decoy"; printf 'must survive' > "$decoy"
+decoy_before="$(wc -c < "$decoy")"
+ln -sf "$decoy" "$good/sym.lock"
 acquire_backup_lock sym >/dev/null 2>&1 \
   && bad "a symlinked lock file is refused" "it was used" \
   || ok "a symlinked lock file is refused"
-[ "$(wc -c < /etc/passwd)" = "$passwd_before" ] \
+[ "$(wc -c < "$decoy")" = "$decoy_before" ] \
   && ok "the symlink target was not truncated" \
   || bad "the symlink target was not truncated" "size changed"
 rm -f "$good/sym.lock"

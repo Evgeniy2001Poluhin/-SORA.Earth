@@ -32,6 +32,13 @@ BACKUP_KEEP_WEEKLY="${BACKUP_KEEP_WEEKLY:-8}"
 
 WORK=""
 BACKUP_ID=""
+# Set only on the deliberate skip below. The EXIT trap treats every non-zero
+# status as a failure, so without this the contention path alerted twice --
+# backup_skipped and then backup_failed "stage exited 75" -- and a benign
+# overlap paged as a fault, which is the one thing that branch exists to avoid.
+# A flag rather than exempting 75 in the trap: a 75 from anywhere else is still
+# a failure and must still alert.
+LOCK_SKIP=0
 
 # Sanitised: an alert path is exactly where a secret gets copied into someone
 # else's log.
@@ -53,7 +60,7 @@ cleanup() {
     local status=$?
     [ -n "$WORK" ] && rm -rf "$WORK"
     release_backup_lock
-    if [ $status -ne 0 ]; then
+    if [ $status -ne 0 ] && [ "$LOCK_SKIP" != 1 ]; then
         alert backup_failed "stage exited $status"
     fi
     return $status
@@ -76,7 +83,8 @@ lock_rc=0
 acquire_backup_lock "backup-$DB" || lock_rc=$?
 case $lock_rc in
     0)  ;;
-    75) alert backup_skipped "another run holds the lock"
+    75) LOCK_SKIP=1
+        alert backup_skipped "another run holds the lock"
         exit 75 ;;   # EX_TEMPFAIL: transient, not a fault
     *)  echo "refusing to run without a usable lock" >&2
         exit 1 ;;

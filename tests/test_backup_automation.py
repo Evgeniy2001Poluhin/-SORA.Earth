@@ -298,6 +298,55 @@ def test_no_script_puts_a_credential_in_argv():
         assert "AWS_SECRET_ACCESS_KEY=$" not in text.replace('AWS_SECRET_ACCESS_KEY="$(<', "")
 
 
+def _run_backup_with_hook(tmp_path, *, hold_lock, env_extra=None):
+    """One backup_run.sh invocation, with the alert hook recording what it got."""
+    runtime = tmp_path / "rt"
+    runtime.mkdir()
+    runtime.chmod(0o700)
+    hook = tmp_path / "hook"
+    hook.write_text("#!/bin/sh\necho \"$1\" >> \"$ALERTS\"\n")
+    hook.chmod(0o755)
+    alerts = tmp_path / "alerts"
+    alerts.write_text("")
+
+    env = dict(os.environ,
+               BACKUP_RUNTIME_DIR=str(runtime),
+               BACKUP_ALERT_HOOK=str(hook),
+               ALERTS=str(alerts))
+    env.update(env_extra or {})
+
+    hold = ("source scripts/backup_lock.sh\n"
+            "acquire_backup_lock 'backup-demo' >/dev/null 2>&1\n") if hold_lock else ""
+    result = bash(hold + "./scripts/backup_run.sh demo", env=env)
+    return result, [ln for ln in alerts.read_text().split() if ln]
+
+
+def test_contention_alerts_once_and_not_as_a_failure(tmp_path):
+    """A benign overlap must not page anyone.
+
+    The EXIT trap alerts on any non-zero status, and the skip path exits 75 -- so
+    an operator got backup_skipped and then backup_failed "stage exited 75" for
+    the same harmless event. Reproduced before the fix: the hook fired twice.
+    That is exactly the outcome the 75 branch exists to prevent, and there was no
+    test holding it, which is how it shipped.
+    """
+    result, alerts = _run_backup_with_hook(tmp_path, hold_lock=True)
+
+    assert result.returncode == 75, result.stderr
+    assert alerts == ["backup_skipped"], f"alerts fired: {alerts}"
+    assert "backup_failed" not in result.stderr
+
+
+def test_a_real_failure_still_alerts(tmp_path):
+    """The counterpart: exempting the skip must not have muted genuine faults."""
+    result, alerts = _run_backup_with_hook(
+        tmp_path, hold_lock=False,
+        env_extra={"BACKUP_RECIPIENT_KEY": str(tmp_path / "absent.pem")})
+
+    assert result.returncode != 0
+    assert alerts == ["backup_failed"], f"alerts fired: {alerts}"
+
+
 def test_a_sourced_library_does_not_set_options_in_its_caller():
     """Shell options are global to the process, so a sourced file sets them for
     whoever sourced it.
@@ -310,7 +359,7 @@ def test_a_sourced_library_does_not_set_options_in_its_caller():
     sourced = {"pg_lib.sh", "backup_crypt.sh", "backup_store.sh", "backup_lock.sh"}
     for name in sorted(sourced):
         code = _executable_lines(SCRIPTS / name)
-        offenders = [l for l in code.splitlines() if l.strip().startswith("set -")]
+        offenders = [ln for ln in code.splitlines() if ln.strip().startswith("set -")]
         assert not offenders, f"{name} sets shell options in its caller: {offenders}"
 
     # And the converse, for the scripts that source them: each must set its own
@@ -322,8 +371,8 @@ def test_a_sourced_library_does_not_set_options_in_its_caller():
     assert sourcing, "no sourcing scripts found; this test is checking nothing"
     for script in sourcing:
         lines = script.read_text().splitlines()
-        first_set = next((i for i, l in enumerate(lines) if l.startswith("set -")), None)
-        first_source = next(i for i, l in enumerate(lines) if l.startswith("source scripts/"))
+        first_set = next((i for i, ln in enumerate(lines) if ln.startswith("set -")), None)
+        first_source = next(i for i, ln in enumerate(lines) if ln.startswith("source scripts/"))
         assert first_set is not None, f"{script.name} sets no options of its own"
         assert first_set < first_source, \
             f"{script.name} sources a library before setting its own options"

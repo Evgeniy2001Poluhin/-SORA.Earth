@@ -563,7 +563,7 @@ def test_a_legacy_serial_is_left_sequence_backed(db):
 
     _converge(db)
 
-    identity, default = _id_generation(db)
+    _identity, default = _id_generation(db)
     assert (default or "").startswith("nextval("), f"the serial default was lost: {default!r}"
     assert _insert_without_id(db, "RU-003") > 2
 
@@ -588,7 +588,7 @@ def test_an_unrecognised_default_is_refused(db):
     _exec(db, BIGINT_PK_NO_IDENTITY_DDL)
     _exec(db, "ALTER TABLE region_esg_scores ALTER COLUMN id SET DEFAULT 42")
 
-    with pytest.raises(Exception, match="does not.*recognise|not recognise"):
+    with pytest.raises(Exception, match=r"does not.*recognise|not recognise"):
         _converge(db)
 
 
