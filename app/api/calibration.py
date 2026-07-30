@@ -5,8 +5,9 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
+from app.paths import data_dir, models_dir
+
 router = APIRouter(tags=["calibration"])
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 @router.get("/model/reliability-diagram")
@@ -16,7 +17,7 @@ def reliability_diagram():
     import matplotlib.pyplot as plt
     from sklearn.calibration import calibration_curve
 
-    csv_path = os.path.join(ROOT, "data", "projects.csv")
+    csv_path = os.path.join(data_dir(), "projects.csv")
     if not os.path.exists(csv_path):
         raise HTTPException(404, "Training data not found")
 
@@ -25,7 +26,7 @@ def reliability_diagram():
 
     probas_v1, probas_v2, probas_cal, labels = [], [], [], []
     # Pre-load calibrated model once
-    cal_path = os.path.join(ROOT, "models", "ensemble_model_v2_cal.pkl")
+    cal_path = os.path.join(models_dir(), "ensemble_model_v2_cal.pkl")
     cal_model = None
     if os.path.exists(cal_path) and m.ensemble_model_v2:
         with open(cal_path, "rb") as f:
@@ -90,7 +91,7 @@ def reliability_diagram():
     ax2.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    out = os.path.join(ROOT, "data", "reliability_diagram.png")
+    out = os.path.join(data_dir(), "reliability_diagram.png")
     plt.savefig(out, dpi=150, bbox_inches="tight")
     plt.close()
 
@@ -197,7 +198,7 @@ def calibration_discrepancy(project: dict):
 
     # calibrated_v2
     pr_cal = pr2
-    cal_path = os.path.join(ROOT, "models", "ensemble_model_v2_cal.pkl")
+    cal_path = os.path.join(models_dir(), "ensemble_model_v2_cal.pkl")
     if os.path.exists(cal_path) and m.ensemble_model_v2 is not None:
         with open(cal_path, "rb") as f:
             cal_model = pickle.load(f)
