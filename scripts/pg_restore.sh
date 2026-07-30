@@ -33,7 +33,12 @@ pg_tool psql -U "$PGUSER" -d postgres -q \
 
 echo "==> restoring"
 started="$(now_ms)"
-pg_tool_stdin pg_restore -U "$PGUSER" -d "$TARGET" --exit-on-error < "$DUMP"
+# --single-transaction as well as --exit-on-error, and for a sharper reason here
+# than in backup_restore.sh: this script drops the target *before* restoring, so
+# a partial failure leaves nothing to fall back to. A half-populated database is
+# worse than an empty one, because it looks usable.
+pg_tool_stdin pg_restore -U "$PGUSER" -d "$TARGET" \
+    --single-transaction --exit-on-error < "$DUMP"
 elapsed="$(since_ms "$started")"
 
 echo "target      : $TARGET"

@@ -19,6 +19,7 @@ cd "$(dirname "$0")/.."
 source scripts/pg_lib.sh
 source scripts/backup_crypt.sh
 source scripts/backup_store.sh
+source scripts/backup_lock.sh
 
 DB="${1:-}"
 [ -n "$DB" ] || { echo "usage: $0 <database>" >&2; exit 2; }
@@ -26,14 +27,11 @@ DB="${1:-}"
 BACKUP_RECIPIENT_KEY="${BACKUP_RECIPIENT_KEY:-}"
 BACKUP_ALERT_HOOK="${BACKUP_ALERT_HOOK:-}"
 BACKUP_ALERT_TIMEOUT="${BACKUP_ALERT_TIMEOUT:-30}"
-BACKUP_LOCK_FILE="${BACKUP_LOCK_FILE:-/tmp/sora-backup-$DB.lock}"
 BACKUP_KEEP_ROLLING="${BACKUP_KEEP_ROLLING:-28}"
 BACKUP_KEEP_WEEKLY="${BACKUP_KEEP_WEEKLY:-8}"
 
 WORK=""
 BACKUP_ID=""
-RELEASE_LOCK=""
-LOCK_TOKEN=""
 
 # Sanitised: an alert path is exactly where a secret gets copied into someone
 # else's log.
@@ -54,13 +52,7 @@ alert() {  # <event> <detail>
 cleanup() {
     local status=$?
     [ -n "$WORK" ] && rm -rf "$WORK"
-    if [ -n "${RELEASE_LOCK:-}" ] && [ -n "${LOCK_TOKEN:-}" ]; then
-        # Only if it is still ours. Removing a lock someone else now holds
-        # would let two runs overlap precisely when one already went wrong.
-        if [ "$(cat "$RELEASE_LOCK/token" 2>/dev/null || echo "")" = "$LOCK_TOKEN" ]; then
-            rm -rf "$RELEASE_LOCK"
-        fi
-    fi
+    release_backup_lock
     if [ $status -ne 0 ]; then
         alert backup_failed "stage exited $status"
     fi
@@ -72,52 +64,24 @@ trap cleanup EXIT
 # twice the IO and produce nothing extra, and a waiting run would still hold the
 # slot when the next schedule fires.
 #
-# mkdir rather than flock. flock is util-linux and is absent on macOS, and the
-# failure it produced was the dangerous kind: the script reported that another
-# run held the lock, so a schedule would have looked healthy while backing up
-# nothing. mkdir is atomic on every POSIX filesystem and needs no package.
-LOCK_DIR="$BACKUP_LOCK_FILE.d"
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    # A crashed run leaves the directory behind. Reclaim it only when the
-    # recorded process is demonstrably gone -- never on age alone, which would
-    # eventually let two runs overlap on a slow database.
-    STALE_HOST="$(cat "$LOCK_DIR/host" 2>/dev/null || echo "")"
-    STALE_PID="$(cat "$LOCK_DIR/pid" 2>/dev/null || echo "")"
-    STALE_START="$(cat "$LOCK_DIR/start" 2>/dev/null || echo "")"
-    THIS_HOST="$(hostname)"
-    # A pid is not an identity: the kernel reuses numbers, and an unrelated
-    # process wearing a dead owner's pid would make this lock look held for
-    # ever. The owner is (host, pid, process start time) together -- reuse
-    # gives a different start time, and a lock from another host is never ours
-    # to reclaim.
-    LIVE=1
-    if [ "$STALE_HOST" != "$THIS_HOST" ]; then
-        LIVE=1                                    # someone else's; leave it
-    elif [ -z "$STALE_PID" ] || ! kill -0 "$STALE_PID" 2>/dev/null; then
-        LIVE=0
-    else
-        NOW_START="$(ps -o lstart= -p "$STALE_PID" 2>/dev/null | tr -s ' ' || echo "")"
-        [ -n "$STALE_START" ] && [ "$NOW_START" != "$STALE_START" ] && LIVE=0
-    fi
-    if [ "$LIVE" = "0" ]; then
-        echo "reclaiming a lock left by a process that is gone" >&2
-        rm -rf "$LOCK_DIR"
-        mkdir "$LOCK_DIR" 2>/dev/null || {
-            echo "lost the race to reclaim the lock" >&2; exit 75; }
-    else
-        alert backup_skipped "another run holds the lock"
-        echo "a backup of $DB is already running" >&2
-        exit 75   # EX_TEMPFAIL: transient, not a fault
-    fi
-fi
-echo $$ > "$LOCK_DIR/pid"
-hostname > "$LOCK_DIR/host"
-ps -o lstart= -p $$ 2>/dev/null | tr -s ' ' > "$LOCK_DIR/start" || true
-# A token so cleanup removes only the lock this run actually holds, never one
-# a later run took after we were reclaimed.
-LOCK_TOKEN="$(openssl rand -hex 16)"
-echo "$LOCK_TOKEN" > "$LOCK_DIR/token"
-RELEASE_LOCK="$LOCK_DIR"
+# The lock lives in a runtime directory that is ours and closed to everyone else
+# -- see scripts/backup_lock.sh for why that, rather than the locking primitive,
+# is the part that matters.
+#
+# The status is captured through `|| lock_rc=$?` rather than read from `$?` on
+# the next line: this script runs under errexit, and there a bare call that
+# returns 75 exits before the case is reached -- the skip alert below would
+# never have been sent.
+lock_rc=0
+acquire_backup_lock "backup-$DB" || lock_rc=$?
+case $lock_rc in
+    0)  ;;
+    75) alert backup_skipped "another run holds the lock"
+        exit 75 ;;   # EX_TEMPFAIL: transient, not a fault
+    *)  echo "refusing to run without a usable lock" >&2
+        exit 1 ;;
+esac
+echo "==> lock held via $BACKUP_LOCK_BACKEND in $BACKUP_LOCK_DIR"
 
 store_ready
 [ -r "$BACKUP_RECIPIENT_KEY" ] || {

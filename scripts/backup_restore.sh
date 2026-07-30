@@ -81,7 +81,22 @@ gunzip -c "$WORK/dump.gz" > "$WORK/dump"
 STAGING="${TARGET}_restore_$$"
 echo "==> restore into staging $STAGING"
 
+# Staging is disposable right up until the restore into it has succeeded.
+# After that it holds a verified copy, and discarding it because the *promotion*
+# failed would throw away the one good thing the run produced -- at the moment
+# it is most needed, since the target may already be gone.
+STAGING_VERIFIED=0
+
 drop_staging() {
+    [ -n "$STAGING" ] || return 0
+    if [ "$STAGING_VERIFIED" = "1" ]; then
+        echo "" >&2
+        echo "The restore succeeded and promotion did not. The verified copy is" >&2
+        echo "kept as: $STAGING" >&2
+        echo "Promote it by hand once the target is free, or drop it deliberately:" >&2
+        echo "  ALTER DATABASE \"$STAGING\" RENAME TO \"$TARGET\";" >&2
+        return 0
+    fi
     pg_tool_stdin psql -U "$PGUSER" -d postgres -tAc \
         "DROP DATABASE IF EXISTS \"$STAGING\"" >/dev/null 2>&1 || true
 }
@@ -96,10 +111,25 @@ if ! pg_tool_stdin pg_restore -U "$PGUSER" -d "$STAGING" \
     exit 1
 fi
 
+# From here the staging copy is the valuable artefact, not the disposable one.
+STAGING_VERIFIED=1
+
 echo "==> promote staging to $TARGET"
-pg_tool_stdin psql -U "$PGUSER" -d postgres -tAc "DROP DATABASE IF EXISTS \"$TARGET\"" >/dev/null
-pg_tool_stdin psql -U "$PGUSER" -d postgres -tAc \
-    "ALTER DATABASE \"$STAGING\" RENAME TO \"$TARGET\"" >/dev/null
-STAGING=""   # promoted; nothing left to discard
+# WITH (FORCE) evicts live sessions. Without it one open connection is enough to
+# fail the drop, and pg_restore.sh two files over already knew that -- the
+# omission here was an oversight, not a decision. FORCE is still not a
+# guarantee: prepared transactions, replication slots and insufficient
+# privileges all refuse it, which is why the failure path keeps the copy.
+if ! pg_tool_stdin psql -U "$PGUSER" -d postgres -tAc \
+        "DROP DATABASE IF EXISTS \"$TARGET\" WITH (FORCE)" >/dev/null; then
+    echo "could not free $TARGET for promotion" >&2
+    exit 1
+fi
+if ! pg_tool_stdin psql -U "$PGUSER" -d postgres -tAc \
+        "ALTER DATABASE \"$STAGING\" RENAME TO \"$TARGET\"" >/dev/null; then
+    echo "could not rename the staging copy into place" >&2
+    exit 1
+fi
+STAGING=""   # promoted; there is nothing left to keep or discard
 
 echo "restored $BACKUP_ID into $TARGET"

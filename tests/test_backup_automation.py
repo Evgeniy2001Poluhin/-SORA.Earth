@@ -20,6 +20,27 @@ SCRIPTS = REPO / "scripts"
 FAKE_S3 = REPO / "tests" / "fakes" / "fake_s3"
 
 
+def _executable_lines(path: Path) -> str:
+    """A shell script with the lines that only talk stripped out.
+
+    Ordering and presence assertions below search for SQL fragments by position.
+    Comments explain the ordering using the same words, and the scripts print
+    the very commands an operator should run by hand when something fails -- so
+    both would otherwise decide the outcome of a test about what the code does.
+    Two assertions in this file have already passed against prose while the code
+    was wrong.
+    """
+    kept = []
+    for line in path.read_text().splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            continue
+        if stripped.startswith(("echo ", "echo>", 'echo "', "printf ")):
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
 @pytest.fixture
 def store(tmp_path):
     """A bucket in a directory, and the environment that points the scripts at it."""
@@ -373,19 +394,55 @@ def test_the_keys_are_independent_not_one_key_reused():
 # --------------------------------------------------------------- lock owner
 
 
-def test_the_lock_records_more_than_a_pid():
-    """A pid is not an identity: the kernel reuses numbers, and an unrelated
-    process wearing a dead owner's pid would hold this lock for ever."""
-    text = (SCRIPTS / "backup_run.sh").read_text()
-    for field in ("host", "start", "token"):
-        assert f'"$LOCK_DIR/{field}"' in text, f"the lock does not record {field}"
+def test_the_lock_does_not_live_where_anyone_can_write():
+    """The metadata approach this replaces could not have worked.
+
+    The lock used to sit at a predictable path under /tmp and record host, pid,
+    start time and a token so that a stale entry could be told from a live one.
+    But any local user can create that path first, and having created it they
+    choose what the metadata says -- so the fields being present proved nothing.
+    Pre-creating the directory with the pid of some long-lived process would have
+    stopped every backup, indefinitely and quietly.
+
+    What makes the metadata trustworthy is the directory: 0700 and ours, so
+    nothing else could have written it. The behavioural coverage is in
+    tests/test_backup_lock.sh, run by test_the_lock_suite_passes below.
+    """
+    runner = (SCRIPTS / "backup_run.sh").read_text()
+    assert "source scripts/backup_lock.sh" in runner, \
+        "the runner no longer delegates to the lock library"
+
+    code = _executable_lines(SCRIPTS / "backup_run.sh")
+    assert "/tmp" not in code, "a /tmp path came back into the runner"
+
+    lib = _executable_lines(SCRIPTS / "backup_lock.sh")
+    assert "validate_runtime_dir" in lib
+    assert "8#077" in lib, "the mode check that keeps others out is gone"
+    # A library that sets shell options sets them in whoever sourced it, and
+    # errexit there turns "someone else holds the lock" into a silent exit.
+    assert not any(
+        line.strip().startswith("set -e") for line in lib.splitlines()
+    ), "the sourced library sets errexit in its caller"
 
 
-def test_cleanup_only_removes_a_lock_this_run_still_holds():
-    text = (SCRIPTS / "backup_run.sh").read_text()
-    assert "LOCK_TOKEN" in text
-    assert 'token" 2>/dev/null || echo "")" = "$LOCK_TOKEN"' in text, \
-        "cleanup does not check the lock is still ours"
+def test_release_only_removes_a_directory_this_process_took():
+    lib = _executable_lines(SCRIPTS / "backup_lock.sh")
+    release = lib[lib.index("release_backup_lock()"):]
+    assert 'BACKUP_LOCK_BACKEND:-}" = "mkdir"' in release, \
+        "release must do nothing under flock, where the kernel owns the lock"
+    assert 'BACKUP_LOCK_HELD_DIR:-}" ]' in release, \
+        "release must only remove a directory this process recorded taking"
+
+
+def test_the_lock_suite_passes():
+    """The lock's behaviour, not its text. On Linux this covers both backends;
+    on a host without flock the flock cases report themselves as skipped."""
+    suite = REPO / "tests" / "test_backup_lock.sh"
+    result = subprocess.run(
+        ["bash", str(suite)], capture_output=True, text=True, timeout=180
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert " 0 failed" in result.stdout, result.stdout
 
 
 # ------------------------------------------------------- restore atomicity
@@ -410,16 +467,13 @@ def test_the_restore_is_atomic_and_fails_closed():
 def test_the_target_is_not_dropped_before_a_good_restore_exists():
     """Dropping first destroys what was there before the replacement is known
     to work. The failing restore above would have left nothing to go back to."""
-    # Comments explain the ordering and mention the same tokens, so only code
-    # is inspected -- otherwise the prose decides the outcome.
-    code = "\n".join(
-        line for line in (SCRIPTS / "backup_restore.sh").read_text().splitlines()
-        if not line.lstrip().startswith("#")
-    )
+    code = _executable_lines(SCRIPTS / "backup_restore.sh")
 
     staging_created = code.index('CREATE DATABASE \\"$STAGING\\"')
     restore_runs = code.index("--single-transaction")
-    target_dropped = code.index('DROP DATABASE IF EXISTS \\"$TARGET\\"')
+    # WITH (FORCE) pins this to the promotion. A plain drop of the target also
+    # appears in the guidance the script prints when promotion fails.
+    target_dropped = code.index('DROP DATABASE IF EXISTS \\"$TARGET\\" WITH (FORCE)')
     promoted = code.index("RENAME TO")
 
     assert staging_created < restore_runs, "staging must exist before the restore"
