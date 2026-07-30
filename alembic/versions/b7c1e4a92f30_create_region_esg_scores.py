@@ -54,6 +54,8 @@ DECLARE
     v_missing    text[];
     v_bad_types  text[];
     v_id_type    text;
+    v_id_identity char;
+    v_id_default text;
     v_dup_ids    bigint;
     v_null_ids   bigint;
     v_fk_count   int;
@@ -296,6 +298,44 @@ BEGIN
             'Refusing to continue.', v_id_type;
     END IF;
 
+    -- The type alone says nothing about where a value comes from. A plain
+    -- bigint passes the check above, takes the primary key below, and then
+    -- generates nothing -- so the table looks converged while the first ORM
+    -- insert, which omits id, fails on NOT NULL. Catalogue state has to be
+    -- classified, not assumed.
+    SELECT a.attidentity, pg_get_expr(d.adbin, d.adrelid)
+      INTO v_id_identity, v_id_default
+      FROM pg_attribute a
+      LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+     WHERE a.attrelid = v_regclass
+       AND a.attnum > 0 AND NOT a.attisdropped
+       AND a.attname = 'id';
+
+    IF v_id_identity IN ('a', 'd') THEN
+        NULL;   -- already an identity column
+    ELSIF v_id_default IS NOT NULL AND v_id_default LIKE 'nextval(%' THEN
+        -- Legacy serial. Sequence-backed, so inserts omitting id already work.
+        -- Converting it to an identity column would be churn for uniformity
+        -- rather than for behaviour, and every conversion is a chance to lose a
+        -- row, so it is left as it is.
+        RAISE NOTICE 'id is sequence-backed (legacy serial); left as is';
+    ELSIF v_id_default IS NULL THEN
+        -- GENERATED ALWAYS rather than BY DEFAULT, to match what a fresh
+        -- install and cb5a035aed2f both produce: one canonical shape is worth
+        -- more than tolerating an explicit-id insert path that nothing here
+        -- uses. Verified that ALWAYS survives pg_dump and pg_restore intact --
+        -- the dump copies values and sets the sequence, so no
+        -- OVERRIDING SYSTEM VALUE is needed.
+        ALTER TABLE region_esg_scores
+            ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY;
+        RAISE NOTICE 'attached an identity generator to a plain bigint id';
+    ELSE
+        RAISE EXCEPTION
+            'region_esg_scores.id carries a default this migration does not '
+            'recognise: %. Converting it automatically could change how ids '
+            'are assigned. Refusing to continue.', v_id_default;
+    END IF;
+
     SELECT count(*) INTO v_null_ids FROM region_esg_scores WHERE id IS NULL;
     IF v_null_ids > 0 THEN
         RAISE EXCEPTION
@@ -359,10 +399,11 @@ BEGIN
     SELECT pg_get_serial_sequence('region_esg_scores', 'id') INTO v_seq;
     IF v_seq IS NOT NULL THEN
         SELECT max(id) INTO v_max_id FROM region_esg_scores;
-        IF v_max_id IS NOT NULL THEN
-            PERFORM setval(v_seq, v_max_id, true);
-            RAISE NOTICE 'identity sequence aligned to max(id) = %', v_max_id;
-        END IF;
+        -- is_called mirrors whether rows exist: true on a populated table, so
+        -- the next value is strictly above max(id); false on an empty one, so
+        -- the first value issued is the start itself rather than one past it.
+        PERFORM setval(v_seq, coalesce(v_max_id, 1), v_max_id IS NOT NULL);
+        RAISE NOTICE 'identity sequence aligned (max(id) = %)', coalesce(v_max_id::text, 'none');
     END IF;
 
     ------------------------------------------------------------- postconditions
@@ -395,6 +436,20 @@ BEGIN
                       AND ic.relname = 'ix_region_esg_scores_region_code'
                       AND i.indisunique) THEN
         RAISE EXCEPTION 'postcondition failed: region_code is not uniquely indexed';
+    END IF;
+
+    -- The one that was missing. Everything above can hold while an insert that
+    -- omits id still fails, which is how a "converged" table reaches production
+    -- and breaks on first write.
+    IF NOT EXISTS (
+            SELECT 1 FROM pg_attribute a
+              LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+             WHERE a.attrelid = v_regclass AND a.attname = 'id'
+               AND (a.attidentity IN ('a', 'd')
+                    OR coalesce(pg_get_expr(d.adbin, d.adrelid), '') LIKE 'nextval(%')) THEN
+        RAISE EXCEPTION
+            'postcondition failed: id has no identity and no sequence default, '
+            'so an insert omitting it would violate NOT NULL';
     END IF;
 END
 $migration$;

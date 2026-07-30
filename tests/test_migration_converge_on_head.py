@@ -453,3 +453,151 @@ def test_a_second_convergence_is_a_no_op_down_to_the_view(db):
     finally:
         _exec(db, "DROP OWNED BY sora_view_reader2 CASCADE")
         _exec(db, "DROP ROLE IF EXISTS sora_view_reader2")
+
+
+# ----------------------------------------------- id must be able to generate
+
+BIGINT_PK_NO_IDENTITY_DDL = """
+CREATE TABLE region_esg_scores (
+    id            bigint PRIMARY KEY,
+    region_code   VARCHAR(10) NOT NULL,
+    env_score     DOUBLE PRECISION,
+    social_score  DOUBLE PRECISION,
+    gov_score     DOUBLE PRECISION,
+    total_score   DOUBLE PRECISION,
+    confidence    DOUBLE PRECISION,
+    sources_count INTEGER,
+    signals_used  INTEGER,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX ix_region_esg_scores_region_code ON region_esg_scores (region_code);
+"""
+
+LEGACY_SERIAL_DDL = """
+CREATE TABLE region_esg_scores (
+    id            bigserial PRIMARY KEY,
+    region_code   VARCHAR(10) NOT NULL,
+    env_score     DOUBLE PRECISION,
+    social_score  DOUBLE PRECISION,
+    gov_score     DOUBLE PRECISION,
+    total_score   DOUBLE PRECISION,
+    confidence    DOUBLE PRECISION,
+    sources_count INTEGER,
+    signals_used  INTEGER,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX ix_region_esg_scores_region_code ON region_esg_scores (region_code);
+"""
+
+
+def _id_generation(engine) -> tuple:
+    """(attidentity, default) for id -- how a value is produced, if at all."""
+    with engine.begin() as conn:
+        return conn.execute(text("""
+            SELECT a.attidentity::text,
+                   pg_get_expr(d.adbin, d.adrelid)
+              FROM pg_attribute a
+              LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+             WHERE a.attrelid = to_regclass('region_esg_scores')
+               AND a.attname = 'id'
+        """)).one()
+
+
+def _insert_without_id(engine, region_code: str) -> int:
+    """The behavioural check: the catalogue can look right and this still fail."""
+    with engine.begin() as conn:
+        return conn.execute(text(
+            "INSERT INTO region_esg_scores (region_code, total_score) "
+            "VALUES (:rc, 1.0) RETURNING id"
+        ), {"rc": region_code}).scalar()
+
+
+@requires_postgres
+def test_a_plain_bigint_pk_gains_a_generator(db):
+    """The defect this closes: type alone passed the check, the primary key moved
+    onto id, and nothing produced a value -- so the table read as converged
+    while the first ORM insert, which omits id, failed on NOT NULL."""
+    _exec(db, BIGINT_PK_NO_IDENTITY_DDL)
+    _exec(db, "INSERT INTO region_esg_scores (id, region_code) VALUES (5, 'RU-005'), (900, 'RU-900')")
+
+    _converge(db)
+
+    identity, default = _id_generation(db)
+    assert identity in ("a", "d") or (default or "").startswith("nextval("), \
+        f"id still generates nothing: identity={identity!r} default={default!r}"
+
+    generated = _insert_without_id(db, "RU-NEW")
+    assert generated > 900, f"generated id {generated} collides with existing rows"
+
+
+@requires_postgres
+def test_existing_ids_are_left_alone(db):
+    _exec(db, BIGINT_PK_NO_IDENTITY_DDL)
+    _exec(db, "INSERT INTO region_esg_scores (id, region_code) VALUES (5, 'RU-005'), (900, 'RU-900')")
+
+    _converge(db)
+
+    with db.begin() as conn:
+        ids = [r[0] for r in conn.execute(text(
+            "SELECT id FROM region_esg_scores ORDER BY id")).fetchall()]
+    assert ids == [5, 900]
+
+
+@requires_postgres
+def test_an_empty_plain_bigint_table_can_take_its_first_row(db):
+    """setval's third argument decides this: on an empty table is_called must be
+    false, or the first value issued is one past the start."""
+    _exec(db, BIGINT_PK_NO_IDENTITY_DDL)
+
+    _converge(db)
+
+    assert _insert_without_id(db, "RU-FIRST") >= 1
+
+
+@requires_postgres
+def test_a_legacy_serial_is_left_sequence_backed(db):
+    """Converting a working serial to an identity column would be churn for
+    uniformity, and every conversion is a chance to lose a row."""
+    _exec(db, LEGACY_SERIAL_DDL)
+    _exec(db, "INSERT INTO region_esg_scores (region_code) VALUES ('RU-001'), ('RU-002')")
+
+    _converge(db)
+
+    identity, default = _id_generation(db)
+    assert (default or "").startswith("nextval("), f"the serial default was lost: {default!r}"
+    assert _insert_without_id(db, "RU-003") > 2
+
+
+@requires_postgres
+def test_converging_twice_leaves_generation_intact(db):
+    _exec(db, BIGINT_PK_NO_IDENTITY_DDL)
+    _exec(db, "INSERT INTO region_esg_scores (id, region_code) VALUES (7, 'RU-007')")
+
+    _converge(db)
+    first = _id_generation(db)
+    _converge(db)
+
+    assert _id_generation(db) == first
+    assert _insert_without_id(db, "RU-008") > 7
+
+
+@requires_postgres
+def test_an_unrecognised_default_is_refused(db):
+    """Anything other than a sequence could mean ids are assigned in a way this
+    migration would silently change."""
+    _exec(db, BIGINT_PK_NO_IDENTITY_DDL)
+    _exec(db, "ALTER TABLE region_esg_scores ALTER COLUMN id SET DEFAULT 42")
+
+    with pytest.raises(Exception, match="does not.*recognise|not recognise"):
+        _converge(db)
+
+
+@requires_postgres
+def test_the_production_shape_still_generates_after_convergence(db):
+    """The case the drill uses -- identity already present -- must not regress."""
+    _exec(db, LEGACY_PRODUCTION_DDL)
+    _seed(db)
+
+    _converge(db)
+
+    assert _insert_without_id(db, "RU-901") == 86
