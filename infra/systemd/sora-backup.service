@@ -1,0 +1,50 @@
+# One encrypted, off-host backup. Installed alongside sora-backup.timer, which
+# is what actually decides when this runs.
+#
+# The scripts run on the host rather than inside an image: pg_lib.sh reaches the
+# database with `docker exec "$PG_CONTAINER"`, because PostgreSQL's client tools
+# refuse to dump a server newer than themselves. That is why no Dockerfile ships
+# scripts/ and why the schedule belongs here.
+
+[Unit]
+Description=SORA.Earth encrypted off-host database backup
+Documentation=file:///opt/sora_earth_ai_platform/docs/BACKUP_AUTOMATION.md
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=sora
+Group=sora
+WorkingDirectory=/opt/sora_earth_ai_platform
+
+# scripts/backup_lock.sh refuses to run in production without a runtime
+# directory that is 0700 and owned by this user, and says so with these two
+# lines in its error message. systemd creates /run/sora-earth on start and
+# removes it on stop, which is exactly the ownership story the lock needs.
+RuntimeDirectory=sora-earth
+RuntimeDirectoryMode=0700
+Environment=BACKUP_RUNTIME_DIR=/run/sora-earth
+
+# Recipient key, S3 endpoint and credentials file paths. Not in the repository:
+# the whole point of the envelope is that this host holds only a public key.
+EnvironmentFile=/etc/sora-earth/backup.env
+
+ExecStart=/opt/sora_earth_ai_platform/scripts/backup_run.sh sora_earth
+
+# 75 is EX_TEMPFAIL, which backup_run.sh returns when another run already holds
+# the lock. Without this line systemd records a skipped run as a failure, the
+# timer's failure path fires, and a benign overlap pages somebody -- the same
+# outcome the LOCK_SKIP flag exists to prevent one layer down.
+SuccessExitStatus=75
+
+# The dump, the plaintext and the key material all live under WorkingDirectory's
+# mktemp for the length of one run. Nothing else on the host needs to reach it.
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/sora_earth_ai_platform
+
+[Install]
+WantedBy=multi-user.target
