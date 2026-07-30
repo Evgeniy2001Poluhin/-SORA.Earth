@@ -162,35 +162,78 @@ def test_the_middleware_is_not_a_pass_through():
     assert "Stub middleware" not in source
 
 
-def test_concurrent_requests_do_not_overspend_a_budget(monkeypatch):
-    """The check and the record happen under one lock, so parallel callers cannot
-    both read a bucket as having room and then both fill it."""
+def test_concurrency_cannot_overspend_the_tightest_budget(monkeypatch):
+    """A hundred callers at once against a budget of ten.
+
+    An earlier version of this released twenty threads against a budget of fifty
+    and asserted twenty hits landed. That shows nothing is lost or double
+    counted, which is worth knowing, and says nothing at all about whether the
+    limit *bounds* -- every caller was inside the budget, so a completely
+    unsynchronised implementation would have passed it too.
+
+    The bound is the property. Two budgets, the tighter one governing, and every
+    thread contending for the same slot at the same instant.
+    """
     import threading
     from app.rate_limit import rate_limiter as limiter, HTTPException
 
-    monkeypatch.setattr(limiter, "max_requests", 50)
+    monkeypatch.setattr(limiter, "max_requests", 20)
     limiter.requests.clear()
 
+    callers = 100
+    endpoint_limit = 10
     allowed, refused = [], []
-    barrier = threading.Barrier(20)
+    lock = threading.Lock()
+    barrier = threading.Barrier(callers)
 
     def hit():
         barrier.wait()
         try:
-            limiter.check_many([("same-caller", 50)])
-            allowed.append(1)
+            limiter.check_many([("caller", 20), ("caller|retrain", endpoint_limit)])
+            with lock:
+                allowed.append(1)
         except HTTPException:
-            refused.append(1)
+            with lock:
+                refused.append(1)
 
-    threads = [threading.Thread(target=hit) for _ in range(20)]
+    threads = [threading.Thread(target=hit) for _ in range(callers)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
 
-    assert len(allowed) == 20, f"{len(refused)} refused inside the budget"
-    assert len(limiter.requests["same-caller"]) == 20, \
-        "a hit was lost or double-counted under contention"
+    assert len(allowed) == endpoint_limit, \
+        f"{len(allowed)} allowed against a budget of {endpoint_limit}"
+    assert len(refused) == callers - endpoint_limit
+    # Neither bucket may hold more than it granted, and the general bucket must
+    # not have been charged for the ninety refusals.
+    assert len(limiter.requests["caller"]) == endpoint_limit
+    assert len(limiter.requests["caller|retrain"]) == endpoint_limit
+    limiter.requests.clear()
+
+
+def test_the_semantics_are_grant_only(monkeypatch):
+    """Recorded on a grant, not on an attempt.
+
+    This is a choice, not a law: some anti-abuse counters deliberately charge
+    refused attempts, so that hammering a closed door costs the attacker. Here a
+    refusal costs nothing, which keeps one budget from being drained by refusals
+    at another. Written down because the opposite is defensible and someone will
+    otherwise assume whichever they are used to.
+    """
+    from app.rate_limit import rate_limiter as limiter, HTTPException
+
+    monkeypatch.setattr(limiter, "max_requests", 3)
+    limiter.requests.clear()
+    for _ in range(3):
+        limiter.check_many([("caller", 3)])
+
+    for _ in range(10):
+        with pytest.raises(HTTPException):
+            limiter.check_many([("caller", 3)])
+
+    assert len(limiter.requests["caller"]) == 3, \
+        "refused attempts were recorded; that is attempt semantics, not grant"
     limiter.requests.clear()
 
 
