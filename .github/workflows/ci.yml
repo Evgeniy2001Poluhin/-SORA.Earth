@@ -192,7 +192,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [backend-tests, frontend-checks]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Runs on pull requests too, not only on main. It was main-only, and because
+    # its `needs` were red on main for two weeks it simply never executed -- so
+    # the missing LFS step below went unnoticed until the first green main
+    # unblocked it. A job that only runs after merge cannot gate anything.
+    if: >-
+      github.event_name == 'pull_request'
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     services:
       postgres:
         image: postgres:16
@@ -217,8 +223,13 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
+      # tests/test_api.py imports app.main, which unpickles models/*.pkl. Without
+      # this the checkout leaves LFS pointers in place and the import dies with
+      # `_pickle.UnpicklingError: invalid load key, 'v'` -- the 'v' of the
+      # pointer's own "version https://git-lfs.github.com/spec/v1" first line.
       - uses: actions/checkout@v4
         with:
+          lfs: true
           persist-credentials: false
 
       - uses: actions/setup-python@v5
