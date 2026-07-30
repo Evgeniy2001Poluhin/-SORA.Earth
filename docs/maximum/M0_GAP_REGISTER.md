@@ -1,8 +1,32 @@
 # M0 GAP REGISTER — SORA.Earth Maximum
 
 **Created:** 2026-07-24  
-**Last Updated:** 2026-07-25
+**Last Updated:** 2026-07-30  
 **Status:** Active
+
+## Standing on 2026-07-30
+
+Every entry below was re-checked against `main@dff724f` rather than against the
+pull requests that were supposed to close it. Each carries a `Verified` row with
+what was actually looked at, so a reader can disagree with the conclusion without
+re-deriving it.
+
+| | count | |
+|---|---|---|
+| CLOSED | 9 | verified against the merged code or a green CI job |
+| PARTIAL | 2 | GAP-007 backups, GAP-010 coverage — see each for what is missing |
+| OPEN | 3 | GAP-008 production behind, GAP-009 refresh tokens, GAP-011 embed header |
+| UNVERIFIED | 3 | GAP-013, -014, -016 — host-side, and no production access was taken |
+
+Before this pass all seventeen read `OPEN` (GAP-001 read `REASSIGNED TO PR #23`),
+including nine that merged work had already closed. A register that says
+everything is open is as uninformative as one that says everything is done, and
+it made the remaining M0 work look larger than it is.
+
+The M0 Definition of Done in `M0_EXECUTION_PLAN.md` is a separate list and is
+**not** met: three of its eight criteria hold. Backups are not scheduled by
+anything, production is not deployed at the current SHA, no P0 security issue may
+remain open while GAP-011 does, and `M0_COMPLETION_REPORT.md` does not exist.
 
 ---
 
@@ -26,7 +50,8 @@
 |----------|-------|
 | Category | DB |
 | Severity | P0 — BLOCKER |
-| Status | REASSIGNED TO PR #23 |
+| Status | CLOSED |
+| Verified 2026-07-30 | `migration-bootstrap` is green on `main@dff724f`: a clean PostgreSQL 16 reaches head from migrations alone, plus the catch-up scenario against a database already recorded at `0b0ff6d1594e`. |
 | Evidence | `alembic/versions/a1b2c3d4e5f6_regional_esg_snapshot_view.py:29` fails with `UndefinedTable` |
 | Root Cause | Model `RegionESGScore` defined at `app/database.py:194` but no migration creates the table |
 | Impact | CI fails, fresh DB cannot be provisioned, Alembic upgrade fails |
@@ -57,7 +82,8 @@
 |----------|-------|
 | Category | DP |
 | Severity | P0 — BLOCKER |
-| Status | OPEN |
+| Status | CLOSED |
+| Verified 2026-07-30 | `app/services/environmental/scheduler_jobs.py:215` (openaq) and `:335` (openmeteo) call `persist_environmental_observations`. `environmental-postgres-tests` green on `main@dff724f`. |
 | Evidence | `app/services/environmental/scheduler_jobs.py:131-228` — no call to `persist_environmental_observations()` |
 | Root Cause | `scheduled_openaq_ingestion()` and `scheduled_openmeteo_ingestion()` fetch signals but discard them |
 | Impact | `environmental_observations` table remains empty, no data for crisis detection |
@@ -70,7 +96,8 @@
 |----------|-------|
 | Category | CI |
 | Severity | P0 — BLOCKER |
-| Status | OPEN |
+| Status | CLOSED |
+| Verified 2026-07-30 | `main@dff724f`: CI `completed/success` — all five required contexts plus `integration-tests`. The first workflow on `main` to be green in its entirety; the previous run on `94e3d49` was `failure`. |
 | Evidence | `gh run view 29645753745 --log-failed` — all 3 jobs failed |
 | Root Cause | Cascading from GAP-001 (Alembic failure) |
 | Impact | Cannot merge PR, no automated testing |
@@ -87,7 +114,8 @@
 |----------|-------|
 | Category | SEC |
 | Severity | P0 — CRITICAL |
-| Status | OPEN |
+| Status | CLOSED |
+| Verified 2026-07-30 | PR #24 requires admin and confines the path. The remaining architectural change — replacing a server-side `file_path` with a multipart upload — is tracked separately as issue #26 and is not this gap. |
 | Evidence | `app/api/retrain.py:398-404` — `file_path` parameter used without validation |
 | Root Cause | No path sanitization before `pd.read_csv(file_path)` |
 | Impact | Arbitrary file read on server |
@@ -100,7 +128,8 @@
 |----------|-------|
 | Category | SEC |
 | Severity | P0 — CRITICAL |
-| Status | OPEN |
+| Status | CLOSED |
+| Verified 2026-07-30 | PR #24 put `require_admin` on the sensitive endpoints. |
 | Evidence | `app/api/retrain.py:398` (`/model/data/bulk-upload`), `app/api/forecast.py:175,188` |
 | Root Cause | Missing `Depends(require_admin)` |
 | Impact | Data injection, resource exhaustion |
@@ -117,7 +146,8 @@
 |----------|-------|
 | Category | SEC |
 | Severity | P1 — HIGH |
-| Status | OPEN |
+| Status | CLOSED |
+| Verified 2026-07-30 | `app/auth.py:9` uses `argon2.PasswordHasher` (PR #34), with migration of the legacy formats on verify. |
 | Evidence | `app/auth.py:72-75` — uses `hashlib.sha256` instead of bcrypt |
 | Root Cause | bcrypt in requirements.txt but not used |
 | Impact | Passwords vulnerable to GPU brute-force attacks |
@@ -130,7 +160,8 @@
 |----------|-------|
 | Category | OPS |
 | Severity | P1 — HIGH |
-| Status | OPEN |
+| Status | PARTIAL |
+| Verified 2026-07-30 | The scripts and their tests are merged (#37, #31) and cover encryption, retention, restore and locking. **Nothing schedules them.** No image copies `scripts/` — `Dockerfile.prod` ships `app/`, `data/`, `alembic/`, `run_scheduler.py` and `entrypoint.sh` only — and the repository contains no systemd unit or cron entry. Until that exists there is no backup running, so the M0 criterion 'verified by cron output' cannot be met. |
 | Evidence | `backups/` contains only manual backup from Jun 14 |
 | Root Cause | No cron job or systemd timer for pg_dump |
 | Impact | Data loss risk on failure |
@@ -144,6 +175,7 @@
 | Category | OPS |
 | Severity | P1 — HIGH |
 | Status | OPEN |
+| Verified 2026-07-30 | Production has not been deployed at `dff724f`. No production action was taken in this work. |
 | Evidence | Production at `9525bf0`, local at `63395f7` (5 commits behind) |
 | Root Cause | Manual deployment process |
 | Impact | Production missing environmental persistence fixes |
@@ -157,6 +189,7 @@
 | Category | SEC |
 | Severity | P1 — HIGH |
 | Status | OPEN |
+| Verified 2026-07-30 | `app/auth.py:397` holds `_refresh_tokens: set = set()` — a plain in-process set. Three consequences: every restart invalidates every refresh token, `backend` and `scheduler` do not share it, and the set grows without bound because entries are removed only by explicit revocation. |
 | Evidence | `app/auth.py:118` — `_refresh_tokens: set = set()` |
 | Root Cause | Tokens stored in Python process memory |
 | Impact | Tokens lost on restart, not distributed |
@@ -169,7 +202,8 @@
 |----------|-------|
 | Category | CQ |
 | Severity | P1 — HIGH |
-| Status | OPEN |
+| Status | PARTIAL |
+| Verified 2026-07-30 | Coverage on `main@dff724f` is 65% overall (8742 statements, 3052 missing), against 744 backend tests plus 47 forecasting. The gap as written names *critical modules* specifically, which the aggregate does not answer — it needs re-scoping to per-module figures before it can be closed or kept. |
 | Evidence | `app/shap_explainer.py` (0%), `app/training.py` (0%) |
 | Root Cause | No tests written |
 | Impact | Regressions undetected |
@@ -182,7 +216,8 @@
 |----------|-------|
 | Category | DB |
 | Severity | P1 — HIGH |
-| Status | OPEN |
+| Status | CLOSED |
+| Verified 2026-07-30 | The converge migrations classify `id` from `pg_attribute.attidentity` and `pg_attrdef` and refuse an unrecognised default by name; 24 tests against PostgreSQL 16, and `migration-bootstrap`'s catch-up scenario converges an 85-row legacy database with the view intact. |
 | Evidence | Production has `PRIMARY KEY (region_code)`, ORM expects `PRIMARY KEY (id)` |
 | Root Cause | Origin unknown; production schema and ORM metadata diverge |
 | Impact | Potential ORM identity-map, merge, refresh, delete, and write-correctness risks |
@@ -204,6 +239,7 @@
 | Category | SEC |
 | Severity | P2 — MEDIUM |
 | Status | OPEN |
+| Verified 2026-07-30 | `app/api/embed/api.py:10` still returns `headers={"X-Frame-Options": "ALLOWALL"}`. |
 | Evidence | `app/api/embed/api.py:10` |
 | Fix | Restrict to known origins or remove |
 
@@ -212,7 +248,8 @@
 |----------|-------|
 | Category | OPS |
 | Severity | P2 — MEDIUM |
-| Status | OPEN |
+| Status | CLOSED |
+| Verified 2026-07-30 | `docker-compose.prod.yml` publishes ports only for `nginx` (80, 443); `backend`, `scheduler`, `postgres`, `pgbouncer`, `redis` and `mlflow` publish none, and Prometheus and Grafana bind to `127.0.0.1`. |
 | Evidence | Production `ss -tlnp` shows `0.0.0.0:8000` |
 | Fix | Bind to `127.0.0.1:8000` in docker-compose.prod.yml |
 
@@ -221,7 +258,8 @@
 |----------|-------|
 | Category | OPS |
 | Severity | P2 — MEDIUM |
-| Status | OPEN |
+| Status | UNVERIFIED |
+| Verified 2026-07-30 | Host-side. Verifying it requires production access, which was not taken in this work. |
 | Evidence | `free -h` shows 0B swap, 62% RAM used |
 | Fix | Add 2GB swapfile |
 
@@ -230,7 +268,8 @@
 |----------|-------|
 | Category | SEC |
 | Severity | P2 — MEDIUM |
-| Status | OPEN |
+| Status | UNVERIFIED |
+| Verified 2026-07-30 | Host-side. Verifying it requires production access, which was not taken in this work. |
 | Evidence | `fail2ban-client status sshd` returns "not installed" |
 | Fix | `apt install fail2ban` |
 
@@ -239,7 +278,8 @@
 |----------|-------|
 | Category | CQ |
 | Severity | P2 — MEDIUM |
-| Status | OPEN |
+| Status | CLOSED |
+| Verified 2026-07-30 | The only tracked `.sql` files are genuine migrations (`migrations/004_esg_pipeline.sql`, `migrations/2026_06_07_regional_esg_snapshot_view.sql`). `.gitignore` covers `backups/`, `*.bak.*` and `*.backup`. |
 | Evidence | 30+ `.bak` files found via `find -name "*.bak*"` |
 | Fix | Clean up or add to .gitignore |
 
@@ -248,7 +288,8 @@
 |----------|-------|
 | Category | OPS |
 | Severity | P2 — MEDIUM |
-| Status | OPEN |
+| Status | UNVERIFIED |
+| Verified 2026-07-30 | Host-side. Verifying it requires production access, which was not taken in this work. |
 | Evidence | `docker system df` on production |
 | Fix | `docker system prune -a` |
 
