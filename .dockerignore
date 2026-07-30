@@ -54,8 +54,12 @@ logs/
 *.log
 server.log
 
-# Frontend (separate Dockerfile)
-web/
+# Frontend: the SPA stage in Dockerfile.prod needs web/ sources, so they can no
+# longer be excluded wholesale. Its installed packages and its build output are
+# still unwanted — npm ci runs inside the image, and app/static/spa is produced
+# there rather than copied from the builder's disk.
+web/node_modules/
+app/static/spa/
 _legacy_frontend_backup/
 .design-backup/
 
