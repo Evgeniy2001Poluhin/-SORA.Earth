@@ -293,6 +293,22 @@ def test_no_script_puts_a_credential_in_argv():
         assert "AWS_SECRET_ACCESS_KEY=$" not in text.replace('AWS_SECRET_ACCESS_KEY="$(<', "")
 
 
+def test_no_backup_script_needs_a_tool_debian_does_not_ship():
+    """xxd comes with vim, not with coreutils.
+
+    It is absent from python:3.11-slim, and no image in this repo ships scripts/
+    at all -- these run on the host, whose toolchain the repo does not pin. A
+    hex encoder that is missing is a backup that does not happen, at 03:00, on
+    the night somebody reinstalled without vim. od is in coreutils.
+
+    Passes on this machine either way, which is the point: the local host has
+    xxd, so the round-trip tests could not have caught this.
+    """
+    for script in sorted(SCRIPTS.glob("backup_*.sh")):
+        code = _executable_lines(script)
+        assert "xxd" not in code, f"{script.name} depends on xxd; use od -An -tx1 -v"
+
+
 def test_every_script_parses():
     for script in SCRIPTS.glob("backup_*.sh"):
         result = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)

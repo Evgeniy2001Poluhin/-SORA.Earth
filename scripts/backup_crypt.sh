@@ -42,11 +42,20 @@ set -euo pipefail
 BACKUP_ENVELOPE_VERSION="sora-backup-envelope/1"
 BACKUP_ENVELOPE_ALGS="aes-256-cbc/hmac-sha256/rsa-oaep-sha256"
 
+# od rather than xxd: xxd ships with vim, not with coreutils, and it is absent
+# from a slim Debian. A backup that cannot hex-encode its own key does not run,
+# and it would have stopped at 03:00 on a host where nobody had installed vim.
+#
+# -v is not optional. Without it od collapses repeated lines into `*`, so a key
+# whose bytes repeat -- an all-zero one, say -- hex-encodes to a short string
+# with a literal asterisk in it. Measured on 32 zero bytes: `00...00*`.
+_hex() { od -An -tx1 -v | tr -d ' \n'; }
+
 _material_parts() {  # <material-file> -> sets ENC_KEY, MAC_KEY, IV
     local f="$1"
-    ENC_KEY="$(dd if="$f" bs=1 skip=0  count=32 2>/dev/null | xxd -p -c 64)"
-    MAC_KEY="$(dd if="$f" bs=1 skip=32 count=32 2>/dev/null | xxd -p -c 64)"
-    IV="$(dd if="$f" bs=1 skip=64 count=16 2>/dev/null | xxd -p -c 32)"
+    ENC_KEY="$(dd if="$f" bs=1 skip=0  count=32 2>/dev/null | _hex)"
+    MAC_KEY="$(dd if="$f" bs=1 skip=32 count=32 2>/dev/null | _hex)"
+    IV="$(dd if="$f" bs=1 skip=64 count=16 2>/dev/null | _hex)"
 }
 
 _wipe() { unset ENC_KEY MAC_KEY IV; }
