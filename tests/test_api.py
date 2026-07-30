@@ -17,8 +17,14 @@ PROJECT = {
 
 def test_root():
     r = client.get("/")
-    assert r.status_code == 200
-    assert len(r.text) > 0
+    # 404 is the honest answer when the SPA has not been built -- the contract
+    # app/main.py:read_root() implements and tests/test_root_route_guard.py
+    # already encodes as `in (404, 200)`. The unconditional 200 here contradicted
+    # it. It went unnoticed because backend-tests passes --ignore=tests/test_api.py,
+    # so this file runs only in integration-tests, which never completed.
+    assert r.status_code in (200, 404), r.text
+    if r.status_code == 200:
+        assert len(r.text) > 0
 
 def test_health():
     r = client.get("/api/v1/health")
