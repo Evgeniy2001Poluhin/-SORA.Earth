@@ -673,10 +673,13 @@ from pathlib import Path as _Path
 _STATIC = _Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=_STATIC), name="static")
 
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def _landing():
-    return FileResponse(_STATIC / "pages/landing.html")
-
+# No route for "/" here. read_root() above already registers it, and FastAPI
+# matches in registration order, so a second "/" is unreachable -- this one served
+# pages/landing.html and never ran. The React SPA is what "/" is meant to answer
+# with now; the legacy pages below are still reachable at their own paths.
+#
+# Whether the legacy UI should survive at all is a separate question and is not
+# decided here.
 @app.get("/auth/login", response_class=HTMLResponse, include_in_schema=False)
 async def _login_page():
     return FileResponse(_STATIC / "pages/login.html")
