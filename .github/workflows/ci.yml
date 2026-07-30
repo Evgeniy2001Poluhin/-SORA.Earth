@@ -190,7 +190,10 @@ jobs:
 
   integration-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Importing app.main costs 4m18s here -- torch, SHAP, transformers, chromadb --
+    # before a single test runs. 15 minutes killed the job mid-suite; backend-tests
+    # already allows 30 for the same import.
+    timeout-minutes: 30
     needs: [backend-tests, frontend-checks]
     # Runs on pull requests too, not only on main. It was main-only, and because
     # its `needs` were red on main for two weeks it simply never executed -- so
@@ -245,12 +248,20 @@ jobs:
       - name: Run integration tests
         run: |
           python -m pytest tests/test_api.py \
-            -v --tb=short --timeout=60
+            -v --tb=short --timeout=60 --timeout-method=thread
         env:
           DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
           REDIS_URL: "redis://localhost:6379/0"
           SECRET_KEY: "ci-test-secret"
           SORA_ADMIN_TOKEN: "ci-test-admin"
+          # Without these the suite reached test_evaluate_success and hung for
+          # 7m46s until the job was killed. SORA_OFFLINE gates the outbound World
+          # Bank and MLflow calls (app/external_data.py:109,135,194 and
+          # app/mlflow_tracking.py:12), which a runner cannot reach. backend-tests
+          # has carried both for a while; this job never did, and never ran to
+          # completion, so nobody found out.
+          SORA_OFFLINE: "1"
+          RUN_SCHEDULER: "false"
 
   # A clean database must be reachable from migrations alone. Production was
   # bootstrapped with Base.metadata.create_all(), which is not reproducible from
