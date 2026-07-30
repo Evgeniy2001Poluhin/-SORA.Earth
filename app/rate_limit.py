@@ -1,4 +1,5 @@
 import ipaddress
+import math
 import os
 import threading
 import time
@@ -60,27 +61,72 @@ class RateLimiter:
             self.requests.popitem(last=False)
 
     def check(self, key: str, max_requests: int | None = None):
-        limit = self.max_requests if max_requests is None else max_requests
+        """One budget. A thin call onto check_many, which is where the rules are."""
+        self.check_many([(key, self.max_requests if max_requests is None else max_requests)])
+
+    def check_many(self, budgets):
+        """Spend one request against several budgets at once, or against none.
+
+        Two sequential check() calls do not compose. The first records the
+        request before the second has decided, so a request refused by the
+        endpoint budget has already been charged to the general one -- a caller
+        hammering a limited endpoint would burn through their ordinary allowance
+        while being told no. Every budget is therefore examined before any is
+        written to, under one lock, so a refusal costs nothing.
+
+        `budgets` is (key, limit) pairs. Duplicate keys would be charged twice by
+        the loop below, so they are collapsed to the tightest limit named.
+        """
         now = time.monotonic()
+        tightest = {}
+        for key, limit in budgets:
+            tightest[key] = min(limit, tightest.get(key, limit))
+
         with self._lock:
             self._sweep(now)
-            hits = [t for t in self.requests.get(key, ()) if now - t < self.window]
-            if len(hits) >= limit:
-                self.requests[key] = hits
-                self.requests.move_to_end(key)
+
+            # Read every bucket first. Nothing is recorded in this pass.
+            live, blocked = {}, []
+            for key, limit in tightest.items():
+                hits = [t for t in self.requests.get(key, ()) if now - t < self.window]
+                live[key] = hits
+                if len(hits) >= limit:
+                    blocked.append(hits)
+
+            if blocked:
+                # The trimmed lists are still worth storing -- the expired entries
+                # are gone either way -- but no new hit is added.
+                for key, hits in live.items():
+                    if hits:
+                        self.requests[key] = hits
+                        self.requests.move_to_end(key)
                 raise HTTPException(
                     status_code=429,
                     detail="Rate limit exceeded",
-                    headers={"Retry-After": str(self.window)},
+                    headers={"Retry-After": str(self._retry_after(now, blocked))},
                 )
-            hits.append(now)
-            self.requests[key] = hits
-            self.requests.move_to_end(key)
+
+            for key, hits in live.items():
+                hits.append(now)
+                self.requests[key] = hits
+                self.requests.move_to_end(key)
             # At most one eviction per insertion, from the front: a flood of
             # single-use keys is discarded before buckets belonging to callers
             # who keep coming back.
             while len(self.requests) > self.max_buckets:
                 self.requests.popitem(last=False)
+
+    def _retry_after(self, now: float, blocked) -> int:
+        """When the longest-blocking budget frees a slot.
+
+        A fixed window empties one request at a time, so the caller may retry
+        once the oldest hit in the fullest bucket falls out. Reporting the whole
+        window instead would be wrong in both directions: too long when a slot is
+        about to free, and -- if several budgets block -- too short for the one
+        that actually governs.
+        """
+        waits = [self.window - (now - hits[0]) for hits in blocked if hits]
+        return max(1, math.ceil(max(waits))) if waits else self.window
 
     def get_usage(self, key: str):
         now = time.monotonic()
@@ -234,13 +280,20 @@ class SlowAPIMiddleware:
             return
 
         from starlette.requests import Request
+        address = client_address(Request(scope))
         suffix, limit = _budget_for(path)
-        key = client_address(Request(scope))
+
+        # Both budgets, not one of them. A tighter endpoint limit is an extra
+        # restriction on top of the general allowance, not an alternative to it:
+        # charging only the endpoint bucket let a caller spend 100 ordinary
+        # requests and 10 retrains in the same minute, while the documented limit
+        # was 100 in total.
+        budgets = [(address, rate_limiter.max_requests)]
         if suffix:
-            key = f"{key}|{suffix}"
+            budgets.append((f"{address}|{suffix}", limit))
 
         try:
-            rate_limiter.check(key, max_requests=limit)
+            rate_limiter.check_many(budgets)
         except HTTPException:
             from starlette.responses import JSONResponse
             response = JSONResponse(

@@ -291,7 +291,10 @@ Optional:
 
 6. **Rate Limiting**: `SlowAPIMiddleware` in `app/rate_limit.py` counts every HTTP
    request per caller address. 100 req/min by default; `/api/v1/model/retrain` gets
-   10 req/min in a bucket of its own, so ordinary traffic cannot spend it. Health,
+   10 req/min in a bucket of its own **in addition to** the general one — a
+   request to it is charged to both, so the tighter figure restricts rather than
+   replaces. A refusal costs nothing: every budget is examined before any is
+   written to, so being turned away at one does not spend another. Health,
    readiness, metrics and favicon paths are exempt — a probe on a schedule would
    otherwise spend a shared budget and make the health check flap.
 
