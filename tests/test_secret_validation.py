@@ -130,7 +130,11 @@ def test_an_unset_environment_is_not_production():
 def test_the_error_reveals_no_property_of_the_value():
     """Not the value, and not its length or prefix either -- both narrow a
     guess, and both end up in whatever log caught the startup failure."""
-    secret = "sk-thisisaplausiblelookingsecret0123456789"
+# Hyphenated on purpose: key-shaped enough to read as one, but it cannot
+    # match a real key pattern, so the scanner does not have to be told to
+    # ignore it. An allowlist entry explaining that a string is not a secret
+    # outlives the reason it was added.
+    secret = "sk-not-a-real-key-this-is-a-test-fixture"
     with pytest.raises(SecretValidationError) as excinfo:
         enforce(production(SORA_JWT_SECRET="changeme", SORA_ADMIN_TOKEN=secret), "production")
     message = str(excinfo.value)
