@@ -6,14 +6,19 @@ without one, and those are the parts where a mistake is silent. A backup that
 cannot be decrypted, or a partial upload that looks complete, is discovered
 during an incident.
 """
+import hashlib
+import hmac
 import json
 import os
 import shutil
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives import padding as sym_padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPTS = REPO / "scripts"
@@ -293,6 +298,37 @@ def test_no_script_puts_a_credential_in_argv():
         assert "AWS_SECRET_ACCESS_KEY=$" not in text.replace('AWS_SECRET_ACCESS_KEY="$(<', "")
 
 
+def test_a_sourced_library_does_not_set_options_in_its_caller():
+    """Shell options are global to the process, so a sourced file sets them for
+    whoever sourced it.
+
+    backup_lock.sh did, and errexit in the caller turned `acquire_backup_lock`
+    returning 75 -- someone else holds it -- into an immediate exit, past the
+    branch that reports the skip. Every executable here sets its own options
+    before sourcing anything, so the libraries have nothing to add.
+    """
+    sourced = {"pg_lib.sh", "backup_crypt.sh", "backup_store.sh", "backup_lock.sh"}
+    for name in sorted(sourced):
+        code = _executable_lines(SCRIPTS / name)
+        offenders = [l for l in code.splitlines() if l.strip().startswith("set -")]
+        assert not offenders, f"{name} sets shell options in its caller: {offenders}"
+
+    # And the converse, for the scripts that source them: each must set its own
+    # options, and set them before sourcing -- otherwise removing them from the
+    # libraries takes errexit away with no replacement. Scoped to the sourcing
+    # scripts; the rest of scripts/ predates this pipeline.
+    sourcing = [p for p in sorted(SCRIPTS.glob("*.sh"))
+                if p.name not in sourced and "source scripts/" in p.read_text()]
+    assert sourcing, "no sourcing scripts found; this test is checking nothing"
+    for script in sourcing:
+        lines = script.read_text().splitlines()
+        first_set = next((i for i, l in enumerate(lines) if l.startswith("set -")), None)
+        first_source = next(i for i, l in enumerate(lines) if l.startswith("source scripts/"))
+        assert first_set is not None, f"{script.name} sets no options of its own"
+        assert first_set < first_source, \
+            f"{script.name} sources a library before setting its own options"
+
+
 def test_no_backup_script_needs_a_tool_debian_does_not_ship():
     """xxd comes with vim, not with coreutils.
 
@@ -399,12 +435,106 @@ def test_the_ciphertext_does_not_contain_the_plaintext(sealed):
     assert b"KNOWN-PLAINTEXT-MARKER" not in Path(f"{sealed.prefix}.enc").read_bytes()
 
 
-def test_the_keys_are_independent_not_one_key_reused():
-    """Using one key for confidentiality and authentication weakens both."""
-    text = (SCRIPTS / "backup_crypt.sh").read_text()
-    assert "skip=0  count=32" in text.replace("skip=0 count=32", "skip=0  count=32")
-    assert "skip=32 count=32" in text
-    assert "skip=64 count=16" in text
+def _open_material(sealed, keypair) -> bytes:
+    """The 80 sealed bytes, as the holder of the private key would see them."""
+    out = subprocess.run(
+        ["openssl", "pkeyutl", "-decrypt", "-inkey", str(keypair.identity),
+         "-pkeyopt", "rsa_padding_mode:oaep", "-pkeyopt", "rsa_oaep_md:sha256",
+         "-in", f"{sealed.prefix}.key"],
+        capture_output=True, check=True,
+    )
+    return out.stdout
+
+
+def test_the_keys_are_independent_not_one_key_reused(sealed, keypair):
+    """Using one key for confidentiality and authentication weakens both.
+
+    Asserted against the envelope rather than against the source: this used to
+    match the dd offsets in the shell, and stopped meaning anything the moment
+    the slicing moved into the helper. What matters is which bytes end up where,
+    so that is what gets checked -- by rebuilding both outputs from the slices
+    the documentation names.
+    """
+    material = _open_material(sealed, keypair)
+    assert len(material) == 80
+    enc_key, mac_key, iv = material[0:32], material[32:64], material[64:80]
+    assert enc_key != mac_key
+    assert len({enc_key, mac_key, iv}) == 3
+
+    # [0:32] is the AES key and [64:80] the IV: re-encrypting with them
+    # reproduces the payload exactly.
+    cipher = Cipher(algorithms.AES(enc_key), modes.CBC(iv)).encryptor()
+    padder = sym_padding.PKCS7(128).padder()
+    redone = cipher.update(padder.update(Path(sealed.plain).read_bytes()) + padder.finalize())
+    redone += cipher.finalize()
+    assert redone == Path(f"{sealed.prefix}.enc").read_bytes()
+
+    # [32:64] is the MAC key, over header || ciphertext.
+    body = Path(f"{sealed.prefix}.hdr").read_bytes() + Path(f"{sealed.prefix}.enc").read_bytes()
+    assert hmac.new(mac_key, body, hashlib.sha256).hexdigest() == \
+        Path(f"{sealed.prefix}.mac").read_text().split()[-1].strip()
+
+
+def test_the_envelope_is_the_one_openssl_produced(tmp_path):
+    """The helper replaced two openssl invocations. If the bytes had changed, the
+    version field would have had to change with them -- so the bytes are checked
+    rather than the claim.
+
+    Encryption is deterministic given the key and IV, which is what makes a
+    byte-for-byte comparison possible here and is also why the IV is fresh per
+    backup rather than fixed.
+    """
+    material = tmp_path / "mat"
+    material.write_bytes(os.urandom(80))
+    # Not a multiple of the block size, so padding is actually exercised.
+    plain = tmp_path / "plain"
+    plain.write_bytes(os.urandom(4099))
+    hex_of = lambda b: b.hex()  # noqa: E731 - a name for the openssl argument form
+    raw = material.read_bytes()
+
+    helper_out = tmp_path / "helper.enc"
+    subprocess.run(
+        [sys.executable, str(SCRIPTS / "backup_crypt.py"), "encrypt",
+         "--material", str(material), "--in", str(plain), "--out", str(helper_out)],
+        check=True, capture_output=True,
+    )
+    openssl_out = tmp_path / "openssl.enc"
+    subprocess.run(
+        ["openssl", "enc", "-aes-256-cbc", "-K", hex_of(raw[0:32]), "-iv", hex_of(raw[64:80]),
+         "-in", str(plain), "-out", str(openssl_out)],
+        check=True, capture_output=True,
+    )
+    assert helper_out.read_bytes() == openssl_out.read_bytes()
+
+    mac = subprocess.run(
+        [sys.executable, str(SCRIPTS / "backup_crypt.py"), "mac",
+         "--material", str(material), str(plain)],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    openssl_mac = subprocess.run(
+        ["openssl", "dgst", "-sha256", "-mac", "HMAC",
+         "-macopt", f"hexkey:{hex_of(raw[32:64])}", str(plain)],
+        check=True, capture_output=True, text=True,
+    ).stdout.split()[-1].strip()
+    assert mac == openssl_mac
+
+
+def test_no_key_material_reaches_a_command_line():
+    """/proc/<pid>/cmdline is mode 444.
+
+    Measured on Linux: while root ran `openssl enc -K <hex>`, an unprivileged
+    user read the AES key out of it. openssl offers no way to hand `enc` a raw
+    key, or `dgst` a MAC key, off the argument list -- every alternative feeds a
+    passphrase through a KDF, which is a different envelope. So the symmetric
+    half moved to backup_crypt.py, which reads the material from a 0600 file.
+    A path in argv is not a secret.
+    """
+    code = _executable_lines(SCRIPTS / "backup_crypt.sh")
+    assert "-macopt" not in code, "a MAC key is being passed on a command line"
+    assert "-K " not in code, "a raw key is being passed on a command line"
+    assert "openssl enc" not in code, "openssl enc cannot take a key off argv"
+    # The RSA half is fine: -inkey names a file.
+    assert "-inkey" in code
 
 
 # --------------------------------------------------------------- lock owner

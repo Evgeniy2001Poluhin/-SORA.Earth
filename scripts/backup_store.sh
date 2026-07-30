@@ -17,7 +17,10 @@
 #
 # Credentials come from files, never from argv -- an argument list is readable
 # by any process on the host -- and are never echoed.
-set -euo pipefail
+# No `set -e` here: this file is sourced, so any option it sets lands in the
+# caller's shell. Every script that sources it already sets its own, and a
+# library that overrides them is deciding for code it cannot see -- which is how
+# a lock helper turned "someone else holds it" into a silent exit.
 
 BACKUP_S3_CLIENT="${BACKUP_S3_CLIENT:-aws}"
 BACKUP_S3_ENDPOINT="${BACKUP_S3_ENDPOINT:-}"

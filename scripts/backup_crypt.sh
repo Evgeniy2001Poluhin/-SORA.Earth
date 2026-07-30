@@ -35,53 +35,71 @@
 # The header is authenticated together with the ciphertext. Signing only the
 # ciphertext would leave the parameters describing it unprotected, which is how
 # downgrade attacks on otherwise sound constructions work.
-set -euo pipefail
+# No `set -e` here: this file is sourced, so any option it sets lands in the
+# caller's shell. Every script that sources it already sets its own, and a
+# library that overrides them is deciding for code it cannot see -- which is how
+# a lock helper turned "someone else holds it" into a silent exit.
 
 # Bumped whenever the envelope changes shape. A reader that does not recognise
 # the version refuses rather than guessing.
 BACKUP_ENVELOPE_VERSION="sora-backup-envelope/1"
 BACKUP_ENVELOPE_ALGS="aes-256-cbc/hmac-sha256/rsa-oaep-sha256"
 
-# od rather than xxd: xxd ships with vim, not with coreutils, and it is absent
-# from a slim Debian. A backup that cannot hex-encode its own key does not run,
-# and it would have stopped at 03:00 on a host where nobody had installed vim.
+# The symmetric half runs in scripts/backup_crypt.py, because openssl enc takes
+# a raw key only as `-K <hex>` and openssl dgst its MAC key only as
+# `-macopt hexkey:<hex>` -- both of which land in /proc/<pid>/cmdline, mode 444.
+# Measured: while root ran openssl enc, an unprivileged user read the AES key
+# straight out of it. The keys now never reach argv, and never become shell
+# variables either; the helper reads them from the sealed-material file, which
+# the caller creates 0600.
 #
-# -v is not optional. Without it od collapses repeated lines into `*`, so a key
-# whose bytes repeat -- an all-zero one, say -- hex-encodes to a short string
-# with a literal asterisk in it. Measured on 32 zero bytes: `00...00*`.
-_hex() { od -An -tx1 -v | tr -d ' \n'; }
+# The RSA half stays on the openssl CLI: -inkey takes a path, and a path is not
+# a secret.
+BACKUP_PYTHON="${BACKUP_PYTHON:-python3}"
+CRYPT_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/backup_crypt.py"
 
-_material_parts() {  # <material-file> -> sets ENC_KEY, MAC_KEY, IV
-    local f="$1"
-    ENC_KEY="$(dd if="$f" bs=1 skip=0  count=32 2>/dev/null | _hex)"
-    MAC_KEY="$(dd if="$f" bs=1 skip=32 count=32 2>/dev/null | _hex)"
-    IV="$(dd if="$f" bs=1 skip=64 count=16 2>/dev/null | _hex)"
+_crypt_helper() {
+    "$BACKUP_PYTHON" "$CRYPT_HELPER" "$@"
 }
 
-_wipe() { unset ENC_KEY MAC_KEY IV; }
+# Checked once, loudly, rather than discovered at 03:00. An undeclared tool that
+# is merely usually present is how a schedule stops without saying so.
+_require_crypt_helper() {
+    [ -r "$CRYPT_HELPER" ] || {
+        echo "crypt: helper not found at $CRYPT_HELPER" >&2; return 1; }
+    if ! "$BACKUP_PYTHON" -c 'import cryptography' >/dev/null 2>&1; then
+        echo "crypt: $BACKUP_PYTHON cannot import 'cryptography'." >&2
+        echo "       It is in requirements.txt, so the interpreter that has the" >&2
+        echo "       application's dependencies already satisfies this. Set" >&2
+        echo "       BACKUP_PYTHON to that interpreter." >&2
+        return 1
+    fi
+}
 
 backup_encrypt() {  # <plaintext> <recipient-pubkey.pem> <out-prefix>
     local plain="$1" recipient="$2" prefix="$3"
     [ -r "$plain" ] || { echo "encrypt: no such file: $plain" >&2; return 1; }
     [ -r "$recipient" ] || { echo "encrypt: no recipient key: $recipient" >&2; return 1; }
 
+    _require_crypt_helper || return 1
+
     local material; material="$(mktemp)"
     chmod 600 "$material"
     openssl rand 80 > "$material"
-    _material_parts "$material"
 
     printf '%s\n%s\n' "$BACKUP_ENVELOPE_VERSION" "$BACKUP_ENVELOPE_ALGS" > "$prefix.hdr"
-    openssl enc -aes-256-cbc -K "$ENC_KEY" -iv "$IV" -in "$plain" -out "$prefix.enc"
+    if ! _crypt_helper encrypt --material "$material" --in "$plain" --out "$prefix.enc"; then
+        rm -f "$material"; echo "encrypt: the payload could not be encrypted" >&2; return 1
+    fi
     # Header first, then ciphertext: one MAC over both.
-    cat "$prefix.hdr" "$prefix.enc" |
-        openssl dgst -sha256 -mac HMAC -macopt "hexkey:$MAC_KEY" |
-        awk '{print $NF}' > "$prefix.mac"
+    if ! _crypt_helper mac --material "$material" "$prefix.hdr" "$prefix.enc" > "$prefix.mac"; then
+        rm -f "$material" "$prefix.mac"; echo "encrypt: the mac could not be computed" >&2; return 1
+    fi
     openssl pkeyutl -encrypt -pubin -inkey "$recipient" \
         -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
         -in "$material" -out "$prefix.key"
 
     rm -f "$material"
-    _wipe
 }
 
 backup_decrypt() {  # <in-prefix> <identity.pem> <out-plaintext>
@@ -91,6 +109,8 @@ backup_decrypt() {  # <in-prefix> <identity.pem> <out-plaintext>
     for part in enc mac key hdr; do
         [ -r "$prefix.$part" ] || { echo "decrypt: missing $prefix.$part" >&2; return 1; }
     done
+
+    _require_crypt_helper || return 1
 
     local material; material="$(mktemp)"
     chmod 600 "$material"
@@ -102,38 +122,32 @@ backup_decrypt() {  # <in-prefix> <identity.pem> <out-plaintext>
         echo "decrypt: the sealed key does not open with this identity" >&2
         return 1
     fi
-    _material_parts "$material"
-    rm -f "$material"
 
     # Refuse an envelope this reader does not understand, before touching the
     # payload at all.
     local got_version
     got_version="$(head -n 1 "$prefix.hdr")"
     if [ "$got_version" != "$BACKUP_ENVELOPE_VERSION" ]; then
-        _wipe
+        rm -f "$material"
         echo "decrypt: unknown envelope version: $got_version" >&2
         return 1
     fi
 
     # Authenticate before decrypting, over the header as well as the ciphertext.
     # A modified payload -- or a rewritten algorithm line -- has to be refused
-    # outright, not decrypted and then judged.
-    local expected actual
-    expected="$(awk '{print $NF}' < "$prefix.mac")"
-    actual="$(cat "$prefix.hdr" "$prefix.enc" |
-        openssl dgst -sha256 -mac HMAC -macopt "hexkey:$MAC_KEY" | awk '{print $NF}')"
-    if [ "$expected" != "$actual" ]; then
-        _wipe
+    # outright, not decrypted and then judged. The comparison is constant-time,
+    # inside the helper.
+    if ! _crypt_helper verify-mac --material "$material" --expected "$prefix.mac" \
+            "$prefix.hdr" "$prefix.enc" 2>/dev/null; then
+        rm -f "$material"
         echo "decrypt: payload failed authentication -- refusing to decrypt" >&2
         return 1
     fi
 
-    if ! openssl enc -d -aes-256-cbc -K "$ENC_KEY" -iv "$IV" \
-            -in "$prefix.enc" -out "$out" 2>/dev/null; then
-        _wipe
-        rm -f "$out"
+    if ! _crypt_helper decrypt --material "$material" --in "$prefix.enc" --out "$out" 2>/dev/null; then
+        rm -f "$material" "$out"
         echo "decrypt: payload could not be decrypted" >&2
         return 1
     fi
-    _wipe
+    rm -f "$material"
 }

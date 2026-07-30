@@ -54,9 +54,29 @@ ciphertext would leave the parameters describing it unprotected, which is how
 downgrade attacks on otherwise sound constructions work. An unrecognised version
 is refused before the payload is touched at all.
 
-Built on OpenSSL because neither `age` nor GPG is present in this environment,
-and a script that needs a package nobody installed is a schedule that never
-runs.
+Built on OpenSSL rather than `age` or GPG, neither of which is present in this
+environment, and a script that needs a package nobody installed is a schedule
+that never runs.
+
+The RSA seal is OpenSSL. The **symmetric half — AES-256-CBC and the HMAC — runs
+in `scripts/backup_crypt.py`**, because `openssl enc` accepts a raw key only as
+`-K <hex>` and `openssl dgst` its MAC key only as `-macopt hexkey:<hex>`. Both
+land in `/proc/<pid>/cmdline`, which is mode 444: measured on Linux, an
+unprivileged user read the AES key out of it while root was encrypting. Every
+OpenSSL option that keeps a secret off the argument list feeds a passphrase
+through a KDF instead, which would be a different envelope — so the only way to
+keep both the format and the guarantee was to stop using the CLI for that step.
+The helper reads the key material from a file the caller creates `0600`; only the
+path reaches `argv`, and a path is not a secret.
+
+The wire format did not change when that moved. A test encrypts with the helper
+and decrypts with `openssl enc`, and the reverse, and compares the ciphertexts
+byte for byte — which is why the version field is still `/1`.
+
+The helper needs `cryptography`, which is already in `requirements.txt`. Point
+`BACKUP_PYTHON` at the interpreter that has the application's dependencies. It is
+checked once at the start of encrypt and decrypt, and refuses with instructions
+rather than discovering it at 03:00.
 
 Authentication happens **before** decryption: a modified payload is refused, not
 decrypted and then judged.
@@ -80,9 +100,13 @@ openssl pkey -in identity.pem -pubout -out recipient.pem
 | `BACKUP_S3_CLIENT` | client executable, default `aws` |
 | `BACKUP_KEEP_ROLLING`, `BACKUP_KEEP_WEEKLY` | retention, default 28 and 8 |
 | `BACKUP_ALERT_HOOK` | executable called on failure |
+| `BACKUP_PYTHON` | interpreter for `backup_crypt.py`, default `python3`; needs `cryptography` |
+| `BACKUP_RUNTIME_DIR` | `0700` directory owned by the service user, for the lock; **required in production** |
 
 Credentials are read from files and exported to the client, never passed as
-arguments — an argument list is readable by every process on the host.
+arguments — an argument list is readable by every process on the host. That rule
+applies to the envelope's keys too; see above for why that meant leaving the
+OpenSSL CLI for one step.
 
 ## Retention
 
