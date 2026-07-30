@@ -2,17 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceDot, ResponsiveContainer } from "recharts";
 import { evaluateApi } from "@/api/endpoints/evaluate";
+import type { EvaluateRequest, EvaluateProjectRequest } from "@/api/types";
 
-type EvalInput = {
-  country?: string;
-  budget_usd?: number;
-  co2_reduction_tons_per_year?: number;
-  social_impact_score?: number;
-  [key: string]: any;
-};
+/** The evaluate form and the last scored run, both possibly incomplete. */
+type EvalInput = Partial<EvaluateRequest> & { total_score?: number };
 type Props = { form: EvalInput; lastRun: EvalInput | null };
 
-const PARAMS = [
+/** Sweepable numeric fields of the evaluate request. */
+type SweepKey = "budget_usd" | "co2_reduction_tons_per_year" | "social_impact_score";
+
+const PARAMS: Array<{ key: SweepKey; label: string; min: number; max: number; step: number; fmt: (v: number) => string }> = [
   { key:"budget_usd",                    label:"Budget (USD)",   min:50000, max:500000, step:10000, fmt:(v:number)=>`$${(v/1000).toFixed(0)}k` },
   { key:"co2_reduction_tons_per_year",   label:"CO2 (t/yr)",     min:50,    max:800,    step:25,    fmt:(v:number)=>`${v} t` },
   { key:"social_impact_score",           label:"Social (1-10)",  min:1,     max:10,     step:1,     fmt:(v:number)=>`${v}/10` },
@@ -20,27 +19,40 @@ const PARAMS = [
 
 export function WhatIf({ form, lastRun }: Props) {
   const wi = useMutation({ mutationFn: evaluateApi.whatIf });
-  const evalMut = useMutation({ mutationFn: evaluateApi.evaluate });
   const base = lastRun || form;
-  const [paramKey, setParamKey] = useState("budget_usd");
+  const [paramKey, setParamKey] = useState<SweepKey>("budget_usd");
   const [sweepData, setSweepData] = useState<Array<{x:number; total:number}>>([]);
   const [sweepLoading, setSweepLoading] = useState(false);
 
   const param = PARAMS.find(p=>p.key===paramKey)!;
 
-  // Tornado on mount/lastRun change — debounced 400ms to avoid request avalanche
+  // Tornado on mount/lastRun change — debounced 400ms to avoid request avalanche.
+  // lastRun is spread from a possibly-absent previous run, so fall back to the
+  // live form. ?? rather than || so a legitimate 0 is not replaced.
+  const budget = base?.budget_usd ?? form.budget_usd;
+  const co2 = base?.co2_reduction_tons_per_year ?? form.co2_reduction_tons_per_year;
+  const social = base?.social_impact_score ?? form.social_impact_score;
+  const duration = base?.project_duration_months ?? form.project_duration_months;
+  const country = base?.country ?? form.country;
   useEffect(()=>{
-    if (!base?.country) return;
+    if (!country) return;
+    // Rejects undefined, null, NaN and +/-Infinity without coercing.
+    if (![budget, co2, social].every(Number.isFinite)) return;
     const id = setTimeout(() => {
       wi.reset();
+      // Send only the backend Project fields; the *_usd / *_score form names
+      // are frontend-only and would be ignored by the Pydantic model.
       wi.mutate({
-        ...base, region: base.country,
-        budget: base.budget_usd, co2_reduction: base.co2_reduction_tons_per_year, social_impact: base.social_impact_score,
+        region: country,
+        budget: budget as number,
+        co2_reduction: co2 as number,
+        social_impact: social as number,
+        ...(Number.isFinite(duration) ? { duration_months: duration as number } : {}),
       });
     }, 400);
     return () => clearTimeout(id);
-  // eslint-disable-next-line
-  },[base?.budget_usd, base?.co2_reduction_tons_per_year, base?.social_impact_score, base?.country]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[budget, co2, social, duration, country]);
 
   // Sweep: 12 points across param range
   const runSweep = async () => {
@@ -48,11 +60,23 @@ export function WhatIf({ form, lastRun }: Props) {
     const points: Array<{x:number; total:number}> = [];
     const xs: number[] = [];
     for (let i=0; i<=11; i++) xs.push(param.min + (param.max-param.min)*i/11);
+    if (!country || ![budget, co2, social, duration].every(Number.isFinite)) {
+      setSweepLoading(false);
+      return;
+    }
+    const sweepBase: EvaluateProjectRequest = {
+      project_name: base?.project_name ?? "Project",
+      country,
+      region: country,
+      budget_usd: budget as number,
+      co2_reduction_tons_per_year: co2 as number,
+      social_impact_score: social as number,
+      project_duration_months: duration as number,
+    };
     for (const x of xs) {
-      const r = await evaluateApi.evaluate({
-        ...base, region: base.country, [param.key]: x
-      } as any).catch(()=>null);
-      if (r) points.push({ x, total: (r as any).total_score });
+      const override: Partial<EvaluateRequest> = { [param.key]: x };
+      const r = await evaluateApi.evaluate({ ...sweepBase, ...override }).catch(()=>null);
+      if (r) points.push({ x, total: r.total_score });
     }
     setSweepData(points);
     setSweepLoading(false);
@@ -116,8 +140,8 @@ export function WhatIf({ form, lastRun }: Props) {
               <YAxis domain={[0,100]} stroke="#666" fontSize={11}/>
               <Tooltip
                 contentStyle={{background:"var(--bg-1)",border:"1px solid var(--line-2)",borderRadius:8,fontSize:12}}
-                formatter={(v:any)=>[`${Number(v).toFixed(1)}`,"Total"]}
-                labelFormatter={(v:any)=>`${param.label}: ${param.fmt(Number(v))}`}/>
+                formatter={(v: unknown)=>[`${Number(v).toFixed(1)}`,"Total"]}
+                labelFormatter={(v: unknown)=>`${param.label}: ${param.fmt(Number(v))}`}/>
               <Line type="monotone" dataKey="total" stroke="#2FE0A6" strokeWidth={2} dot={{r:3,fill:"#2FE0A6"}} animationDuration={400}/>
               <ReferenceDot x={currentX} y={base?.total_score ?? 50} r={6} fill="#fff" stroke="#2FE0A6" strokeWidth={2}/>
             </LineChart>

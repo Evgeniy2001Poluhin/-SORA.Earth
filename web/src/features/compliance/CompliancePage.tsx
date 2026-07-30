@@ -102,7 +102,7 @@ export function CompliancePage() {
       }),
   });
 
-  const update = (k: keyof typeof form, v: any) =>
+  const update = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
   const applyPreset = (id: string) => {

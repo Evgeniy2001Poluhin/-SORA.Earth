@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { historyApi } from "../../api/endpoints/history";
-import type { HistoryItem, HistoryParams } from "../../api/endpoints/history";
+import type { HistoryParams } from "../../api/endpoints/history";
+import { errorMessage } from "@/lib/errors";
 import "./history.css";
 
 const PAGE = 20;
@@ -10,19 +12,15 @@ const RISKS: Array<"LOW" | "MED" | "HIGH"> = ["LOW", "MED", "HIGH"];
 export default function HistoryPage() {
   const nav = useNavigate();
   const [params, setParams] = useState<HistoryParams>({ limit: PAGE, offset: 0 });
-  const [data, setData] = useState<{ items: HistoryItem[]; total: number }>({ items: [], total: 0 });
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    setLoading(true);
-    setErr(null);
-    historyApi
-      .list(params)
-      .then((r) => setData({ items: r.items, total: r.total }))
-      .catch((e) => setErr(String(e)))
-      .finally(() => setLoading(false));
-  }, [params]);
+  // Server state belongs to the query cache, not to an effect that writes state.
+  const query = useQuery({
+    queryKey: ["history", params],
+    queryFn: () => historyApi.list(params),
+  });
+  const data = { items: query.data?.items ?? [], total: query.data?.total ?? 0 };
+  const loading = query.isPending;
+  const err = query.error ? errorMessage(query.error) : null;
 
   const page = Math.floor((params.offset || 0) / PAGE) + 1;
   const pages = Math.max(1, Math.ceil(data.total / PAGE));

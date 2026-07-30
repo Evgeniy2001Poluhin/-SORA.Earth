@@ -24,6 +24,52 @@ export interface ExplainResponse {
 }
 export type CountriesMap = Record<string, string>;
 
+// Shapes returned by POST /evaluate/monte-carlo, /evaluate/ranking and /what-if.
+// Keep these aligned with app/api/evaluate.py.
+export interface MonteCarloResponse {
+  n: number; mean: number; stdev: number; min: number; max: number;
+  p10: number; p50: number; p90: number;
+  histogram: { edges: number[]; counts: number[] };
+}
+
+export interface EvaluateRankingEntry {
+  country: string;
+  region?: string;
+  total_score?: number;
+  environment_score?: number;
+  social_score?: number;
+  economic_score?: number;
+  success_probability?: number;
+  risk_level?: string;
+  error?: string;
+}
+export interface EvaluateRankingResponse { count: number; ranking: EvaluateRankingEntry[] }
+
+// These endpoints take a project plus the resolved region the caller wants scored.
+export type EvaluateProjectRequest = EvaluateRequest & { region?: string };
+
+// POST /what-if is scored server-side from the backend Project field names,
+// which differ from the *_usd / *_score names the evaluate form uses.
+export type WhatIfRequest = Partial<EvaluateRequest> & {
+  region?: string;
+  budget: number;
+  co2_reduction: number;
+  social_impact: number;
+  duration_months?: number;
+};
+
+export interface WhatIfVariation {
+  new_value: number;
+  new_score: number;
+  score_change: number;
+  new_probability: number;
+  prob_change: number;
+}
+export interface WhatIfResponse {
+  base: EvaluateResponse;
+  variations: Record<string, WhatIfVariation>;
+}
+
 export type RankingItem = {
   country: string;
   co2_per_capita: number;
@@ -60,9 +106,12 @@ export interface DiscrepancyResponse {
 }
 
 export interface UncertaintyResponse {
+  probability: number;
   prediction: { mean: number; median: number; lower_90: number; upper_90: number };
-  tree_distribution: { std: number; n_trees: number; min: number; max: number };
+  tree_distribution: { std: number; n_trees: number; min: number; max: number; p5: number; p95: number };
   confidence: "high" | "medium" | "low";
+  uncertainty: { method: string; mean: number; std: number; ci_90: [number, number]; n_trees: number };
+  reliability: "high" | "medium" | "low";
 }
 
 export interface DriftBaselineStatus {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import TourTooltip from "./TourTooltip";
 import Joyride, { STATUS, type Step, type CallBackProps } from "react-joyride";
 
@@ -66,13 +66,19 @@ const ST = {
 };
 
 export default function OnboardingTour({ runSignal = 0 }: { runSignal?: number }) {
-  const [run, setRun] = useState(false);
-  useEffect(() => {
-    if (!localStorage.getItem(KEY)) setRun(true);
-  }, []);
-  useEffect(() => {
+  // Whether the tour was already completed is known before the first paint,
+  // so read it as lazy initial state rather than setting it from an effect.
+  const [run, setRun] = useState(() => {
+    try { return !localStorage.getItem(KEY); } catch { return false; }
+  });
+
+  // A bumped runSignal re-opens the tour. Adjusting state during render avoids
+  // committing a frame with the tour still closed.
+  const [lastSignal, setLastSignal] = useState(runSignal);
+  if (runSignal !== lastSignal) {
+    setLastSignal(runSignal);
     if (runSignal > 0) setRun(true);
-  }, [runSignal]);
+  }
 
   const cb = (d: CallBackProps) => {
     if (([STATUS.FINISHED, STATUS.SKIPPED] as string[]).includes(d.status)) {

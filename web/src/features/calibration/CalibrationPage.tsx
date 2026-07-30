@@ -7,6 +7,7 @@ import { calibrationApi } from "@/api/endpoints/calibration";
 import type { DiscrepancyResponse, ExplainLocalRequest } from "@/api/types";
 import "./calibration.css";
 import { BrierReliabilityPanel } from "./BrierReliabilityPanel";
+import { errorMessage } from "@/lib/errors";
 
 interface FormValues {
   budget: number;
@@ -44,11 +45,11 @@ export function CalibrationPage() {
   const mut = useMutation({
     mutationFn: (b: ExplainLocalRequest) => calibrationApi.discrepancy(b),
     onSuccess: (r) => { setData(r); toast.success("Discrepancy computed"); },
-    onError: (e: any) => toast.error("Failed: " + (e?.message ?? "unknown")),
+    onError: (e: unknown) => toast.error("Failed: " + errorMessage(e)),
   });
 
   const submit = (v: FormValues) => mut.mutate(v);
-  const usePreset = (k: PresetKey) => { reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
+  const applyPreset = (k: PresetKey) => { reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
 
   const chartData = data ? [
     { model: "rf_v1",         proba: data.models.rf_v1.proba,         weight: data.models.rf_v1.weight, nd: data.models.rf_v1.near_deterministic },
@@ -68,7 +69,7 @@ export function CalibrationPage() {
 
       <div className="calib-presets">
         {PRESET_KEYS.map((k) => (
-          <button key={k} type="button" className="preset-btn" onClick={() => usePreset(k)}>{k}</button>
+          <button key={k} type="button" className="preset-btn" onClick={() => applyPreset(k)}>{k}</button>
         ))}
       </div>
 
@@ -103,7 +104,7 @@ export function CalibrationPage() {
               <BarChart data={chartData} margin={{ top: 16, right: 24, left: 0, bottom: 8 }}>
                 <XAxis dataKey="model" stroke="#8aa" tick={{ fontSize: 12 }} />
                 <YAxis stroke="#8aa" domain={[0, 1]} tick={{ fontSize: 12 }} tickFormatter={(v) => (v * 100).toFixed(0) + "%"} />
-                <Tooltip contentStyle={{ background: "var(--bg-1)", border: "1px solid #234", borderRadius: 8, fontSize: 12 }} formatter={(v: any) => (Number(v) * 100).toFixed(2) + "%"} />
+                <Tooltip contentStyle={{ background: "var(--bg-1)", border: "1px solid #234", borderRadius: 8, fontSize: 12 }} formatter={(v: unknown) => (Number(v) * 100).toFixed(2) + "%"} />
                 <ReferenceLine y={data.consensus.weighted_proba} stroke="#2FE0A6" strokeDasharray="4 4" />
                 <Bar dataKey="proba" radius={[6, 6, 0, 0]}>
                   {chartData.map((d) => (<Cell key={d.model} fill={MODEL_COLOR[d.model] ?? "#7AA2F7"} />))}

@@ -5,7 +5,6 @@ export type HistoryPage={items:HistoryItem[];total:number;limit:number;offset:nu
 export type HistoryParams={region?:string;risk_level?:"LOW"|"MED"|"HIGH";date_from?:string;date_to?:string;min_score?:number;max_score?:number;limit?:number;offset?:number;};
 const delay=<T,>(v:T,ms=250)=>new Promise<T>(r=>setTimeout(()=>r(v),ms));
 const REGIONS=["Europe","North America","Asia","South America","Africa","Oceania"];
-const RISKS=["LOW","MED","HIGH"];
 const ITEMS:HistoryItem[]=Array.from({length:546},(_,i)=>{
   const score=45+Math.random()*45; const rl=score>75?"LOW":score>60?"MED":"HIGH";
   const d=new Date(Date.now()-i*86400000*0.5);
