@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -315,9 +316,49 @@ def _run_backup_with_hook(tmp_path, *, hold_lock, env_extra=None):
                ALERTS=str(alerts))
     env.update(env_extra or {})
 
-    hold = ("source scripts/backup_lock.sh\n"
-            "acquire_backup_lock 'backup-demo' >/dev/null 2>&1\n") if hold_lock else ""
-    result = bash(hold + "./scripts/backup_run.sh demo", env=env)
+    holder = None
+    if hold_lock:
+        # The holder has to be its own live process, and it has to stay alive.
+        #
+        # Putting `acquire_backup_lock` and the run in one `bash -c` looks
+        # equivalent and is not: bash execs the last command of a -c script,
+        # replacing the process that held the lock. Under the flock backend the
+        # replacement's own `exec 9>"$lockfile"` then closes the last reference to
+        # the locked file description, the lock evaporates, and the run proceeds as
+        # though nothing held it. Measured on Linux: rc=0 in that shape, rc=75 with
+        # a live holder, rc=75 with a trailing no-op that merely defeats the
+        # exec optimisation.
+        #
+        # It passed on macOS for a reason unrelated to correctness: the directory
+        # backend's lock is filesystem state, which does not care which process
+        # holds it. This is why the test is written against a live holder rather
+        # than against whichever backend the host happens to have.
+        held = tmp_path / "held"
+        holder = subprocess.Popen(
+            ["bash", "-c",
+             "source scripts/backup_lock.sh\n"
+             "acquire_backup_lock 'backup-demo' >/dev/null 2>&1 || exit 1\n"
+             'printf held > "$HELD_FLAG"\n'
+             "sleep 120\n"],
+            cwd=REPO, env=dict(env, HELD_FLAG=str(held)),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        # Wait for the lock to actually be held rather than sleeping and hoping.
+        deadline = time.monotonic() + 20
+        while not held.exists():
+            if holder.poll() is not None:
+                raise AssertionError("the holder exited without taking the lock")
+            if time.monotonic() > deadline:
+                holder.kill()
+                raise AssertionError("the holder never reported taking the lock")
+            time.sleep(0.05)
+
+    try:
+        result = bash("./scripts/backup_run.sh demo", env=env)
+    finally:
+        if holder is not None:
+            holder.kill()
+            holder.wait()
     return result, [ln for ln in alerts.read_text().split() if ln]
 
 
@@ -337,14 +378,22 @@ def test_contention_alerts_once_and_not_as_a_failure(tmp_path):
     assert "backup_failed" not in result.stderr
 
 
-def test_a_real_failure_still_alerts(tmp_path):
-    """The counterpart: exempting the skip must not have muted genuine faults."""
+def test_a_real_failure_still_alerts(tmp_path, store):
+    """The counterpart: exempting the skip must not have muted genuine faults.
+
+    The store is configured so the run gets past store_ready and fails on the one
+    thing this test is about -- an unreadable recipient key. Without it the failing
+    stage differed by environment (a missing bucket in CI, the key locally), and a
+    test that passes for a different reason on each machine is not measuring what
+    its name says.
+    """
     result, alerts = _run_backup_with_hook(
         tmp_path, hold_lock=False,
-        env_extra={"BACKUP_RECIPIENT_KEY": str(tmp_path / "absent.pem")})
+        env_extra=dict(store.env, BACKUP_RECIPIENT_KEY=str(tmp_path / "absent.pem")))
 
     assert result.returncode != 0
     assert alerts == ["backup_failed"], f"alerts fired: {alerts}"
+    assert "readable public key" in result.stderr, result.stderr
 
 
 def test_a_sourced_library_does_not_set_options_in_its_caller():
