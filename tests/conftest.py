@@ -158,6 +158,33 @@ def mock_redis_session():
 
 
 @pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """Give every test its own request budget.
+
+    The limiter counts per address, in-process, and TestClient has no IP -- so
+    every request from every test lands in one bucket. Across a suite this size
+    that bucket fills, and tests start failing with 429 in whatever order they
+    happen to run, which looks like flakiness rather than a shared counter.
+
+    Clearing between tests is not a way of switching the limiter off: the
+    middleware runs for every request in every test. It removes a dependency
+    between tests that should not exist in the first place.
+    """
+    # Lazy, like restore_app_models below: an autouse fixture that imports an
+    # application module makes every test in the repository depend on that module
+    # importing cleanly. The backup and script tests deliberately touch no part of
+    # the app, and importing it for them turned 36 of them into errors.
+    import sys
+    module = sys.modules.get("app.rate_limit")
+    if module is None:
+        yield
+        return
+    module.rate_limiter.requests.clear()
+    yield
+    module.rate_limiter.requests.clear()
+
+
+@pytest.fixture(autouse=True)
 def clear_redis_cache():
     """Clear Redis mock cache between each test for isolation."""
     yield

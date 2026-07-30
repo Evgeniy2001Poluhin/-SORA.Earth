@@ -289,7 +289,19 @@ Optional:
 
 5. **CORS Configuration**: CORS origins hardcoded in `app/main.py:144-151`. Add new origins there if deploying to new domains.
 
-6. **Rate Limiting**: SlowAPI middleware active on all endpoints. Limits: 100 req/min per IP for most endpoints, 10 req/min for `/api/v1/model/retrain`.
+6. **Rate Limiting**: `SlowAPIMiddleware` in `app/rate_limit.py` counts every HTTP
+   request per caller address. 100 req/min by default; `/api/v1/model/retrain` gets
+   10 req/min in a bucket of its own, so ordinary traffic cannot spend it. Health,
+   readiness, metrics and favicon paths are exempt — a probe on a schedule would
+   otherwise spend a shared budget and make the health check flap.
+
+   The counter lives in one process, so with several workers the effective budget
+   multiplies by the worker count. It is a brake on a single noisy caller, not a
+   defence against a distributed flood; that belongs at the edge.
+
+   This paragraph previously described the limits as enforced while the middleware
+   was a pass-through stub. Stating a control that does not exist is worse than
+   stating none, because someone relies on it.
 
 7. **Head Requests**: Custom middleware at `app/main.py:118-141` converts HEAD to GET internally. Do not set Content-Length manually in responses.
 
