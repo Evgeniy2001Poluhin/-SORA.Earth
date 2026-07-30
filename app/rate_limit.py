@@ -59,12 +59,13 @@ class RateLimiter:
                 return
             self.requests.popitem(last=False)
 
-    def check(self, key: str):
+    def check(self, key: str, max_requests: int | None = None):
+        limit = self.max_requests if max_requests is None else max_requests
         now = time.monotonic()
         with self._lock:
             self._sweep(now)
             hits = [t for t in self.requests.get(key, ()) if now - t < self.window]
-            if len(hits) >= self.max_requests:
+            if len(hits) >= limit:
                 self.requests[key] = hits
                 self.requests.move_to_end(key)
                 raise HTTPException(
@@ -166,12 +167,95 @@ limiter = rate_limiter
 class RateLimitExceeded(Exception):
     pass
 
+
+# Paths a monitoring system polls on a schedule. A liveness probe every ten
+# seconds and a Prometheus scrape every fifteen come from one address and would
+# spend a shared budget on nothing an attacker cares about -- and the first
+# symptom would be a health check flapping, which reads as an outage.
+EXEMPT_PATHS = frozenset({
+    "/health",
+    "/api/v1/health",
+    "/api/v1/ready",
+    "/api/v1/metrics/prometheus",
+    "/metrics",
+    "/favicon.ico",
+})
+
+# Endpoints where a single call is expensive enough that the general budget is
+# the wrong shape. Retraining loads the training set and fits a model.
+PATH_LIMITS = {
+    "/api/v1/model/retrain": 10,
+}
+
+
+def _budget_for(path: str):
+    """(bucket suffix, limit) for a path.
+
+    The suffix matters. Sharing one bucket between the general budget and a
+    stricter path would mean ten ordinary requests exhaust the retrain budget --
+    the tighter number would silently become the limit on everything. Each entry
+    in PATH_LIMITS therefore counts in a bucket of its own.
+    """
+    for prefix, limit in PATH_LIMITS.items():
+        if path == prefix or path.startswith(prefix + "/"):
+            return prefix, limit
+    return "", rate_limiter.max_requests
+
+
 class SlowAPIMiddleware:
-    """Stub middleware for compatibility."""
+    """Per-address request budget, applied to every HTTP request.
+
+    This was a pass-through stub for some time: it was installed in main.py, the
+    handler and the limiter were wired up beside it, and nothing ever counted a
+    request. Meanwhile the documentation stated the limits as though they were in
+    force -- which is worse than having no limiter at all, because it is a
+    control someone believes in.
+
+    Scope: this counter lives in one process. With several workers the effective
+    budget multiplies by the worker count, so it is a brake on a single noisy
+    caller, not a defence against a distributed flood. That belongs at the edge.
+    The docstring on RateLimiter says the same thing; it is repeated here because
+    this is the layer someone will read when they want to know what is enforced.
+    """
+
     def __init__(self, app):
         self.app = app
+
     async def __call__(self, scope, receive, send):
+        # Websockets and lifespan have no request budget to spend, and reaching
+        # into their scope for a path would be wrong rather than merely useless.
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        if path in EXEMPT_PATHS:
+            await self.app(scope, receive, send)
+            return
+
+        from starlette.requests import Request
+        suffix, limit = _budget_for(path)
+        key = client_address(Request(scope))
+        if suffix:
+            key = f"{key}|{suffix}"
+
+        try:
+            rate_limiter.check(key, max_requests=limit)
+        except HTTPException:
+            from starlette.responses import JSONResponse
+            response = JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded"},
+                # Fixed window, so the caller waits at most one window. Saying so
+                # is what lets a well-behaved client back off instead of retrying
+                # immediately and spending the next window too.
+                headers={"Retry-After": str(rate_limiter.window)},
+            )
+            await response(scope, receive, send)
+            return
+
         await self.app(scope, receive, send)
+
 
 def rate_limit_handler(request, exc):
     from fastapi.responses import JSONResponse
