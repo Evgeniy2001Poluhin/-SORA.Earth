@@ -257,3 +257,24 @@ def clear_external_cache():
     except Exception:
         pass
     yield
+
+
+@pytest.fixture(autouse=True)
+def clear_login_rate_limit():
+    """Give every test a fresh login budget.
+
+    Login is rate-limited per source address because Argon2 verification is
+    deliberately expensive. Every test shares one address -- TestClient reports
+    "testclient" -- so without this the eleventh login in a session starts
+    getting 429 and the failure lands on whichever test happens to run then.
+
+    This resets the counter rather than raising the limit: the production bound
+    is the thing under test elsewhere, and loosening it here would mean the
+    suite never exercises the real one.
+    """
+    try:
+        from app.auth import _login_limiter
+        _login_limiter.requests.clear()
+    except Exception:
+        pass
+    yield

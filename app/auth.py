@@ -2,9 +2,16 @@
 SORA.Earth JWT Authentication + RBAC + API Keys
 Pure Python JWT (HS256) — no external deps
 """
-import hashlib, hmac, json, os, time, base64
+import hashlib, hmac, json, logging, os, time, base64
 from datetime import datetime, timezone
 from typing import Optional
+
+from argon2 import PasswordHasher
+
+from app.rate_limit import RateLimiter
+from argon2.exceptions import InvalidHash, VerificationError, VerifyMismatchError
+import threading
+
 from fastapi import Depends, HTTPException, Security, Header, status
 from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
 from pydantic import BaseModel, Field
@@ -69,16 +76,288 @@ def _jwt_decode(token: str) -> dict:
         raise ValueError("Token expired")
     return payload
 
+# --- password hashing -------------------------------------------------------
+#
+# Argon2id at the argon2-cffi defaults: time_cost=3, memory_cost=64 MiB,
+# parallelism=4, which costs roughly 150 ms to hash and 130 ms to verify on
+# commodity hardware. The cost is deliberately not configurable: the only
+# reason to expose it would be to lower it, and a weak setting is
+# indistinguishable from a strong one until a table leaks.
+#
+# Two legacy formats are still accepted so that no existing account is locked
+# out, and both are upgraded in place on the next successful login:
+#
+#   $argon2id$...          current
+#   <hex salt>$<sha256>    legacy, salted but a single fast round
+#   <sha256>               legacy, unsalted -- rainbow-table material
+#
+# A single SHA-256 round is the wrong primitive for passwords whether or not it
+# is salted: commodity GPUs evaluate it in the billions per second.
+# OWASP's floor for Argon2id. Raising the parameters as hardware improves is
+# expected and is why they are read from the environment at all; lowering them
+# past this point is refused outright, because a weak setting is
+# indistinguishable from a strong one until a table leaks.
+ARGON2_FLOOR = {"time_cost": 2, "memory_cost": 19 * 1024, "parallelism": 1}
+ARGON2_DEFAULTS = {"time_cost": 3, "memory_cost": 64 * 1024, "parallelism": 4}
+# A ceiling as well as a floor: memory_cost is allocated per concurrent
+# verification, so a mistyped value denies service just as effectively as a
+# weak one -- in the opposite direction and just as quietly.
+# memory_cost is the total for one hash operation. parallelism splits that
+# total across lanes -- it does not multiply it. Measured on this build, m=256
+# MiB costs ~256 MiB of peak RSS at p=1, 2, 4 and 8 alike.
+#
+# So the multiplier is concurrency, not parallelism: N verifications in flight
+# hold roughly N x memory_cost at once. Nothing in the app caps N -- the rate
+# limiter bounds requests per key per minute, not simultaneous ones -- and no
+# container in docker-compose.prod.yml declares a memory limit, so a mistyped
+# cost is bounded only by host RAM.
+#
+# 256 MiB is therefore a configuration guard rather than a proof of safety: it
+# keeps a typo from reserving gigabytes per verification, while eight
+# concurrent logins at the ceiling would still hold ~2 GiB. Bounding N belongs
+# with a declared container limit and an admission bound, and should come
+# before this ceiling is raised.
+ARGON2_CEILING = {"time_cost": 10, "memory_cost": 256 * 1024, "parallelism": 8}
+
+
+def _argon2_params() -> dict:
+    params = {}
+    for name, default in ARGON2_DEFAULTS.items():
+        raw = os.getenv(f"SORA_ARGON2_{name.upper()}")
+        if raw is None:
+            params[name] = default
+            continue
+        try:
+            value = int(raw)
+        except ValueError:
+            raise RuntimeError(
+                f"SORA_ARGON2_{name.upper()} must be an integer, got {raw!r}"
+            ) from None
+        if value < ARGON2_FLOOR[name]:
+            raise RuntimeError(
+                f"SORA_ARGON2_{name.upper()}={value} is below the floor "
+                f"{ARGON2_FLOOR[name]}. Refusing to weaken password hashing."
+            )
+        if value > ARGON2_CEILING[name]:
+            raise RuntimeError(
+                f"SORA_ARGON2_{name.upper()}={value} exceeds the ceiling "
+                f"{ARGON2_CEILING[name]}. A cost this high denies service."
+            )
+        params[name] = value
+    return params
+
+
+_password_hasher = PasswordHasher(**_argon2_params())
+
+ARGON2_PREFIX = "$argon2"
+
+# Login is the only unauthenticated endpoint that does deliberately expensive
+# work: an Argon2id verification costs ~130 ms and allocates 64 MiB by design.
+# Nothing else rate-limits it -- SlowAPIMiddleware is a pass-through stub and
+# rate_limiter.check() is called from exactly one analytics endpoint -- so
+# without this a handful of concurrent clients can saturate the process by
+# guessing passwords. The budget is spent per source address and per account
+# separately, so one address cannot exhaust an account's allowance and a
+# distributed attempt on a single account is still bounded.
+#
+# The counter lives in the process, so with multiple workers the effective
+# limit is per worker. That is a real limitation and the reason this is a
+# bound rather than a lockout.
+_login_limiter = RateLimiter(max_requests=10, window_seconds=60)
+
+
 def _hash_password(password: str) -> str:
-    salt = os.urandom(16).hex()
-    h = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-    return f"{salt}${h}"
+    return _password_hasher.hash(password)
+
+
+def _verify_legacy_sha256(plain: str, hashed: str) -> bool:
+    """Constant-time check against either legacy format."""
+    if "$" in hashed:
+        salt, stored = hashed.split("$", 1)
+        candidate = hashlib.sha256(f"{salt}{plain}".encode()).hexdigest()
+    else:
+        salt, stored = "", hashed
+        candidate = hashlib.sha256(plain.encode()).hexdigest()
+    return hmac.compare_digest(candidate, stored)
+
 
 def verify_password(plain: str, hashed: str) -> bool:
-    if "$" not in hashed:
-        return hashlib.sha256(plain.encode()).hexdigest() == hashed
-    salt, h = hashed.split("$", 1)
-    return hmac.compare_digest(hashlib.sha256(f"{salt}{plain}".encode()).hexdigest(), h)
+    if not hashed:
+        return False
+    if hashed.startswith(ARGON2_PREFIX):
+        try:
+            return _password_hasher.verify(hashed, plain)
+        except VerifyMismatchError:
+            return False
+        except (VerificationError, InvalidHash) as exc:
+            # Not a wrong password: the stored value is damaged or the backend
+            # failed. The caller still sees plain bad credentials, but silently
+            # folding this into that path would hide a corrupted record for as
+            # long as nobody tried to log in twice. Neither the hash nor the
+            # password is logged.
+            logging.getLogger("sora_earth").error(
+                "password hash could not be evaluated: %s", type(exc).__name__
+            )
+            return False
+    return _verify_legacy_sha256(plain, hashed)
+
+
+def needs_rehash(hashed: str) -> bool:
+    """True when the stored hash is not Argon2id at the current parameters."""
+    if not hashed or not hashed.startswith(ARGON2_PREFIX):
+        return True
+    try:
+        return _password_hasher.check_needs_rehash(hashed)
+    except InvalidHash:
+        return True
+
+
+def upgrade_password_hash(user: dict, plain: str) -> bool:
+    """Re-hash in place after a successful login. Returns True if it changed.
+
+    Called only once the password has already been verified, so the plaintext
+    is known-good. This is what keeps the legacy formats from becoming
+    permanent: every active account migrates the next time its owner signs in.
+    """
+    if not needs_rehash(user.get("hashed_password", "")):
+        return False
+    user["hashed_password"] = _hash_password(plain)
+    return True
+
+
+
+
+# Argon2 is expensive on purpose, and the rate limiter bounds attempts per key
+# per window -- not how many are in flight at once. A burst spread across
+# distinct addresses and accounts stays inside every budget while starting
+# arbitrarily many verifications together, and N of them hold roughly
+# N x memory_cost. Four concurrent verifications at the default 64 MiB is
+# ~256 MiB; without a gate the same burst at the 256 MiB ceiling is unbounded.
+#
+# The gate is a semaphore rather than a queue: waiting would convert memory
+# pressure into latency for everyone, so a saturated process sheds load instead
+# and says so.
+def _verify_concurrency() -> int:
+    raw = os.getenv("SORA_PASSWORD_VERIFY_CONCURRENCY", "4")
+    try:
+        value = int(raw)
+    except ValueError:
+        raise RuntimeError(
+            f"SORA_PASSWORD_VERIFY_CONCURRENCY must be an integer, got {raw!r}"
+        ) from None
+    if not 1 <= value <= 16:
+        raise RuntimeError(
+            f"SORA_PASSWORD_VERIFY_CONCURRENCY={value} is outside 1..16."
+        )
+    return value
+
+
+VERIFY_CONCURRENCY = _verify_concurrency()
+_verify_slots = threading.BoundedSemaphore(VERIFY_CONCURRENCY)
+
+# Compared against when the account does not exist, so that an unknown user
+# costs the same as a known one. Without it the miss returns before any hashing
+# happens, and the difference is a timing oracle for which accounts exist.
+# Built once, at import. Doing it per request would make an unknown account
+# cost a hash *and* a verify -- turning the defence against enumeration into a
+# cheaper way to burn CPU than a real login.
+_ABSENT_ACCOUNT_HASH = _password_hasher.hash(os.urandom(32).hex())
+
+
+def _verify_and_upgrade_under_gate(plain: str, stored: str,
+                                  user: dict | None) -> bool:
+    """Verify, and re-hash if needed, under a single slot.
+
+    One acquisition covers both. Releasing between them and taking a second
+    slot would put the same login through the gate twice: the bound would still
+    hold, but a request that already passed admission could be made to compete
+    again, and the two Argon2 operations of one login would no longer be
+    accounted together.
+
+    A stale hash is therefore always replaced on a successful verification:
+    holding the slot already, there is no second admission to fail and no
+    reason to skip. Nothing is deferred and nothing runs after the response.
+
+    Should a future store make persisting the new hash fallible -- these records
+    live in a process dictionary today -- the login must still succeed, and the
+    replacement is simply attempted again at the next successful login. That is
+    the same mechanism that migrates a legacy account in the first place.
+    """
+    if not _verify_slots.acquire(blocking=False):
+        raise HTTPException(
+            status_code=503,
+            detail="Server busy, retry shortly",
+            headers={"Retry-After": "1"},
+        )
+    try:
+        matched = verify_password(plain, stored)
+        if matched and user is not None and needs_rehash(stored):
+            upgrade_password_hash(user, plain)
+        return matched
+    finally:
+        _verify_slots.release()
+
+
+_ACCOUNT_KEY_SECRET = os.urandom(32)
+
+
+def _account_key(username: str) -> str:
+    """A fixed-width, opaque bucket key for an attacker-supplied username.
+
+    Two reasons it is not the username itself. The key space has to be bounded
+    -- an arbitrary-length string straight into a dict is a memory vector -- and
+    raw usernames should not sit in a limiter table that ends up in a heap dump
+    or a diagnostic endpoint.
+
+    Case and surrounding whitespace are folded so that "Admin " and "admin"
+    share one budget; otherwise trivial variations would each buy a fresh
+    allowance against the same account.
+
+    Keyed rather than a bare digest: a plain SHA-256 of a username is reversible
+    by dictionary, so a heap dump would reveal which accounts were recently
+    active. The key is random per process rather than derived from SECRET_KEY --
+    the buckets are ephemeral anyway, so there is nothing to correlate across
+    restarts, and no production secret is drawn into a new domain.
+    """
+    normalised = username.strip().casefold()[:256]
+    return hmac.new(_ACCOUNT_KEY_SECRET, normalised.encode("utf-8", "replace"),
+                    hashlib.sha256).hexdigest()[:32]
+
+
+def authenticate(username: str, password: str, users: dict | None = None,
+                 client_ip: str | None = None) -> Optional[dict]:
+    """Look up, verify, and migrate the stored hash. None when either fails.
+
+    Every login path goes through here deliberately. Verifying and upgrading in
+    separate places invites a fourth login route that authenticates correctly
+    but forgets the upgrade, which would keep the legacy formats alive
+    indefinitely and quietly.
+    """
+    if client_ip is not None:
+        # Before the expensive verification, not after.
+        _login_limiter.check(f"login-ip:{client_ip}")
+        _login_limiter.check(f"login-user:{_account_key(username)}")
+    store = USERS_DB if users is None else users
+    user = store.get(username)
+    # The comparison runs whether or not the account exists, against a hash
+    # nobody holds, so a miss costs the same as a hit.
+    stored = user.get("hashed_password", "") if user else _ABSENT_ACCOUNT_HASH
+    if not _verify_and_upgrade_under_gate(password, stored, user):
+        return None
+    return user
+
+
+def legacy_hash_count(users: dict | None = None) -> int:
+    """How many stored hashes are still not Argon2id.
+
+    The unsalted branch above can only be deleted once this reaches zero and
+    stays there, so the removal date is evidence rather than a guess.
+    """
+    store = USERS_DB if users is None else users
+    return sum(
+        1 for u in store.values()
+        if not str(u.get("hashed_password", "")).startswith(ARGON2_PREFIX)
+    )
 
 # Load default users from environment (fallback to dev passwords only in dev mode)
 def _get_default_password(role: str, dev_default: str) -> str:

@@ -1,20 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from app.auth import (
     Token, LoginRequest, UserInfo,
-    verify_password, create_access_token, create_refresh_token,
+    verify_password, authenticate, create_access_token, create_refresh_token,
     require_auth, require_admin, USERS_DB,
     require_api_key, require_admin_apikey,
 )
 from app.audit import record_audit
+from app.rate_limit import client_address
 from app.metrics import metrics
 
 router = APIRouter()
 
 @router.post("/auth/login", response_model=Token, tags=["auth"])
 def login(req: LoginRequest, request: Request):
-    ip = request.client.host if request.client else "unknown"
-    user = USERS_DB.get(req.username)
-    if not user or not verify_password(req.password, user["hashed_password"]):
+    ip = client_address(request)
+    user = authenticate(req.username, req.password, client_ip=ip)
+    if not user:
         record_audit(req.username, "login_failed", "/auth/login", "POST", ip)
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token_data = {"sub": user["username"], "role": user["role"]}
