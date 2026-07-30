@@ -73,15 +73,22 @@ def persist_environmental_observations(
                 result.errors.append(f"signal_{idx}: {str(e)[:200]}")
                 log.warning(f"[persist] rejected signal {idx}: {e}")
 
-        # Execute upsert
+        # Execute upsert. The counts stay local until the commit succeeds: a
+        # failure below rolls the transaction back, and a result that still
+        # claimed accepted > 0 would be reporting rows that no longer exist.
+        # app/ingesters/runner.py writes result["accepted"] into
+        # ingester_runs.rows_written, so the lie would be recorded as history.
+        inserted = updated = duplicates = 0
         if observations:
             inserted, updated, duplicates = _upsert_observations(db, observations)
-            result.inserted = inserted
-            result.updated = updated
-            result.duplicates = duplicates
-            result.accepted = inserted + updated
 
         db.commit()
+
+        # Committed: the counts now describe rows that are actually there.
+        result.inserted = inserted
+        result.updated = updated
+        result.duplicates = duplicates
+        result.accepted = inserted + updated
         log.info(
             f"[persist] {source}: received={result.received}, "
             f"inserted={result.inserted}, updated={result.updated}, "
@@ -90,6 +97,14 @@ def persist_environmental_observations(
 
     except Exception as e:
         db.rollback()
+        # Nothing was written. `rejected` is kept -- those signals failed
+        # validation before the database was involved and that is still true --
+        # but everything describing stored rows is zeroed, because after the
+        # rollback there are none.
+        result.inserted = 0
+        result.updated = 0
+        result.duplicates = 0
+        result.accepted = 0
         result.errors.append(f"persist_error: {str(e)[:500]}")
         log.exception(f"[persist] {source} failed: {e}")
     finally:
