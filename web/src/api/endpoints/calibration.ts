@@ -2,8 +2,19 @@ import { api } from "../client";
 import type { DiscrepancyResponse, UncertaintyResponse, ExplainLocalRequest } from "../types";
 import { isMock } from "../mock";
 const delay=<T,>(v:T,ms=300)=>new Promise<T>(r=>setTimeout(()=>r(v),ms));
-const DISC:any={models:["rf_v1","stacking_v2","calibrated_v2"],predictions:[71.2,72.3,72.0],std:0.6,agreement:0.94};
-const UNC:any={mean:72.3,std:3.1,ci_low:67.2,ci_high:77.4,n_estimators:100};
+const DISC:DiscrepancyResponse={
+  models:{rf_v1:{proba:0.712,weight:0.34},stacking_v2:{proba:0.723,weight:0.33},calibrated_v2:{proba:0.720,weight:0.33,near_deterministic:false}},
+  consensus:{weighted_proba:0.718,method:"weighted_average"},
+  divergence:{max_spread:0.011,std:0.006,max_pair:["rf_v1","stacking_v2"]},
+  tree_uncertainty:{std:0.031,ci_90:[0.672,0.774],n_trees:100},
+  recommendation:"consensus"};
+const UNC:UncertaintyResponse={
+  probability:72.3,
+  prediction:{mean:0.723,median:0.720,lower_90:0.672,upper_90:0.774},
+  tree_distribution:{std:0.031,n_trees:100,min:0.610,max:0.845,p5:0.672,p95:0.774},
+  confidence:"high",
+  uncertainty:{method:"RF tree variance",mean:72.3,std:3.1,ci_90:[67.2,77.4],n_trees:100},
+  reliability:"high"};
 export const calibrationApi={
   discrepancy:(b:ExplainLocalRequest)=>isMock?delay(DISC):api<DiscrepancyResponse>("/calibration/discrepancy",{method:"POST",body:JSON.stringify(b)}),
   uncertainty:(b:ExplainLocalRequest)=>isMock?delay(UNC):api<UncertaintyResponse>("/predict/uncertainty",{method:"POST",body:JSON.stringify(b)}),

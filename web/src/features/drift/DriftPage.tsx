@@ -1,11 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { driftBaselineApi } from "@/api/endpoints/driftBaseline";
+import type { DriftBaselineStatus } from "@/api/types";
 import { DriftTimeline } from "./DriftTimeline";
 import { LSTMProgressWidget } from "./LSTMProgressWidget";
 import { api } from "@/api/client";
 import "./drift.css";
 import "./lstm-progress.css";
+import { errorMessage } from "@/lib/errors";
 
 type FeatureStat = {
   baseline_mean: number;
@@ -47,17 +49,17 @@ export function DriftPage() {
   const fitMut = useMutation({
     mutationFn: () => driftBaselineApi.fit(),
     onSuccess: (r) => { toast.success("Baseline fitted: " + r.n_samples + " samples"); qc.invalidateQueries({ queryKey: ["drift"] }); qc.invalidateQueries({ queryKey: ["drift-baseline"] }); },
-    onError: (e: any) => toast.error("Fit failed: " + (e?.message ?? "unknown")),
+    onError: (e: unknown) => toast.error("Fit failed: " + errorMessage(e)),
   });
   const delMut = useMutation({
     mutationFn: () => driftBaselineApi.remove(),
-    onSuccess: () => { toast.success("Baseline deleted"); qc.setQueryData(["drift-baseline"], (old: any) => ({ ...(old ?? {}), exists: false })); qc.invalidateQueries({ queryKey: ["drift"] }); qc.invalidateQueries({ queryKey: ["drift-baseline"] }); },
-    onError: (e: any) => toast.error("Delete failed: " + (e?.message ?? "unknown")),
+    onSuccess: () => { toast.success("Baseline deleted"); qc.setQueryData<DriftBaselineStatus>(["drift-baseline"], (old) => ({ ...(old ?? { exists: false }), exists: false })); qc.invalidateQueries({ queryKey: ["drift"] }); qc.invalidateQueries({ queryKey: ["drift-baseline"] }); },
+    onError: (e: unknown) => toast.error("Delete failed: " + errorMessage(e)),
   });
   const simMut = useMutation({
     mutationFn: (mode: "stable" | "drift") => driftBaselineApi.simulate(mode, 50),
     onSuccess: (_r, mode) => { toast.success("Simulated " + mode); qc.invalidateQueries({ queryKey: ["drift"] }); },
-    onError: (e: any) => { const msg = String(e?.message ?? ""); if (msg.includes("fit baseline first")) toast("Fit baseline before simulating"); else toast.error("Simulate failed: " + (msg || "unknown")); },
+    onError: (e: unknown) => { const msg = errorMessage(e, ""); if (msg.includes("fit baseline first")) toast("Fit baseline before simulating"); else toast.error("Simulate failed: " + (msg || "unknown")); },
   });
 
   if (q.isLoading) return <div className="card-body"><p style={{ color: "var(--muted)" }}>Loading drift status...</p></div>;
@@ -73,7 +75,6 @@ export function DriftPage() {
   }
 
   const noData = d.status === "insufficient_data" || d.status === "no_baseline";
-  const isStable = noData || d.status === "stable";
   const statusLabel = noData ? "NO BASELINE" : (d.drift_detected ? "DRIFT DETECTED" : "STABLE");
   const statusColor = noData ? "var(--muted)" : (d.drift_detected ? "#EF4444" : "#2FE0A6");
   const features = Object.entries(d.features || {}).sort(

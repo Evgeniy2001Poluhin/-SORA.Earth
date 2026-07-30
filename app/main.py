@@ -1,5 +1,13 @@
+# First, before anything else imports a secret or opens a socket. A placeholder
+# that gets as far as serving traffic is signing tokens anyone holding the same
+# public example can forge, so production refuses to start rather than start
+# wrongly. Development is untouched.
+from app.secret_validation import enforce as _enforce_secrets
+
+_enforce_secrets()
+
 from app import cache, external_data
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.rate_limit import limiter, rate_limit_handler, SlowAPIMiddleware, RateLimitExceeded
@@ -560,7 +568,15 @@ Instrumentator().instrument(app).expose(app)
 # ===== MINIMAL ENDPOINTS (root, health, model-info) =====
 @app.get("/")
 def read_root():
-    return FileResponse(os.path.join(BASE_DIR, "static", "index.html"))
+    # app/static/index.html is a symlink to spa/index.html, which is build
+    # output. Whenever the SPA has not been built the link dangles, and
+    # FileResponse raises RuntimeError at request time rather than returning a
+    # status -- a 500 where 404 is the honest answer. os.path.exists() resolves
+    # the link, so a missing file and a dangling symlink are covered alike.
+    index = os.path.join(BASE_DIR, "static", "index.html")
+    if not os.path.exists(index):
+        raise HTTPException(status_code=404, detail="UI is not built")
+    return FileResponse(index)
 @app.get("/dev")
 async def dev_page():
     basedir = os.path.dirname(os.path.abspath(__file__))

@@ -214,29 +214,35 @@ def test_scheduled_pretrain_forecast_models_data_quality():
         mock_lock.release.assert_called_once()
 
 
-def test_scheduled_pretrain_forecast_models_registered_in_scheduler():
+def test_scheduled_pretrain_forecast_models_registered_in_scheduler(monkeypatch):
     """Test that forecast pretraining job is registered in the scheduler."""
     from app.scheduler import scheduler, init_scheduler
-    import os
 
-    # Set environment to enable scheduler
-    os.environ['SORA_SCHEDULER'] = '1'
-    os.environ['RUN_SCHEDULER'] = 'true'
+    # monkeypatch, not os.environ: assigning RUN_SCHEDULER directly leaked into
+    # every later test in the session, which started the real ingestion jobs and
+    # sent live requests to the upstream data providers.
+    monkeypatch.setenv("SORA_SCHEDULER", "1")
+    monkeypatch.setenv("RUN_SCHEDULER", "true")
 
-    # Initialize scheduler (will be no-op if already running)
-    if not scheduler.running:
-        init_scheduler()
+    registered_here = not scheduler.running and not scheduler.get_jobs()
+    try:
+        if registered_here:
+            # start=False: the ingestion jobs carry next_run_time=now, so starting
+            # the scheduler here fires live requests to the upstream providers.
+            init_scheduler(start=False)
 
-    # Find the forecast pretraining job
-    jobs = scheduler.get_jobs()
-    forecast_job = None
-    for job in jobs:
-        if job.id == "auto_pretrain_forecast":
-            forecast_job = job
-            break
+        forecast_job = next(
+            (job for job in scheduler.get_jobs() if job.id == "auto_pretrain_forecast"),
+            None,
+        )
 
-    # Verify job exists and is configured correctly
-    assert forecast_job is not None, "Forecast pretraining job not found in scheduler"
-    assert "Pre-train forecast models" in forecast_job.name
-    assert "6" in str(forecast_job.trigger)  # 6-hour interval
-    assert forecast_job.func.__name__ == "scheduled_pretrain_forecast_models"
+        assert forecast_job is not None, "Forecast pretraining job not found in scheduler"
+        assert "Pre-train forecast models" in forecast_job.name
+        assert "6" in str(forecast_job.trigger)  # 6-hour interval
+        assert forecast_job.func.__name__ == "scheduled_pretrain_forecast_models"
+    finally:
+        # Leave no registered jobs behind: a later start would fire them all.
+        if registered_here:
+            scheduler.remove_all_jobs()
+        if scheduler.running:
+            scheduler.shutdown(wait=False)

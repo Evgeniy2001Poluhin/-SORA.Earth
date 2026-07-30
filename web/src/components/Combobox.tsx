@@ -27,7 +27,15 @@ export default function Combobox({ value, onChange, options, groups, placeholder
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  useEffect(() => { setHi(0); }, [q, open]);
+  // Reset the highlight when the query or open state changes. Adjusting state
+  // during render is the documented alternative to a setState-in-effect here:
+  // React re-renders immediately without committing the stale highlight.
+  const hiResetKey = `${q}|${open}`;
+  const [lastHiResetKey, setLastHiResetKey] = useState(hiResetKey);
+  if (hiResetKey !== lastHiResetKey) {
+    setLastHiResetKey(hiResetKey);
+    setHi(0);
+  }
 
   const pick = (v: string) => { onChange(v); setOpen(false); setQ(""); };
 

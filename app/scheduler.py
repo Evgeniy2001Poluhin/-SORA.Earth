@@ -454,7 +454,11 @@ def full_pipeline_run(trigger_source="full_pipeline", force: bool = False):
 
 
 def scheduled_run_ingesters():
-    """Run all registered ingesters (Rosstat, Sber/VEB, OpenAQ)."""
+    """Run all registered ingesters (Rosstat, Sber/VEB).
+
+    OpenAQ and Open-Meteo are intentionally excluded: they are owned solely by
+    their hourly scheduled_openaq_ingestion/scheduled_openmeteo_ingestion jobs.
+    """
     from app.locks import RedisLock
     lock = RedisLock(key="sora:lock:ingesters", timeout=600)
     if not lock.acquire():
@@ -673,7 +677,13 @@ def refresh_forecast_metrics():
         logger.error(f"Failed to refresh forecast metrics: {e}", exc_info=True)
 
 
-def init_scheduler():
+def init_scheduler(start: bool = True):
+    """Register the scheduled jobs, and start the scheduler unless start=False.
+
+    The ingestion jobs are given next_run_time=now below, so simply starting the
+    scheduler fires live upstream requests immediately. Tests that only need to
+    assert job registration pass start=False.
+    """
     if not should_run_scheduler():
         logger.info("RUN_SCHEDULER is false, scheduler will not be started in this process")
         return
@@ -831,6 +841,13 @@ def init_scheduler():
             logger.info("Job %s scheduled to run immediately on startup", _jid)
         except Exception as e:
             logger.warning("Could not set immediate run for %s: %s", _jid, e)
+    if not start:
+        logger.info(
+            "Scheduler jobs registered without starting: %s",
+            [job.id for job in scheduler.get_jobs()],
+        )
+        return
+
     scheduler.start()
     logger.info(
         "Scheduler started with %d jobs: %s",

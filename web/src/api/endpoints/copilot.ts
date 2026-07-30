@@ -1,7 +1,7 @@
 import { api } from '../client';
 
 export interface CopilotShapValue { feature: string; shap_value: number; }
-export interface CopilotRequest { probability: number; features: Record<string, number>; shap_values?: CopilotShapValue[]; project?: Record<string, any>; model_version?: string; session_id?: string; }
+export interface CopilotRequest { probability: number; features: Record<string, number>; shap_values?: CopilotShapValue[]; project?: Record<string, unknown>; model_version?: string; session_id?: string; }
 export interface CopilotDriver { feature: string; feature_label: string; shap_value?: number; direction?: string; note?: string; }
 export interface CopilotSource { id: string; title: string; category: string; score: number; excerpt: string; }
 export interface CopilotPiiFinding { type: string; text: string; start: number; end: number; confidence: number; }

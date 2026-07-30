@@ -1,7 +1,11 @@
+import logging
 import os
+import re
 import mlflow
 import mlflow.sklearn
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5556")
 EXPERIMENT_NAME = "sora-earth-esg"
@@ -12,8 +16,57 @@ try:
     if not _OFFLINE:
         mlflow.set_experiment(EXPERIMENT_NAME)
 except Exception as e:
-    import logging
-    logging.getLogger(__name__).warning("MLflow init failed: %s", e)
+    logger.warning("MLflow init failed: %s", e)
+
+
+_MAX_DETAIL = 200
+# userinfo in a URI, a query string, and anything that looks like a credential.
+_REDACT = (
+    re.compile(r"//[^/@\s]*@"),
+    re.compile(r"\?[^\s]*"),
+    # = and : both appear in the wild, and JSON-ish payloads wrap either side
+    # in quotes: api_key=x, api_key: x, "api_key": "x". A quoted value is taken
+    # whole -- stopping at whitespace would leave the tail of
+    # api_key: "super secret" in the log.
+    re.compile(
+        r"""(?ix)(token|password|secret|api[_-]?key)["']?\s*[:=]\s*(
+            "(?:\\.|[^"\\])*" | '(?:\\.|[^'\\])*' | [^\s&]+
+        )"""
+    ),
+)
+
+
+def _sanitized(exc: Exception) -> str:
+    """A short, redacted description of a failure, safe to put in a log line.
+
+    MLflow errors can carry the tracking URI with its query string, and a URI can
+    carry userinfo, so the message is redacted rather than logged verbatim.
+    Control characters are neutralised so a failure cannot forge log lines.
+    """
+    try:
+        text = str(exc)
+    except Exception:
+        # An exception whose __str__ raises must not take the caller down with it.
+        return "<unprintable>"
+    for pattern in _REDACT:
+        text = pattern.sub("[redacted]", text)
+    text = "".join(ch if ch.isprintable() else " " for ch in text)
+    text = " ".join(text.split())
+    if len(text) > _MAX_DETAIL:
+        text = text[:_MAX_DETAIL] + "..."
+    return text
+
+
+def _log_mlflow_failure(operation: str, exc: Exception) -> None:
+    """MLflow is optional telemetry: report the failure, never raise from it.
+
+    Without this the caller cannot tell an outage from a quiet success -- for
+    get_experiment_stats in particular, a failure and an empty experiment both
+    produced total_runs = 0.
+    """
+    logger.warning(
+        "MLflow %s failed: %s: %s", operation, type(exc).__name__, _sanitized(exc)
+    )
 
 
 def _to_dict(input_data):
@@ -100,8 +153,8 @@ def log_prediction(
             mlflow.set_tag("type", "prediction")
             if conf_value is not None:
                 mlflow.set_tag("confidence", str(conf_value))
-    except Exception:
-        pass
+    except Exception as e:
+        _log_mlflow_failure("log_prediction", e)
 
 
 def log_evaluation(project_name: str, esg_scores: dict, risk_level: str):
@@ -123,8 +176,8 @@ def log_evaluation(project_name: str, esg_scores: dict, risk_level: str):
             mlflow.set_tag("project", project_name)
             mlflow.set_tag("risk_level", risk_level)
             mlflow.set_tag("type", "evaluation")
-    except Exception:
-        pass
+    except Exception as e:
+        _log_mlflow_failure("log_evaluation", e)
 
 
 def log_model_registry(model, model_name: str, metrics: dict):
@@ -135,8 +188,8 @@ def log_model_registry(model, model_name: str, metrics: dict):
             mlflow.log_metrics(metrics)
             mlflow.sklearn.log_model(model, model_name)
             mlflow.set_tag("type", "model_registry")
-    except Exception:
-        pass
+    except Exception as e:
+        _log_mlflow_failure("log_model_registry", e)
 
 
 def get_experiment_stats():
@@ -172,13 +225,18 @@ def get_experiment_stats():
             result["_source"] = "retrain_log"
     except Exception as e:
         result["_sqlite_error"] = str(e)
-    try:
-        experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
-        if experiment:
-            runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], max_results=100)
-            result["total_runs"] = len(runs)
-    except Exception:
-        pass
+    if not _OFFLINE:
+        try:
+            experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
+            if experiment:
+                runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], max_results=100)
+                result["total_runs"] = len(runs)
+        except Exception as e:
+            # total_runs stays 0 either way. The warning is deliberately the only
+            # signal: this dict is returned verbatim by GET /api/v1/mlflow/stats
+            # (app/api/infra.py), so adding a field here would change a public
+            # response and leak an internal exception class to clients.
+            _log_mlflow_failure("get_experiment_stats", e)
     return result
 
 

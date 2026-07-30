@@ -134,7 +134,7 @@ class TestAuthEdgeCases:
         assert r.status_code in [200, 401, 403]
 
     def test_invalid_api_key(self):
-        r = client.get("/api/v1/model/feature-importance", headers={"X-API-Key": "invalid-key-12345"})
+        r = client.get("/api/v1/model/feature-importance", headers={"X-API-Key": "not-a-real-credential-invalid-by-design"})
         assert r.status_code in [200, 403]
 
 
@@ -177,56 +177,71 @@ class TestRetrainEdgeCases:
 
 
 class TestBulkUpload:
+    """The endpoint is admin-only and reads only from UPLOADS_DIR.
+
+    These tests used to post unauthenticated with arbitrary absolute paths,
+    which is the behaviour that made the endpoint an unauthenticated arbitrary
+    file read and a training-data poisoning vector. They now exercise the
+    secured contract; the security properties themselves live in
+    tests/test_bulk_upload_security.py.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _as_admin(self, tmp_path, monkeypatch):
+        from app.api import retrain
+        from app.auth import require_admin
+
+        uploads = tmp_path / "uploads"
+        uploads.mkdir()
+        monkeypatch.setattr(retrain, "UPLOADS_DIR", str(uploads))
+        app.dependency_overrides[require_admin] = lambda: {"username": "admin", "role": "admin"}
+        self.uploads = uploads
+        yield
+        app.dependency_overrides.pop(require_admin, None)
+
+    def _write(self, name: str, body: str) -> str:
+        (self.uploads / name).write_text(body)
+        return name
+
     def test_bulk_upload_file_not_found(self):
-        r = client.post("/api/v1/model/data/bulk-upload?file_path=/tmp/nonexistent_xyz.csv")
+        r = client.post("/api/v1/model/data/bulk-upload?file_path=nonexistent_xyz.csv")
         assert r.status_code == 400
 
     def test_bulk_upload_invalid_csv(self):
-        import tempfile
-        import os
-        f = tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w")
-        f.write("not,valid,csv\n\x00\x01\x02")
-        f.close()
-        r = client.post(f"/api/v1/model/data/bulk-upload?file_path={f.name}")
-        os.unlink(f.name)
+        name = self._write("invalid.csv", "not,valid,csv\n\x00\x01\x02")
+        r = client.post(f"/api/v1/model/data/bulk-upload?file_path={name}")
         assert r.status_code == 400
 
     def test_bulk_upload_missing_columns(self):
-        import tempfile
-        import os
-        f = tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w")
-        f.write("budget,co2_reduction\n100,50\n")
-        f.close()
-        r = client.post(f"/api/v1/model/data/bulk-upload?file_path={f.name}")
-        os.unlink(f.name)
+        name = self._write("missing.csv", "budget,co2_reduction\n100,50\n")
+        r = client.post(f"/api/v1/model/data/bulk-upload?file_path={name}")
         assert r.status_code == 400
         assert "Missing columns" in r.json()["detail"]
 
     def test_bulk_upload_invalid_success(self):
-        import tempfile
-        import os
-        f = tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w")
-        f.write("budget,co2_reduction,social_impact,duration_months,success\n100,50,3,6,5\n")
-        f.close()
-        r = client.post(f"/api/v1/model/data/bulk-upload?file_path={f.name}")
-        os.unlink(f.name)
+        name = self._write(
+            "bad_success.csv",
+            "budget,co2_reduction,social_impact,duration_months,success\n100,50,3,6,5\n",
+        )
+        r = client.post(f"/api/v1/model/data/bulk-upload?file_path={name}")
         assert r.status_code == 400
         assert "invalid success" in r.json()["detail"]
 
     def test_bulk_upload_success(self):
-        import tempfile
-        import os
         import shutil
+
         shutil.copy("data/projects.csv", "data/projects.csv.bak_test")
-        f = tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w")
-        f.write("budget,co2_reduction,social_impact,duration_months,success\n100000,80,7,12,1\n")
-        f.close()
-        r = client.post(f"/api/v1/model/data/bulk-upload?file_path={f.name}")
-        os.unlink(f.name)
-        shutil.copy("data/projects.csv.bak_test", "data/projects.csv")
-        os.unlink("data/projects.csv.bak_test")
-        assert r.status_code == 200
-        assert r.json()["rows_added"] == 1
+        try:
+            name = self._write(
+                "good.csv",
+                "budget,co2_reduction,social_impact,duration_months,success\n100000,80,7,12,1\n",
+            )
+            r = client.post(f"/api/v1/model/data/bulk-upload?file_path={name}")
+            assert r.status_code == 200
+            assert r.json()["rows_added"] == 1
+        finally:
+            shutil.copy("data/projects.csv.bak_test", "data/projects.csv")
+            os.unlink("data/projects.csv.bak_test")
 
 
 class TestAdminAuth:

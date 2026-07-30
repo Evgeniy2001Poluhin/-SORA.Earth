@@ -10,49 +10,49 @@ from sqlalchemy import text
 from datetime import datetime, timezone
 
 from app.ingesters.base import Signal
-from app.ingesters.openaq import OpenAQIngester
 from app.ingesters.sber_veb_baseline import SberVebBaselineIngester
 from app.ingesters.rosstat import RosstatIngester
 
 log = logging.getLogger(__name__)
 
+# OpenAQ and Open-Meteo are owned exclusively by their hourly scheduled jobs
+# (scheduled_openaq_ingestion / scheduled_openmeteo_ingestion in
+# app/services/environmental/scheduler_jobs.py) — do not add them here, or
+# their signals get persisted twice (once by the hourly job, once by this
+# 24h runner).
 INGESTERS = [
     SberVebBaselineIngester,
     RosstatIngester,
-    OpenAQIngester,
 ]
 
 
-def _persist_signals(signals: list[Signal]) -> int:
-    """Persist signals to DB. Falls back to no-op if models not available."""
-    try:
-        from app.database import SessionLocal
-        from app.database import RegionSignal  # может отсутствовать
-    except ImportError:
-        log.warning("[runner] RegionSignal model s not persisted")
-        return 0
+def _persist_signals(signals: list[Signal], source: str) -> dict:
+    """Persist signals to DB with upsert logic.
 
-    db = SessionLocal()
-    saved = 0
+    Args:
+        signals: List of Signal objects
+        source: Data source name for conflict resolution
+
+    Returns:
+        Dict with persist statistics
+    """
     try:
-        for s in signals:
-            row = RegionSignal(
-                region_code=s.region_code,
-                source=s.source,
-                metric=s.metric,
-                value=s.value,
-                unit=s.unit,
-                observed_at=s.observed_at or datetime.now(timezone.utc),
-            )
-            db.add(row)
-            saved += 1
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        log.exception("[runner] persist failed: %s", e)
-    finally:
-        db.close()
-    return saved
+        from app.ingesters.persist import persist_environmental_observations
+    except ImportError:
+        log.warning("[runner] persist module not available")
+        return {"saved": 0, "error": "persist_unavailable"}
+
+    result = persist_environmental_observations(signals, source)
+
+    return {
+        "received": result.received,
+        "inserted": result.inserted,
+        "updated": result.updated,
+        "accepted": result.accepted,
+        "rejected": result.rejected,
+        "duplicates": result.duplicates,
+        "errors": result.errors[:5] if result.errors else [],
+    }
 
 
 
@@ -95,27 +95,28 @@ def _audit_finish(rid, status, rows_written=None, error=None):
 async def run_all_ingesters() -> dict:
     """Run all registered ingesters, return stats."""
     stats = {"started_at": datetime.now(timezone.utc).isoformat(), "ingesters": {}}
-    total_signals: list[Signal] = []
 
     for cls in INGESTERS:
         ing = cls()
         rid = _audit_start(ing.name)
         try:
             signals = await ing.fetch_with_retry()
+
+            # Persist signals immediately per source
+            persist_result = _persist_signals(signals, ing.name)
+
             stats["ingesters"][ing.name] = {
                 "status": "ok",
                 "signals": len(signals),
                 "regions": len({s.region_code for s in signals}),
+                "persist": persist_result,
             }
-            total_signals.extend(signals)
             log.info("[runner] %s: %d signals", ing.name, len(signals))
-            _audit_finish(rid, "ok", rows_written=len(signals))
+            _audit_finish(rid, "ok", rows_written=persist_result.get("accepted", 0))
         except Exception as e:
             stats["ingesters"][ing.name] = {"status": "error", "error": str(e)}
             log.exception("[runner] %s failed: %s", ing.name, e)
             _audit_finish(rid, "error", error=e)
-
-    saved = _persist_signals(total_signals)
 
     try:
         from app.services.esg_aggregator import recalc_all_regions
@@ -125,11 +126,24 @@ async def run_all_ingesters() -> dict:
     except Exception as e:
         log.exception("[runner] aggregation failed: %s", e)
         stats["aggregation"] = {"status": "error", "error": str(e)}
-    stats["total_signals"] = len(total_signals)
-    stats["persisted"] = saved
+
+    # Aggregate persist stats
+    total_received = sum(
+        ing_stats.get("persist", {}).get("received", 0)
+        for ing_stats in stats["ingesters"].values()
+        if isinstance(ing_stats, dict)
+    )
+    total_accepted = sum(
+        ing_stats.get("persist", {}).get("accepted", 0)
+        for ing_stats in stats["ingesters"].values()
+        if isinstance(ing_stats, dict)
+    )
+
+    stats["total_signals"] = total_received
+    stats["total_persisted"] = total_accepted
     stats["finished_at"] = datetime.now(timezone.utc).isoformat()
 
-    log.info("[runner] done: %d signals total, %d persisted", len(total_signals), saved)
+    log.info("[runner] done: %d signals total, %d persisted", total_received, total_accepted)
     return stats
 
 

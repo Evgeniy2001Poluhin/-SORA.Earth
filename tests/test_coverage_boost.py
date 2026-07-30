@@ -203,8 +203,16 @@ class TestMainCoverage:
         assert c.get("/health").status_code == 200
 
     def test_root(self):
+        """The route must answer; which answer depends on whether the UI exists.
+
+        This asserted 200 unconditionally, from when app/static/spa was tracked
+        and there was always something to serve. Once the SPA became build
+        output, 200 depends on whether anyone ran `npm run build` -- so the
+        contract worth pinning is that the route returns a status rather than
+        raising, and that 404 is what a missing UI looks like.
+        """
         c = TestClient(app, raise_server_exceptions=False)
-        assert c.get("/").status_code == 200
+        assert c.get("/").status_code in (200, 404)
 
     def test_openapi(self):
         c = TestClient(app, raise_server_exceptions=False)

@@ -1,0 +1,56 @@
+# Secret scanning configuration.
+#
+# The allowlist is deliberately small and every entry names why it is there.
+# A broad path or regex exclusion is worse than no scanner: it silences the
+# findings nobody has looked at yet along with the ones somebody has.
+#
+# Nothing here suppresses a rule globally. Each exception is pinned to a path,
+# and where the match is a known identifier, to that identifier.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "sora-openai-key"
+description = "OpenAI or OpenRouter API key"
+# The leading class is not decoration: without it the pattern matches inside
+# ordinary words -- npm ships packages called gfm-task-list-item, and "ta|sk-|list"
+# looked exactly like a key. Go's regexp has no lookbehind, so the boundary is
+# part of the match.
+regex = '''(^|[^A-Za-z0-9_\-])sk-[A-Za-z0-9]{20,}'''
+keywords = ["sk-"]
+
+[allowlist]
+description = "Reviewed exceptions. Each one states what it is and why it is not a secret."
+
+paths = [
+  # Build output. The bundler inlines the same field names the source declares,
+  # so a false positive in the source reappears here verbatim. Scanning
+  # generated artefacts finds nothing the source does not already show.
+  '''app/static/spa/assets/.*''',
+  '''web/static/spa/assets/.*''',
+  # Dependencies, never our code.
+  '''\.venv.*''',
+  '''node_modules/.*''',
+  # Sibling worktrees are checkouts of this same repository. Scanning them
+  # multiplies every finding by the number of worktrees and hides the total.
+  '''\.claude/worktrees/.*''',
+]
+
+regexes = [
+  # The generic-api-key rule matches these three field names from the What-If
+  # form. They are UI parameter keys, present in the rendered page, and carry
+  # no credential. Pinned to the exact strings rather than the file, so a real
+  # secret added to the same file is still caught.
+  '''co2_reduction_tons''',
+  '''social_impact_score''',
+  '''budget_efficiency''',
+  # An obviously non-functional value used to assert that the endpoint rejects
+  # a bad key. If this ever became a working credential the test would stop
+  # testing what it claims to.
+  # The value a test sends to assert the endpoint rejects a bad key. Renamed to
+  # say so out loud rather than allowlisted while looking plausible -- an
+  # exception that needs a comment to explain it is not a secret is an
+  # exception that will outlive the reason for it.
+  '''not-a-real-credential-invalid-by-design''',
+]

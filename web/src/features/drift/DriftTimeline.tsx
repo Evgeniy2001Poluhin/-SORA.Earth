@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid } from "recharts";
 import { driftBaselineApi } from "@/api/endpoints/driftBaseline";
-import type { MlflowDriftEvent } from "@/api/endpoints/driftBaseline";
+import type { MlflowDriftEvent, KsFeatureStat } from "@/api/endpoints/driftBaseline";
 
 export function DriftTimeline() {
   const tl = useQuery({ queryKey: ["drift-mlflow-history"], queryFn: driftBaselineApi.mlflowHistory, refetchInterval: 30000 });
@@ -20,7 +20,7 @@ export function DriftTimeline() {
       features: e["params.drifted_features"] || "-",
     }));
 
-  const ksFeatures = ks.data && ks.data.features && typeof ks.data.features === 'object' ? Object.entries(ks.data.features as Record<string, any>) : [];
+  const ksFeatures = ks.data && ks.data.features && typeof ks.data.features === 'object' ? Object.entries(ks.data.features as Record<string, KsFeatureStat>) : [];
 
   return (
     <div>

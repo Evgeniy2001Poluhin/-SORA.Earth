@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+  # No branch filter: a stacked pull request targets its parent branch rather
+  # than main, and with [main] here it received no checks at all and could not
+  # be reviewed against CI.
   pull_request:
-    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -13,9 +15,51 @@ concurrency:
 jobs:
   backend-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
+          # No authenticated git operation runs after checkout -- the only git
+          # call is a local `git lfs ls-files` -- so the token does not need to
+          # stay in .git/config where later steps could read it.
+          persist-credentials: false
+
+      - name: Verify Git LFS model artifacts
+        shell: bash
+        run: |
+          git lfs ls-files
+
+          python - <<'PY'
+          from pathlib import Path
+
+          required = [
+              Path("models/scaler.pkl"),
+              Path("models/model.pkl"),
+              Path("models/xgb_model.pkl"),
+              Path("models/stacking_meta.pkl"),
+              Path("models/best_threshold.pkl"),
+          ]
+
+          pointer_prefix = b"version https://git-lfs.github.com/spec/v1"
+
+          for path in required:
+              if not path.is_file():
+                  raise SystemExit(f"Required LFS artifact is missing: {path}")
+
+              content = path.read_bytes()
+
+              if content.startswith(pointer_prefix):
+                  raise SystemExit(f"LFS artifact is still a pointer: {path}")
+
+              if not content:
+                  raise SystemExit(f"LFS artifact is empty: {path}")
+
+              print(f"Materialized: {path} ({len(content)} bytes)")
+          PY
+
+      - name: Materialize Git LFS models
+        run: git lfs pull
 
       - uses: actions/setup-python@v5
         with:
@@ -26,6 +70,17 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install pytest pytest-cov pytest-timeout
+
+      - name: Verify backend model loading
+        env:
+          SORA_OFFLINE: "1"
+          RUN_SCHEDULER: "false"
+        run: |
+          python - <<'PY'
+          from app.main import app
+
+          print(f"Backend import successful: {type(app).__name__}")
+          PY
 
       - name: Run tests
         run: |
@@ -40,8 +95,13 @@ jobs:
           REDIS_URL: ""
           SECRET_KEY: "ci-test-secret"
           SORA_ADMIN_TOKEN: "ci-test-admin"
+          SORA_OFFLINE: "1"
+          RUN_SCHEDULER: "false"
 
       - name: Run forecasting tests
+        env:
+          SORA_OFFLINE: "1"
+          RUN_SCHEDULER: "false"
         run: |
           python -m pytest tests/test_forecasting_*.py \
             -v --timeout=60
@@ -54,6 +114,8 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -70,8 +132,61 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Unit tests
+        run: npm run test
+
       - name: Build
         run: npm run build
+
+  environmental-postgres-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sora
+          POSTGRES_PASSWORD: sora2026
+          POSTGRES_DB: sora_earth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-timeout
+
+      # The removed GAP-001 bootstrap script used to bring the schema up as a
+      # side effect of its round-trip. The persistence tests need the tables to
+      # exist, so the chain is now run explicitly rather than incidentally.
+      - name: alembic upgrade head
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
+      - name: Run environmental persistence tests against PostgreSQL
+        run: |
+          python -m pytest \
+            tests/test_environmental_persist.py \
+            -v --tb=short --timeout=120
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+          REDIS_URL: ""
+          SECRET_KEY: "ci-test-secret"
+          SORA_ADMIN_TOKEN: "ci-test-admin"
+          MLFLOW_TRACKING_URI: "sqlite:///./test_mlflow.db"
 
   integration-tests:
     runs-on: ubuntu-latest
@@ -103,6 +218,8 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -123,3 +240,193 @@ jobs:
           REDIS_URL: "redis://localhost:6379/0"
           SECRET_KEY: "ci-test-secret"
           SORA_ADMIN_TOKEN: "ci-test-admin"
+
+  # A clean database must be reachable from migrations alone. Production was
+  # bootstrapped with Base.metadata.create_all(), which is not reproducible from
+  # the repository, so this gate runs the chain against an empty PostgreSQL.
+  migration-bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sora
+          POSTGRES_PASSWORD: sora2026
+          POSTGRES_DB: sora_bootstrap
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_bootstrap"
+      SORA_OFFLINE: "1"
+      RUN_SCHEDULER: "false"
+      SECRET_KEY: "ci-test-secret"
+      SORA_ADMIN_TOKEN: "ci-test-admin"
+    steps:
+      # tests/conftest.py imports app.main, which unpickles the LFS models, so
+      # the scenario step needs them materialised like backend-tests does.
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-timeout
+
+      - name: Assert the database starts empty
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          tables = inspect(engine).get_table_names()
+          assert tables == [], f"database is not empty: {tables}"
+          print("Database is empty, as required for a bootstrap test")
+          PY
+
+      - name: alembic upgrade head
+        run: alembic upgrade head
+
+      - name: Verify schema and single head
+        run: |
+          alembic current
+          alembic heads
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          inspector = inspect(engine)
+          tables = set(inspector.get_table_names())
+          views = set(inspector.get_view_names())
+
+          # region_esg_scores backs the regional_esg_snapshot view; both must
+          # exist after a migration-only bootstrap.
+          required_tables = {"alembic_version", "region_esg_scores"}
+          missing = required_tables - tables
+          assert not missing, f"missing tables after upgrade head: {sorted(missing)}"
+          assert "regional_esg_snapshot" in views, f"view missing, have: {sorted(views)}"
+          print(f"{len(tables)} tables, {len(views)} views")
+          PY
+
+      - name: downgrade and upgrade round-trip
+        run: |
+          alembic downgrade -1
+          alembic upgrade head
+
+      - name: Offline SQL generation
+        run: |
+          alembic upgrade 31e5cc432377:b7c1e4a92f30 --sql > /tmp/offline.sql
+          grep -q 'DO \$migration\$' /tmp/offline.sql
+          echo "Offline script generated without an Inspector"
+
+      - name: Convergence scenarios against PostgreSQL
+        run: |
+          python -m pytest tests/test_migration_region_esg_scores.py \
+            tests/test_migration_converge_on_head.py \
+            -v --tb=short --timeout=120
+
+      # The bootstrap above starts empty, so it never exercises the case this
+      # chain actually has to survive: a deployment already recorded at
+      # 0b0ff6d1594e, carrying the legacy table that create_all() left behind.
+      # b7c1e4a92f30 is an ancestor of that revision and is therefore treated
+      # as applied without ever running, so only e3f8a7c15d92 converges it.
+      - name: Catch-up convergence on a database already past b7c1e4a92f30
+        env:
+          CATCHUP_URL: "postgresql://sora:sora2026@localhost:5432/sora_catchup"
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          admin = create_engine(os.environ["DATABASE_URL"], isolation_level="AUTOCOMMIT")
+          with admin.connect() as conn:
+              conn.execute(text("DROP DATABASE IF EXISTS sora_catchup"))
+              conn.execute(text("CREATE DATABASE sora_catchup"))
+          admin.dispose()
+
+          engine = create_engine(os.environ["CATCHUP_URL"])
+          with engine.begin() as conn:
+              conn.execute(text("""
+                  CREATE TABLE region_esg_scores (
+                      region_code   text PRIMARY KEY,
+                      env_score     real,
+                      social_score  real,
+                      gov_score     real,
+                      total_score   real,
+                      confidence    real,
+                      updated_at    timestamptz NOT NULL DEFAULT now()
+                  )"""))
+              # what cb5a035aed2f added on top of it
+              conn.execute(text("ALTER TABLE region_esg_scores "
+                                "ADD COLUMN id BIGINT GENERATED ALWAYS AS IDENTITY"))
+              conn.execute(text("ALTER TABLE region_esg_scores ADD COLUMN sources_count INTEGER"))
+              conn.execute(text("ALTER TABLE region_esg_scores ADD COLUMN signals_used INTEGER"))
+              conn.execute(text("CREATE UNIQUE INDEX ix_region_esg_scores_id "
+                                "ON region_esg_scores(id)"))
+              conn.execute(text("""
+                  CREATE VIEW regional_esg_snapshot AS
+                  SELECT region_code, env_score AS e_score, social_score AS s_score,
+                         gov_score AS g_score, total_score AS score, confidence,
+                         ARRAY[]::text[] AS sources_used, updated_at AS computed_at
+                    FROM region_esg_scores"""))
+              conn.execute(text("""
+                  INSERT INTO region_esg_scores
+                         (region_code, env_score, social_score, gov_score, total_score, confidence)
+                  SELECT 'RU-' || lpad(g::text, 3, '0'), 50+g*0.1, 60+g*0.1, 55+g*0.1, 58+g*0.1, 0.8
+                    FROM generate_series(1, 85) g"""))
+              conn.execute(text("CREATE TABLE alembic_version "
+                                "(version_num varchar(32) NOT NULL PRIMARY KEY)"))
+              conn.execute(text("INSERT INTO alembic_version VALUES ('0b0ff6d1594e')"))
+          engine.dispose()
+          print("legacy database staged at 0b0ff6d1594e with 85 rows")
+          PY
+
+          DATABASE_URL="$CATCHUP_URL" alembic upgrade head
+
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(os.environ["CATCHUP_URL"])
+          with engine.begin() as conn:
+              columns = dict(conn.execute(text("""
+                  SELECT a.attname, format_type(a.atttypid, a.atttypmod)
+                    FROM pg_attribute a
+                   WHERE a.attrelid = 'region_esg_scores'::regclass
+                     AND a.attnum > 0 AND NOT a.attisdropped""")).fetchall())
+              pk = [r[0] for r in conn.execute(text("""
+                  SELECT a.attname FROM pg_constraint con
+                    JOIN pg_attribute a ON a.attrelid = con.conrelid
+                                       AND a.attnum = ANY (con.conkey)
+                   WHERE con.conrelid = 'region_esg_scores'::regclass
+                     AND con.contype = 'p'""")).fetchall()]
+              rows = conn.execute(text("SELECT count(*) FROM region_esg_scores")).scalar()
+              view_rows = conn.execute(text("SELECT count(*) FROM regional_esg_snapshot")).scalar()
+
+          assert pk == ["id"], f"primary key was not moved to id: {pk}"
+          assert columns["region_code"] == "character varying(10)", columns["region_code"]
+          for score in ("env_score", "social_score", "gov_score", "total_score", "confidence"):
+              assert columns[score] == "double precision", f"{score} is {columns[score]}"
+          assert rows == 85, f"rows were lost: {rows}"
+          assert view_rows == 85, f"view lost rows: {view_rows}"
+          print("legacy database converged, 85 rows and the view intact")
+          PY
+
+      - name: Offline SQL generation for the catch-up revision
+        run: |
+          alembic upgrade 0b0ff6d1594e:e3f8a7c15d92 --sql > /tmp/offline_catchup.sql
+          grep -q 'DO \$migration\$' /tmp/offline_catchup.sql
+          echo "Catch-up offline script generated without an Inspector"

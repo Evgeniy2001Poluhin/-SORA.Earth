@@ -26,7 +26,7 @@
 - ✅ Comprehensive security documentation created
 
 **Manual Actions Required:**
-- 🔴 Rotate exposed OpenAI API keys (sk-proj-hEHc0Ymh..., sk-or-v1-6d4048dd...)
+- 🔴 Rotate exposed OpenAI API keys (sk-<redacted: see SECRETS.md>..., sk-<redacted: see SECRETS.md>...)
 - 🔴 Generate new JWT secret and admin token
 - 🔴 Set strong passwords for default users
 
@@ -39,8 +39,8 @@
 **File:** `.env` (line 28-30)  
 **Exposed Keys:**
 ```
-OPENAI_API_KEY=sk-proj-hEHc0Ymhlb3ZvqRE4wg03z1...  (OpenAI Platform)
-OPENAI_API_KEY=sk-or-v1-6d4048dd01c6c91e2c4e...    (OpenRouter)
+OPENAI_API_KEY=sk-<redacted: see SECRETS.md>...  (OpenAI Platform)
+OPENAI_API_KEY=sk-<redacted: see SECRETS.md>...    (OpenRouter)
 ```
 
 **Risk:** Unauthorized API usage, potential $$ charges

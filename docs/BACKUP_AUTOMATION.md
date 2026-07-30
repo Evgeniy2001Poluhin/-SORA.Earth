@@ -1,0 +1,323 @@
+# Scheduled backups
+
+Extends the manual tooling in `docs/BACKUP_RESTORE.md`. That document proves a
+dump can be restored; this one is about doing it unattended, off the host, and
+in a form the host itself cannot read.
+
+## What runs
+
+```
+lock → dump → compress → encrypt → checksum → upload → verify
+     → publish manifest → retention → alert on failure
+```
+
+Every stage fails closed. `scripts/backup_run.sh <database>` is the whole job.
+
+## The completion contract
+
+S3 has no atomic rename, so the local trick — write a temporary object, then
+move it into place — does not exist. A reader can always catch a multi-object
+upload half finished, and a half-finished payload that looks like a backup is
+worse than no backup: you find out during an incident.
+
+So completion is explicit. Every object is written first and a small
+`manifest.json` is written **last**.
+
+**Nothing without a manifest is a backup.** Restore refuses it, retention
+ignores it, and it cannot take a weekly slot. Debris is swept separately, after
+a grace period, so an upload still in flight is never mistaken for it.
+
+## Encryption
+
+The backup host must not be able to read its own backups. A passphrase fails
+that: whatever encrypts also decrypts, so compromising the machine that runs the
+schedule hands over the archive with it.
+
+A **versioned OpenSSL envelope with encrypt-then-MAC**. The shape is the same
+one `age` and GPG use — a sealed data key over a symmetric payload — but this is
+not that format and has had none of its review. It is narrower, and the header
+exists so the algorithms can change later without a reader guessing.
+
+| object | contents |
+|---|---|
+| `payload.hdr` | envelope version and algorithm identifiers, in the clear |
+| `payload.enc` | AES-256-CBC under a per-backup data key |
+| `payload.mac` | HMAC-SHA256 over **header ‖ ciphertext** |
+| `payload.key` | the data key, IV and MAC key, sealed to an RSA public key with OAEP |
+
+The keys are independent, not one key reused: 80 random bytes per backup, split
+into a 32-byte AES key, a 32-byte HMAC key and a 16-byte IV. Using one key for
+both confidentiality and authentication weakens each.
+
+The header is authenticated **together with** the ciphertext. Signing only the
+ciphertext would leave the parameters describing it unprotected, which is how
+downgrade attacks on otherwise sound constructions work. An unrecognised version
+is refused before the payload is touched at all.
+
+Built on OpenSSL rather than `age` or GPG, neither of which is present in this
+environment, and a script that needs a package nobody installed is a schedule
+that never runs.
+
+The RSA seal is OpenSSL. The **symmetric half — AES-256-CBC and the HMAC — runs
+in `scripts/backup_crypt.py`**, because `openssl enc` accepts a raw key only as
+`-K <hex>` and `openssl dgst` its MAC key only as `-macopt hexkey:<hex>`. Both
+land in `/proc/<pid>/cmdline`, which is mode 444: measured on Linux, an
+unprivileged user read the AES key out of it while root was encrypting. Every
+OpenSSL option that keeps a secret off the argument list feeds a passphrase
+through a KDF instead, which would be a different envelope — so the only way to
+keep both the format and the guarantee was to stop using the CLI for that step.
+The helper reads the key material from a file the caller creates `0600`; only the
+path reaches `argv`, and a path is not a secret.
+
+The wire format did not change when that moved. A test encrypts with the helper
+and decrypts with `openssl enc`, and the reverse, and compares the ciphertexts
+byte for byte — which is why the version field is still `/1`.
+
+The helper needs `cryptography`, which is already in `requirements.txt`. Point
+`BACKUP_PYTHON` at the interpreter that has the application's dependencies. It is
+checked once at the start of encrypt and decrypt, and refuses with instructions
+rather than discovering it at 03:00.
+
+Authentication happens **before** decryption: a modified payload is refused, not
+decrypted and then judged.
+
+Generating the pair — the private half never reaches the backup host:
+
+```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out identity.pem
+openssl pkey -in identity.pem -pubout -out recipient.pem
+```
+
+## Configuration
+
+| variable | meaning |
+|---|---|
+| `BACKUP_RECIPIENT_KEY` | public key; the only key the backup host needs |
+| `BACKUP_IDENTITY_KEY` | private key; **restore side only** |
+| `BACKUP_S3_ENDPOINT` | any S3-compatible endpoint |
+| `BACKUP_S3_BUCKET`, `BACKUP_S3_PREFIX`, `BACKUP_S3_REGION` | object location |
+| `BACKUP_S3_ACCESS_KEY_FILE`, `BACKUP_S3_SECRET_KEY_FILE` | credentials, read from files |
+| `BACKUP_S3_CLIENT` | client executable, default `aws` |
+| `BACKUP_KEEP_ROLLING`, `BACKUP_KEEP_WEEKLY` | retention, default 28 and 8 |
+| `BACKUP_ALERT_HOOK` | executable called on failure |
+| `BACKUP_PYTHON` | interpreter for `backup_crypt.py`, default `python3`; needs `cryptography` |
+| `BACKUP_RUNTIME_DIR` | `0700` directory owned by the service user, for the lock; **required in production** |
+
+Credentials are read from files and exported to the client, never passed as
+arguments — an argument list is readable by every process on the host. That rule
+applies to the envelope's keys too; see above for why that meant leaving the
+OpenSSL CLI for one step.
+
+## Retention
+
+- the newest **28** completed backups
+- the newest completed backup of each of the last **8** ISO weeks
+- one backup can be both; the keep-set is a union
+- the whole keep-set is computed **before** anything is deleted
+- the newest completed backup is never deleted, whatever the settings say
+- a retention failure alerts but does not invalidate the backup that just ran
+
+Dry run by default. `BACKUP_RETENTION_APPLY=1` to act.
+
+## Restore
+
+```bash
+BACKUP_RESTORE_TARGET=sora_drill \
+BACKUP_IDENTITY_KEY=identity.pem \
+  ./scripts/backup_restore.sh <backup-id>
+```
+
+Both the backup and the target are explicit and neither has a default.
+`sora_earth` and `postgres` are refused outright — a production restore is a
+decision with a rollback plan, not a command. The payload is checked against the
+manifest before anything touches PostgreSQL, and no plaintext survives the run.
+
+## Promotion is not an atomic swap
+
+The restore *construction* is atomic — `--single-transaction`, into a staging
+database, discarded on any failure. Taking the name afterwards is not, and
+calling it "promotion" should not suggest otherwise:
+
+```
+DROP DATABASE target
+ALTER DATABASE staging RENAME TO target
+```
+
+Two statements, not one. Between them the target does not exist, and a process
+that dies in the gap leaves it that way. Both statements also fail outright if
+anyone is connected — measured:
+
+```
+ALTER DATABASE stg RENAME TO tgt
+ERROR:  database "stg" is being accessed by other users
+DETAIL:  There is 1 other session using the database.
+```
+
+So a running application defeats the swap rather than surviving it, and a
+connection pool that reconnects during the gap will find nothing there.
+
+**This script therefore refuses production.** `sora_earth` and `postgres` are on
+`BACKUP_PROTECTED_DATABASES` and the restore exits before doing anything. What
+is automated here is restoring into a disposable target — a drill, a copy for
+investigation — not replacing a live database.
+
+### Replacing a live database is a runbook, not a command
+
+It needs, in order: owner approval, maintenance mode, writers stopped, sessions
+inspected and terminated, the pool paused. Then rename the current target to a
+**rollback name** rather than dropping it, rename staging into place, reconnect,
+run smoke checks, and keep the rollback database until the result is accepted.
+Dropping it is a separate approved action, later.
+
+The difference that matters: never drop the old database before a rollback name
+exists. This script's `DROP` then `RENAME` is acceptable for a disposable target
+precisely because there is nothing to roll back to.
+
+## RPO: what is claimed and what is not
+
+These are different things and conflating them is how a backup policy becomes
+fiction:
+
+| | |
+|---|---|
+| **Proposed RPO** | ≤ 6 hours, on a four-times-daily schedule |
+| **Configured schedule** | none — nothing is installed |
+| **Observed interval** | none — no scheduled run has happened |
+| **Verified restore** | yes, against PostgreSQL 16 — see below |
+
+### Drill result
+
+Backup and restore of a database carrying the production shape, PostgreSQL 16:
+
+```
+fingerprints IDENTICAL — 295 lines
+  181 column     63 index      16 table
+   16 rows       16 constraint  1 view
+    1 content hash              1 alembic revision
+```
+
+Refusals, exercised against the objects as actually stored rather than in a unit
+test — in every case the database was never touched:
+
+| damage | outcome |
+|---|---|
+| algorithm line rewritten in the header | refused: payload failed authentication |
+| one byte flipped in the ciphertext | refused: checksum disagrees with the manifest |
+| manifest claiming a different checksum | refused: checksum disagrees with the manifest |
+| none | restored |
+
+The first is what the header authentication is for. Signing only the ciphertext
+would have let that edit through to a reader that believed the algorithm line.
+
+### What the drill proves, and what it does not
+
+Two distinctions are worth keeping apart, because conflating them overstates the
+guarantee.
+
+**Verified** — the fingerprint compares these before and after, and they matched:
+
+| | count |
+|---|---|
+| tables | 16 |
+| columns, with type, nullability and default | 181 |
+| indexes, with definition | 63 |
+| constraints, with definition | 16 |
+| views | 1 |
+| row counts, per table | 16 |
+| content hash of `region_esg_scores` | 1 |
+| Alembic revision | 1 |
+
+**Restored but not verified.** `pg_dump -F c` carries these and `pg_restore`
+puts them back; the fingerprint simply does not compare them, so a fault in that
+path would not be caught here:
+
+- current values of sequences
+- extensions
+- triggers and functions
+- large objects
+
+**Not carried at all:**
+
+- roles — cluster-level, absent from a single-database dump
+- database-level settings
+
+**Ownership** is deliberately not restored: `pg_restore --no-owner`. Reproducing
+it needs the same roles to exist and can require superuser.
+
+**Grants are a separate question from ownership**, and the answer is not the one
+that sounds obvious. Measured on PostgreSQL 16 with the exact commands these
+scripts run:
+
+| target cluster | outcome |
+|---|---|
+| grantee role exists | ACL restored **byte-identically**, named grant and `PUBLIC` alike |
+| grantee role absent | the whole `GRANT` group fails; **every ACL on that table is lost**, including the `PUBLIC` grant that did not depend on the missing role |
+
+`--no-owner` suppresses ownership; it says nothing about privileges. Grants are
+in the dump and are restored — provided the roles are there to receive them.
+
+### A non-zero exit is not a rollback
+
+`pg_restore` exits 1 when the GRANT fails — but reporting failure is not the
+same as undoing anything. It does not roll back the statements it already
+applied, so an ordinary restore leaves the target **partially populated**, which
+is worse than empty because it looks usable. Measured:
+
+| restore | exit | what is in the database afterwards |
+|---|---|---|
+| plain `pg_restore` | 1 | the table, with all 50 rows |
+| `--single-transaction --exit-on-error` | 1 | nothing — `relation "t" does not exist` |
+
+The first row is the trap: an operator sees a failure, finds a populated
+database, and reasonably concludes it mostly worked. What is missing is the
+privileges, and nothing says so.
+
+So the restore is transactional, and it does not touch the target until it has
+something good to put there:
+
+```
+create staging → restore into it → drop the target → rename staging into place
+```
+
+An earlier version dropped the target first. That destroys what was there
+before the replacement is known to work — the failing restore above would have
+left nothing to go back to. Verified: with the role missing, a target holding
+its own data came through untouched.
+
+This is a **database** backup, not a cluster backup.
+
+**The actual RPO today is undefined.** Not poor — undefined. Nothing takes a
+backup on a schedule, so what would come back is whatever someone last ran by
+hand, of unknown age. Restoring in seconds does not help with that.
+
+Choosing the schedule is a decision about acceptable data loss, and installing
+it is an owner action. Nothing here touches production.
+
+## What the restore evidence means
+
+Two numbers appear in the drill output and they measure different things:
+
+| | |
+|---|---|
+| **85** | rows in `region_esg_scores` — the seeded production shape |
+| **295** | lines in the fingerprint, one per recorded fact |
+
+The fingerprint is not a row dump. It records the Alembic revision, every table,
+every view, every column with its type, nullability and default, every
+constraint with its definition, every index with its definition, a row count for
+each table, and an MD5 over the ordered contents of `region_esg_scores`.
+
+Comparing those 295 lines before and after a restore is what makes "identical"
+mean something: a dump that restored the rows but lost an index, a constraint or
+the revision would differ, and a row count alone would not notice.
+
+## Portability
+
+Written for bash 3.2, which is what macOS ships: no `mapfile`, no associative
+arrays, no `flock`. Locking uses `mkdir`, which is atomic on every POSIX
+filesystem.
+
+`flock` is worth naming specifically. It is absent on macOS, and its absence
+produced the dangerous failure rather than a loud one: the script reported that
+another run held the lock, so a schedule would have looked healthy while backing
+up nothing at all.
