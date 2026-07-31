@@ -75,8 +75,12 @@ class DataRefreshLog(Base):
     countries_fetched = Column(Integer, default=0)
     total_countries = Column(Integer, default=0)
     message = Column(Text, nullable=True)
-    started_at = Column(DateTime, nullable=True)
-    finished_at = Column(DateTime, nullable=True)
+    # timezone=True to match migration 0d88c3e3c633, which declares these
+    # columns `sa.DateTime(timezone=True)`. The model said naive, the database
+    # has been timestamptz since that revision, and nothing reconciled them --
+    # found by the startup schema check, which is what it is for.
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
     duration_sec = Column(Float, nullable=True)
     trigger_source = Column(String(50), nullable=True, default="manual")
 

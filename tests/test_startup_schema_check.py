@@ -11,6 +11,8 @@ when the schema is there. A check that never fires is not a check.
 """
 
 import os
+import subprocess
+import sys
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -239,6 +241,94 @@ def test_types_are_compared_on_postgresql(tmp_path):
 
     message = str(excinfo.value)
     assert "VARCHAR(10)" in message and "VARCHAR(50)" in message, message
+
+
+@pytest.mark.skipif(
+    not os.getenv("DATABASE_URL", "").startswith("postgresql"),
+    reason="needs a PostgreSQL DATABASE_URL",
+)
+def test_a_canonical_postgresql_schema_passes():
+    """The control this file was missing, and its absence hid a serious fault.
+
+    Comparing *rendered* types found 42 disagreements on a schema the migrations
+    themselves had just built -- FLOAT against DOUBLE PRECISION, VARCHAR(50)
+    against an unbounded VARCHAR. The application would have refused to start on
+    every correct production database, and nothing here would have said so: the
+    other tests all assert refusals, and `TestClient(app)` without a `with` block
+    never fires the startup event at all.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy.engine import make_url
+    from app.main import assert_schema_ready
+
+    url = make_url(os.environ["DATABASE_URL"])
+    name = "sora_canon_%s" % _uuid.uuid4().hex[:12]
+    admin = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as conn:
+        conn.execute(text('CREATE DATABASE "%s"' % name))
+    scratch = url.set(database=name)
+    try:
+        migrated = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            env={**os.environ, "DATABASE_URL": scratch.render_as_string(hide_password=False)},
+            capture_output=True, text=True, timeout=300,
+        )
+        assert migrated.returncode == 0, migrated.stderr[-2000:]
+
+        engine = create_engine(scratch)
+        assert_schema_ready(engine=engine)      # must not raise
+        engine.dispose()
+    finally:
+        with admin.connect() as conn:
+            conn.execute(text(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = :n AND pid <> pg_backend_pid()"), {"n": name})
+            conn.execute(text('DROP DATABASE IF EXISTS "%s"' % name))
+        admin.dispose()
+
+
+@pytest.mark.skipif(
+    not os.getenv("DATABASE_URL", "").startswith("postgresql"),
+    reason="needs a PostgreSQL DATABASE_URL",
+)
+def test_a_widened_column_is_accepted():
+    """VARCHAR(50) to VARCHAR(100) is what a rolling deploy does.
+
+    The old version is still running and writes values it already fit into 50;
+    the wider column takes them. Refusing this would stop the deployment the
+    widening was part of, so compatibility -- not equality -- is the relation.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy.engine import make_url
+    from app.database import Base
+    from app.main import assert_schema_ready
+
+    url = make_url(os.environ["DATABASE_URL"])
+    name = "sora_widen_%s" % _uuid.uuid4().hex[:12]
+    admin = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as conn:
+        conn.execute(text('CREATE DATABASE "%s"' % name))
+    scratch = url.set(database=name)
+    try:
+        engine = create_engine(scratch)
+        Base.metadata.create_all(bind=engine)
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE retrain_log ALTER COLUMN status TYPE VARCHAR(100)"))
+        engine.dispose()
+
+        engine = create_engine(scratch)
+        assert_schema_ready(engine=engine)      # must not raise
+        engine.dispose()
+    finally:
+        with admin.connect() as conn:
+            conn.execute(text(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = :n AND pid <> pg_backend_pid()"), {"n": name})
+            conn.execute(text('DROP DATABASE IF EXISTS "%s"' % name))
+        admin.dispose()
 
 
 def test_passes_on_a_complete_schema(tmp_path):

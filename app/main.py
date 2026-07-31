@@ -91,14 +91,66 @@ def _type_check_applies(engine):
 
 
 def _compile_type(type_, engine):
-    """Both sides through the same dialect, or the comparison is meaningless."""
+    """For the message. Never for the decision -- see _type_is_compatible."""
     if type_ is None:
         return None
     try:
         return type_.compile(dialect=engine.dialect)
     except Exception:
-        # A type the dialect cannot render is not evidence of drift.
         return None
+
+
+def _type_family(type_):
+    import sqlalchemy as sa
+
+    for base in (sa.String, sa.Boolean, sa.Integer, sa.Float, sa.Numeric,
+                 sa.DateTime, sa.Date, sa.Time, sa.LargeBinary, sa.JSON):
+        if isinstance(type_, base):
+            return base.__name__
+    return type_.__class__.__name__
+
+
+def _type_is_compatible(model_type, db_type):
+    """Compatibility, not equality. Equality refuses correct databases.
+
+    Measured against a canonical PostgreSQL schema built by the migrations
+    themselves: comparing rendered types found **42 disagreements**, none of
+    which were drift --
+
+        FLOAT          vs DOUBLE PRECISION   the same PostgreSQL type
+        VARCHAR(50)    vs VARCHAR            a column the DDL left unbounded
+
+    Strict equality would therefore have refused to start on every correct
+    production database. It also refuses a widening -- VARCHAR(50) to
+    VARCHAR(100) -- which is exactly the compatible change a rolling deploy
+    makes while the old version is still running.
+
+    So: same family, and the database no narrower than the models. Under that
+    relation 40 of the 42 vanish and 2 remain, both genuine.
+    """
+    if _type_family(model_type) != _type_family(db_type):
+        return False
+
+    model_length = getattr(model_type, "length", None)
+    db_length = getattr(db_type, "length", None)
+    # db_length None means unbounded, which is never narrower.
+    if model_length is not None and db_length is not None and db_length < model_length:
+        return False
+
+    for attribute in ("precision", "scale"):
+        declared = getattr(model_type, attribute, None)
+        actual = getattr(db_type, attribute, None)
+        if declared is not None and actual is not None and actual < declared:
+            return False
+
+    # Timezone is not a width, and a naive column cannot hold what an aware one
+    # does. The two surviving disagreements above are exactly this.
+    model_tz = getattr(model_type, "timezone", None)
+    db_tz = getattr(db_type, "timezone", None)
+    if model_tz is not None and db_tz is not None and model_tz != db_tz:
+        return False
+
+    return True
 
 
 def assert_schema_ready(engine=None):
@@ -204,13 +256,13 @@ def assert_schema_ready(engine=None):
             # are dialect-specific, so this compiles both sides with the engine's
             # own dialect rather than comparing across dialects -- which is what
             # would refuse a schema that is in fact correct.
-            if _type_check_applies(engine):
-                declared = _compile_type(model_column.type, engine)
-                actual_type = _compile_type(found.get("type"), engine)
-                if declared and actual_type and declared != actual_type:
+            if _type_check_applies(engine) and found.get("type") is not None:
+                if not _type_is_compatible(model_column.type, found["type"]):
                     faults.append(
                         "%s.%s is %s in the database and %s in the models"
-                        % (name, column_name, actual_type, declared))
+                        % (name, column_name,
+                           _compile_type(found["type"], engine),
+                           _compile_type(model_column.type, engine)))
 
     if faults:
         raise RuntimeError(
