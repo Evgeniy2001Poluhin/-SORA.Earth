@@ -82,6 +82,42 @@ def test_names_only_what_is_actually_missing(tmp_path):
     assert "batch_results" in message, message
 
 
+def test_refuses_a_column_the_database_requires_but_the_models_omit(tmp_path):
+    """The drift that breaks writes rather than reads.
+
+    Measured on SQLite: with `message` NOT NULL in the database and optional in
+    the models, the first insert the ORM issues fails with a not-null violation.
+    Every table and every column name is present, so nothing above notices.
+    """
+    from app.database import Base
+    from app.main import assert_schema_ready
+
+    path = tmp_path / "strict.db"
+    engine = create_engine("sqlite:///%s" % path)
+    Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        # SQLite cannot alter a column, so the table is rebuilt with the stricter
+        # nullability -- which is what a hand-edited production table looks like.
+        conn.execute(text("DROP TABLE retrain_log"))
+        conn.execute(text(
+            "CREATE TABLE retrain_log ("
+            " id INTEGER NOT NULL PRIMARY KEY, started_at DATETIME NOT NULL,"
+            " finished_at DATETIME, duration_sec FLOAT, status VARCHAR(50) NOT NULL,"
+            " trigger_source VARCHAR(50), job_name VARCHAR(100),"
+            " model_version VARCHAR(100), data_version VARCHAR(100),"
+            " metrics_json TEXT, error_message TEXT, message TEXT NOT NULL)"))
+    engine.dispose()
+
+    reopened = create_engine("sqlite:///%s" % path)
+    with pytest.raises(RuntimeError) as excinfo:
+        assert_schema_ready(engine=reopened)
+    reopened.dispose()
+
+    message = str(excinfo.value)
+    assert "retrain_log.message is NOT NULL" in message, message
+    assert "inserts will fail" in message, message
+
+
 def test_passes_on_a_complete_schema(tmp_path):
     from app.database import Base
     from app.main import assert_schema_ready

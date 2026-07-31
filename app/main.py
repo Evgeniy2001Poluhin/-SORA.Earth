@@ -103,6 +103,23 @@ def assert_schema_ready(engine=None):
     which is exactly the case worth catching. The revision is also not available
     without reading the migration graph at runtime.
 
+    What it checks, and what it does not -- stated rather than left to be
+    discovered:
+
+        checked      every model table exists
+                     every model column exists
+                     no column is NOT NULL without a default where the models
+                       treat it as optional (that combination fails every insert)
+
+        not checked  column types, index and constraint presence, anything extra
+
+    Types are left out deliberately: the suite runs on SQLite and production on
+    PostgreSQL, and comparing reflected types across dialects produces refusals
+    for schemas that are correct. Refusing a good deployment is worse than the
+    drift being looked for. That gap belongs to the migration-time check
+    (f2c9a1d47b30), which knows it is on PostgreSQL and compares full type
+    modifiers there.
+
     Deliberately no environment variable to switch this off. An escape hatch would
     be used, and the first time it is used is the moment the guarantee stops
     meaning anything.
@@ -128,9 +145,29 @@ def assert_schema_ready(engine=None):
         # revision has every table the application expects and is still wrong;
         # checking only names lets it start and fail later on the first query
         # that names a column added since.
-        actual = {c["name"] for c in inspector.get_columns(name)}
-        for column in sorted(set(table.columns.keys()) - actual):
+        reflected = {c["name"]: c for c in inspector.get_columns(name)}
+        for column in sorted(set(table.columns.keys()) - set(reflected)):
             faults.append("missing column: %s.%s" % (name, column))
+
+        # Nullability, because it is the one further disagreement that breaks a
+        # write rather than a read, and the one that means the same thing in
+        # every dialect. Measured: a column the database requires and the ORM
+        # omits fails with a not-null violation on the first insert.
+        for column_name, model_column in sorted(table.columns.items()):
+            found = reflected.get(column_name)
+            if found is None or found.get("nullable", True):
+                continue
+            if found.get("default") is not None:
+                continue                      # the database fills it in
+            supplied = (not model_column.nullable
+                        or model_column.default is not None
+                        or model_column.server_default is not None
+                        or model_column.primary_key)
+            if not supplied:
+                faults.append(
+                    "%s.%s is NOT NULL in the database with no default, but the "
+                    "models treat it as optional -- inserts will fail"
+                    % (name, column_name))
 
     if faults:
         raise RuntimeError(
