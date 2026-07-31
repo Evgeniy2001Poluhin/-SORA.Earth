@@ -70,7 +70,7 @@ SELECT rel.relname || ' ' || a.attname || ' ' || format_type(a.atttypid, a.attty
 """
 
 INDEXES_SQL = """
-SELECT i.relname || ' on ' || t.relname
+SELECT t.relname || ' index ' || i.relname
        || ' unique=' || ix.indisunique::text
        || ' primary=' || ix.indisprimary::text
        || ' method=' || am.amname
@@ -260,6 +260,105 @@ def test_both_paths_to_head_produce_the_same_schema():
                sorted(set(fresh[label]) - set(converged[label])),
                sorted(set(converged[label]) - set(fresh[label])))
         )
+
+
+def _canonical_then(url, *statements):
+    """Reach head, rewind the *recorded* revision only, mutate, and re-run.
+
+    `alembic stamp` moves the version row without touching the schema, so the
+    revision runs again over tables that are genuinely canonical apart from the
+    mutation under test. Building those tables by hand instead is how an earlier
+    version of this file tested a shape that was subtly wrong everywhere, which
+    made every case look refused for the wrong reason.
+    """
+    assert _alembic(url, "upgrade", "head").returncode == 0
+    assert _alembic(url, "stamp", "e3f8a7c15d92").returncode == 0
+    if statements:
+        engine = create_engine(url, isolation_level="AUTOCOMMIT")
+        with engine.connect() as conn:
+            for statement in statements:
+                conn.execute(text(statement))
+        engine.dispose()
+    return _alembic(url, "upgrade", "head")
+
+
+@requires_postgres
+def test_an_unmutated_canonical_schema_is_accepted():
+    """The control for every case below: with no mutation, the revision passes.
+
+    Without this, a refusal in the other tests would not distinguish "the check
+    caught the mutation" from "the check refuses this setup regardless".
+    """
+    admin, name, url = _scratch()
+    try:
+        result = _canonical_then(url)
+    finally:
+        _drop(admin, name)
+    assert result.returncode == 0, (result.stderr + result.stdout)[-2000:]
+
+
+@requires_postgres
+@pytest.mark.parametrize("what,statement", [
+    ("a canonical index removed", "DROP INDEX ix_retrain_log_status"),
+    ("a canonical column removed", "ALTER TABLE retrain_log DROP COLUMN message"),
+    ("a canonical column retyped", "ALTER TABLE retrain_log ALTER COLUMN status TYPE varchar(10)"),
+    ("a canonical column made nullable", "ALTER TABLE retrain_log ALTER COLUMN status DROP NOT NULL"),
+    ("an extra NOT NULL column with no default",
+     "ALTER TABLE retrain_log ADD COLUMN tenant_id integer NOT NULL"),
+    ("an extra unique index", "CREATE UNIQUE INDEX ix_x ON retrain_log (status)"),
+    ("an extra check constraint",
+     "ALTER TABLE retrain_log ADD CONSTRAINT c_x CHECK (status <> 'x')"),
+    ("a trigger", "CREATE OR REPLACE FUNCTION f_x() RETURNS trigger AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;"
+                  "CREATE TRIGGER t_x BEFORE INSERT ON retrain_log FOR EACH ROW EXECUTE FUNCTION f_x()"),
+    ("a rule", "CREATE RULE r_x AS ON DELETE TO retrain_log DO INSTEAD NOTHING"),
+    ("row-level security", "ALTER TABLE retrain_log ENABLE ROW LEVEL SECURITY"),
+])
+def test_these_must_be_refused(what, statement):
+    """One negative control per limb of the check.
+
+    Each of these changes what a write does or what the models can rely on. A
+    limb with no case that fails when it is removed is decoration: the index
+    comparison was exactly that for several commits -- its filter selected
+    nothing, so it verified nothing, and the suite stayed green because an
+    unverified index and a tolerated extra looked the same from outside.
+    """
+    admin, name, url = _scratch()
+    try:
+        result = _canonical_then(url, statement)
+        current = _alembic(url, "current")
+    finally:
+        _drop(admin, name)
+
+    assert result.returncode != 0, "%s was accepted" % what
+    assert "refuses to complete" in (result.stderr + result.stdout), (
+        "%s failed, but not with the diagnosis:\n%s" % (what, (result.stderr + result.stdout)[-1500:])
+    )
+    assert "e3f8a7c15d92" in current.stdout, "the revision was recorded anyway"
+
+
+@requires_postgres
+@pytest.mark.parametrize("what,statement", [
+    ("an operator's performance index", "CREATE INDEX ix_perf ON retrain_log (job_name)"),
+    ("an extra nullable column", "ALTER TABLE retrain_log ADD COLUMN note text"),
+    ("an extra column with a default",
+     "ALTER TABLE retrain_log ADD COLUMN seen integer NOT NULL DEFAULT 0"),
+])
+def test_these_must_be_tolerated(what, statement):
+    """The other half. A check that refuses everything is not discriminating.
+
+    None of these can break a write the models make: the ORM never names the
+    column, and a non-unique index rejects nothing. Refusing them would block a
+    correct deployment over an operator's own maintenance.
+    """
+    admin, name, url = _scratch()
+    try:
+        result = _canonical_then(url, statement)
+    finally:
+        _drop(admin, name)
+
+    assert result.returncode == 0, (
+        "%s was refused:\n%s" % (what, (result.stderr + result.stdout)[-1500:])
+    )
 
 
 @requires_postgres
