@@ -91,6 +91,18 @@ def assert_schema_ready(engine=None):
     fault, and the deploy that skipped `alembic upgrade head` is the thing to fix;
     creating it here would hide that from whoever needs to know.
 
+    It checks **columns as well as tables**. Names alone are not the contract: a
+    schema left behind by an older revision has every table this application
+    expects, passes a name-only check, starts, and then fails on the first query
+    naming a column added since -- at request time, to a user, instead of at
+    startup, to the deploy.
+
+    Columns rather than the recorded Alembic revision, because a revision number
+    says what was *run*, not what is *there*. A hand-edited table or a migration
+    that failed halfway leaves the version row untouched and the schema wrong,
+    which is exactly the case worth catching. The revision is also not available
+    without reading the migration graph at runtime.
+
     Deliberately no environment variable to switch this off. An escape hatch would
     be used, and the first time it is used is the moment the guarantee stops
     meaning anything.
@@ -104,13 +116,29 @@ def assert_schema_ready(engine=None):
     from app.database import engine as app_engine
 
     engine = engine or app_engine
-    present = set(inspect(engine).get_table_names())
-    missing = sorted(set(Base.metadata.tables) - present)
-    if missing:
+    inspector = inspect(engine)
+    present = set(inspector.get_table_names())
+
+    faults = []
+    for name, table in sorted(Base.metadata.tables.items()):
+        if name not in present:
+            faults.append("missing table: %s" % name)
+            continue
+        # Names alone are not the contract. A schema left behind by an older
+        # revision has every table the application expects and is still wrong;
+        # checking only names lets it start and fail later on the first query
+        # that names a column added since.
+        actual = {c["name"] for c in inspector.get_columns(name)}
+        for column in sorted(set(table.columns.keys()) - actual):
+            faults.append("missing column: %s.%s" % (name, column))
+
+    if faults:
         raise RuntimeError(
-            "the database is missing %d table(s) the application needs: %s\n"
+            "the database does not match what the application expects (%d "
+            "problem(s)):\n%s\n"
             "Run `alembic upgrade head` against this database. The application "
-            "does not create tables; migrations do." % (len(missing), ", ".join(missing))
+            "does not create or alter tables; migrations do."
+            % (len(faults), "\n".join(faults))
         )
 
 

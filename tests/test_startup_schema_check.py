@@ -28,8 +28,38 @@ def test_refuses_when_tables_are_missing(tmp_path):
     message = str(excinfo.value)
     # Actionable, not merely negative: which tables, and what to run.
     assert "alembic upgrade head" in message, message
-    assert "retrain_log" in message, message
-    assert "does not create tables" in message, message
+    assert "missing table: retrain_log" in message, message
+    assert "does not create or alter tables" in message, message
+
+
+def test_refuses_a_stale_schema_whose_table_names_all_match(tmp_path):
+    """Names are not the contract.
+
+    A schema left behind by an older revision has every table this application
+    expects. A name-only check passes it, the application starts, and the first
+    query naming a column added since fails -- at request time, to a user.
+    """
+    from sqlalchemy import Column, Integer, MetaData, Table
+    from app.database import Base
+    from app.main import assert_schema_ready
+
+    stale_path = tmp_path / "stale.db"
+    stale = create_engine("sqlite:///%s" % stale_path)
+    Base.metadata.create_all(bind=stale)
+    with stale.begin() as conn:
+        conn.execute(text("ALTER TABLE retrain_log DROP COLUMN message"))
+    stale.dispose()
+
+    # Re-open so nothing is cached from the create_all above.
+    reopened = create_engine("sqlite:///%s" % stale_path)
+    with pytest.raises(RuntimeError) as excinfo:
+        assert_schema_ready(engine=reopened)
+    reopened.dispose()
+
+    message = str(excinfo.value)
+    assert "missing column: retrain_log.message" in message, message
+    # And it must not claim the table itself is gone -- the table is right there.
+    assert "missing table: retrain_log" not in message, message
 
 
 def test_names_only_what_is_actually_missing(tmp_path):
