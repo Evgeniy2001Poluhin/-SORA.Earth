@@ -119,6 +119,13 @@ SELECT s.relname || ' owned_by ' || rel.relname || '.' || a.attname
 """
 
 
+# pytest.ini sets timeout=30, which is far below what a case that runs several
+# alembic invocations and creates a database needs. Relying on the CI step
+# passing --timeout=300 makes the file depend on how it is invoked; these
+# override it themselves, and _alembic's subprocess timeout sits below.
+slow = pytest.mark.timeout(600)
+
+
 def _scratch():
     """A fresh database. The caller drops it."""
     url = make_url(DATABASE_URL)
@@ -147,7 +154,9 @@ def _alembic(url, *args):
         [sys.executable, "-m", "alembic", *args],
         cwd=REPO_ROOT,
         env={**os.environ, "DATABASE_URL": url.render_as_string(hide_password=False)},
-        capture_output=True, text=True, timeout=300,
+        # Below the per-test timeout below, so a hung migration reports its own
+        # failure with alembic output rather than being killed by pytest first.
+        capture_output=True, text=True, timeout=240,
     )
 
 
@@ -170,6 +179,7 @@ def _inventory(url, tables):
 
 
 @requires_postgres
+@slow
 def test_alembic_head_creates_every_table_declared_in_the_models():
     """models is a subset of the schema. See the module docstring on the converse."""
     from app.database import Base
@@ -200,6 +210,7 @@ def test_alembic_head_creates_every_table_declared_in_the_models():
 
 
 @requires_postgres
+@slow
 def test_both_paths_to_head_produce_the_same_schema():
     """A fresh install and a converged deployment must be indistinguishable.
 
@@ -222,7 +233,7 @@ def test_both_paths_to_head_produce_the_same_schema():
              "d.Base.metadata.create_all(bind=d.engine, checkfirst=True)"],
             cwd=REPO_ROOT,
             env={**os.environ, "DATABASE_URL": conv_url.render_as_string(hide_password=False)},
-            capture_output=True, text=True, timeout=300,
+            capture_output=True, text=True, timeout=240,
         )
         assert built.returncode == 0, built.stderr[-2000:]
 
@@ -283,6 +294,7 @@ def _canonical_then(url, *statements):
 
 
 @requires_postgres
+@slow
 def test_an_unmutated_canonical_schema_is_accepted():
     """The control for every case below: with no mutation, the revision passes.
 
@@ -298,6 +310,7 @@ def test_an_unmutated_canonical_schema_is_accepted():
 
 
 @requires_postgres
+@slow
 @pytest.mark.parametrize("what,statement", [
     ("a canonical index removed", "DROP INDEX ix_retrain_log_status"),
     ("a canonical column removed", "ALTER TABLE retrain_log DROP COLUMN message"),
@@ -337,6 +350,7 @@ def test_these_must_be_refused(what, statement):
 
 
 @requires_postgres
+@slow
 @pytest.mark.parametrize("what,statement", [
     ("an operator's performance index", "CREATE INDEX ix_perf ON retrain_log (job_name)"),
     ("an extra nullable column", "ALTER TABLE retrain_log ADD COLUMN note text"),
@@ -362,6 +376,7 @@ def test_these_must_be_tolerated(what, statement):
 
 
 @requires_postgres
+@slow
 def test_the_revision_refuses_a_table_that_drifted_from_the_models():
     """IF NOT EXISTS matches on name alone, so creation cannot be the guarantee.
 
@@ -400,6 +415,7 @@ def test_the_revision_refuses_a_table_that_drifted_from_the_models():
 
 
 @requires_postgres
+@slow
 def test_a_non_default_search_path_does_not_produce_a_false_refusal():
     """The verification must find the tables where the migration actually put them.
 

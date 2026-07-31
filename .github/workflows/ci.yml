@@ -378,13 +378,18 @@ jobs:
       - name: downgrade and upgrade round-trip above the irreversible revision
         run: |
           alembic downgrade f2c9a1d47b30
+          alembic current | grep -q f2c9a1d47b30
           alembic upgrade head
-          alembic current
+          alembic current | grep -q "$(alembic heads | awk '{print $1}')"
 
       # 2. The boundary itself. Named rather than reached with `-1`, which will
       #    stop pointing at it as soon as anything is stacked above.
       - name: the irreversible revision refuses to be downgraded
         run: |
+          # Position at the boundary first. The step above ends at head, so once a
+          # revision exists above f2c9a1d47b30 this would downgrade that one before
+          # reaching the boundary -- testing something else and mutating state.
+          alembic downgrade f2c9a1d47b30
           before="$(alembic current)"
           if alembic downgrade e3f8a7c15d92 2>/tmp/downgrade.err; then
             echo "expected the downgrade to be refused, but it succeeded" >&2
@@ -416,7 +421,9 @@ jobs:
           DATABASE_URL="$ROUNDTRIP_URL" alembic upgrade e3f8a7c15d92
           DATABASE_URL="$ROUNDTRIP_URL" alembic downgrade -1
           DATABASE_URL="$ROUNDTRIP_URL" alembic upgrade e3f8a7c15d92
-          DATABASE_URL="$ROUNDTRIP_URL" alembic current
+          # Assert where it landed. `alembic current` alone only proves the command
+          # ran, and passes just as well from the wrong revision.
+          DATABASE_URL="$ROUNDTRIP_URL" alembic current | grep -q e3f8a7c15d92
 
       - name: Offline SQL generation
         run: |

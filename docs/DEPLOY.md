@@ -78,18 +78,21 @@ for you. If removing them is genuinely wanted, it is a separate decision that
 starts with establishing provenance and contents:
 
 ```bash
-# Do these hold anything? Run for each of batch_results, forecast_history,
-# region_signals, retrain_log.
-psql -c "SELECT count(*) FROM retrain_log"
-
-# When did they appear -- with this revision, or long before it?
-psql -c "SELECT relname, pg_stat_get_last_analyze_time(oid) FROM pg_class
-         WHERE relname IN ('batch_results','forecast_history',
-                           'region_signals','retrain_log')"
+# 1. Are they empty? All four, not one.
+for t in batch_results forecast_history region_signals retrain_log; do
+  psql -c "SELECT '$t' AS table, count(*) FROM public.$t"
+done
 ```
 
-Only once every one of them is confirmed empty *and* confirmed to have been
-created by this revision does dropping them and running
+**There is no query that establishes provenance.** An earlier version of this
+runbook suggested `pg_stat_get_last_analyze_time`; that reports the last `ANALYZE`
+and says nothing about when a table was created or which revision created it.
+Provenance has to come from outside the database: the deployment record or audit
+log showing which revision this database has run. If that record does not exist
+for the exact schema in front of you, **restore instead of dropping**.
+
+Only once all four are confirmed empty *and* an external record confirms this
+database ran the revision that created them does dropping them and running
 `alembic stamp e3f8a7c15d92` become a reasonable act. If either is unknown,
 restore instead.
 
