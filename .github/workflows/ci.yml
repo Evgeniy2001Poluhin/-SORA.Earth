@@ -364,21 +364,42 @@ jobs:
       # which would leave the recorded revision and the actual schema
       # disagreeing. That refusal is a property of the chain now, so it is
       # asserted rather than assumed.
-      - name: the head revision refuses to be downgraded
+      # The chain has three regions and each needs its own coverage. Writing the
+      # round-trip as "up to the last reversible revision" would have frozen it
+      # there: every revision added above f2c9a1d47b30 from now on would go
+      # untested for ever, which is the opposite of what a round-trip check is
+      # for. The boundary is named explicitly instead, so the region above it
+      # grows with the chain.
+
+      # 1. Everything ABOVE the boundary. Empty today -- f2c9a1d47b30 is head --
+      #    and this becomes real coverage the moment a revision is added on top.
+      #    Verified with a throwaway revision placed above it: its downgrade and
+      #    its upgrade both ran.
+      - name: downgrade and upgrade round-trip above the irreversible revision
         run: |
-          if alembic downgrade -1 2>/tmp/downgrade.err; then
+          alembic downgrade f2c9a1d47b30
+          alembic upgrade head
+          alembic current
+
+      # 2. The boundary itself. Named rather than reached with `-1`, which will
+      #    stop pointing at it as soon as anything is stacked above.
+      - name: the irreversible revision refuses to be downgraded
+        run: |
+          before="$(alembic current)"
+          if alembic downgrade e3f8a7c15d92 2>/tmp/downgrade.err; then
             echo "expected the downgrade to be refused, but it succeeded" >&2
             exit 1
           fi
           grep -q "cannot be downgraded automatically" /tmp/downgrade.err
-          alembic current | grep -q f2c9a1d47b30
+          if [ "$(alembic current)" != "$before" ]; then
+            echo "the recorded revision moved despite the refusal" >&2
+            exit 1
+          fi
           echo "refused, and the recorded revision did not move"
 
-      # The round-trip guarantee still holds for every reversible revision, but
-      # it can no longer be exercised from head: any downgrade passes through
-      # f2c9a1d47b30 first. So it runs on its own database, built up to the last
-      # reversible revision.
-      - name: downgrade and upgrade round-trip below the irreversible head
+      # 3. Everything BELOW the boundary, on its own database: it cannot be
+      #    reached from head any more without crossing f2c9a1d47b30.
+      - name: downgrade and upgrade round-trip below the irreversible revision
         env:
           ROUNDTRIP_URL: "postgresql://sora:sora2026@localhost:5432/sora_roundtrip"
         run: |
