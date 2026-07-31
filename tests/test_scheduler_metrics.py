@@ -34,15 +34,26 @@ def test_every_counter_is_a_real_counter():
         "these are None, so the scheduler records nothing for them: %s" % missing)
 
 
+# Which counters carry a status label, taken from app/prom_metrics.py rather than
+# assumed: the three run-outcome counters do, the three event counters do not.
+LABELLED = {"sora_retrain_total", "sora_refresh_total", "sora_full_pipeline_total"}
+
+
 @pytest.mark.parametrize("name", COUNTERS)
-def test_each_counter_can_actually_be_incremented(name):
-    """Not None is not enough -- it has to be usable at the call sites."""
+def test_each_counter_works_with_its_real_call_pattern(name):
+    """Called the way the call sites call it, not merely inspected.
+
+    An earlier version asserted `hasattr(counter, "inc") or hasattr(counter,
+    "labels")`. That passes for a counter whose labels do not match what the call
+    site passes -- it checks that an attribute exists, not that the call works.
+    """
     import app.scheduler as scheduler
 
     counter = getattr(scheduler, name)
-    # The three with a status label are called as .labels(status=...).inc()
-    assert hasattr(counter, "inc") or hasattr(counter, "labels"), (
-        "%s is %r, which no call site can use" % (name, counter))
+    if name in LABELLED:
+        counter.labels(status="test").inc()
+    else:
+        counter.inc()
 
 
 def test_importing_the_scheduler_does_not_pull_in_the_application():
@@ -57,7 +68,7 @@ def test_importing_the_scheduler_does_not_pull_in_the_application():
     result = subprocess.run(
         [sys.executable, "-c",
          "import app.scheduler, sys; print('app.main' in sys.modules)"],
-        capture_output=True, text=True, timeout=300,
+        capture_output=True, text=True, timeout=25,
     )
     assert result.returncode == 0, result.stderr[-2000:]
     assert result.stdout.strip() == "False", (
