@@ -62,8 +62,11 @@ def test_refuses_a_stale_schema_whose_table_names_all_match(tmp_path):
 
     message = str(excinfo.value)
     assert "missing column: retrain_log.message" in message, message
-    # And it must not claim the table itself is gone -- the table is right there.
-    assert "missing table: retrain_log" not in message, message
+    # The exact line, not a slice of the message. An earlier version isolated the
+    # text after the second colon, which is the *first* reported table only -- so
+    # it passed for any ordering where retrain_log came later, and asserted
+    # nothing at all.
+    assert "missing table: retrain_log" not in message.splitlines(), message
 
 
 def test_names_only_what_is_actually_missing(tmp_path):

@@ -35,6 +35,13 @@ def refresh_log_rows():
 
     inserted = []
 
+    # The liveness fallback returns True if ANY row is inside 48 hours, so a
+    # leftover from another test would make the negative case pass for the wrong
+    # reason. The table is cleared first, and restored to empty afterwards.
+    with SessionLocal() as session:
+        session.query(DataRefreshLog).delete(synchronize_session=False)
+        session.commit()
+
     def _add(started_at):
         with SessionLocal() as session:
             row = DataRefreshLog(status="ok", job_name="test-liveness", started_at=started_at)

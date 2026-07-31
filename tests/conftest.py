@@ -27,6 +27,23 @@ def _provision_test_schema():
     """
     from app.database import Base, engine
 
+    # Refuse anything that is not obviously a throwaway. checkfirst=True skips
+    # existing tables but still issues CREATE TABLE for missing ones, so pointing
+    # DATABASE_URL at a shared or production database and running pytest would
+    # change that schema -- which is the exact behaviour this branch removes from
+    # the application. Reintroducing it in the harness would be worse, not better.
+    url = str(engine.url)
+    name = engine.url.database or ""
+    disposable = (
+        engine.url.get_backend_name() == "sqlite"
+        or any(token in name.lower() for token in ("test", "scratch", "ci", "tmp"))
+    )
+    if not disposable:
+        raise RuntimeError(
+            "refusing to create tables in %r: the test suite provisions only "
+            "throwaway databases. Point DATABASE_URL at SQLite or a database "
+            "whose name marks it disposable." % name)
+
     Base.metadata.create_all(bind=engine, checkfirst=True)
 
 

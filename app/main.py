@@ -186,8 +186,11 @@ def assert_schema_ready(engine=None):
                          every model column exists
                          nullability agrees, in both directions
 
-        PostgreSQL too   the compiled column type agrees, which carries length,
-                         precision and enum membership
+        PostgreSQL too   the column type is compatible: same family, and the
+                         database no narrower in length, precision or scale.
+                         Enum *labels* are not compared -- sa.Enum lands in the
+                         String family, so a database enum missing a label
+                         passes
 
         still unchecked  indexes, constraints, triggers, rules, row-level
                          security, and anything extra
