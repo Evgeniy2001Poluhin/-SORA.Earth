@@ -78,9 +78,214 @@ def get_db_sync():
     return SessionLocal()
 
 
-def init_db():
-    from app.database import init_db as _init
-    _init()
+def _type_check_applies(engine):
+    """Types are compared on PostgreSQL, and only there.
+
+    SQLite is the suite's database, and it stores what it is given: `VARCHAR(50)`
+    round-trips, but its type affinity means a length is never enforced, so a
+    mismatch there says nothing about production. PostgreSQL is where a length,
+    a precision or an enum actually rejects a value, so that is where the deeper
+    contract is checked -- and the reduced one is what SQLite gets.
+    """
+    return engine.dialect.name == "postgresql"
+
+
+def _compile_type(type_, engine):
+    """For the message. Never for the decision -- see _type_is_compatible."""
+    if type_ is None:
+        return None
+    try:
+        return type_.compile(dialect=engine.dialect)
+    except Exception:
+        return None
+
+
+def _type_family(type_):
+    import sqlalchemy as sa
+
+    for base in (sa.String, sa.Boolean, sa.Integer, sa.Float, sa.Numeric,
+                 sa.DateTime, sa.Date, sa.Time, sa.LargeBinary, sa.JSON):
+        if isinstance(type_, base):
+            return base.__name__
+    return type_.__class__.__name__
+
+
+def _type_is_compatible(model_type, db_type):
+    """Compatibility, not equality. Equality refuses correct databases.
+
+    Measured against a canonical PostgreSQL schema built by the migrations
+    themselves: comparing rendered types flagged **42 columns** -- 40 of them
+    artefacts of the comparison, 2 genuine drift. The 40 look like --
+
+        FLOAT          vs DOUBLE PRECISION   the same PostgreSQL type
+        VARCHAR(50)    vs VARCHAR            a column the DDL left unbounded
+
+    Strict equality would therefore have refused to start on every correct
+    production database. It also refuses a widening -- VARCHAR(50) to
+    VARCHAR(100) -- which is exactly the compatible change a rolling deploy
+    makes while the old version is still running.
+
+    So: same family, and the database no narrower than the models. Under that
+    relation 40 of the 42 vanish and 2 remain, both genuine.
+    """
+    if _type_family(model_type) != _type_family(db_type):
+        return False
+
+    model_length = getattr(model_type, "length", None)
+    db_length = getattr(db_type, "length", None)
+    # db_length None means unbounded, which is never narrower.
+    if model_length is not None and db_length is not None and db_length < model_length:
+        return False
+
+    for attribute in ("precision", "scale"):
+        declared = getattr(model_type, attribute, None)
+        actual = getattr(db_type, attribute, None)
+        if declared is not None and actual is not None and actual < declared:
+            return False
+
+    # Timezone is not a width, and a naive column cannot hold what an aware one
+    # does. The two surviving disagreements above are exactly this.
+    model_tz = getattr(model_type, "timezone", None)
+    db_tz = getattr(db_type, "timezone", None)
+    if model_tz is not None and db_tz is not None and model_tz != db_tz:
+        return False
+
+    return True
+
+
+def assert_schema_ready(engine=None):
+    """Alembic owns the schema. The application checks it and does not build it.
+
+    This used to be `init_db()`, which called `Base.metadata.create_all()` at
+    import time. That made importing the application a schema-changing act -- for
+    a web worker, the scheduler, a CLI, or a test collection run alike -- and it
+    quietly papered over a database that migrations had left incomplete, which is
+    exactly how four tables came to have no migration at all (issue #51).
+
+    So the application now reads and refuses. A missing table is a provisioning
+    fault, and the deploy that skipped `alembic upgrade head` is the thing to fix;
+    creating it here would hide that from whoever needs to know.
+
+    It checks **columns as well as tables**. Names alone are not the contract: a
+    schema left behind by an older revision has every table this application
+    expects, passes a name-only check, starts, and then fails on the first query
+    naming a column added since -- at request time, to a user, instead of at
+    startup, to the deploy.
+
+    Columns rather than the recorded Alembic revision, because a revision number
+    says what was *run*, not what is *there*. A hand-edited table or a migration
+    that failed halfway leaves the version row untouched and the schema wrong,
+    which is exactly the case worth catching. The revision is also not available
+    without reading the migration graph at runtime.
+
+    What it checks, and what it does not -- stated rather than left to be
+    discovered. The depth depends on the dialect, because SQLite is the suite's
+    database and must not set the contract production is held to:
+
+        everywhere       every model table exists
+                         every model column exists
+                         nullability agrees, in both directions
+
+        PostgreSQL too   the column type is compatible: same family, and the
+                         database no narrower in length, precision or scale.
+                         Enum *labels* are not compared -- sa.Enum lands in the
+                         String family, so a database enum missing a label
+                         passes
+
+        still unchecked  indexes, constraints, triggers, rules, row-level
+                         security, and anything extra
+
+    Nullability is checked in both directions and a server default on the
+    *database* side does not excuse it. A default applies only to a column the
+    statement omits, and whether the statement omits it depends on the mapping,
+    not on the database -- measured:
+
+        mapped column without server_default   INSERT names it, sends NULL,
+                                               so the default never applies
+        mapped column with server_default      INSERT omits it, the default
+                                               does apply
+
+    None of the models here declare `server_default`, so on this codebase the
+    column is always named and a database-side default is never reached. That is
+    a fact about these mappings, not about SQLAlchemy in general.
+
+    The reverse direction -- nullable in the database, NOT NULL in the models --
+    lets reads return None where the models say they cannot.
+
+    Not a claim that these are the only things that break a write. A type, a
+    length, an enum, a constraint or a trigger will too; the unchecked list above
+    is a real gap, and the migration-time check in f2c9a1d47b30 is what covers
+    indexes, constraints, triggers, rules and row-level security on PostgreSQL.
+
+    Deliberately no environment variable to switch this off. An escape hatch would
+    be used, and the first time it is used is the moment the guarantee stops
+    meaning anything.
+
+    The `engine` argument exists so a test can point the check at a database it
+    controls; startup passes nothing and gets the application's own.
+    """
+    from sqlalchemy import inspect
+
+    from app.database import Base
+    from app.database import engine as app_engine
+
+    engine = engine or app_engine
+    inspector = inspect(engine)
+    present = set(inspector.get_table_names())
+
+    faults = []
+    for name, table in sorted(Base.metadata.tables.items()):
+        if name not in present:
+            faults.append("missing table: %s" % name)
+            continue
+        # Names alone are not the contract. A schema left behind by an older
+        # revision has every table the application expects and is still wrong;
+        # checking only names lets it start and fail later on the first query
+        # that names a column added since.
+        reflected = {c["name"]: c for c in inspector.get_columns(name)}
+        for column in sorted(set(table.columns.keys()) - set(reflected)):
+            faults.append("missing column: %s.%s" % (name, column))
+
+        for column_name, model_column in sorted(table.columns.items()):
+            found = reflected.get(column_name)
+            if found is None:
+                continue
+
+            # Nullability, in both directions, and without excusing a server
+            # default. A default only applies to a column the statement omits:
+            # measured on PostgreSQL, `INSERT ... (note) VALUES (NULL)` against
+            # `note text NOT NULL DEFAULT 'x'` still raises a not-null violation,
+            # and code holding an optional column may pass None explicitly.
+            db_nullable = bool(found.get("nullable", True))
+            if db_nullable != bool(model_column.nullable):
+                faults.append(
+                    "%s.%s is %s in the database and %s in the models -- %s"
+                    % (name, column_name,
+                       "nullable" if db_nullable else "NOT NULL",
+                       "nullable" if model_column.nullable else "NOT NULL",
+                       "writes may fail" if not db_nullable else
+                       "reads may return None where the models say they cannot"))
+
+            # Types only where the comparison means something. Reflected types
+            # are dialect-specific, so this compiles both sides with the engine's
+            # own dialect rather than comparing across dialects -- which is what
+            # would refuse a schema that is in fact correct.
+            if _type_check_applies(engine) and found.get("type") is not None:
+                if not _type_is_compatible(model_column.type, found["type"]):
+                    faults.append(
+                        "%s.%s is %s in the database and %s in the models"
+                        % (name, column_name,
+                           _compile_type(found["type"], engine),
+                           _compile_type(model_column.type, engine)))
+
+    if faults:
+        raise RuntimeError(
+            "the database does not match what the application expects (%d "
+            "problem(s)):\n%s\n"
+            "Run `alembic upgrade head` against this database. The application "
+            "does not create or alter tables; migrations do."
+            % (len(faults), "\n".join(faults))
+        )
 
 
 def log_prediction(endpoint, input_data, result, latency_ms=None):
@@ -284,7 +489,6 @@ if os.path.exists(NN_PATH):
     nn_model.load_state_dict(torch.load(NN_PATH, map_location="cpu"))
     nn_model.eval()
 
-init_db()
 logger.info("SORA.Earth AI Platform started")
 
 explainer_shap = shap.TreeExplainer(rf_model)
@@ -623,6 +827,12 @@ _executor: ProcessPoolExecutor = None
 @app.on_event("startup")
 async def startup_event():
     import asyncio
+
+    # First, and synchronously: if the schema is not there, nothing below is
+    # worth starting. Here rather than at import time, so that importing the
+    # application -- for alembic, a CLI, or test collection -- does not require a
+    # reachable database.
+    assert_schema_ready()
     async def _bg_refresh():
         try:
             from app.external_data import refresh_all_countries

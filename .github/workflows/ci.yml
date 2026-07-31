@@ -196,6 +196,17 @@ jobs:
         env:
           DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
 
+      # Five of its six cases need a real PostgreSQL: the session TimeZone
+      # behaviour they pin down is PostgreSQL's, and on SQLite they skip. A
+      # skipped test proves nothing, so it needs a job where it runs.
+      - name: data_refresh_log timestamp handling against PostgreSQL
+        run: |
+          python -m pytest \
+            tests/test_refresh_log_timestamps.py \
+            -v --tb=short --timeout=300
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
       - name: Run environmental persistence tests against PostgreSQL
         run: |
           python -m pytest \
@@ -264,6 +275,32 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install pytest pytest-timeout
+
+      # This job had no schema step: it relied on conftest's create_all() to
+      # build the tables as a side effect of importing. That is the behaviour
+      # this branch removes, and the guard in conftest refused it -- 15 tables
+      # in an empty sora_earth. Provisioning goes through migrations, like
+      # everywhere else.
+      - name: alembic upgrade head
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
+      # Here rather than in environmental-postgres-tests: the startup check
+      # imports app.main, which unpickles models/*.pkl, and this is the job that
+      # materialises LFS. The column type comparison also runs on PostgreSQL only
+      # and skips on SQLite, so it needs a job where it actually runs.
+      - name: Startup schema check against PostgreSQL
+        run: |
+          python -m pytest tests/test_startup_schema_check.py \
+            -v --tb=short --timeout=180
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+          REDIS_URL: "redis://localhost:6379/0"
+          SECRET_KEY: "ci-test-secret"
+          SORA_ADMIN_TOKEN: "ci-test-admin"
+          SORA_OFFLINE: "1"
+          RUN_SCHEDULER: "false"
 
       - name: Run integration tests
         run: |
