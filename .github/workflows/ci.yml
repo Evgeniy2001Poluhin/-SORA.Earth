@@ -176,6 +176,20 @@ jobs:
         env:
           DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
 
+      # Asserts that `alembic upgrade head` alone builds the whole schema, which
+      # the step above cannot check: it migrates the shared database, and any
+      # later import of the application would fill in a missing table via
+      # create_all() before anyone looked. This test provisions its own scratch
+      # database instead, so it is unaffected by the job's other steps and by
+      # whatever the test process has imported.
+      - name: Alembic builds the entire schema on its own
+        run: |
+          python -m pytest \
+            tests/test_schema_is_migrated.py \
+            -v --tb=short --timeout=300
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
       - name: Run environmental persistence tests against PostgreSQL
         run: |
           python -m pytest \
