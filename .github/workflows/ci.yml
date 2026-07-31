@@ -140,7 +140,13 @@ jobs:
 
   environmental-postgres-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 was right when this job ran one test file. It now also runs the schema
+    # checks -- 18 cases, each creating its own database and driving alembic in a
+    # subprocess. Measured on the runner: ~2.5 min for pip install, then roughly
+    # 2 minutes per case against ~30s locally, and the job was cancelled after
+    # two of them. The cancellation also destroys pytest's own diagnostic, so the
+    # budget has to hold before any failure inside it can be read at all.
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16
@@ -173,6 +179,20 @@ jobs:
       # exist, so the chain is now run explicitly rather than incidentally.
       - name: alembic upgrade head
         run: alembic upgrade head
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
+      # Asserts that `alembic upgrade head` alone builds the whole schema, which
+      # the step above cannot check: it migrates the shared database, and any
+      # later import of the application would fill in a missing table via
+      # create_all() before anyone looked. This test provisions its own scratch
+      # database instead, so it is unaffected by the job's other steps and by
+      # whatever the test process has imported.
+      - name: Alembic builds the entire schema on its own
+        run: |
+          python -m pytest \
+            tests/test_schema_is_migrated.py \
+            -v --tb=short --timeout=300
         env:
           DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
 
@@ -343,10 +363,73 @@ jobs:
           print(f"{len(tables)} tables, {len(views)} views")
           PY
 
-      - name: downgrade and upgrade round-trip
+      # f2c9a1d47b30 is irreversible by construction: it creates tables only
+      # where they are absent, so it cannot tell the ones it created from the
+      # ones create_all() had already made -- and those hold data. It refuses
+      # rather than move alembic_version back over tables that stay behind,
+      # which would leave the recorded revision and the actual schema
+      # disagreeing. That refusal is a property of the chain now, so it is
+      # asserted rather than assumed.
+      # The chain has three regions and each needs its own coverage. Writing the
+      # round-trip as "up to the last reversible revision" would have frozen it
+      # there: every revision added above f2c9a1d47b30 from now on would go
+      # untested for ever, which is the opposite of what a round-trip check is
+      # for. The boundary is named explicitly instead, so the region above it
+      # grows with the chain.
+
+      # 1. Everything ABOVE the boundary. Empty today -- f2c9a1d47b30 is head --
+      #    and this becomes real coverage the moment a revision is added on top.
+      #    Verified with a throwaway revision placed above it: its downgrade and
+      #    its upgrade both ran.
+      - name: downgrade and upgrade round-trip above the irreversible revision
         run: |
-          alembic downgrade -1
+          alembic downgrade f2c9a1d47b30
+          alembic current | grep -q f2c9a1d47b30
           alembic upgrade head
+          alembic current | grep -q "$(alembic heads | awk '{print $1}')"
+
+      # 2. The boundary itself. Named rather than reached with `-1`, which will
+      #    stop pointing at it as soon as anything is stacked above.
+      - name: the irreversible revision refuses to be downgraded
+        run: |
+          # Position at the boundary first. The step above ends at head, so once a
+          # revision exists above f2c9a1d47b30 this would downgrade that one before
+          # reaching the boundary -- testing something else and mutating state.
+          alembic downgrade f2c9a1d47b30
+          before="$(alembic current)"
+          if alembic downgrade e3f8a7c15d92 2>/tmp/downgrade.err; then
+            echo "expected the downgrade to be refused, but it succeeded" >&2
+            exit 1
+          fi
+          grep -q "cannot be downgraded automatically" /tmp/downgrade.err
+          if [ "$(alembic current)" != "$before" ]; then
+            echo "the recorded revision moved despite the refusal" >&2
+            exit 1
+          fi
+          echo "refused, and the recorded revision did not move"
+
+      # 3. Everything BELOW the boundary, on its own database: it cannot be
+      #    reached from head any more without crossing f2c9a1d47b30.
+      - name: downgrade and upgrade round-trip below the irreversible revision
+        env:
+          ROUNDTRIP_URL: "postgresql://sora:sora2026@localhost:5432/sora_roundtrip"
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          admin = create_engine(os.environ["DATABASE_URL"], isolation_level="AUTOCOMMIT")
+          with admin.connect() as conn:
+              conn.execute(text("DROP DATABASE IF EXISTS sora_roundtrip"))
+              conn.execute(text("CREATE DATABASE sora_roundtrip"))
+          admin.dispose()
+          PY
+          DATABASE_URL="$ROUNDTRIP_URL" alembic upgrade e3f8a7c15d92
+          DATABASE_URL="$ROUNDTRIP_URL" alembic downgrade -1
+          DATABASE_URL="$ROUNDTRIP_URL" alembic upgrade e3f8a7c15d92
+          # Assert where it landed. `alembic current` alone only proves the command
+          # ran, and passes just as well from the wrong revision.
+          DATABASE_URL="$ROUNDTRIP_URL" alembic current | grep -q e3f8a7c15d92
 
       - name: Offline SQL generation
         run: |

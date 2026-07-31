@@ -387,9 +387,20 @@ def no_scheduler_left_running():
     firing ingestion and retrain jobs for the rest of the session.
     """
     yield
-    try:
-        from app.scheduler import scheduler
-    except Exception:
+    # Look in sys.modules; do not import. This teardown ran for every test, and
+    # `from app.scheduler import scheduler` pulls in app.main with torch, SHAP and
+    # transformers behind it -- more than the per-test timeout on a CI runner. The
+    # body passed, the teardown was killed mid-import, the half-built module was
+    # dropped from sys.modules, and the next test paid it again: PASSED-then-ERROR
+    # at exactly the timeout, once per test, until the job was cancelled.
+    #
+    # A test that never imported app.scheduler cannot have started the scheduler.
+    import sys
+    module = sys.modules.get("app.scheduler")
+    if module is None:
+        return
+    scheduler = getattr(module, "scheduler", None)
+    if scheduler is None:
         return
     if scheduler.running:
         scheduler.remove_all_jobs()
