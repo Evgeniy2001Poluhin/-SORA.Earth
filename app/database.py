@@ -167,8 +167,14 @@ class ForecastModelMetrics(Base):
     metadata_json = Column(Text, nullable=True)  # Additional metadata (hyperparameters, etc.)
 
 
-def init_db():
-    Base.metadata.create_all(bind=engine, checkfirst=True)
+# init_db() lived here and called Base.metadata.create_all(). It is gone rather
+# than merely unused: leaving it defined invites the next caller, and its one
+# caller was app.main at import time -- which is how four tables came to exist
+# with no migration behind them (issue #51).
+#
+# Alembic owns the schema now. The application checks it at startup
+# (app.main.assert_schema_ready) and the test suite provisions its own scratch
+# database explicitly (tests/conftest.py).
 
 
 def get_db():

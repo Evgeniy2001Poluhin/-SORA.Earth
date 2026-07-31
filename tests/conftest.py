@@ -12,6 +12,26 @@ os.environ.setdefault("RUN_SCHEDULER", "false")
 import pytest
 from unittest.mock import MagicMock, patch
 
+
+def _provision_test_schema():
+    """Build the schema for the suite's scratch database.
+
+    The application used to do this as a side effect of being imported, which is
+    what let four tables exist with no migration behind them (issue #51). It now
+    checks the schema and refuses to start without it, so the harness provisions
+    it -- explicitly, and here, because pytest imports this file before any test
+    module imports the application.
+
+    Only app.database is imported: it defines the models and the engine without
+    loading the ML models that app.main pulls in.
+    """
+    from app.database import Base, engine
+
+    Base.metadata.create_all(bind=engine, checkfirst=True)
+
+
+_provision_test_schema()
+
 # Create in-memory mock cache BEFORE any imports
 mock_cache = {}
 mock_lists = {}  # For Redis list operations (rpush, lrange)

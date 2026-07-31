@@ -78,9 +78,35 @@ def get_db_sync():
     return SessionLocal()
 
 
-def init_db():
-    from app.database import init_db as _init
-    _init()
+def assert_schema_ready():
+    """Alembic owns the schema. The application checks it and does not build it.
+
+    This used to be `init_db()`, which called `Base.metadata.create_all()` at
+    import time. That made importing the application a schema-changing act -- for
+    a web worker, the scheduler, a CLI, or a test collection run alike -- and it
+    quietly papered over a database that migrations had left incomplete, which is
+    exactly how four tables came to have no migration at all (issue #51).
+
+    So the application now reads and refuses. A missing table is a provisioning
+    fault, and the deploy that skipped `alembic upgrade head` is the thing to fix;
+    creating it here would hide that from whoever needs to know.
+
+    Deliberately no environment variable to switch this off. An escape hatch would
+    be used, and the first time it is used is the moment the guarantee stops
+    meaning anything.
+    """
+    from sqlalchemy import inspect
+
+    from app.database import Base, engine
+
+    present = set(inspect(engine).get_table_names())
+    missing = sorted(set(Base.metadata.tables) - present)
+    if missing:
+        raise RuntimeError(
+            "the database is missing %d table(s) the application needs: %s\n"
+            "Run `alembic upgrade head` against this database. The application "
+            "does not create tables; migrations do." % (len(missing), ", ".join(missing))
+        )
 
 
 def log_prediction(endpoint, input_data, result, latency_ms=None):
@@ -284,7 +310,6 @@ if os.path.exists(NN_PATH):
     nn_model.load_state_dict(torch.load(NN_PATH, map_location="cpu"))
     nn_model.eval()
 
-init_db()
 logger.info("SORA.Earth AI Platform started")
 
 explainer_shap = shap.TreeExplainer(rf_model)
@@ -623,6 +648,12 @@ _executor: ProcessPoolExecutor = None
 @app.on_event("startup")
 async def startup_event():
     import asyncio
+
+    # First, and synchronously: if the schema is not there, nothing below is
+    # worth starting. Here rather than at import time, so that importing the
+    # application -- for alembic, a CLI, or test collection -- does not require a
+    # reachable database.
+    assert_schema_ready()
     async def _bg_refresh():
         try:
             from app.external_data import refresh_all_countries
