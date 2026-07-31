@@ -29,7 +29,8 @@ and documentation is not permission.
 
 | | state |
 |---|---|
-| Observations actually persisting in production | **Unverified.** The 2026-07-24 audit recorded `environmental_observations` = 0 rows. Persistence code and tests have landed since (`test_environmental_persist.py`, `test_persist_commit_failure.py`, `test_openmeteo_ingester.py`) and pass in CI, but CI is not production |
+| Observations actually persisting in production | **No.** Verified 2026-07-31: 0 rows. Persistence code and tests have landed and pass in CI, but production still runs `0b0ff6d1594e` — none of it is deployed |
+| Production running current migrations | **No.** `alembic_version` = `0b0ff6d1594e`, head = `f2c9a1d47b30` |
 | Backup on a schedule | Scripts exist (`scripts/backup_*.sh`). No schedule is installed. RPO is undefined — not poor, undefined |
 | Restore drill against production | Done locally against PostgreSQL 16. Never against production |
 | Security P0 | Three private advisories with matching fix branches. PRs #46, #47, #48 open; #45 draft |
@@ -45,8 +46,9 @@ found by checking, not by reading the list.
 
 ## M1 — Data Trust
 
-**Prerequisite:** M0 complete *and* observations persisting. The first is done. The
-second is the one open question, and it is a single query against production:
+**Prerequisite:** M0 complete *and* observations persisting. The first is done.
+**The second is not met** — verified, 0 rows. M1 does not open until ingestion
+writes and production runs current migrations. The query that established it:
 
 ```sql
 SELECT count(*), max(observed_at) FROM environmental_observations;
@@ -72,23 +74,34 @@ Both of the last two need their provenance established before a contract can be
 written for them: a source with no endpoint in the code is either a file drop, a
 manual load, or dead. That is the first task, not an assumption to carry forward.
 
-### A gap found while writing this
+### Verified against production, 2026-07-31
 
-The spec requires four distinct times per observation. `EnvironmentalObservation`
-carries three:
+Read-only, with the owner's explicit permission given in chat.
+
+**Observations are not persisting.** `environmental_observations` holds **0 rows**.
+The M1 prerequisite is therefore **not met**, and repairing ingestion is the first
+task of M1, not a side item.
+
+**Production is behind on migrations.** `alembic_version` reads `0b0ff6d1594e`;
+head is `f2c9a1d47b30`. None of the M0 work has been deployed, which also means
+`assert_schema_ready()` has never run against this database.
+
+**A claim in the first draft of this document was wrong.** It stated that
+`published_at` was missing and that only three of the four required timestamps
+existed. Production carries all four:
 
 ```
-observed_at    when the phenomenon occurred          present
-created_at     when this system stored the row       present
-updated_at     when the row last changed             present
-published_at   when the source made it available     MISSING
+event_time     when the phenomenon occurred
+published_at   when the source made it available
+ingested_at    when this system received it
++ updated_at   when the row last changed
 ```
 
-Without `published_at`, a late value cannot be attributed: "the source published
-it late" and "we fetched it late" are indistinguishable, and freshness SLAs
-against a source become unmeasurable. This is a schema change and therefore an
-early M1 item, before contracts are written against a shape that cannot express
-them.
+The error came from reading `observed_at` at `app/database.py:204` and
+attributing it to `EnvironmentalObservation` — it belongs to a different model.
+The gap was invented by misreading, not found by measuring. Corrected here rather
+than quietly deleted, because a roadmap that hides its own errors is worth less
+than one that carries them.
 
 ### Work
 
