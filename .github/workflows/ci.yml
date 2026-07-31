@@ -190,6 +190,17 @@ jobs:
         env:
           DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
 
+      # Five of its six cases need a real PostgreSQL: the session TimeZone
+      # behaviour they pin down is PostgreSQL's, and on SQLite they skip. A
+      # skipped test proves nothing, so it needs a job where it runs.
+      - name: data_refresh_log timestamp handling against PostgreSQL
+        run: |
+          python -m pytest \
+            tests/test_refresh_log_timestamps.py \
+            -v --tb=short --timeout=300
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
       - name: Run environmental persistence tests against PostgreSQL
         run: |
           python -m pytest \
