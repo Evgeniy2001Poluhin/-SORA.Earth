@@ -126,6 +126,42 @@ def _fetch_wb_indicator(iso3: str, indicator_code: str, mrv: int = 3) -> Optiona
     return None
 
 
+def _fetch_wb_indicator_dated(
+    iso3: str, indicator_code: str, mrv: int = 3
+) -> Tuple[Optional[float], Optional[str]]:
+    """The same fetch, keeping the period the value describes.
+
+    `_fetch_wb_indicator` returns the number and discards `entry["date"]`, which
+    is the year the World Bank states the observation is for. Every row in
+    country_indicator_history was stored with `as_of_date=None` because of it --
+    87,005 of them -- so the database could say when a figure was downloaded and
+    never what it measured. See issue #58.
+
+    Returns (value, period). The period is the source's own string, e.g. "2025",
+    kept verbatim rather than parsed into a date here: an annual indicator has a
+    year, not a day, and inventing 1 January would assert precision the source
+    did not give.
+    """
+    if os.getenv("SORA_OFFLINE", "0") == "1":
+        return None, None
+
+    url = (
+        f"{WB_BASE}/country/{iso3}/indicator/{indicator_code}"
+        f"?format=json&per_page={mrv}&mrv={mrv}"
+    )
+    try:
+        resp = httpx.get(url, timeout=5.0)
+        resp.raise_for_status()
+        data = resp.json()
+        if len(data) >= 2 and data[1]:
+            for entry in data[1]:
+                if entry.get("value") is not None:
+                    return round(float(entry["value"]), 2), entry.get("date")
+    except Exception as e:
+        logger.warning("World Bank API error for %s/%s: %s", iso3, indicator_code, e)
+    return None, None
+
+
 def _fetch_oecd_indicator(iso3: str, key: str) -> Optional[float]:
     """Fetch indicator from OECD SDMX (CSV format).
 
@@ -163,6 +199,21 @@ def _fetch_oecd_indicator(iso3: str, key: str) -> Optional[float]:
     return None
 
 
+# Period of the most recent World Bank value per (country, indicator).
+#
+# A side table rather than a wider return type: _fetch_with_fallback_impl's
+# 2-tuple is depended on by two backward-compatible wrappers below and by tests,
+# and widening it to carry the period would break all of them for the sake of one
+# consumer. The entry is written immediately before the return that produced it,
+# so it cannot describe a different value than the one handed back.
+_LAST_PERIOD: Dict[Tuple[str, str], Optional[str]] = {}
+
+
+def _indicator_period(iso3: str, indicator_code: str) -> Optional[str]:
+    """The period of the last World Bank value fetched for this pair, if any."""
+    return _LAST_PERIOD.get((iso3, indicator_code))
+
+
 def _fetch_with_fallback_impl(
     iso3: str,
     key: str,
@@ -175,8 +226,9 @@ def _fetch_with_fallback_impl(
     Returns (value, source_tag).
     """
     # 1. World Bank
-    val = _fetch_wb_indicator(iso3, indicator_code)
+    val, period = _fetch_wb_indicator_dated(iso3, indicator_code)
     if val is not None:
+        _LAST_PERIOD[(iso3, indicator_code)] = period
         return val, "world_bank"
 
     # 2. OECD (only for keys that have a mapping)
@@ -215,6 +267,10 @@ def get_country_esg_realtime(country_name: str) -> Optional[Dict]:
         "source": "World Bank API + OECD + benchmarks",
         "indicators": {},
         "indicator_sources": {},
+        # What period each value describes, when the source states one. World
+        # Bank does; the static benchmarks and the offline global averages do
+        # not, and they get None rather than a guess. See issue #58.
+        "indicator_periods": {},
     }
 
     for key, indicator_code in INDICATORS.items():
@@ -222,6 +278,9 @@ def get_country_esg_realtime(country_name: str) -> Optional[Dict]:
         if val is not None:
             result["indicators"][key] = val
             result["indicator_sources"][key] = src
+            result["indicator_periods"][key] = (
+                _indicator_period(iso3, indicator_code) if src == "world_bank" else None
+            )
             # backward compat: top-level keys too
             result[key] = val
 
@@ -269,6 +328,28 @@ def get_all_countries_merged() -> Dict[str, dict]:
 # Refresh logic
 # ---------------------------------------------------------------------------
 
+def _period_to_date(period: Optional[str]) -> Optional[datetime]:
+    """The source's period string as a date, or None when it stated none.
+
+    World Bank annual indicators carry a year: "2025". Stored as the first day of
+    that year, because the column is a DateTime and there is nowhere else to put
+    it -- but the day is an artefact of the column type, not a claim by the
+    source. A specialist reading 2025-01-01 should understand "the 2025 figure",
+    which is why the period is also kept verbatim upstream.
+
+    None stays None. A benchmark or a global average has no period, and inventing
+    one would make a fallback indistinguishable from a dated observation --
+    exactly the confusion issue #58 is about.
+    """
+    if not period:
+        return None
+    try:
+        return datetime(int(str(period)[:4]), 1, 1)
+    except (TypeError, ValueError):
+        logger.warning("Unparseable indicator period %r; storing no date", period)
+        return None
+
+
 def refresh_all_countries() -> Dict:
     """Full refresh: invalidate cache, fetch live data, persist history."""
     db = SessionLocal()
@@ -291,7 +372,8 @@ def refresh_all_countries() -> Dict:
                     indicator_name=key,
                     value=value,
                     source=data.get("indicator_sources", {}).get(key, "unknown"),
-                    as_of_date=None,
+                    as_of_date=_period_to_date(
+                        data.get("indicator_periods", {}).get(key)),
                     fetched_at=fetched_at,
                     refresh_job_name="external_data_refresh",
                 )
