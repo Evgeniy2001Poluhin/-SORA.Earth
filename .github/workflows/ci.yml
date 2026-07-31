@@ -142,8 +142,10 @@ jobs:
     runs-on: ubuntu-latest
     # 10 was right when this job ran one test file. It now also runs the schema
     # checks -- 18 cases, each creating its own database and driving alembic in a
-    # subprocess -- and the timestamp tests, and it was cancelled at the limit
-    # with every test passing. The work grew; the budget had not.
+    # subprocess. Measured on the runner: ~2.5 min for pip install, then roughly
+    # 2 minutes per case against ~30s locally, and the job was cancelled after
+    # two of them. The cancellation also destroys pytest's own diagnostic, so the
+    # budget has to hold before any failure inside it can be read at all.
     timeout-minutes: 25
     services:
       postgres:
@@ -276,9 +278,8 @@ jobs:
 
       # Here rather than in environmental-postgres-tests: the startup check
       # imports app.main, which unpickles models/*.pkl, and this is the job that
-      # materialises LFS. It is also the deeper half of the check -- the column
-      # type comparison runs on PostgreSQL only, and skips on the SQLite the rest
-      # of the suite uses, so running it anywhere else would prove nothing.
+      # materialises LFS. The column type comparison also runs on PostgreSQL only
+      # and skips on SQLite, so it needs a job where it actually runs.
       - name: Startup schema check against PostgreSQL
         run: |
           python -m pytest tests/test_startup_schema_check.py \
@@ -410,13 +411,18 @@ jobs:
       - name: downgrade and upgrade round-trip above the irreversible revision
         run: |
           alembic downgrade f2c9a1d47b30
+          alembic current | grep -q f2c9a1d47b30
           alembic upgrade head
-          alembic current
+          alembic current | grep -q "$(alembic heads | awk '{print $1}')"
 
       # 2. The boundary itself. Named rather than reached with `-1`, which will
       #    stop pointing at it as soon as anything is stacked above.
       - name: the irreversible revision refuses to be downgraded
         run: |
+          # Position at the boundary first. The step above ends at head, so once a
+          # revision exists above f2c9a1d47b30 this would downgrade that one before
+          # reaching the boundary -- testing something else and mutating state.
+          alembic downgrade f2c9a1d47b30
           before="$(alembic current)"
           if alembic downgrade e3f8a7c15d92 2>/tmp/downgrade.err; then
             echo "expected the downgrade to be refused, but it succeeded" >&2
@@ -448,7 +454,9 @@ jobs:
           DATABASE_URL="$ROUNDTRIP_URL" alembic upgrade e3f8a7c15d92
           DATABASE_URL="$ROUNDTRIP_URL" alembic downgrade -1
           DATABASE_URL="$ROUNDTRIP_URL" alembic upgrade e3f8a7c15d92
-          DATABASE_URL="$ROUNDTRIP_URL" alembic current
+          # Assert where it landed. `alembic current` alone only proves the command
+          # ran, and passes just as well from the wrong revision.
+          DATABASE_URL="$ROUNDTRIP_URL" alembic current | grep -q e3f8a7c15d92
 
       - name: Offline SQL generation
         run: |

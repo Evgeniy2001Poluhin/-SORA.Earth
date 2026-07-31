@@ -263,19 +263,24 @@ docker compose -f docker-compose.prod.yml up -d --build backend   # с пред�
 установления происхождения и содержимого:
 
 ```bash
-# Пусто ли? Для каждой из четырёх.
-docker compose -f docker-compose.prod.yml exec postgres \
-  psql -U sora -d sora_earth -c "SELECT count(*) FROM retrain_log"
-
-# Когда появились — с этой ревизией или задолго до неё?
-docker compose -f docker-compose.prod.yml exec postgres \
-  psql -U sora -d sora_earth -c "SELECT relname, pg_stat_get_last_analyze_time(oid)
-    FROM pg_class WHERE relname IN
-    ('batch_results','forecast_history','region_signals','retrain_log')"
+# 1. Пусто ли? Все четыре, а не одна.
+for t in batch_results forecast_history region_signals retrain_log; do
+  docker compose -f docker-compose.prod.yml exec postgres \
+    psql -U sora -d sora_earth -c "SELECT '$t', count(*) FROM public.$t"
+done
 ```
 
-Только когда **каждая** подтверждённо пуста **и** подтверждённо создана этой
-ревизией, удаление с последующим `alembic stamp e3f8a7c15d92` становится
+**В PostgreSQL нет встроенной записи о времени создания таблицы.** Прежняя версия этого
+runbook предлагала `pg_stat_get_last_analyze_time` — он отдаёт время последнего
+`ANALYZE` и ничего не говорит ни о моменте создания таблицы, ни о том, какая
+ревизия её создала. Происхождение может существовать — event trigger или таблица аудита DDL его
+несли бы, — но лишь если на этом развёртывании их завели. Если нет, оно берётся
+вне базы: из записи о развёртывании или журнала аудита с перечнем выполненных
+ревизий. Если такой записи
+для ровно этой схемы нет — **восстанавливайте из бэкапа, а не удаляйте**.
+
+Только когда **все четыре** подтверждённо пусты **и** внешняя запись
+подтверждает, что эта база выполняла создавшую их ревизию, удаление с последующим `alembic stamp e3f8a7c15d92` становится
 разумным действием. Если хоть одно неизвестно — восстанавливайте из бэкапа.
 
 Если ревизия отказывается на **апгрейде**, она сообщает, что эти таблицы уже
