@@ -32,12 +32,24 @@ Measured on PostgreSQL 16 against a table that had drifted from the models:
 ...and the migration reported success. So the creation alone would let a
 divergent database reach head and claim a schema it does not have.
 
-This revision therefore **verifies what it ends up with**. After the creation it
-compares every column with its full type and modifier, every nullability, every
-default, every index definition and every constraint against the canonical shape
-frozen below, and raises if anything expected is absent. Extra indexes and
-columns an operator added are reported but not fatal — the failure being guarded
-against is a shape that silently disagrees, not a superset.
+This revision therefore **verifies what it ends up with**, against the canonical
+shape frozen below: every column with its full type modifier, nullability and
+default kind; every index with its uniqueness, access method, ordered columns and
+whether it is partial; every constraint of every kind with its columns and
+referenced table.
+
+**The relation checked is `canonical ⊆ actual` — a compatible superset, not
+equality.** Everything canonical must be present and must match. Anything extra
+is reported in the message and is *not* fatal, deliberately: an operator who adds
+an index to relieve a slow query must not have their next deployment refused for
+it, and a migration is not the right place to enforce that no one ever did. The
+fault being guarded against is a canonical object that is absent or that exists
+with a different shape.
+
+That choice has a cost worth naming: a *stray* object — a column left behind by
+an abandoned change, an index nobody remembers adding — passes silently. Catching
+those is inventory work against a known-good baseline, not something a revision
+can decide.
 
 What this still does **not** do is *repair* a drifted table. It refuses, loudly,
 with the differences listed, and converging those shapes is a separate revision
@@ -138,109 +150,160 @@ CREATE INDEX IF NOT EXISTS ix_retrain_log_trigger_source ON retrain_log (trigger
 
 TABLES = ("batch_results", "forecast_history", "region_signals", "retrain_log")
 
-# Queried through the catalogue rather than information_schema: `data_type`
-# there reports `character varying` with the length dropped, so VARCHAR(50) and
-# VARCHAR(10) compare equal. format_type keeps the modifier.
+# Structured catalogue fields, not rendered DDL.
+#
+# An earlier version compared pg_indexes.indexdef and pg_get_expr() output
+# directly. Rendered SQL is not a stable identity: it carries schema
+# qualification that depends on the session's search_path. Measured on one
+# database, one PostgreSQL, the same column:
+#
+#     search_path = public   nextval('retrain_log_id_seq'::regclass)
+#     search_path = ''       nextval('public.retrain_log_id_seq'::regclass)
+#
+# So a deployment that runs migrations with a non-default search_path would have
+# been refused for a schema that is in fact correct -- a false refusal blocking a
+# correct deployment, which is worse than the silent acceptance being fixed.
+#
+# (Across PostgreSQL 14, 15, 16 and 17 the rendered text was in fact identical,
+# so the version was not the trigger here. search_path was.)
+#
+# The schema is current_schema(), not a hardcoded 'public'. The CREATE
+# statements above are unqualified, so they land in whatever the search_path puts
+# first; a check that looked in 'public' regardless refused a correct deployment.
+# Measured with search_path = 'app_schema, public': the tables were created in
+# app_schema and the verification reported all 42 columns missing.
+#
+# # information_schema is avoided for a different reason: its `data_type` reports
+# `character varying` with the length dropped, so VARCHAR(50) and VARCHAR(10)
+# compare equal there. format_type keeps the modifier, and is the canonical
+# spelling of a type rather than a rendering of a statement.
 COLUMN_QUERY = """
-SELECT rel.relname || '.' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
-       || ' null=' || (NOT a.attnotnull)::text
-       || ' default=' || coalesce(pg_get_expr(d.adbin, d.adrelid), '-')
+SELECT rel.relname || ' ' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
+       || ' notnull=' || a.attnotnull::text
+       || ' default=' || CASE
+              WHEN d.adbin IS NULL THEN 'none'
+              WHEN pg_get_expr(d.adbin, d.adrelid) LIKE 'nextval(%' THEN 'sequence'
+              ELSE 'expr' END
   FROM pg_attribute a
   JOIN pg_class rel ON rel.oid = a.attrelid
   JOIN pg_namespace n ON n.oid = rel.relnamespace
   LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
- WHERE n.nspname = 'public' AND rel.relname = ANY(:tables)
+ WHERE n.nspname = current_schema() AND rel.relname = ANY(:tables)
    AND a.attnum > 0 AND NOT a.attisdropped
 """
 
 INDEX_QUERY = """
-SELECT indexname || ' :: ' || indexdef
-  FROM pg_indexes
- WHERE schemaname = 'public' AND tablename = ANY(:tables)
+SELECT i.relname || ' on ' || t.relname
+       || ' unique=' || ix.indisunique::text
+       || ' primary=' || ix.indisprimary::text
+       || ' method=' || am.amname
+       || ' partial=' || (ix.indpred IS NOT NULL)::text
+       || ' cols=' || coalesce((
+             SELECT string_agg(att.attname, ',' ORDER BY k.ord)
+               FROM unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord)
+               JOIN pg_attribute att ON att.attrelid = t.oid AND att.attnum = k.attnum
+          ), '(expression)')
+  FROM pg_index ix
+  JOIN pg_class i ON i.oid = ix.indexrelid
+  JOIN pg_class t ON t.oid = ix.indrelid
+  JOIN pg_am am ON am.oid = i.relam
+  JOIN pg_namespace n ON n.oid = t.relnamespace
+ WHERE n.nspname = current_schema() AND t.relname = ANY(:tables)
 """
 
+# Every constraint kind. A check constraint's expression is the only
+# representation there is, so it is included, lowercased and whitespace-collapsed;
+# these tables carry none today, and the query does not assume that.
 CONSTRAINT_QUERY = """
-SELECT rel.relname || ' ' || c.conname || ' ' || c.contype::text
-       || ' :: ' || pg_get_constraintdef(c.oid)
+SELECT rel.relname || ' ' || c.conname || ' type=' || c.contype::text
+       || ' cols=' || coalesce((
+             SELECT string_agg(att.attname, ',' ORDER BY k.ord)
+               FROM unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord)
+               JOIN pg_attribute att ON att.attrelid = c.conrelid AND att.attnum = k.attnum
+          ), '-')
+       || ' refs=' || coalesce(fr.relname, '-')
+       || ' check=' || coalesce(
+             regexp_replace(lower(pg_get_expr(c.conbin, c.conrelid)), '\\s+', ' ', 'g'), '-')
   FROM pg_constraint c
   JOIN pg_class rel ON rel.oid = c.conrelid
   JOIN pg_namespace n ON n.oid = rel.relnamespace
- WHERE n.nspname = 'public' AND rel.relname = ANY(:tables)
+  LEFT JOIN pg_class fr ON fr.oid = c.confrelid
+ WHERE n.nspname = current_schema() AND rel.relname = ANY(:tables)
 """
 
 EXPECTED_COLUMNS = {
-    "batch_results.batch_id character varying(64) null=false default=-",
-    "batch_results.created_at timestamp without time zone null=false default=-",
-    "batch_results.duration_ms double precision null=true default=-",
-    "batch_results.error_message text null=true default=-",
-    "batch_results.failed integer null=false default=-",
-    "batch_results.id integer null=false default=nextval('batch_results_id_seq'::regclass)",
-    "batch_results.job_type character varying(50) null=false default=-",
-    "batch_results.results_json text null=true default=-",
-    "batch_results.status character varying(50) null=false default=-",
-    "batch_results.successful integer null=false default=-",
-    "batch_results.total integer null=false default=-",
-    "batch_results.trigger_source character varying(50) null=false default=-",
-    "forecast_history.confidence character varying(10) null=true default=-",
-    "forecast_history.country character varying(10) null=true default=-",
-    "forecast_history.created_at timestamp without time zone null=false default=-",
-    "forecast_history.forecast_json text null=false default=-",
-    "forecast_history.horizon integer null=false default=-",
-    "forecast_history.id integer null=false default=nextval('forecast_history_id_seq'::regclass)",
-    "forecast_history.metadata_json text null=true default=-",
-    "forecast_history.metric character varying(50) null=false default=-",
-    "forecast_history.model character varying(50) null=false default=-",
-    "region_signals.created_at timestamp with time zone null=false default=-",
-    "region_signals.id integer null=false default=nextval('region_signals_id_seq'::regclass)",
-    "region_signals.metadata_json text null=true default=-",
-    "region_signals.metric character varying(64) null=false default=-",
-    "region_signals.observed_at timestamp with time zone null=true default=-",
-    "region_signals.region_code character varying(10) null=false default=-",
-    "region_signals.source character varying(32) null=false default=-",
-    "region_signals.unit character varying(32) null=true default=-",
-    "region_signals.value double precision null=true default=-",
-    "retrain_log.data_version character varying(100) null=true default=-",
-    "retrain_log.duration_sec double precision null=true default=-",
-    "retrain_log.error_message text null=true default=-",
-    "retrain_log.finished_at timestamp without time zone null=true default=-",
-    "retrain_log.id integer null=false default=nextval('retrain_log_id_seq'::regclass)",
-    "retrain_log.job_name character varying(100) null=true default=-",
-    "retrain_log.message text null=true default=-",
-    "retrain_log.metrics_json text null=true default=-",
-    "retrain_log.model_version character varying(100) null=true default=-",
-    "retrain_log.started_at timestamp without time zone null=false default=-",
-    "retrain_log.status character varying(50) null=false default=-",
-    "retrain_log.trigger_source character varying(50) null=true default=-",
+    "batch_results batch_id character varying(64) notnull=true default=none",
+    "batch_results created_at timestamp without time zone notnull=true default=none",
+    "batch_results duration_ms double precision notnull=false default=none",
+    "batch_results error_message text notnull=false default=none",
+    "batch_results failed integer notnull=true default=none",
+    "batch_results id integer notnull=true default=sequence",
+    "batch_results job_type character varying(50) notnull=true default=none",
+    "batch_results results_json text notnull=false default=none",
+    "batch_results status character varying(50) notnull=true default=none",
+    "batch_results successful integer notnull=true default=none",
+    "batch_results total integer notnull=true default=none",
+    "batch_results trigger_source character varying(50) notnull=true default=none",
+    "forecast_history confidence character varying(10) notnull=false default=none",
+    "forecast_history country character varying(10) notnull=false default=none",
+    "forecast_history created_at timestamp without time zone notnull=true default=none",
+    "forecast_history forecast_json text notnull=true default=none",
+    "forecast_history horizon integer notnull=true default=none",
+    "forecast_history id integer notnull=true default=sequence",
+    "forecast_history metadata_json text notnull=false default=none",
+    "forecast_history metric character varying(50) notnull=true default=none",
+    "forecast_history model character varying(50) notnull=true default=none",
+    "region_signals created_at timestamp with time zone notnull=true default=none",
+    "region_signals id integer notnull=true default=sequence",
+    "region_signals metadata_json text notnull=false default=none",
+    "region_signals metric character varying(64) notnull=true default=none",
+    "region_signals observed_at timestamp with time zone notnull=false default=none",
+    "region_signals region_code character varying(10) notnull=true default=none",
+    "region_signals source character varying(32) notnull=true default=none",
+    "region_signals unit character varying(32) notnull=false default=none",
+    "region_signals value double precision notnull=false default=none",
+    "retrain_log data_version character varying(100) notnull=false default=none",
+    "retrain_log duration_sec double precision notnull=false default=none",
+    "retrain_log error_message text notnull=false default=none",
+    "retrain_log finished_at timestamp without time zone notnull=false default=none",
+    "retrain_log id integer notnull=true default=sequence",
+    "retrain_log job_name character varying(100) notnull=false default=none",
+    "retrain_log message text notnull=false default=none",
+    "retrain_log metrics_json text notnull=false default=none",
+    "retrain_log model_version character varying(100) notnull=false default=none",
+    "retrain_log started_at timestamp without time zone notnull=true default=none",
+    "retrain_log status character varying(50) notnull=true default=none",
+    "retrain_log trigger_source character varying(50) notnull=false default=none",
 }
 
 EXPECTED_INDEXES = {
-    "batch_results_pkey :: CREATE UNIQUE INDEX batch_results_pkey ON public.batch_results USING btree (id)",
-    "forecast_history_pkey :: CREATE UNIQUE INDEX forecast_history_pkey ON public.forecast_history USING btree (id)",
-    "ix_batch_results_batch_id :: CREATE UNIQUE INDEX ix_batch_results_batch_id ON public.batch_results USING btree (batch_id)",
-    "ix_batch_results_created_at :: CREATE INDEX ix_batch_results_created_at ON public.batch_results USING btree (created_at)",
-    "ix_batch_results_id :: CREATE INDEX ix_batch_results_id ON public.batch_results USING btree (id)",
-    "ix_forecast_history_country :: CREATE INDEX ix_forecast_history_country ON public.forecast_history USING btree (country)",
-    "ix_forecast_history_created_at :: CREATE INDEX ix_forecast_history_created_at ON public.forecast_history USING btree (created_at)",
-    "ix_forecast_history_id :: CREATE INDEX ix_forecast_history_id ON public.forecast_history USING btree (id)",
-    "ix_forecast_history_metric :: CREATE INDEX ix_forecast_history_metric ON public.forecast_history USING btree (metric)",
-    "ix_forecast_history_model :: CREATE INDEX ix_forecast_history_model ON public.forecast_history USING btree (model)",
-    "ix_region_signals_observed_at :: CREATE INDEX ix_region_signals_observed_at ON public.region_signals USING btree (observed_at)",
-    "ix_region_signals_region_code :: CREATE INDEX ix_region_signals_region_code ON public.region_signals USING btree (region_code)",
-    "ix_region_signals_source :: CREATE INDEX ix_region_signals_source ON public.region_signals USING btree (source)",
-    "ix_retrain_log_finished_at :: CREATE INDEX ix_retrain_log_finished_at ON public.retrain_log USING btree (finished_at)",
-    "ix_retrain_log_id :: CREATE INDEX ix_retrain_log_id ON public.retrain_log USING btree (id)",
-    "ix_retrain_log_started_at :: CREATE INDEX ix_retrain_log_started_at ON public.retrain_log USING btree (started_at)",
-    "ix_retrain_log_status :: CREATE INDEX ix_retrain_log_status ON public.retrain_log USING btree (status)",
-    "ix_retrain_log_trigger_source :: CREATE INDEX ix_retrain_log_trigger_source ON public.retrain_log USING btree (trigger_source)",
-    "region_signals_pkey :: CREATE UNIQUE INDEX region_signals_pkey ON public.region_signals USING btree (id)",
-    "retrain_log_pkey :: CREATE UNIQUE INDEX retrain_log_pkey ON public.retrain_log USING btree (id)",
+    "batch_results_pkey on batch_results unique=true primary=true method=btree partial=false cols=id",
+    "forecast_history_pkey on forecast_history unique=true primary=true method=btree partial=false cols=id",
+    "ix_batch_results_batch_id on batch_results unique=true primary=false method=btree partial=false cols=batch_id",
+    "ix_batch_results_created_at on batch_results unique=false primary=false method=btree partial=false cols=created_at",
+    "ix_batch_results_id on batch_results unique=false primary=false method=btree partial=false cols=id",
+    "ix_forecast_history_country on forecast_history unique=false primary=false method=btree partial=false cols=country",
+    "ix_forecast_history_created_at on forecast_history unique=false primary=false method=btree partial=false cols=created_at",
+    "ix_forecast_history_id on forecast_history unique=false primary=false method=btree partial=false cols=id",
+    "ix_forecast_history_metric on forecast_history unique=false primary=false method=btree partial=false cols=metric",
+    "ix_forecast_history_model on forecast_history unique=false primary=false method=btree partial=false cols=model",
+    "ix_region_signals_observed_at on region_signals unique=false primary=false method=btree partial=false cols=observed_at",
+    "ix_region_signals_region_code on region_signals unique=false primary=false method=btree partial=false cols=region_code",
+    "ix_region_signals_source on region_signals unique=false primary=false method=btree partial=false cols=source",
+    "ix_retrain_log_finished_at on retrain_log unique=false primary=false method=btree partial=false cols=finished_at",
+    "ix_retrain_log_id on retrain_log unique=false primary=false method=btree partial=false cols=id",
+    "ix_retrain_log_started_at on retrain_log unique=false primary=false method=btree partial=false cols=started_at",
+    "ix_retrain_log_status on retrain_log unique=false primary=false method=btree partial=false cols=status",
+    "ix_retrain_log_trigger_source on retrain_log unique=false primary=false method=btree partial=false cols=trigger_source",
+    "region_signals_pkey on region_signals unique=true primary=true method=btree partial=false cols=id",
+    "retrain_log_pkey on retrain_log unique=true primary=true method=btree partial=false cols=id",
 }
 
 EXPECTED_CONSTRAINTS = {
-    "batch_results batch_results_pkey p :: PRIMARY KEY (id)",
-    "forecast_history forecast_history_pkey p :: PRIMARY KEY (id)",
-    "region_signals region_signals_pkey p :: PRIMARY KEY (id)",
-    "retrain_log retrain_log_pkey p :: PRIMARY KEY (id)",
+    "batch_results batch_results_pkey type=p cols=id refs=- check=-",
+    "forecast_history forecast_history_pkey type=p cols=id refs=- check=-",
+    "region_signals region_signals_pkey type=p cols=id refs=- check=-",
+    "retrain_log retrain_log_pkey type=p cols=id refs=- check=-",
 }
 
 
@@ -249,7 +312,7 @@ def _existing_tables():
     return sorted(
         row[0] for row in conn.execute(
             text("SELECT tablename FROM pg_tables "
-                 "WHERE schemaname = 'public' AND tablename = ANY(:tables)"),
+                 "WHERE schemaname = current_schema() AND tablename = ANY(:tables)"),
             {"tables": list(TABLES)})
     )
 
@@ -258,7 +321,7 @@ def _assert_canonical(tables):
     """Refuse to record this revision over a schema that is not the canonical one."""
     if not tables:
         return
-    prefixes = tuple("%s." % t for t in tables)
+    prefixes = tuple("%s " % t for t in tables)
     conn = op.get_bind()
     problems = []
     extras = []
@@ -269,10 +332,9 @@ def _assert_canonical(tables):
     ):
         # Only the tables being checked: called before creation, the others do
         # not exist yet and their absence is the normal case, not a fault.
-        if label == "column":
-            expected = {e for e in whole if e.startswith(prefixes)}
-        else:
-            expected = {e for e in whole if any(t in e for t in tables)}
+        # Every entry begins with the table name followed by a space, in all
+        # three inventories, so one rule covers them.
+        expected = {e for e in whole if e.startswith(prefixes)}
         actual = {row[0] for row in conn.execute(text(query), {"tables": list(tables)})}
         for entry in sorted(expected - actual):
             problems.append("missing %s: %s" % (label, entry))

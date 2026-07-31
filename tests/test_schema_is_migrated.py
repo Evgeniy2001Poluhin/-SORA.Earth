@@ -23,6 +23,12 @@ The catalogue is queried through pg_* rather than information_schema, because
 `information_schema.columns.data_type` reports `character varying` with the
 length dropped -- VARCHAR(50) and VARCHAR(10) compare equal there.
 
+Structured fields, never rendered DDL. `pg_get_indexdef` and `pg_get_expr` carry
+schema qualification that depends on the session's search_path, so comparing
+their text makes an identical schema look different. The schema is
+`current_schema()` for the same reason: the migration's CREATE statements are
+unqualified and land wherever the search_path puts them.
+
 See issue #51.
 """
 
@@ -49,33 +55,57 @@ requires_postgres = pytest.mark.skipif(
 SUBJECT_TABLES = ["batch_results", "forecast_history", "region_signals", "retrain_log"]
 
 COLUMNS_SQL = """
-SELECT rel.relname || '.' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
-       || ' null=' || (NOT a.attnotnull)::text
-       || ' default=' || coalesce(pg_get_expr(d.adbin, d.adrelid), '-')
+SELECT rel.relname || ' ' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
+       || ' notnull=' || a.attnotnull::text
+       || ' default=' || CASE
+              WHEN d.adbin IS NULL THEN 'none'
+              WHEN pg_get_expr(d.adbin, d.adrelid) LIKE 'nextval(%' THEN 'sequence'
+              ELSE 'expr' END
   FROM pg_attribute a
   JOIN pg_class rel ON rel.oid = a.attrelid
   JOIN pg_namespace n ON n.oid = rel.relnamespace
   LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
- WHERE n.nspname = 'public' AND rel.relname = ANY(:tables)
+ WHERE n.nspname = current_schema() AND rel.relname = ANY(:tables)
    AND a.attnum > 0 AND NOT a.attisdropped
 """
 
 INDEXES_SQL = """
-SELECT indexname || ' :: ' || indexdef
-  FROM pg_indexes
- WHERE schemaname = 'public' AND tablename = ANY(:tables)
+SELECT i.relname || ' on ' || t.relname
+       || ' unique=' || ix.indisunique::text
+       || ' primary=' || ix.indisprimary::text
+       || ' method=' || am.amname
+       || ' partial=' || (ix.indpred IS NOT NULL)::text
+       || ' cols=' || coalesce((
+             SELECT string_agg(att.attname, ',' ORDER BY k.ord)
+               FROM unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord)
+               JOIN pg_attribute att ON att.attrelid = t.oid AND att.attnum = k.attnum
+          ), '(expression)')
+  FROM pg_index ix
+  JOIN pg_class i ON i.oid = ix.indexrelid
+  JOIN pg_class t ON t.oid = ix.indrelid
+  JOIN pg_am am ON am.oid = i.relam
+  JOIN pg_namespace n ON n.oid = t.relnamespace
+ WHERE n.nspname = current_schema() AND t.relname = ANY(:tables)
 """
 
 # Every constraint kind: primary keys, foreign keys, unique and check alike.
 # These four tables carry only primary keys today; the query does not assume it,
 # so a constraint present on one side and not the other would show up.
 CONSTRAINTS_SQL = """
-SELECT rel.relname || ' ' || c.conname || ' ' || c.contype::text
-       || ' :: ' || pg_get_constraintdef(c.oid)
+SELECT rel.relname || ' ' || c.conname || ' type=' || c.contype::text
+       || ' cols=' || coalesce((
+             SELECT string_agg(att.attname, ',' ORDER BY k.ord)
+               FROM unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord)
+               JOIN pg_attribute att ON att.attrelid = c.conrelid AND att.attnum = k.attnum
+          ), '-')
+       || ' refs=' || coalesce(fr.relname, '-')
+       || ' check=' || coalesce(
+             regexp_replace(lower(pg_get_expr(c.conbin, c.conrelid)), '\\s+', ' ', 'g'), '-')
   FROM pg_constraint c
   JOIN pg_class rel ON rel.oid = c.conrelid
   JOIN pg_namespace n ON n.oid = rel.relnamespace
- WHERE n.nspname = 'public' AND rel.relname = ANY(:tables)
+  LEFT JOIN pg_class fr ON fr.oid = c.confrelid
+ WHERE n.nspname = current_schema() AND rel.relname = ANY(:tables)
 """
 
 SEQUENCES_SQL = """
@@ -85,7 +115,7 @@ SELECT s.relname || ' owned_by ' || rel.relname || '.' || a.attname
   JOIN pg_class rel ON rel.oid = dep.refobjid
   JOIN pg_attribute a ON a.attrelid = dep.refobjid AND a.attnum = dep.refobjsubid
   JOIN pg_namespace n ON n.oid = rel.relnamespace
- WHERE s.relkind = 'S' AND n.nspname = 'public' AND rel.relname = ANY(:tables)
+ WHERE s.relkind = 'S' AND n.nspname = current_schema() AND rel.relname = ANY(:tables)
 """
 
 
@@ -262,9 +292,52 @@ def test_the_revision_refuses_a_table_that_drifted_from_the_models():
         % output[-2000:]
     )
     # Named specifically, so the message is actionable rather than merely angry.
-    assert "retrain_log.started_at" in output, "the missing column is not named"
+    assert "retrain_log started_at" in output, "the missing column is not named"
     assert "ix_retrain_log_status" in output, "the wrong index is not named"
     # And the recorded revision must not have moved.
     assert "e3f8a7c15d92" in current.stdout, (
         "the revision was recorded despite refusing: %s" % current.stdout
+    )
+
+
+@requires_postgres
+def test_a_non_default_search_path_does_not_produce_a_false_refusal():
+    """The verification must find the tables where the migration actually put them.
+
+    The CREATE statements are unqualified, so they land in whatever schema the
+    search_path puts first. An earlier version of the check looked in 'public'
+    regardless: with search_path = 'app_schema, public' the tables were created in
+    app_schema and the revision reported all 42 columns missing, refusing a
+    deployment that was in fact correct. A false refusal blocks a good release,
+    which is worse than the silent acceptance the check exists to prevent.
+    """
+    admin, name, url = _scratch()
+    try:
+        engine = create_engine(url, isolation_level="AUTOCOMMIT")
+        with engine.connect() as conn:
+            conn.execute(text("CREATE SCHEMA app_schema"))
+            conn.execute(text('ALTER DATABASE "%s" SET search_path TO app_schema, public' % name))
+        engine.dispose()
+
+        result = _alembic(url, "upgrade", "head")
+        current = _alembic(url, "current")
+
+        engine = create_engine(url)
+        with engine.connect() as conn:
+            landed = conn.execute(text(
+                "SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE c.relname = 'retrain_log' AND c.relkind = 'r'")).scalar()
+        engine.dispose()
+    finally:
+        _drop(admin, name)
+
+    assert result.returncode == 0, (
+        "a non-default search_path was refused:\n%s" % (result.stderr + result.stdout)[-2000:]
+    )
+    assert "f2c9a1d47b30" in current.stdout, "did not reach head: %s" % current.stdout
+    # The premise of the test: the tables really did land somewhere other than
+    # public, so passing is not just the default case in disguise.
+    assert landed == "app_schema", (
+        "the tables landed in %r, so this test did not exercise a non-default "
+        "search_path at all" % landed
     )

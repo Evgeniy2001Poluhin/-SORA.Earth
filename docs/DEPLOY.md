@@ -48,6 +48,32 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build bac
 docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
 
+### Rolling back past `f2c9a1d47b30`
+
+**`alembic downgrade` will refuse.** That revision creates `batch_results`,
+`forecast_history`, `region_signals` and `retrain_log` only where they are
+absent, so it cannot tell the tables it created from the ones
+`Base.metadata.create_all()` had already made — and those hold data. Rather than
+move `alembic_version` back over tables that stay behind, it fails and says so.
+
+A release carrying it therefore rolls back **forward or from a backup**, not by
+downgrading:
+
+| | |
+|---|---|
+| application only | redeploy the previous image; the schema is a superset and the old code does not use the four tables |
+| schema must go back | restore from a backup taken before the upgrade — see `docs/BACKUP_RESTORE.md` |
+| the four tables must go | drop them explicitly, then `alembic stamp e3f8a7c15d92`; a deliberate act with the data loss in view |
+
+The first row is the usual one: the revision only *adds*, so the previous
+application version runs against the new schema unchanged. Take the backup before
+the upgrade regardless — that is what makes the second row available at all.
+
+Also: if the revision refuses the *upgrade*, it is reporting that these tables
+already exist with a shape that disagrees with the models, and it lists every
+difference. That is a real finding about the database, not a fault in the
+migration. See issue #51.
+
 ## Health checks
 
 - `curl https://your-domain.com/health` → `{"status":"ok"}`
