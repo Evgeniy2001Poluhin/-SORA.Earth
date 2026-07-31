@@ -119,11 +119,19 @@ SELECT s.relname || ' owned_by ' || rel.relname || '.' || a.attname
 """
 
 
-# pytest.ini sets timeout=30, which is far below what a case that runs several
-# alembic invocations and creates a database needs. Relying on the CI step
-# passing --timeout=300 makes the file depend on how it is invoked; these
-# override it themselves, and _alembic's subprocess timeout sits below.
-slow = pytest.mark.timeout(600)
+# A budget ladder, sized from measurement rather than picked: 18 cases run in
+# 105s against PostgreSQL 16, the slowest around 30s.
+#
+#     subprocess  120s   a hung alembic reports its own failure, with output
+#     per test    180s   6x the slowest case
+#     the job     600s   .github/workflows/ci.yml
+#
+# pytest.ini sets timeout=30, far below what a case driving several alembic
+# invocations needs, and relying on the CI step passing --timeout=300 makes the
+# file depend on how it is invoked. Hence the override -- but at 180, not higher:
+# a per-test timeout at or above the job's own limit cannot fire, because the job
+# is cancelled first and pytest never gets to write its diagnostic.
+slow = pytest.mark.timeout(180)
 
 
 def _scratch():
@@ -156,7 +164,7 @@ def _alembic(url, *args):
         env={**os.environ, "DATABASE_URL": url.render_as_string(hide_password=False)},
         # Below the per-test timeout below, so a hung migration reports its own
         # failure with alembic output rather than being killed by pytest first.
-        capture_output=True, text=True, timeout=240,
+        capture_output=True, text=True, timeout=120,
     )
 
 
@@ -233,7 +241,7 @@ def test_both_paths_to_head_produce_the_same_schema():
              "d.Base.metadata.create_all(bind=d.engine, checkfirst=True)"],
             cwd=REPO_ROOT,
             env={**os.environ, "DATABASE_URL": conv_url.render_as_string(hide_password=False)},
-            capture_output=True, text=True, timeout=240,
+            capture_output=True, text=True, timeout=120,
         )
         assert built.returncode == 0, built.stderr[-2000:]
 

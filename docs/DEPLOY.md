@@ -84,11 +84,13 @@ for t in batch_results forecast_history region_signals retrain_log; do
 done
 ```
 
-**There is no query that establishes provenance.** An earlier version of this
+**PostgreSQL provides no built-in record of when a table was created.** An earlier version of this
 runbook suggested `pg_stat_get_last_analyze_time`; that reports the last `ANALYZE`
 and says nothing about when a table was created or which revision created it.
-Provenance has to come from outside the database: the deployment record or audit
-log showing which revision this database has run. If that record does not exist
+Provenance can exist -- an event trigger or audit table recording DDL would carry
+it -- but only if this deployment set one up. Absent that, it comes from outside
+the database: the deployment record or audit log showing which revisions this
+database has run. If that record does not exist
 for the exact schema in front of you, **restore instead of dropping**.
 
 Only once all four are confirmed empty *and* an external record confirms this
