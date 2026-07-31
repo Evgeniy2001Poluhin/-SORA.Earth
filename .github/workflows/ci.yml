@@ -140,7 +140,13 @@ jobs:
 
   environmental-postgres-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 was right when this job ran one test file. It now also runs the schema
+    # checks -- 18 cases, each creating its own database and driving alembic in a
+    # subprocess. Measured on the runner: ~2.5 min for pip install, then roughly
+    # 2 minutes per case against ~30s locally, and the job was cancelled after
+    # two of them. The cancellation also destroys pytest's own diagnostic, so the
+    # budget has to hold before any failure inside it can be read at all.
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16
