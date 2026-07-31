@@ -32,17 +32,27 @@ def _provision_test_schema():
     # DATABASE_URL at a shared or production database and running pytest would
     # change that schema -- which is the exact behaviour this branch removes from
     # the application. Reintroducing it in the harness would be worse, not better.
-    url = str(engine.url)
-    name = engine.url.database or ""
-    disposable = (
-        engine.url.get_backend_name() == "sqlite"
-        or any(token in name.lower() for token in ("test", "scratch", "ci", "tmp"))
-    )
-    if not disposable:
+    # The guard is on the *action*, not on the name. An allowlist of safe names
+    # cannot be written -- the CI databases are called sora_earth and
+    # sora_bootstrap, and an earlier version of this refused both.
+    #
+    # So: if nothing is missing, nothing is created, and there is nothing to
+    # guard against. That is the CI case, where `alembic upgrade head` has
+    # already run. Only when tables would actually be created does it matter
+    # which database this is, and then only SQLite is taken as obviously
+    # disposable.
+    from sqlalchemy import inspect
+
+    missing = sorted(set(Base.metadata.tables) - set(inspect(engine).get_table_names()))
+    if not missing:
+        return
+    if engine.url.get_backend_name() != "sqlite":
         raise RuntimeError(
-            "refusing to create tables in %r: the test suite provisions only "
-            "throwaway databases. Point DATABASE_URL at SQLite or a database "
-            "whose name marks it disposable." % name)
+            "refusing to create %d table(s) in %r: %s\n"
+            "The suite provisions only SQLite for itself. Against a server "
+            "database, run `alembic upgrade head` first -- creating tables here "
+            "is the behaviour this branch removes from the application."
+            % (len(missing), engine.url.database, ", ".join(missing)))
 
     Base.metadata.create_all(bind=engine, checkfirst=True)
 
