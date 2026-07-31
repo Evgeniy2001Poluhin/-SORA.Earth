@@ -390,6 +390,8 @@ jobs:
 
       # 1. Everything ABOVE the boundary. Empty today -- f2c9a1d47b30 is head --
       #    and this becomes real coverage the moment a revision is added on top.
+      #    Verified with a throwaway revision placed above it: its downgrade and
+      #    its upgrade both ran.
       - name: downgrade and upgrade round-trip above the irreversible revision
         run: |
           alembic downgrade f2c9a1d47b30
