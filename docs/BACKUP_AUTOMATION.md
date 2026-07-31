@@ -225,9 +225,22 @@ region_esg_scores     85 rows
 environmental_observations  1,860 rows
 ```
 
-**So RPO ≤ 24 hours may now be claimed for host-survivable loss, and only that.**
-Both conditions are met: the unit has run successfully under systemd, and a
-restore from what it produced has been performed.
+### What the schedule actually guarantees
+
+**RPO ≤ 24 hours while the timer fires on schedule, for host-survivable loss —
+and only that.** Both conditions the review set are met: the unit has run
+successfully under systemd, and a restore from what it produced has been
+performed.
+
+The qualifier is not hedging. `Persistent=true` runs a missed activation after
+boot, which is the right behaviour — but it means downtime extends the gap
+between consecutive dumps by however long the host was down. A server off for
+six hours yields a 30-hour interval, and no daily schedule can do otherwise.
+
+An earlier version also set `RandomizedDelaySec=300`, which put consecutive runs
+up to 24h05m apart on its own, with the host running normally. It bought nothing
+here — nothing else is scheduled at 03:30 — and cost the interval the claim rests
+on, so it is gone.
 
 ### Still not covered
 

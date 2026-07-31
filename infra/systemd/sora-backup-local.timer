@@ -9,9 +9,10 @@ OnCalendar=*-*-* 03:30:00 UTC
 # down at 03:30 would otherwise silently have no backup for that day.
 Persistent=true
 
-# Spread the start so a dump never begins at the same instant as anything else
-# scheduled on the hour.
-RandomizedDelaySec=300
+# No RandomizedDelaySec. Five minutes of jitter puts consecutive runs up to
+# 24h05m apart, which is more than the interval this schedule is used to claim.
+# Nothing else runs at 03:30 here, so the spread bought nothing and cost the
+# guarantee.
 
 [Install]
 WantedBy=timers.target

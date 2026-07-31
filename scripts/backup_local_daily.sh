@@ -28,7 +28,19 @@ fail() { logger -t sora-backup -p daemon.err   -- "FAILED: $*"; echo "FAILED: $*
 # nothing extra, and a slow one overlapping the next would leave two partial
 # files racing for the same name.
 exec 9>"$LOCK_FILE" || fail "cannot open lock $LOCK_FILE"
-flock -n 9 || { log "another run holds the lock; skipping"; exit 0; }
+
+# -E 75 so contention is distinguishable from a broken lock. Without it every
+# nonzero status reads as "someone else is running" -- a missing directory, a bad
+# descriptor or a permissions fault all become a silent skip, and a schedule that
+# has not produced a backup for weeks looks healthy. scripts/backup_lock.sh says
+# exactly this about the same trap; this file did not apply it.
+lock_rc=0
+flock -n -E 75 9 || lock_rc=$?
+case $lock_rc in
+    0)  ;;
+    75) log "another run holds the lock; skipping"; exit 0 ;;
+    *)  fail "flock failed with status $lock_rc" ;;
+esac
 
 mkdir -p "$BACKUP_DIR"
 chmod 0700 "$BACKUP_DIR"
@@ -65,6 +77,19 @@ DC=(docker compose -f "$COMPOSE_FILE" exec -T postgres)
 
 container_cleanup() { "${DC[@]}" rm -f "$CONTAINER_TMP" >/dev/null 2>&1 || true; }
 trap 'cleanup; container_cleanup' EXIT
+
+# Wait for PostgreSQL, bounded. After=docker.service waits for the daemon, not
+# for the compose service, so a Persistent=true catch-up at boot can start while
+# postgres is still coming up. The dump would fail and nothing would retry until
+# tomorrow -- a whole day lost to a race of a few seconds.
+READY=0
+for _ in $(seq 1 30); do
+    if "${DC[@]}" pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
+        READY=1; break
+    fi
+    sleep 2
+done
+[ "$READY" = 1 ] || fail "PostgreSQL not ready after 60s"
 
 log "starting dump of $DB_NAME"
 "${DC[@]}" pg_dump -U "$DB_USER" -d "$DB_NAME" \
