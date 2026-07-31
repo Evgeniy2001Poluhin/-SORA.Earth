@@ -114,8 +114,8 @@ def _type_is_compatible(model_type, db_type):
     """Compatibility, not equality. Equality refuses correct databases.
 
     Measured against a canonical PostgreSQL schema built by the migrations
-    themselves: comparing rendered types found **42 disagreements**, none of
-    which were drift --
+    themselves: comparing rendered types flagged **42 columns** -- 40 of them
+    artefacts of the comparison, 2 genuine drift. The 40 look like --
 
         FLOAT          vs DOUBLE PRECISION   the same PostgreSQL type
         VARCHAR(50)    vs VARCHAR            a column the DDL left unbounded
@@ -192,11 +192,22 @@ def assert_schema_ready(engine=None):
         still unchecked  indexes, constraints, triggers, rules, row-level
                          security, and anything extra
 
-    Nullability is checked in both directions and a server default does not
-    excuse it. A default applies only to a column the statement omits: measured,
-    `INSERT ... (note) VALUES (NULL)` against `note text NOT NULL DEFAULT 'x'`
-    still raises. The reverse -- nullable in the database, NOT NULL in the models
-    -- lets reads return None where the models say they cannot.
+    Nullability is checked in both directions and a server default on the
+    *database* side does not excuse it. A default applies only to a column the
+    statement omits, and whether the statement omits it depends on the mapping,
+    not on the database -- measured:
+
+        mapped column without server_default   INSERT names it, sends NULL,
+                                               so the default never applies
+        mapped column with server_default      INSERT omits it, the default
+                                               does apply
+
+    None of the models here declare `server_default`, so on this codebase the
+    column is always named and a database-side default is never reached. That is
+    a fact about these mappings, not about SQLAlchemy in general.
+
+    The reverse direction -- nullable in the database, NOT NULL in the models --
+    lets reads return None where the models say they cannot.
 
     Not a claim that these are the only things that break a write. A type, a
     length, an enum, a constraint or a trigger will too; the unchecked list above

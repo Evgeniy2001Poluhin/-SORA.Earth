@@ -349,3 +349,68 @@ def test_the_application_no_longer_creates_tables_on_import():
     assert not hasattr(database, "init_db"), (
         "app.database.init_db is back; the application can create its own schema again"
     )
+
+
+@pytest.mark.skipif(
+    not os.getenv("DATABASE_URL", "").startswith("postgresql"),
+    reason="needs a PostgreSQL DATABASE_URL",
+)
+def test_the_check_is_actually_wired_into_startup():
+    """Through the real lifecycle, not by calling the function.
+
+    Every other test here calls assert_schema_ready directly, which proves the
+    function works and nothing about whether it runs. `TestClient(app)` without
+    a `with` block never fires startup, so the entire application suite -- green
+    on every commit -- exercises none of this. Both halves are asserted here:
+    a migrated database starts, and a broken one is refused, by the lifecycle
+    itself.
+    """
+    import uuid as _uuid
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy.engine import make_url
+    import app.database as database
+    from app.main import app
+
+    url = make_url(os.environ["DATABASE_URL"])
+    name = "sora_lifecycle_%s" % _uuid.uuid4().hex[:12]
+    admin = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as conn:
+        conn.execute(text('CREATE DATABASE "%s"' % name))
+    scratch = url.set(database=name)
+    original = database.engine
+    try:
+        migrated = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            env={**os.environ, "DATABASE_URL": scratch.render_as_string(hide_password=False)},
+            capture_output=True, text=True, timeout=300,
+        )
+        assert migrated.returncode == 0, migrated.stderr[-2000:]
+
+        # The check reads app.database.engine, so point it at the scratch one.
+        database.engine = create_engine(scratch)
+        with TestClient(app) as client:                 # fires startup
+            assert client.get("/health").status_code == 200
+        database.engine.dispose()
+
+        # Now break it and go through the same lifecycle.
+        breaker = create_engine(scratch)
+        with breaker.begin() as conn:
+            conn.execute(text("ALTER TABLE retrain_log DROP COLUMN message"))
+        breaker.dispose()
+
+        database.engine = create_engine(scratch)
+        with pytest.raises(RuntimeError) as excinfo:
+            with TestClient(app):
+                pass
+        database.engine.dispose()
+        assert "missing column: retrain_log.message" in str(excinfo.value)
+    finally:
+        database.engine = original
+        with admin.connect() as conn:
+            conn.execute(text(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = :n AND pid <> pg_backend_pid()"), {"n": name})
+            conn.execute(text('DROP DATABASE IF EXISTS "%s"' % name))
+        admin.dispose()
