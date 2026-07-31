@@ -59,15 +59,39 @@ move `alembic_version` back over tables that stay behind, it fails and says so.
 A release carrying it therefore rolls back **forward or from a backup**, not by
 downgrading:
 
-| | |
-|---|---|
-| application only | redeploy the previous image; the schema is a superset and the old code does not use the four tables |
-| schema must go back | restore from a backup taken before the upgrade — see `docs/BACKUP_RESTORE.md` |
-| the four tables must go | drop them explicitly, then `alembic stamp e3f8a7c15d92`; a deliberate act with the data loss in view |
+In order of preference:
 
-The first row is the usual one: the revision only *adds*, so the previous
-application version runs against the new schema unchanged. Take the backup before
-the upgrade regardless — that is what makes the second row available at all.
+1. **Roll the application back.** The revision only *adds*, so the previous
+   version runs against the new schema unchanged. This is the usual answer and
+   needs no schema change at all.
+2. **Forward-fix.** Ship a revision that corrects the problem. A schema that is
+   additive-compatible does not need to be unwound to be fixed.
+3. **Restore** from a backup taken before the upgrade — see
+   `docs/BACKUP_RESTORE.md`. Taking that backup first is what makes this option
+   exist.
+
+**Dropping the tables is not on that list, and must not be treated as a rollback
+step.** On any deployment that predates the revision they were created by
+`Base.metadata.create_all()` and may hold production data the revision never
+touched — that is the whole reason `downgrade` refuses rather than dropping them
+for you. If removing them is genuinely wanted, it is a separate decision that
+starts with establishing provenance and contents:
+
+```bash
+# Do these hold anything? Run for each of batch_results, forecast_history,
+# region_signals, retrain_log.
+psql -c "SELECT count(*) FROM retrain_log"
+
+# When did they appear -- with this revision, or long before it?
+psql -c "SELECT relname, pg_stat_get_last_analyze_time(oid) FROM pg_class
+         WHERE relname IN ('batch_results','forecast_history',
+                           'region_signals','retrain_log')"
+```
+
+Only once every one of them is confirmed empty *and* confirmed to have been
+created by this revision does dropping them and running
+`alembic stamp e3f8a7c15d92` become a reasonable act. If either is unknown,
+restore instead.
 
 Also: if the revision refuses the *upgrade*, it is reporting that these tables
 already exist with a shape that disagrees with the models, and it lists every

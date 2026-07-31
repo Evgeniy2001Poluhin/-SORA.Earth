@@ -38,16 +38,33 @@ default kind; every index with its uniqueness, access method, ordered columns an
 whether it is partial; every constraint of every kind with its columns and
 referenced table.
 
-**The relation checked is `canonical ⊆ actual` — a compatible superset, not
-equality.** Everything canonical must be present and must match. Anything extra
-is reported in the message and is *not* fatal, deliberately: an operator who adds
-an index to relieve a slow query must not have their next deployment refused for
-it, and a migration is not the right place to enforce that no one ever did. The
-fault being guarded against is a canonical object that is absent or that exists
-with a different shape.
+**The relation checked is a *compatible* superset, not any superset.** Everything
+canonical must be present and match. What is extra is then classified, because
+"extra" is not a synonym for "harmless" — enumerated over the whole space rather
+than the cases that came to mind:
 
-That choice has a cost worth naming: a *stray* object — a column left behind by
-an abandoned change, an index nobody remembers adding — passes silently. Catching
+    tolerated                          refused
+    ---------                          -------
+    non-unique index                   NOT NULL column with no default
+    nullable column                    unique index
+    column with a default              constraint of any kind (check, fk,
+    generated column                     unique, exclusion)
+                                       trigger
+                                       rule
+                                       row-level security
+
+The tolerated side is deliberate: an operator who adds an index to relieve a slow
+query must not have their next deployment refused for it, and the ORM never names
+a column it does not know about.
+
+The refused side is measured, not assumed. An extra `NOT NULL` column with no
+default makes every insert the models issue fail with a not-null violation; a
+`DO INSTEAD NOTHING` rule turns DELETE into a silent no-op. Triggers, rules and
+row-level security were invisible to an earlier version of this check — they
+change no column, index or constraint, so nothing looked for them.
+
+A *stray tolerated* object still passes silently: a nullable column left behind by
+an abandoned change is indistinguishable here from one added on purpose. Catching
 those is inventory work against a known-good baseline, not something a revision
 can decide.
 
@@ -193,7 +210,7 @@ SELECT rel.relname || ' ' || a.attname || ' ' || format_type(a.atttypid, a.attty
 """
 
 INDEX_QUERY = """
-SELECT i.relname || ' on ' || t.relname
+SELECT t.relname || ' index ' || i.relname
        || ' unique=' || ix.indisunique::text
        || ' primary=' || ix.indisprimary::text
        || ' method=' || am.amname
@@ -277,26 +294,26 @@ EXPECTED_COLUMNS = {
 }
 
 EXPECTED_INDEXES = {
-    "batch_results_pkey on batch_results unique=true primary=true method=btree partial=false cols=id",
-    "forecast_history_pkey on forecast_history unique=true primary=true method=btree partial=false cols=id",
-    "ix_batch_results_batch_id on batch_results unique=true primary=false method=btree partial=false cols=batch_id",
-    "ix_batch_results_created_at on batch_results unique=false primary=false method=btree partial=false cols=created_at",
-    "ix_batch_results_id on batch_results unique=false primary=false method=btree partial=false cols=id",
-    "ix_forecast_history_country on forecast_history unique=false primary=false method=btree partial=false cols=country",
-    "ix_forecast_history_created_at on forecast_history unique=false primary=false method=btree partial=false cols=created_at",
-    "ix_forecast_history_id on forecast_history unique=false primary=false method=btree partial=false cols=id",
-    "ix_forecast_history_metric on forecast_history unique=false primary=false method=btree partial=false cols=metric",
-    "ix_forecast_history_model on forecast_history unique=false primary=false method=btree partial=false cols=model",
-    "ix_region_signals_observed_at on region_signals unique=false primary=false method=btree partial=false cols=observed_at",
-    "ix_region_signals_region_code on region_signals unique=false primary=false method=btree partial=false cols=region_code",
-    "ix_region_signals_source on region_signals unique=false primary=false method=btree partial=false cols=source",
-    "ix_retrain_log_finished_at on retrain_log unique=false primary=false method=btree partial=false cols=finished_at",
-    "ix_retrain_log_id on retrain_log unique=false primary=false method=btree partial=false cols=id",
-    "ix_retrain_log_started_at on retrain_log unique=false primary=false method=btree partial=false cols=started_at",
-    "ix_retrain_log_status on retrain_log unique=false primary=false method=btree partial=false cols=status",
-    "ix_retrain_log_trigger_source on retrain_log unique=false primary=false method=btree partial=false cols=trigger_source",
-    "region_signals_pkey on region_signals unique=true primary=true method=btree partial=false cols=id",
-    "retrain_log_pkey on retrain_log unique=true primary=true method=btree partial=false cols=id",
+    "batch_results index batch_results_pkey unique=true primary=true method=btree partial=false cols=id",
+    "batch_results index ix_batch_results_batch_id unique=true primary=false method=btree partial=false cols=batch_id",
+    "batch_results index ix_batch_results_created_at unique=false primary=false method=btree partial=false cols=created_at",
+    "batch_results index ix_batch_results_id unique=false primary=false method=btree partial=false cols=id",
+    "forecast_history index forecast_history_pkey unique=true primary=true method=btree partial=false cols=id",
+    "forecast_history index ix_forecast_history_country unique=false primary=false method=btree partial=false cols=country",
+    "forecast_history index ix_forecast_history_created_at unique=false primary=false method=btree partial=false cols=created_at",
+    "forecast_history index ix_forecast_history_id unique=false primary=false method=btree partial=false cols=id",
+    "forecast_history index ix_forecast_history_metric unique=false primary=false method=btree partial=false cols=metric",
+    "forecast_history index ix_forecast_history_model unique=false primary=false method=btree partial=false cols=model",
+    "region_signals index ix_region_signals_observed_at unique=false primary=false method=btree partial=false cols=observed_at",
+    "region_signals index ix_region_signals_region_code unique=false primary=false method=btree partial=false cols=region_code",
+    "region_signals index ix_region_signals_source unique=false primary=false method=btree partial=false cols=source",
+    "region_signals index region_signals_pkey unique=true primary=true method=btree partial=false cols=id",
+    "retrain_log index ix_retrain_log_finished_at unique=false primary=false method=btree partial=false cols=finished_at",
+    "retrain_log index ix_retrain_log_id unique=false primary=false method=btree partial=false cols=id",
+    "retrain_log index ix_retrain_log_started_at unique=false primary=false method=btree partial=false cols=started_at",
+    "retrain_log index ix_retrain_log_status unique=false primary=false method=btree partial=false cols=status",
+    "retrain_log index ix_retrain_log_trigger_source unique=false primary=false method=btree partial=false cols=trigger_source",
+    "retrain_log index retrain_log_pkey unique=true primary=true method=btree partial=false cols=id",
 }
 
 EXPECTED_CONSTRAINTS = {
@@ -317,6 +334,100 @@ def _existing_tables():
     )
 
 
+# Object kinds that can be present without being canonical. Enumerated rather
+# than recalled: triggers, rules and row-level security were invisible to the
+# earlier version of this check, and each of them can change what a write does
+# without changing any column, index or constraint.
+TRIGGER_QUERY = """
+SELECT rel.relname || ' trigger ' || tg.tgname
+  FROM pg_trigger tg
+  JOIN pg_class rel ON rel.oid = tg.tgrelid
+  JOIN pg_namespace n ON n.oid = rel.relnamespace
+ WHERE n.nspname = current_schema() AND rel.relname = ANY(:tables)
+   AND NOT tg.tgisinternal
+"""
+
+RULE_QUERY = """
+SELECT rel.relname || ' rule ' || r.rulename
+  FROM pg_rewrite r
+  JOIN pg_class rel ON rel.oid = r.ev_class
+  JOIN pg_namespace n ON n.oid = rel.relnamespace
+ WHERE n.nspname = current_schema() AND rel.relname = ANY(:tables)
+   AND r.rulename <> '_RETURN'
+"""
+
+RLS_QUERY = """
+SELECT rel.relname || ' row-level security enabled'
+  FROM pg_class rel
+  JOIN pg_namespace n ON n.oid = rel.relnamespace
+ WHERE n.nspname = current_schema() AND rel.relname = ANY(:tables)
+   AND rel.relrowsecurity
+"""
+
+# The anchor table: created by 94d781c78478, long before this revision. If it
+# lives somewhere other than current_schema(), the unqualified CREATE statements
+# here are about to build a second copy of the application's tables in the wrong
+# schema -- silently, and with the application still reading the first one.
+ANCHOR_TABLE = "evaluations"
+ANCHOR_QUERY = """
+SELECT n.nspname
+  FROM pg_class rel
+  JOIN pg_namespace n ON n.oid = rel.relnamespace
+ WHERE rel.relname = :anchor AND rel.relkind = 'r'
+   AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+"""
+
+
+def _assert_schema_is_the_application_schema():
+    """Refuse to create the tables in a schema the application does not use."""
+    conn = op.get_bind()
+    here = conn.execute(text("SELECT current_schema()")).scalar()
+    homes = sorted(r[0] for r in conn.execute(text(ANCHOR_QUERY), {"anchor": ANCHOR_TABLE}))
+    if not homes:
+        # A genuinely fresh database: nothing to disagree with. The chain that
+        # ran before this revision put its tables here too.
+        return
+    if here not in homes:
+        raise RuntimeError(
+            "f2c9a1d47b30 refuses to run: current_schema() is %r, but the "
+            "application's %s table lives in %s. The CREATE statements in this "
+            "revision are unqualified, so they would build a second copy of these "
+            "tables in %r while the application keeps reading %s.\n"
+            "Set search_path so that the application's schema comes first, then "
+            "run the migration again."
+            % (here, ANCHOR_TABLE, ", ".join(repr(h) for h in homes), here, homes[0])
+        )
+
+
+def _classify_extra(label, entry):
+    """Is this extra object safe to leave alone, or must it stop the migration?
+
+    Enumerated over the whole space rather than the cases that came to mind:
+
+        index, non-unique          tolerated -- an operator's performance index
+        column, nullable           tolerated -- the ORM simply never writes it
+        column, with a default     tolerated -- likewise
+        column, generated          tolerated -- likewise
+        column, NOT NULL, no default   REFUSED -- measured: every ORM insert
+                                       fails with a not-null violation
+        index, unique              REFUSED -- rejects rows the models allow
+        constraint, any kind       REFUSED -- check, foreign key, unique and
+                                       exclusion all reject rows the models allow
+        trigger                    REFUSED -- can rewrite or reject a write
+        rule                       REFUSED -- measured: a DO INSTEAD NOTHING rule
+                                       turns DELETE into a silent no-op
+        row-level security         REFUSED -- hides rows from the application
+    """
+    if label == "column":
+        # "table name type notnull=<bool> default=<none|sequence|expr>"
+        notnull = " notnull=true" in entry
+        has_default = " default=none" not in entry
+        return "tolerated" if (not notnull or has_default) else "refused"
+    if label == "index":
+        return "refused" if " unique=true" in entry else "tolerated"
+    return "refused"
+
+
 def _assert_canonical(tables):
     """Refuse to record this revision over a schema that is not the canonical one."""
     if not tables:
@@ -332,14 +443,34 @@ def _assert_canonical(tables):
     ):
         # Only the tables being checked: called before creation, the others do
         # not exist yet and their absence is the normal case, not a fault.
-        # Every entry begins with the table name followed by a space, in all
-        # three inventories, so one rule covers them.
+        #
+        # Every entry begins with "<table> ", which is why all three inventories
+        # are phrased that way. They were not: the index query led with the index
+        # name, so this filter selected nothing and the index comparison verified
+        # nothing at all. It stayed green because extras were tolerated, which
+        # made "expected and present" and "unexpected but harmless"
+        # indistinguishable from outside. test_these_must_be_refused now carries
+        # a case per limb, so a limb that verifies nothing fails.
         expected = {e for e in whole if e.startswith(prefixes)}
         actual = {row[0] for row in conn.execute(text(query), {"tables": list(tables)})}
         for entry in sorted(expected - actual):
             problems.append("missing %s: %s" % (label, entry))
         for entry in sorted(actual - expected):
-            extras.append("unexpected %s: %s" % (label, entry))
+            if _classify_extra(label, entry) == "refused":
+                problems.append("unexpected %s, and not a safe one: %s" % (label, entry))
+            else:
+                extras.append("unexpected %s (tolerated): %s" % (label, entry))
+
+    # Kinds that are never canonical here, so any occurrence is an extra. None of
+    # them changes a column, an index or a constraint, which is exactly why the
+    # earlier version of this check could not see them at all.
+    for label, query in (
+        ("trigger", TRIGGER_QUERY),
+        ("rule", RULE_QUERY),
+        ("row-level security", RLS_QUERY),
+    ):
+        for row in conn.execute(text(query), {"tables": list(tables)}):
+            problems.append("unexpected %s: %s" % (label, row[0]))
 
     if problems:
         raise RuntimeError(
@@ -355,6 +486,10 @@ def _assert_canonical(tables):
 
 
 def upgrade():
+    # Before anything: are we even in the schema the application uses? The CREATE
+    # statements below are unqualified and follow search_path wherever it points.
+    _assert_schema_is_the_application_schema()
+
     # Whatever is already here is checked *first*. Running the creation over a
     # drifted table fails deep inside the DDL instead -- measured, the index on
     # retrain_log.started_at raised `column "started_at" does not exist`, which
