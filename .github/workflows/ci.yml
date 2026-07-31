@@ -140,7 +140,11 @@ jobs:
 
   environmental-postgres-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 was right when this job ran one test file. It now also runs the schema
+    # checks -- 18 cases, each creating its own database and driving alembic in a
+    # subprocess -- and the timestamp tests, and it was cancelled at the limit
+    # with every test passing. The work grew; the budget had not.
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16
