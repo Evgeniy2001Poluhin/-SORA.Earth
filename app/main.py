@@ -78,7 +78,7 @@ def get_db_sync():
     return SessionLocal()
 
 
-def assert_schema_ready():
+def assert_schema_ready(engine=None):
     """Alembic owns the schema. The application checks it and does not build it.
 
     This used to be `init_db()`, which called `Base.metadata.create_all()` at
@@ -94,11 +94,16 @@ def assert_schema_ready():
     Deliberately no environment variable to switch this off. An escape hatch would
     be used, and the first time it is used is the moment the guarantee stops
     meaning anything.
+
+    The `engine` argument exists so a test can point the check at a database it
+    controls; startup passes nothing and gets the application's own.
     """
     from sqlalchemy import inspect
 
-    from app.database import Base, engine
+    from app.database import Base
+    from app.database import engine as app_engine
 
+    engine = engine or app_engine
     present = set(inspect(engine).get_table_names())
     missing = sorted(set(Base.metadata.tables) - present)
     if missing:
