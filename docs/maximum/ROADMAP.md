@@ -5,9 +5,10 @@
 
 Every claim below is either marked as verified with the evidence that verified it,
 or marked as unverified. Nothing here is asserted from memory. Where a fact could
-only be established against production, it is listed as unverifiable **by this
-agent** — production access is withheld after a registered incident on 2026-07-27,
-and documentation is not permission.
+only be established against production, it says so and names how it was checked.
+Production access is withheld by default after a registered incident on
+2026-07-27; the read-only checks recorded below were made after the owner gave
+permission directly in chat. Documentation is still not permission.
 
 ---
 
@@ -51,13 +52,13 @@ found by checking, not by reading the list.
 writes and production runs current migrations. The query that established it:
 
 ```sql
-SELECT count(*), max(observed_at) FROM environmental_observations;
-SELECT job_name, status, count(*), max(finished_at)
-  FROM environmental_job_log GROUP BY 1, 2;
+SELECT count(*) FROM environmental_observations;   -- 0
+SELECT version_num FROM alembic_version;           -- 0b0ff6d1594e
 ```
 
-If rows are accumulating, M1 opens. If not, the first item of M1 is repairing
-ingestion, and nothing downstream is worth building first.
+The column is `event_time`, not `observed_at` — the first version of this query
+used the wrong name and failed, which is how the schema below came to be read
+properly rather than assumed.
 
 ### Sources, as they exist in the code today
 
@@ -109,7 +110,7 @@ than one that carries them.
 |---|---|
 | **Source register** | For each source: endpoint, auth, licence, owner, update frequency, geographic and temporal coverage, known gaps. Sources whose endpoint is not in the code get their provenance established first |
 | **Data contracts** | Schema, units, valid ranges, required fields, geographic precision, temporal frequency, freshness SLA, missing-value handling, deduplication rule |
-| **Four timestamps** | Add `published_at`; migration plus backfill policy for rows that predate it |
+| **Four timestamps** | Already present: `event_time`, `published_at`, `ingested_at`, `updated_at`. Nothing to add; the contracts must use them rather than collapse them |
 | **Provenance chain** | Source, endpoint, request parameters, checksum of the raw payload, parser version, transformations applied, quality checks run, dataset snapshot id |
 | **Quality engine** | Completeness, validity, timeliness, uniqueness, coverage, outliers, unit consistency, source disagreement, schema drift — reported per dimension, never collapsed into one opaque score |
 | **Dataset snapshots** | An immutable snapshot per model run, so re-running one reproduces the result |
