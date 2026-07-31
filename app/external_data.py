@@ -199,54 +199,46 @@ def _fetch_oecd_indicator(iso3: str, key: str) -> Optional[float]:
     return None
 
 
-# Period of the most recent World Bank value per (country, indicator).
-#
-# A side table rather than a wider return type: _fetch_with_fallback_impl's
-# 2-tuple is depended on by two backward-compatible wrappers below and by tests,
-# and widening it to carry the period would break all of them for the sake of one
-# consumer. The entry is written immediately before the return that produced it,
-# so it cannot describe a different value than the one handed back.
-_LAST_PERIOD: Dict[Tuple[str, str], Optional[str]] = {}
-
-
-def _indicator_period(iso3: str, indicator_code: str) -> Optional[str]:
-    """The period of the last World Bank value fetched for this pair, if any."""
-    return _LAST_PERIOD.get((iso3, indicator_code))
-
-
 def _fetch_with_fallback_impl(
     iso3: str,
     key: str,
     indicator_code: str,
     country_name: str,
-) -> Tuple[Optional[float], str]:
+) -> Tuple[Optional[float], str, Optional[str]]:
     """Unified fetch with fallback chain.
 
     Order: World Bank → OECD → static benchmark → global average.
-    Returns (value, source_tag).
+    Returns (value, source_tag, period).
+
+    The period travels in the return rather than in a side table. An earlier
+    version kept a module-level dict keyed by (iso3, indicator_code), written
+    just before the return that produced it -- which is correct only while calls
+    are sequential, and nothing guarantees that. Two concurrent fetches of the
+    same pair could have one overwrite the other's period, and the wrong
+    as_of_date would be persisted against a right-looking value. Sources other
+    than World Bank state no period and return None.
     """
     # 1. World Bank
     val, period = _fetch_wb_indicator_dated(iso3, indicator_code)
     if val is not None:
-        _LAST_PERIOD[(iso3, indicator_code)] = period
-        return val, "world_bank"
+        return val, "world_bank", period
 
     # 2. OECD (only for keys that have a mapping)
     val = _fetch_oecd_indicator(iso3, key)
     if val is not None:
-        return val, "oecd"
+        return val, "oecd", None
 
     # 3. Static benchmark
     bench = BENCHMARKS.get(country_name, {})
     if key in bench:
         logger.info("Using static benchmark for %s/%s", country_name, key)
-        return bench[key], "benchmark"
+        return bench[key], "benchmark", None
 
     # 4. Global average (offline mode only)
     if os.getenv("SORA_OFFLINE", "0") == "1" and key in GLOBAL_AVG:
-        return GLOBAL_AVG[key], "global_avg"
+        return GLOBAL_AVG[key], "global_avg", None
 
-    return None, "none"
+    return None, "none", None
 
 # ---------------------------------------------------------------------------
 # Public API — country data
@@ -274,13 +266,11 @@ def get_country_esg_realtime(country_name: str) -> Optional[Dict]:
     }
 
     for key, indicator_code in INDICATORS.items():
-        val, src = _fetch_with_fallback_impl(iso3, key, indicator_code, country_name)
+        val, src, period = _fetch_with_fallback_impl(iso3, key, indicator_code, country_name)
         if val is not None:
             result["indicators"][key] = val
             result["indicator_sources"][key] = src
-            result["indicator_periods"][key] = (
-                _indicator_period(iso3, indicator_code) if src == "world_bank" else None
-            )
+            result["indicator_periods"][key] = period
             # backward compat: top-level keys too
             result[key] = val
 
@@ -343,10 +333,17 @@ def _period_to_date(period: Optional[str]) -> Optional[datetime]:
     """
     if not period:
         return None
-    try:
-        return datetime(int(str(period)[:4]), 1, 1)
-    except (TypeError, ValueError):
+    text = str(period).strip()
+    # Exactly four digits, nothing else. Slicing the first four characters turned
+    # "2025-invalid" and "20250" into 2025-01-01 -- a false observation date,
+    # which is worse than none: it looks answerable and is wrong.
+    if not (len(text) == 4 and text.isdigit()):
         logger.warning("Unparseable indicator period %r; storing no date", period)
+        return None
+    try:
+        return datetime(int(text), 1, 1)
+    except ValueError:
+        logger.warning("Out-of-range indicator period %r; storing no date", period)
         return None
 
 
@@ -491,7 +488,7 @@ def _fetch_with_fallback(
     - Старые тесты зовут без want_source -> получают только value.
     - Новый код может звать с want_source=True -> (value, source).
     """
-    val, src = _fetch_with_fallback_impl(iso3, key, indicator_code, country_name)
+    val, src, _period = _fetch_with_fallback_impl(iso3, key, indicator_code, country_name)
     if want_source:
         return val, src
     return val
@@ -504,7 +501,7 @@ def _fetch_with_fallback(
     *,
     want_source: bool = False,
 ):
-    val, src = _fetch_with_fallback_impl(iso3, key, indicator_code, country_name)
+    val, src, _period = _fetch_with_fallback_impl(iso3, key, indicator_code, country_name)
     if want_source:
         return val, src
     return val

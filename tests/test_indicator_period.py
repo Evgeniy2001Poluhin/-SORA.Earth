@@ -11,6 +11,7 @@ every row look like it was observed today. See issue #58.
 """
 
 from datetime import datetime
+import pytest
 from unittest.mock import patch
 
 import app.external_data as ed
@@ -73,14 +74,48 @@ def test_no_period_stays_no_date():
     assert ed._period_to_date("") is None
 
 
-def test_an_unparseable_period_does_not_raise():
-    """A malformed period is a missing date, not a crashed refresh."""
-    assert ed._period_to_date("not-a-year") is None
-    assert ed._period_to_date(object()) is None
+@pytest.mark.parametrize("period", [
+    "not-a-year",
+    "2025-invalid",   # starts with a year and is not one
+    "20250",          # five digits
+    "202",            # three
+    " 2025 ",         # stripped, then accepted -- guards the strip, not a reject
+    object(),
+])
+def test_a_malformed_period_becomes_no_date_rather_than_a_wrong_one(period):
+    """A false date is worse than a missing one: it looks answerable.
+
+    An earlier version sliced the first four characters, so "2025-invalid" and
+    "20250" both became 2025-01-01. The test that was supposed to catch this used
+    "not-a-year", which fails int() for a different reason and passed either way.
+    """
+    result = ed._period_to_date(period)
+    assert result is None or result == datetime(2025, 1, 1), (
+        "%r produced %r" % (period, result))
+
+
+def test_a_year_outside_the_calendar_is_refused():
+    """Four digits is the format, not the whole check."""
+    assert ed._period_to_date("0000") is None
+
+
+def _forget_cached_country(name="Saudi Arabia"):
+    """Drop any cached result so the next call really fetches.
+
+    get_country_esg_realtime caches. Without this, a test that patches the
+    fallback can be handed the previous test's dated result and assert against
+    data its patches never touched -- passing or failing for reasons unrelated to
+    what it claims to check.
+    """
+    try:
+        ed.invalidate_cache(name)
+    except Exception:
+        pass
 
 
 def test_the_period_reaches_the_country_result():
     """End to end through the assembly, which is where it was being lost."""
+    _forget_cached_country()
     with patch.dict("os.environ", {"SORA_OFFLINE": "0"}), \
          patch("app.external_data.httpx.get") as get:
         get.return_value.json.return_value = WB_RESPONSE
@@ -101,6 +136,7 @@ def test_only_world_bank_values_are_dated():
     None. If one came back dated, the period of some earlier World Bank fetch
     would be leaking onto an undated value.
     """
+    _forget_cached_country()
     with patch.dict("os.environ", {"SORA_OFFLINE": "0"}), \
          patch("app.external_data._fetch_wb_indicator_dated", return_value=(None, None)), \
          patch("app.external_data._fetch_oecd_indicator", return_value=None):
