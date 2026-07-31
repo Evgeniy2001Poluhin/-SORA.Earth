@@ -74,24 +74,28 @@ def test_no_period_stays_no_date():
     assert ed._period_to_date("") is None
 
 
-@pytest.mark.parametrize("period", [
-    "not-a-year",
-    "2025-invalid",   # starts with a year and is not one
-    "20250",          # five digits
-    "202",            # three
-    " 2025 ",         # stripped, then accepted -- guards the strip, not a reject
-    object(),
+@pytest.mark.parametrize("period,expected", [
+    ("2025",         datetime(2025, 1, 1)),   # the shape the source actually sends
+    (" 2025 ",       datetime(2025, 1, 1)),   # stripped, then accepted
+    ("2025-invalid", None),                   # starts with a year and is not one
+    ("20250",        None),                   # five digits
+    ("202",          None),                   # three
+    ("not-a-year",   None),
+    (object(),       None),
 ])
-def test_a_malformed_period_becomes_no_date_rather_than_a_wrong_one(period):
-    """A false date is worse than a missing one: it looks answerable.
+def test_each_period_produces_exactly_this_date(period, expected):
+    """One expected value per case, not "either of these is fine".
 
-    An earlier version sliced the first four characters, so "2025-invalid" and
-    "20250" both became 2025-01-01. The test that was supposed to catch this used
-    "not-a-year", which fails int() for a different reason and passed either way.
+    The previous version asserted `result is None or result == 2025-01-01`, which
+    every parameter satisfies whichever way the code behaves -- so a regression
+    turning "2025-invalid" into a date would have passed. A test that accepts
+    both answers tests nothing.
+
+    The defect it exists for: `str(period)[:4]` accepted anything beginning with
+    four digits and produced a false observation date, which is worse than none
+    because it looks answerable.
     """
-    result = ed._period_to_date(period)
-    assert result is None or result == datetime(2025, 1, 1), (
-        "%r produced %r" % (period, result))
+    assert ed._period_to_date(period) == expected
 
 
 def test_a_year_outside_the_calendar_is_refused():
@@ -102,15 +106,14 @@ def test_a_year_outside_the_calendar_is_refused():
 def _forget_cached_country(name="Saudi Arabia"):
     """Drop any cached result so the next call really fetches.
 
-    get_country_esg_realtime caches. Without this, a test that patches the
-    fallback can be handed the previous test's dated result and assert against
-    data its patches never touched -- passing or failing for reasons unrelated to
-    what it claims to check.
+    No try/except. An earlier version swallowed every exception here, which would
+    have let a failed invalidation hand the next test the previous one's cached
+    result -- it would then assert against data its patches never produced, and
+    pass. Silencing a failure in the setup of a test is the same defect this
+    repository has been removing from its ingestion code all week; it does not
+    become acceptable because it is in a test.
     """
-    try:
-        ed.invalidate_cache(name)
-    except Exception:
-        pass
+    ed.invalidate_cache(name)
 
 
 def test_the_period_reaches_the_country_result():
