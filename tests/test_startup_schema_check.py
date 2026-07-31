@@ -10,6 +10,8 @@ something is missing and says what and how to fix it, and that it stays quiet
 when the schema is there. A check that never fires is not a check.
 """
 
+import os
+
 import pytest
 from sqlalchemy import create_engine, text
 
@@ -114,8 +116,129 @@ def test_refuses_a_column_the_database_requires_but_the_models_omit(tmp_path):
     reopened.dispose()
 
     message = str(excinfo.value)
-    assert "retrain_log.message is NOT NULL" in message, message
-    assert "inserts will fail" in message, message
+    assert "retrain_log.message is NOT NULL in the database" in message, message
+    assert "writes may fail" in message, message
+
+
+def test_a_server_default_does_not_excuse_the_mismatch(tmp_path):
+    """A default applies to a column the statement omits, not to an explicit NULL.
+
+    Measured on PostgreSQL 16, `note text NOT NULL DEFAULT 'x'`:
+
+        INSERT INTO t (id) VALUES (1)             -> INSERT 0 1
+        INSERT INTO t (id, note) VALUES (2, NULL) -> not-null violation
+
+    Code holding a column the models call optional may well pass None, so a
+    default on the database side does not make the disagreement safe. An earlier
+    version skipped exactly this case.
+    """
+    from app.database import Base
+    from app.main import assert_schema_ready
+
+    path = tmp_path / "defaulted.db"
+    engine = create_engine("sqlite:///%s" % path)
+    Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE retrain_log"))
+        conn.execute(text(
+            "CREATE TABLE retrain_log ("
+            " id INTEGER NOT NULL PRIMARY KEY, started_at DATETIME NOT NULL,"
+            " finished_at DATETIME, duration_sec FLOAT, status VARCHAR(50) NOT NULL,"
+            " trigger_source VARCHAR(50), job_name VARCHAR(100),"
+            " model_version VARCHAR(100), data_version VARCHAR(100),"
+            " metrics_json TEXT, error_message TEXT,"
+            " message TEXT NOT NULL DEFAULT 'x')"))
+    engine.dispose()
+
+    reopened = create_engine("sqlite:///%s" % path)
+    with pytest.raises(RuntimeError) as excinfo:
+        assert_schema_ready(engine=reopened)
+    reopened.dispose()
+
+    assert "retrain_log.message is NOT NULL in the database" in str(excinfo.value)
+
+
+def test_refuses_the_other_direction_too(tmp_path):
+    """Nullable in the database, NOT NULL in the models.
+
+    The database can then hold rows the models say are impossible, and a read
+    hands code None where it expects a value. Less dramatic than a failing
+    insert, and just as much a schema disagreement.
+    """
+    from app.database import Base
+    from app.main import assert_schema_ready
+
+    path = tmp_path / "loose.db"
+    engine = create_engine("sqlite:///%s" % path)
+    Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE retrain_log"))
+        # `status` is NOT NULL in the models; here it is not.
+        conn.execute(text(
+            "CREATE TABLE retrain_log ("
+            " id INTEGER NOT NULL PRIMARY KEY, started_at DATETIME NOT NULL,"
+            " finished_at DATETIME, duration_sec FLOAT, status VARCHAR(50),"
+            " trigger_source VARCHAR(50), job_name VARCHAR(100),"
+            " model_version VARCHAR(100), data_version VARCHAR(100),"
+            " metrics_json TEXT, error_message TEXT, message TEXT)"))
+    engine.dispose()
+
+    reopened = create_engine("sqlite:///%s" % path)
+    with pytest.raises(RuntimeError) as excinfo:
+        assert_schema_ready(engine=reopened)
+    reopened.dispose()
+
+    message = str(excinfo.value)
+    assert "retrain_log.status is nullable in the database" in message, message
+    assert "reads may return None" in message, message
+
+
+@pytest.mark.skipif(
+    not os.getenv("DATABASE_URL", "").startswith("postgresql"),
+    reason="the type comparison only runs on PostgreSQL; needs a PostgreSQL DATABASE_URL",
+)
+def test_types_are_compared_on_postgresql(tmp_path):
+    """SQLite must not set the contract production is held to.
+
+    Its type affinity means a length is never enforced, so a length mismatch
+    there proves nothing. On PostgreSQL a length rejects values, so that is where
+    the type is checked -- this asserts the deeper branch actually runs.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy.engine import make_url
+    from app.database import Base
+    from app.main import assert_schema_ready
+
+    url = make_url(os.environ["DATABASE_URL"])
+    name = "sora_typecheck_%s" % _uuid.uuid4().hex[:12]
+    admin = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as conn:
+        conn.execute(text('CREATE DATABASE "%s"' % name))
+    scratch = url.set(database=name)
+    try:
+        engine = create_engine(scratch)
+        Base.metadata.create_all(bind=engine)
+        with engine.begin() as conn:
+            # VARCHAR(50) in the models, VARCHAR(10) here: SQLite would not care,
+            # PostgreSQL rejects a 40-character status.
+            conn.execute(text("ALTER TABLE retrain_log ALTER COLUMN status TYPE VARCHAR(10)"))
+        engine.dispose()
+
+        engine = create_engine(scratch)
+        with pytest.raises(RuntimeError) as excinfo:
+            assert_schema_ready(engine=engine)
+        engine.dispose()
+    finally:
+        with admin.connect() as conn:
+            conn.execute(text(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = :n AND pid <> pg_backend_pid()"), {"n": name})
+            conn.execute(text('DROP DATABASE IF EXISTS "%s"' % name))
+        admin.dispose()
+
+    message = str(excinfo.value)
+    assert "VARCHAR(10)" in message and "VARCHAR(50)" in message, message
 
 
 def test_passes_on_a_complete_schema(tmp_path):

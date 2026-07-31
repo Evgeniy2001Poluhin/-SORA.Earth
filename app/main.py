@@ -78,6 +78,29 @@ def get_db_sync():
     return SessionLocal()
 
 
+def _type_check_applies(engine):
+    """Types are compared on PostgreSQL, and only there.
+
+    SQLite is the suite's database, and it stores what it is given: `VARCHAR(50)`
+    round-trips, but its type affinity means a length is never enforced, so a
+    mismatch there says nothing about production. PostgreSQL is where a length,
+    a precision or an enum actually rejects a value, so that is where the deeper
+    contract is checked -- and the reduced one is what SQLite gets.
+    """
+    return engine.dialect.name == "postgresql"
+
+
+def _compile_type(type_, engine):
+    """Both sides through the same dialect, or the comparison is meaningless."""
+    if type_ is None:
+        return None
+    try:
+        return type_.compile(dialect=engine.dialect)
+    except Exception:
+        # A type the dialect cannot render is not evidence of drift.
+        return None
+
+
 def assert_schema_ready(engine=None):
     """Alembic owns the schema. The application checks it and does not build it.
 
@@ -104,21 +127,29 @@ def assert_schema_ready(engine=None):
     without reading the migration graph at runtime.
 
     What it checks, and what it does not -- stated rather than left to be
-    discovered:
+    discovered. The depth depends on the dialect, because SQLite is the suite's
+    database and must not set the contract production is held to:
 
-        checked      every model table exists
-                     every model column exists
-                     no column is NOT NULL without a default where the models
-                       treat it as optional (that combination fails every insert)
+        everywhere       every model table exists
+                         every model column exists
+                         nullability agrees, in both directions
 
-        not checked  column types, index and constraint presence, anything extra
+        PostgreSQL too   the compiled column type agrees, which carries length,
+                         precision and enum membership
 
-    Types are left out deliberately: the suite runs on SQLite and production on
-    PostgreSQL, and comparing reflected types across dialects produces refusals
-    for schemas that are correct. Refusing a good deployment is worse than the
-    drift being looked for. That gap belongs to the migration-time check
-    (f2c9a1d47b30), which knows it is on PostgreSQL and compares full type
-    modifiers there.
+        still unchecked  indexes, constraints, triggers, rules, row-level
+                         security, and anything extra
+
+    Nullability is checked in both directions and a server default does not
+    excuse it. A default applies only to a column the statement omits: measured,
+    `INSERT ... (note) VALUES (NULL)` against `note text NOT NULL DEFAULT 'x'`
+    still raises. The reverse -- nullable in the database, NOT NULL in the models
+    -- lets reads return None where the models say they cannot.
+
+    Not a claim that these are the only things that break a write. A type, a
+    length, an enum, a constraint or a trigger will too; the unchecked list above
+    is a real gap, and the migration-time check in f2c9a1d47b30 is what covers
+    indexes, constraints, triggers, rules and row-level security on PostgreSQL.
 
     Deliberately no environment variable to switch this off. An escape hatch would
     be used, and the first time it is used is the moment the guarantee stops
@@ -149,25 +180,37 @@ def assert_schema_ready(engine=None):
         for column in sorted(set(table.columns.keys()) - set(reflected)):
             faults.append("missing column: %s.%s" % (name, column))
 
-        # Nullability, because it is the one further disagreement that breaks a
-        # write rather than a read, and the one that means the same thing in
-        # every dialect. Measured: a column the database requires and the ORM
-        # omits fails with a not-null violation on the first insert.
         for column_name, model_column in sorted(table.columns.items()):
             found = reflected.get(column_name)
-            if found is None or found.get("nullable", True):
+            if found is None:
                 continue
-            if found.get("default") is not None:
-                continue                      # the database fills it in
-            supplied = (not model_column.nullable
-                        or model_column.default is not None
-                        or model_column.server_default is not None
-                        or model_column.primary_key)
-            if not supplied:
+
+            # Nullability, in both directions, and without excusing a server
+            # default. A default only applies to a column the statement omits:
+            # measured on PostgreSQL, `INSERT ... (note) VALUES (NULL)` against
+            # `note text NOT NULL DEFAULT 'x'` still raises a not-null violation,
+            # and code holding an optional column may pass None explicitly.
+            db_nullable = bool(found.get("nullable", True))
+            if db_nullable != bool(model_column.nullable):
                 faults.append(
-                    "%s.%s is NOT NULL in the database with no default, but the "
-                    "models treat it as optional -- inserts will fail"
-                    % (name, column_name))
+                    "%s.%s is %s in the database and %s in the models -- %s"
+                    % (name, column_name,
+                       "nullable" if db_nullable else "NOT NULL",
+                       "nullable" if model_column.nullable else "NOT NULL",
+                       "writes may fail" if not db_nullable else
+                       "reads may return None where the models say they cannot"))
+
+            # Types only where the comparison means something. Reflected types
+            # are dialect-specific, so this compiles both sides with the engine's
+            # own dialect rather than comparing across dialects -- which is what
+            # would refuse a schema that is in fact correct.
+            if _type_check_applies(engine):
+                declared = _compile_type(model_column.type, engine)
+                actual_type = _compile_type(found.get("type"), engine)
+                if declared and actual_type and declared != actual_type:
+                    faults.append(
+                        "%s.%s is %s in the database and %s in the models"
+                        % (name, column_name, actual_type, declared))
 
     if faults:
         raise RuntimeError(
