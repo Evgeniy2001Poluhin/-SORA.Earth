@@ -1,0 +1,17 @@
+[Unit]
+Description=Run the SORA local dump daily
+Documentation=https://github.com/Evgeniy2001Poluhin/-SORA.Earth/issues/51
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+
+# A missed run executes after boot rather than being skipped. A host that was
+# down at 03:30 would otherwise silently have no backup for that day.
+Persistent=true
+
+# Spread the start so a dump never begins at the same instant as anything else
+# scheduled on the hour.
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
