@@ -377,11 +377,23 @@ jobs:
       # the environment is made to match. So the production path is staged first.
       - name: systemd unit verification
         run: |
-          sudo install -D -m 0755 scripts/backup_local_daily.sh \
+          # Modes come from the repository, never forced here.
+          #
+          # This step first used `install -m 0755`, which hid the defect it exists
+          # to catch: scripts/backup_local_daily.sh was committed non-executable,
+          # so ExecStart could not run it. Production survived only because a
+          # hand-installed copy carried the bit, and a `git pull` replaced it with
+          # the tracked one -- leaving the nightly backup broken with nothing
+          # reporting it. Forcing the mode made CI green over exactly that.
+          #
+          # systemd-analyze does detect it: a present but non-executable command
+          # gives "is not executable: Permission denied" and exit 1. Measured.
+          sudo mkdir -p /opt/sora_earth_ai_platform/scripts
+          sudo cp --preserve=mode scripts/backup_local_daily.sh \
             /opt/sora_earth_ai_platform/scripts/backup_local_daily.sh
-          sudo install -D -m 0644 infra/systemd/sora-backup-local.service \
+          sudo cp --preserve=mode infra/systemd/sora-backup-local.service \
             /etc/systemd/system/sora-backup-local.service
-          sudo install -D -m 0644 infra/systemd/sora-backup-local.timer \
+          sudo cp --preserve=mode infra/systemd/sora-backup-local.timer \
             /etc/systemd/system/sora-backup-local.timer
 
           for unit in sora-backup-local.service sora-backup-local.timer; do
