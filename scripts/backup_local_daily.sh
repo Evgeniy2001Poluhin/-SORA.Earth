@@ -89,11 +89,22 @@ trap 'cleanup; container_cleanup' EXIT
 READY_TIMEOUT="${READY_TIMEOUT:-60}"
 DEADLINE=$(( SECONDS + READY_TIMEOUT ))
 READY=0
-while [ "$SECONDS" -lt "$DEADLINE" ]; do
-    if "${DC[@]}" pg_isready -U "$DB_USER" -d "$DB_NAME" -t 2 >/dev/null 2>&1; then
+while :; do
+    # Both the probe and the pause are capped to what is left, so the total
+    # cannot exceed READY_TIMEOUT. Checking the deadline only at the top of the
+    # loop was not enough: a 2s probe followed by an unconditional 2s sleep could
+    # carry the wait four seconds past a budget the message then reported as 60.
+    remaining=$(( DEADLINE - SECONDS ))
+    [ "$remaining" -gt 0 ] || break
+
+    probe=$(( remaining < 2 ? remaining : 2 ))
+    if "${DC[@]}" pg_isready -U "$DB_USER" -d "$DB_NAME" -t "$probe" >/dev/null 2>&1; then
         READY=1; break
     fi
-    sleep 2
+
+    remaining=$(( DEADLINE - SECONDS ))
+    [ "$remaining" -gt 0 ] || break
+    sleep $(( remaining < 2 ? remaining : 2 ))
 done
 [ "$READY" = 1 ] || fail "PostgreSQL not ready after ${READY_TIMEOUT}s"
 
