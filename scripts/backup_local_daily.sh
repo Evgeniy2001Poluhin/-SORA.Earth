@@ -32,8 +32,8 @@ exec 9>"$LOCK_FILE" || fail "cannot open lock $LOCK_FILE"
 # -E 75 so contention is distinguishable from a broken lock. Without it every
 # nonzero status reads as "someone else is running" -- a missing directory, a bad
 # descriptor or a permissions fault all become a silent skip, and a schedule that
-# has not produced a backup for weeks looks healthy. scripts/backup_lock.sh says
-# exactly this about the same trap; this file did not apply it.
+# has not produced a backup for weeks looks healthy. scripts/backup_lock.sh
+# carries the same guard for the same reason.
 lock_rc=0
 flock -n -E 75 9 || lock_rc=$?
 case $lock_rc in
@@ -82,14 +82,20 @@ trap 'cleanup; container_cleanup' EXIT
 # for the compose service, so a Persistent=true catch-up at boot can start while
 # postgres is still coming up. The dump would fail and nothing would retry until
 # tomorrow -- a whole day lost to a race of a few seconds.
+# A deadline in wall-clock seconds, not a probe count. Counting probes made the
+# stated 60s a fiction: pg_isready waits up to 3s by default, so thirty attempts
+# with 2s between them could take about 150. -t 2 bounds each probe as well, so
+# neither the loop nor a single hung connection can outlast the budget.
+READY_TIMEOUT="${READY_TIMEOUT:-60}"
+DEADLINE=$(( SECONDS + READY_TIMEOUT ))
 READY=0
-for _ in $(seq 1 30); do
-    if "${DC[@]}" pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
+while [ "$SECONDS" -lt "$DEADLINE" ]; do
+    if "${DC[@]}" pg_isready -U "$DB_USER" -d "$DB_NAME" -t 2 >/dev/null 2>&1; then
         READY=1; break
     fi
     sleep 2
 done
-[ "$READY" = 1 ] || fail "PostgreSQL not ready after 60s"
+[ "$READY" = 1 ] || fail "PostgreSQL not ready after ${READY_TIMEOUT}s"
 
 log "starting dump of $DB_NAME"
 "${DC[@]}" pg_dump -U "$DB_USER" -d "$DB_NAME" \
