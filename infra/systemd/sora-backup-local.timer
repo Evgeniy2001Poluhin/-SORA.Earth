@@ -1,0 +1,18 @@
+[Unit]
+Description=Run the SORA local dump daily
+Documentation=https://github.com/Evgeniy2001Poluhin/-SORA.Earth/issues/51
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+
+# A missed run executes after boot rather than being skipped. A host that was
+# down at 03:30 would otherwise silently have no backup for that day.
+Persistent=true
+
+# No RandomizedDelaySec. Five minutes of jitter puts consecutive runs up to
+# 24h05m apart, which is more than the interval this schedule is used to claim.
+# Nothing else runs at 03:30 here, so the spread bought nothing and cost the
+# guarantee.
+
+[Install]
+WantedBy=timers.target

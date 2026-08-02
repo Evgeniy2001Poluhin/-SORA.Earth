@@ -173,6 +173,82 @@ The difference that matters: never drop the old database before a rollback name
 exists. This script's `DROP` then `RENAME` is acceptable for a disposable target
 precisely because there is nothing to roll back to.
 
+## The local daily dump
+
+**An operational copy. Not disaster recovery.** It lands on the same disk as the
+database it came from, so it does not protect against losing the host. What it
+does is move RPO from *undefined* to *24 hours while the server is alive*, which
+is the difference between not knowing what would be lost and knowing.
+
+`scripts/backup_local_daily.sh`, driven by `infra/systemd/sora-backup-local.timer`
+at 03:30 UTC with `Persistent=true`, so a run missed while the host was down
+executes after boot instead of being skipped.
+
+| | |
+|---|---|
+| format | `--format=custom --no-owner --no-acl` |
+| directory | `/var/backups/sora`, mode `0700`, `umask 077` |
+| overlap | `flock`; a second run exits without touching anything |
+| verification | `pg_restore --list` before the file is allowed to exist |
+| publication | written to `.tmp`, moved atomically only after passing |
+| retention | 7 days, pruned **after** a new dump has been verified |
+| credentials | none. `pg_dump` runs inside the container; nothing reaches argv |
+| failure | journal, and systemd marks the unit failed |
+
+### Two things measured rather than assumed
+
+**Verification happens inside the container.** The first version piped the dump
+to the host and checked it with `pg_restore --list /dev/stdin`. That cannot work:
+a custom-format archive must be seeked and stdin through `docker exec` is a pipe.
+It failed loudly and wrote nothing — the design behaving correctly — but the check
+had to move to where the file is a file. Neither `pg_dump` nor `pg_restore` exists
+on this host, so there is nowhere else it could go.
+
+**The copy out is size-checked.** The dump leaves the container through a pipe,
+so the host-side size is compared against what the container reports. A truncated
+transfer would otherwise produce a shorter file that still lists correctly.
+
+### Verified on production, 2026-07-31
+
+```
+systemctl start sora-backup-local.service      Finished, unit succeeded
+wrote sora_earth_20260731T230702Z.dump         1,174,757 bytes, sha256 recorded
+/var/backups/sora                              0700, files 0600
+```
+
+Restore drill from that exact automated dump, into a scratch database that was
+then dropped:
+
+```
+tables                19
+region_esg_scores     85 rows
+environmental_observations  1,860 rows
+```
+
+### What the schedule actually guarantees
+
+**RPO ≤ 24 hours while the timer fires on schedule, for host-survivable loss —
+and only that.** Both conditions the review set are met: the unit has run
+successfully under systemd, and a restore from what it produced has been
+performed.
+
+The qualifier is not hedging. `Persistent=true` runs a missed activation after
+boot, which is the right behaviour — but it means downtime extends the gap
+between consecutive dumps by however long the host was down. A server off for
+six hours yields a 30-hour interval, and no daily schedule can do otherwise.
+
+An earlier version also set `RandomizedDelaySec=300`, which put consecutive runs
+up to 24h05m apart on its own, with the host running normally. It bought nothing
+here — nothing else is scheduled at 03:30 — and cost the interval the claim rests
+on, so it is gone.
+
+### Still not covered
+
+Losing the server, the disk, or the directory. That needs the off-site pipeline
+above — encryption to a recipient, S3, manifests, retention — which requires a
+keypair and a bucket this host does not have. Separate work, and a decision about
+where the bucket lives and who holds the private key.
+
 ## RPO: what is claimed and what is not
 
 These are different things and conflating them is how a backup policy becomes
