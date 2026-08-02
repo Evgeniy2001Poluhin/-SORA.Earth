@@ -320,6 +320,116 @@ jobs:
           SORA_OFFLINE: "1"
           RUN_SCHEDULER: "false"
 
+  # The shell scripts had no CI at all. tests/test_backup_lock.sh has existed for
+  # a while and has never run here, which is the same as not having it: a test
+  # nobody executes cannot fail, and a green board said nothing about any of this.
+  shell-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Two gates, deliberately at different strictness.
+      #
+      # Repo-wide at `error` only. Eight scripts carry warning- and style-level
+      # findings today (tests/test_backup_lock.sh alone has 22). Gating everything
+      # at full strictness would mean fixing all of them here, in a pull request
+      # about backups -- so the wide gate catches what is actually broken, and the
+      # existing findings are left for their own change rather than absorbed
+      # silently into this one.
+      #
+      # The files this pull request owns are held to every severity, where they
+      # already stand at zero. New debt in them is blocked from the start; that is
+      # much cheaper than the 22 findings above, which were also once zero.
+      - name: ShellCheck
+        run: |
+          shellcheck --version | head -2
+
+          echo "--- every shell script, error severity"
+          find . -name '*.sh' -not -path './node_modules/*' -not -path './.git/*' \
+            -print0 | xargs -0 shellcheck -S error
+
+          echo "--- the backup-local set, every severity"
+          shellcheck -S style \
+            scripts/backup_local_daily.sh \
+            tests/test_backup_local_daily.sh \
+            tests/test_backup_local_integration.sh \
+            tools/mutation_backup_local.sh
+
+      # These skip on macOS -- flock does not exist there -- so this Linux job is
+      # the only place they actually execute.
+      - name: Behavioural tests for the daily local backup
+        run: bash tests/test_backup_local_daily.sh
+
+      # Runs the suite against deliberately broken copies of the script and fails
+      # if any of them survives. Without it, "23 tests pass" is a statement about
+      # the tests, not about the script: an earlier run of this tool is what
+      # showed the empty-dump guard could be deleted with every test still green.
+      # The copies are temporary; the tracked script is never modified.
+      - name: Mutation testing
+        run: bash tools/mutation_backup_local.sh
+
+      # Verified where the unit's assumptions hold. In a bare container it reports
+      # a missing docker.service and a non-executable command -- both artefacts of
+      # the container, not defects, and indistinguishable from real findings unless
+      # the environment is made to match. So the production path is staged first.
+      - name: systemd unit verification
+        run: |
+          sudo install -D -m 0755 scripts/backup_local_daily.sh \
+            /opt/sora_earth_ai_platform/scripts/backup_local_daily.sh
+          sudo install -D -m 0644 infra/systemd/sora-backup-local.service \
+            /etc/systemd/system/sora-backup-local.service
+          sudo install -D -m 0644 infra/systemd/sora-backup-local.timer \
+            /etc/systemd/system/sora-backup-local.timer
+
+          for unit in sora-backup-local.service sora-backup-local.timer; do
+            # Status and output both. Measured: systemd-analyze exits 1 whenever it
+            # reports anything, so the status is a real signal -- checked against a
+            # unit with an unknown key and a missing command, which it caught. The
+            # output is asserted empty as well because that is the legible half:
+            # the status says something is wrong, the text says what.
+            rc=0
+            out="$(systemd-analyze verify "/etc/systemd/system/$unit" 2>&1)" || rc=$?
+            if [ -n "$out" ] || [ "$rc" -ne 0 ]; then
+              echo "$unit failed verification (exit $rc):" >&2
+              echo "$out" >&2
+              exit 1
+            fi
+            echo "$unit verified clean"
+          done
+
+      # A dump that has never been restored is a hypothesis. This one is written
+      # by a real pg_dump and read back by a real pg_restore into a second
+      # database, then compared.
+      #
+      # In a container rather than a `services:` block so the client and the
+      # server come from the same image. With the runner's own psql the two
+      # versions drift independently, and pg_dump refuses a newer server -- a
+      # failure that would say nothing about this change.
+      - name: Restore against a real PostgreSQL
+        run: |
+          docker run -d --name pg-restore-test --network none \
+            --tmpfs /var/lib/postgresql/data:rw \
+            -e POSTGRES_USER=sora -e POSTGRES_PASSWORD=sora2026 \
+            -e POSTGRES_DB=postgres -e PGDATA=/var/lib/postgresql/data/pg \
+            postgres:16
+
+          for _ in $(seq 1 30); do
+            docker exec pg-restore-test pg_isready -U sora -q && break
+            sleep 2
+          done
+
+          docker cp tests/test_backup_local_integration.sh pg-restore-test:/it.sh
+          docker exec \
+            -e PGHOST=localhost -e PGUSER=sora -e PGPASSWORD=sora2026 \
+            pg-restore-test bash /it.sh
+
+      - name: Remove the PostgreSQL stand
+        if: always()
+        run: docker rm -f pg-restore-test 2>/dev/null || true
+
   # A clean database must be reachable from migrations alone. Production was
   # bootstrapped with Base.metadata.create_all(), which is not reproducible from
   # the repository, so this gate runs the chain against an empty PostgreSQL.
