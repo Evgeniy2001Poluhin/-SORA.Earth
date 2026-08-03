@@ -56,6 +56,32 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# ---------------------------------------------------------------- serialisation
+
+# One deployment at a time.
+#
+# Two runs sharing a second produced the same manifest name and one silently
+# replaced the other, which breaks the rollback chain: the record of what the
+# survivor replaced is gone. But the collision was the symptom. Two concurrent
+# runs also race on `docker compose up`, on the nginx recreation, and on the
+# checkout itself during a rollback.
+#
+# Contention refuses rather than skipping. A backup that skips because another
+# is running has lost nothing; a deployment that skips has silently not happened
+# while its operator believes it did.
+#
+# -E 75 so contention is distinguishable from a broken lock. Without it a missing
+# directory or a permissions fault reads as "someone else is deploying".
+LOCK_FILE="${DEPLOY_LOCK:-/var/lock/sora-deploy.lock}"
+exec 9>"$LOCK_FILE" || fail "cannot open lock $LOCK_FILE"
+lock_rc=0
+flock -n -E 75 9 || lock_rc=$?
+case $lock_rc in
+    0)  ;;
+    75) fail "another deployment holds $LOCK_FILE; wait for it to finish" ;;
+    *)  fail "flock failed with status $lock_rc" ;;
+esac
+
 # ---------------------------------------------------------------- preconditions
 
 step "what may be deployed"
@@ -306,6 +332,15 @@ step "recording what was deployed"
 mkdir -p "$MANIFEST_DIR"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 MANIFEST="$MANIFEST_DIR/$STAMP.txt"
+# Never overwrite. The lock above makes a collision from this script impossible,
+# but a manifest restored from a backup or written by hand would still be there,
+# and losing one destroys the chain a rollback walks back through. A suffix is
+# added rather than the file replaced.
+if [ -e "$MANIFEST" ]; then
+    n=1
+    while [ -e "$MANIFEST_DIR/$STAMP-$n.txt" ]; do n=$((n + 1)); done
+    MANIFEST="$MANIFEST_DIR/$STAMP-$n.txt"
+fi
 TMP_MANIFEST="$MANIFEST.tmp"
 {
     echo "deployed_at    $(date -u +%Y-%m-%dT%H:%M:%SZ)"

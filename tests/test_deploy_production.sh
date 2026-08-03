@@ -145,6 +145,7 @@ run_guard() {
       COMPOSE_PROJECT_NAME="p" \
       SITE_URL="http://stand.invalid" \
       MANIFEST_DIR="${MANIFEST_OVERRIDE:-$SANDBOX/manifests}" \
+      DEPLOY_LOCK="$SANDBOX/deploy.lock" \
       HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-3}" \
       HEALTH_DELAY=0 \
         bash "$SCRIPT" "$@" ) > "$SANDBOX/out" 2>&1
@@ -393,6 +394,32 @@ check "the second deployed the new commit" \
 # commits the two answers finally differ.
 check "and names the first deploy's commit as replaced" \
     "$(awk '/^previous_commit /{print $2}' "$MAN2")" "$SECOND"
+rm -rf "$SANDBOX"
+
+echo "== deployments are serialised, and manifests are never overwritten =="
+new_sandbox
+# Contention must refuse, not skip. A backup that skips has lost nothing; a
+# deployment that skips has silently not happened while its operator believes
+# it did.
+(
+    exec 9>"$SANDBOX/deploy.lock"
+    flock -n 9
+    run_guard
+    refused_because "a second deployment while one holds the lock" "another deployment holds"
+)
+rm -rf "$SANDBOX"
+
+new_sandbox
+# Two manifests in the same second used to collide, and the survivor's record of
+# what it replaced was gone with the file it overwrote.
+mkdir -p "$SANDBOX/manifests"
+STAMP_NOW="$(date -u +%Y%m%dT%H%M%SZ)"
+echo "planted" > "$SANDBOX/manifests/$STAMP_NOW.txt"
+run_guard
+check "the deploy succeeds"           "$RC" "0"
+check "the existing manifest survives" "$(cat "$SANDBOX/manifests/$STAMP_NOW.txt")" "planted"
+check "and the new one sits beside it" \
+    "$(find "$SANDBOX/manifests" -name "$STAMP_NOW-*.txt" | wc -l | tr -d ' ')" "1"
 rm -rf "$SANDBOX"
 
 echo "== rollback reads the previous manifest, not the checkout =="
