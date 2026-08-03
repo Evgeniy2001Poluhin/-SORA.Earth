@@ -351,17 +351,26 @@ jobs:
           find . -name '*.sh' -not -path './node_modules/*' -not -path './.git/*' \
             -print0 | xargs -0 shellcheck -S error
 
-          echo "--- the backup-local set, every severity"
+          echo "--- the owned set, every severity"
           shellcheck -S style \
             scripts/backup_local_daily.sh \
             tests/test_backup_local_daily.sh \
             tests/test_backup_local_integration.sh \
-            tools/mutation_backup_local.sh
+            tools/mutation_backup_local.sh \
+            scripts/deploy_production.sh \
+            tests/test_deploy_production.sh
 
       # These skip on macOS -- flock does not exist there -- so this Linux job is
       # the only place they actually execute.
       - name: Behavioural tests for the daily local backup
         run: bash tests/test_backup_local_daily.sh
+
+      # The guard is almost entirely refusals, so the tests are almost entirely
+      # refusals: a wrong branch, an unmerged rollback target, a container the
+      # compose file does not declare, a port reachable off-host, a certificate
+      # store nothing renews. Each stands for something that actually happened.
+      - name: Behavioural tests for the deployment guard
+        run: bash tests/test_deploy_production.sh
 
       # Runs the suite against deliberately broken copies of the script and fails
       # if any of them survives. Without it, "23 tests pass" is a statement about
