@@ -20,6 +20,7 @@ import logging
 import time
 import asyncio
 from datetime import datetime, timezone
+from app.ingesters.classification import classify_run
 from typing import Optional, Dict, Any
 from functools import wraps
 
@@ -217,9 +218,23 @@ def scheduled_openaq_ingestion():
         if _is_fatal_persist_error(persist_result):
             raise RuntimeError(f"persistence failed for openaq: {persist_result.errors}")
 
+        # What the run achieved, not whether it threw. This job recorded
+        # "success" on every non-exception path, which is how sixty-two openaq
+        # runs came to report success having written nothing: the source is
+        # reachable, authenticated and empty (#56, #57).
+        verdict = classify_run(
+            received=persist_result.received,
+            accepted=persist_result.accepted,
+            rejected=persist_result.rejected,
+        )
+
         # Update Prometheus metrics only after persistence has succeeded, counting
-        # accepted (persisted) records rather than fetched ones.
-        sora_environmental_ingestion_total.labels(source="openaq", status="success").inc()
+        # accepted (persisted) records rather than fetched ones. The label carries
+        # the verdict, so a degraded run stops being indistinguishable from a
+        # working one on the dashboard as well as in the table.
+        sora_environmental_ingestion_total.labels(
+            source="openaq", status=verdict.status
+        ).inc()
         for indicator, count in _accepted_indicator_counts(signals, persist_result).items():
             sora_environmental_observations_total.labels(
                 source="openaq", indicator=indicator
@@ -242,10 +257,11 @@ def scheduled_openaq_ingestion():
         # persisted (PersistResult), never the fetch-time quality-flag count.
         _log_job_execution(
             job_name=job_name,
-            status="success",
+            status=verdict.status,
             duration_sec=duration,
             records_processed=persist_result.accepted,
             records_rejected=persist_result.rejected,
+            error_message=verdict.failure_reason,
             metadata={
                 "fetched_count": fetched_count,
                 "quality_valid_count": len(quality_valid_signals),
@@ -339,7 +355,14 @@ def scheduled_openmeteo_ingestion():
 
         # Update Prometheus metrics only after persistence has succeeded, counting
         # accepted (persisted) records rather than fetched ones.
-        sora_environmental_ingestion_total.labels(source="openmeteo", status="success").inc()
+        verdict = classify_run(
+            received=persist_result.received,
+            accepted=persist_result.accepted,
+            rejected=persist_result.rejected,
+        )
+        sora_environmental_ingestion_total.labels(
+            source="openmeteo", status=verdict.status
+        ).inc()
         for indicator, count in _accepted_indicator_counts(signals, persist_result).items():
             sora_environmental_observations_total.labels(
                 source="openmeteo", indicator=indicator
@@ -362,10 +385,11 @@ def scheduled_openmeteo_ingestion():
         # persisted (PersistResult), never the raw fetch count.
         _log_job_execution(
             job_name=job_name,
-            status="success",
+            status=verdict.status,
             duration_sec=duration,
             records_processed=persist_result.accepted,
             records_rejected=persist_result.rejected,
+            error_message=verdict.failure_reason,
             metadata={
                 "fetched_count": fetched_count,
                 "regions_count": len(set(s.region_code for s in signals)),
