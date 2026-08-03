@@ -61,6 +61,19 @@ def _persist_signals(signals: list[Signal], source: str) -> dict:
 
     result = persist_environmental_observations(signals, source)
 
+    # A persistence failure inside the upsert counts too, not only a missing
+    # module.
+    #
+    # persist_environmental_observations catches its own exception, rolls back,
+    # leaves accepted at 0 and appends an error prefixed "persist_error:" --
+    # without raising. Detecting only the ImportError meant a database that
+    # accepted nothing was still read as a source producing nothing usable:
+    # REJECTED rather than a write failure, pointing the investigation at the
+    # API while the database was the thing that broke.
+    write_failed = any(
+        str(e).startswith("persist_error:") for e in (result.errors or [])
+    )
+
     # The same key set as the failure path above, write_failed included. A
     # result whose shape depends on which branch produced it is one every caller
     # has to guess at, and the guess that started this was `.get(..., 0)` on keys
@@ -72,7 +85,7 @@ def _persist_signals(signals: list[Signal], source: str) -> dict:
         "accepted": result.accepted,
         "rejected": result.rejected,
         "duplicates": result.duplicates,
-        "write_failed": False,
+        "write_failed": write_failed,
         "errors": result.errors[:5] if result.errors else [],
     }
 

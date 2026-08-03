@@ -136,6 +136,12 @@ pyparsing==3.3.2
 pyproj==3.6.1
 pytest==8.4.2
 pytest-timeout==2.4.0
+# Pinned like its siblings. CI and tools/preflight.sh both install it explicitly
+# and both did so unpinned, so the coverage plugin was the one dependency that
+# could change under either without anything recording it.
+# pytest-asyncio stays out deliberately: it lives in requirements-dev.txt, CI has
+# never had it, and a test that needs it passes locally and fails on the runner.
+pytest-cov==6.0.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
 python-jose==3.5.0

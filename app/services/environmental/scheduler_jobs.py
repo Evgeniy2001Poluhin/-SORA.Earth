@@ -232,6 +232,12 @@ def scheduled_openaq_ingestion():
             received=persist_result.received,
             accepted=persist_result.accepted,
             rejected=persist_result.rejected,
+            # No write_failed here, deliberately. _is_fatal_persist_error()
+            # above already raises on a "persist_error:" entry, so this line is
+            # unreachable with one present -- I added it anyway, following a
+            # review finding that was correct for runner.py, which has no such
+            # guard, without reading what stood four lines higher. Dead code
+            # that looks load-bearing is worse than none.
         )
 
         # Update Prometheus metrics only after persistence has succeeded, counting
@@ -378,6 +384,12 @@ def scheduled_openmeteo_ingestion():
             received=persist_result.received,
             accepted=persist_result.accepted,
             rejected=persist_result.rejected,
+            # No write_failed here, deliberately. _is_fatal_persist_error()
+            # above already raises on a "persist_error:" entry, so this line is
+            # unreachable with one present -- I added it anyway, following a
+            # review finding that was correct for runner.py, which has no such
+            # guard, without reading what stood four lines higher. Dead code
+            # that looks load-bearing is worse than none.
         )
         sora_environmental_ingestion_total.labels(
             source="openmeteo", status=verdict.status

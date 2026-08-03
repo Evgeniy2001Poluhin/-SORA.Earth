@@ -52,6 +52,14 @@ def _run_openaq(signals, persist_result):
     """Run the job with everything external mocked, and collect all three readers."""
     ingestion_counter = MagicMock()
     with patch(
+        # RedisLock.acquire() returns True when Redis is unreachable and False
+        # when a reachable Redis already holds the key, so leaving it unmocked
+        # makes these tests depend on whatever a developer's Redis happens to
+        # contain -- passing on one machine and skipping the job on another.
+        "app.locks.RedisLock.acquire", return_value=True,
+    ), patch(
+        "app.locks.RedisLock.release", return_value=None,
+    ), patch(
         "app.ingesters.openaq.OpenAQIngester.fetch",
         new_callable=AsyncMock, return_value=signals,
     ), patch(
@@ -96,6 +104,10 @@ def test_they_agree_when_the_run_fails():
     """The failure path is a separate branch and can drift on its own."""
     ingestion_counter = MagicMock()
     with patch(
+        "app.locks.RedisLock.acquire", return_value=True,
+    ), patch(
+        "app.locks.RedisLock.release", return_value=None,
+    ), patch(
         "app.ingesters.openaq.OpenAQIngester.fetch",
         new_callable=AsyncMock, side_effect=RuntimeError("upstream 503"),
     ), patch(

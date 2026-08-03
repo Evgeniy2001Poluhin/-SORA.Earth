@@ -50,7 +50,10 @@ BASE_IMAGE="python:3.11-slim"
 CACHE_VOL="sora-preflight-pip"
 
 if [ "${1:-}" = "--build" ]; then
-    echo "== building $PY_IMAGE (once; minutes) =="
+    REQ_HASH="$(shasum -a 256 "$REPO/requirements.txt" 2>/dev/null | cut -c1-12)"
+    [ -n "$REQ_HASH" ] || REQ_HASH="$(sha256sum "$REPO/requirements.txt" | cut -c1-12)"
+    PY_IMAGE="${PY_IMAGE%:latest}:$REQ_HASH"
+    echo "== building $PY_IMAGE (once per requirements.txt; minutes) =="
     docker build -t "$PY_IMAGE" -f - "$REPO" <<DOCKERFILE
 FROM $BASE_IMAGE
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
@@ -64,8 +67,20 @@ DOCKERFILE
     exit 0
 fi
 
+# The image is tagged with a hash of what went into it, so a changed
+# requirements.txt simply misses and the fallback installs the current set.
+# Without this the tag keeps matching after the dependencies move, and preflight
+# quietly tests an old set while claiming to match CI -- the exact drift it was
+# written to remove, hidden inside its own optimisation.
+REQ_HASH="$(shasum -a 256 "$REPO/requirements.txt" 2>/dev/null | cut -c1-12)"
+[ -n "$REQ_HASH" ] || REQ_HASH="$(sha256sum "$REPO/requirements.txt" | cut -c1-12)"
+case "$PY_IMAGE" in
+    *:latest) PY_IMAGE="${PY_IMAGE%:latest}:$REQ_HASH" ;;
+esac
+
 if ! docker image inspect "$PY_IMAGE" >/dev/null 2>&1; then
-    echo "note: $PY_IMAGE is missing; falling back to $BASE_IMAGE and installing"
+    echo "note: $PY_IMAGE is missing (requirements.txt hash $REQ_HASH);"
+    echo "      falling back to $BASE_IMAGE and installing"
     echo "      dependencies inside the run. Build it once with: $0 --build"
     PY_IMAGE="$BASE_IMAGE"
     NEED_INSTALL=1
@@ -98,9 +113,21 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# An upper bound. The full suite takes about twelve minutes; thirty is generous
-# and still finite. Without it a stuck pip or a wedged daemon waits for ever.
-PREFLIGHT_TIMEOUT="${PREFLIGHT_TIMEOUT:-1800}"
+# An upper bound that knows what it is bounding.
+#
+# 1800 was set for a run against the prebuilt image, where the suite is the only
+# cost. On the fallback path the dependency install eats the whole budget and the
+# watchdog killed a run just as it reached collection -- correct behaviour, wrong
+# number. Measured: about 27 minutes to install and 16 to run.
+#
+# The failure mode this avoids is worse than a slow check: a watchdog that fires
+# on healthy runs teaches everyone to raise the number without reading why, and
+# then it never fires on a real hang either.
+if [ "$NEED_INSTALL" = "1" ]; then
+    PREFLIGHT_TIMEOUT="${PREFLIGHT_TIMEOUT:-4200}"
+else
+    PREFLIGHT_TIMEOUT="${PREFLIGHT_TIMEOUT:-1800}"
+fi
 
 # A watchdog rather than `timeout`, which is GNU coreutils and absent from
 # macOS -- where this actually runs. Depending on it would have meant the
@@ -124,18 +151,25 @@ trap 'cleanup; kill_watchdog' EXIT INT TERM
 LOG="${PREFLIGHT_LOG:-${TMPDIR:-/tmp}/preflight-$(date -u +%Y%m%dT%H%M%SZ).log}"
 echo "   log: $LOG"
 
+# The environment is CI's, value for value from the `Run tests` step of
+# .github/workflows/ci.yml -- not approximations. A preflight meaning "what CI
+# will see" cannot run with a different database path or a different secret and
+# still claim it. CHANGED is newline-separated so a path containing a space
+# stays one argument; the space-joined form split it in two and left the
+# expansion open to globbing besides.
 run_rc=0
 docker run --name "$CONTAINER" --rm \
     -v "$REPO:/w" -w /w \
     -v "$CACHE_VOL:/root/.cache/pip" \
     -e SORA_OFFLINE=1 \
     -e RUN_SCHEDULER=false \
-    -e DATABASE_URL="sqlite:////tmp/preflight.db" \
+    -e DATABASE_URL="sqlite:///./test.db" \
     -e REDIS_URL="" \
-    -e SECRET_KEY=preflight \
-    -e SORA_ADMIN_TOKEN=preflight \
-    -e CHANGED="${CHANGED[*]}" \
+    -e SECRET_KEY="ci-test-secret" \
+    -e SORA_ADMIN_TOKEN="ci-test-admin" \
+    -e CHANGED="$(printf '%s\n' "${CHANGED[@]}")" \
     -e NEED_INSTALL="$NEED_INSTALL" \
+    -e RUN_AS_UID="$(id -u)" \
     "$PY_IMAGE" bash -euo pipefail -c '
 echo
 echo "-- 1/4 dependencies, exactly as CI installs them"
@@ -152,13 +186,26 @@ else
 fi
 python -c "import sys; print(f\"   python {sys.version.split()[0]}\")"
 
+# As a non-root user, because the runner is one.
+#
+# This script exists because deployment tests passed as root here and failed on
+# the runner -- and it was itself running everything as root, which is the same
+# blindness in the tool built to remove it. Dependencies are installed first, as
+# root, exactly as the CI image is built; only the tests drop privileges.
+if [ "$(id -u)" = "0" ] && [ "${RUN_AS_UID:-0}" != "0" ]; then
+    id -u runner >/dev/null 2>&1 || useradd -u "$RUN_AS_UID" -m runner 2>/dev/null || true
+    RUN="setpriv --reuid=$RUN_AS_UID --regid=$RUN_AS_UID --clear-groups"
+    echo "   tests run as uid $RUN_AS_UID, not root"
+else
+    RUN=""
+    echo "   tests run as uid $(id -u)"
+fi
+
 echo
 echo "-- 2/4 the changed tests"
 if [ -n "${CHANGED:-}" ]; then
-    # shellcheck disable=SC2086
-    #   Deliberate word splitting: CHANGED is a space-separated list of paths
-    #   built from git output, and pytest takes them as separate arguments.
-    python -m pytest $CHANGED -q --no-header -p no:cacheprovider --timeout=60
+    mapfile -t CHANGED_ARR <<< "$CHANGED"
+    $RUN python -m pytest "${CHANGED_ARR[@]}" -q --no-header -p no:cacheprovider --timeout=60
 else
     echo "   (none)"
 fi
@@ -167,14 +214,23 @@ echo
 echo "-- 3/4 the whole backend suite must at least be collectable"
 # The step that would have caught the Python version gap on its own: forty files
 # fail to import under 3.9 and the failure has nothing to do with any test.
-python -m pytest tests/ --ignore=tests/test_api.py --ignore=tests/test_scoring_baseline.py \
+$RUN python -m pytest tests/ --ignore=tests/test_api.py --ignore=tests/test_scoring_baseline.py \
     --collect-only -q --no-header -p no:cacheprovider 2>&1 | tail -3
 
 echo
 echo "-- 4/4 the whole backend suite"
-python -m pytest tests/ --ignore=tests/test_api.py --ignore=tests/test_scoring_baseline.py \
+$RUN python -m pytest tests/ --ignore=tests/test_api.py --ignore=tests/test_scoring_baseline.py \
     -q --no-header -p no:cacheprovider --timeout=60 2>&1 | tail -6
-' 2>&1 | tee -a "$LOG" || run_rc=${PIPESTATUS[0]}
+' 2>&1 | tee -a "$LOG"
+# Both halves. With only PIPESTATUS[0], a tee that failed after a successful
+# docker run left run_rc at 0 and the preflight reported success without the
+# persistent log it promises.
+run_rc=${PIPESTATUS[0]}
+tee_rc=${PIPESTATUS[1]}
+if [ "$run_rc" = 0 ] && [ "$tee_rc" != 0 ]; then
+    echo "== preflight FAILED: the run passed but its log was not captured ==" >&2
+    exit 1
+fi
 
 if ! kill -0 "$WATCHDOG" 2>/dev/null && [ "$run_rc" != 0 ]; then
     fail_msg="killed by the watchdog after ${PREFLIGHT_TIMEOUT}s"
@@ -194,7 +250,8 @@ fi
 echo
 echo "-- git tree must be clean of build and test debris"
 STRAY="$(git -C "$REPO" status --porcelain --untracked-files=all \
-         | grep -vE "^(A|M|\?\?) +(app|tests|tools|docs|infra|scripts|alembic|\.github)/" || true)"
+         | grep -vE "^(A|M|\?\?) +(app|tests|tools|docs|infra|scripts|alembic|\.github)/" \
+         | grep -vE "^\?\? +test\.db$" || true)"
 if [ -n "$STRAY" ]; then
     printf '   %s\n' "$STRAY" >&2
     echo "== preflight FAILED: the working tree carries files nothing should have left ==" >&2
