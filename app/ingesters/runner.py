@@ -7,6 +7,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from sqlalchemy import text
+
+from app.ingesters.classification import classify_run
 from datetime import datetime, timezone
 
 from app.ingesters.base import Signal
@@ -73,7 +75,14 @@ def _audit_start(source: str):
         return None
 
 
-def _audit_finish(rid, status, rows_written=None, error=None):
+def _audit_finish(rid, verdict):
+    """Record the verdict, not a hand-picked word.
+
+    The status used to be passed in by the caller, which is how every run that
+    did not raise came to be 'ok' -- including sixty-two openaq runs that wrote
+    nothing. It is now derived by classify_run() from what the run actually
+    achieved, and this function has no opinion about it.
+    """
     if rid is None:
         return
     try:
@@ -82,9 +91,21 @@ def _audit_finish(rid, status, rows_written=None, error=None):
         try:
             db.execute(text(
                 "UPDATE ingester_runs SET finished_at=now(), status=:st, "
-                "rows_written=:rw, error=:err WHERE id=:id"),
-                {"st": status, "rw": rows_written,
-                 "err": (str(error)[:2000] if error else None), "id": rid})
+                "rows_written=:rw, error=:err, "
+                "execution_status=:ex, primary_source_status=:ps, "
+                "data_outcome=:do, records_received=:rr, records_accepted=:ra, "
+                "records_rejected=:rj, failure_reason=:fr WHERE id=:id"),
+                {"st": verdict.status,
+                 "rw": verdict.records_accepted,
+                 "err": verdict.failure_reason,
+                 "ex": verdict.execution_status,
+                 "ps": verdict.primary_source_status,
+                 "do": verdict.data_outcome,
+                 "rr": verdict.records_received,
+                 "ra": verdict.records_accepted,
+                 "rj": verdict.records_rejected,
+                 "fr": verdict.failure_reason,
+                 "id": rid})
             db.commit()
         finally:
             db.close()
@@ -106,17 +127,33 @@ async def run_all_ingesters() -> dict:
             persist_result = _persist_signals(signals, ing.name)
 
             stats["ingesters"][ing.name] = {
-                "status": "ok",
+                "status": "ok",  # replaced below by the classified verdict
                 "signals": len(signals),
                 "regions": len({s.region_code for s in signals}),
                 "persist": persist_result,
             }
-            log.info("[runner] %s: %d signals", ing.name, len(signals))
-            _audit_finish(rid, "ok", rows_written=persist_result.get("accepted", 0))
+            verdict = classify_run(
+                received=persist_result.get("received", 0),
+                accepted=persist_result.get("accepted", 0),
+                rejected=persist_result.get("rejected", 0),
+            )
+            stats["ingesters"][ing.name].update(verdict.as_dict())
+            if verdict.status == "success":
+                log.info("[runner] %s: %d signals", ing.name, len(signals))
+            else:
+                # Loud, because this is the case that used to be indistinguishable
+                # from working. A degraded run is not an error and must not be
+                # logged as one, but it cannot pass in silence either.
+                log.warning("[runner] %s: %s -- %s (received=%d accepted=%d)",
+                            ing.name, verdict.status, verdict.failure_reason,
+                            verdict.records_received, verdict.records_accepted)
+            _audit_finish(rid, verdict)
         except Exception as e:
-            stats["ingesters"][ing.name] = {"status": "error", "error": str(e)}
+            verdict = classify_run(raised=e)
+            stats["ingesters"][ing.name] = {"status": "error", "error": str(e),
+                                            **verdict.as_dict()}
             log.exception("[runner] %s failed: %s", ing.name, e)
-            _audit_finish(rid, "error", error=e)
+            _audit_finish(rid, verdict)
 
     try:
         from app.services.esg_aggregator import recalc_all_regions
