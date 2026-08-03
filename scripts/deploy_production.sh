@@ -83,7 +83,11 @@ done
 # infra/tmpfiles.d/sora.conf recreates the directory on boot, because /run is a
 # tmpfs and does not survive one.
 LOCK_DIR="${DEPLOY_LOCK_DIR:-/run/sora}"
-LOCK_FILE="${DEPLOY_LOCK:-$LOCK_DIR/deploy.lock}"
+# Derived from the directory, never given separately. An overridable DEPLOY_LOCK
+# let the lock file sit outside LOCK_DIR, so every check below validated a
+# directory the lock was not in -- security theatre with a passing test suite,
+# and the tests were the ones using the override.
+LOCK_FILE="$LOCK_DIR/deploy.lock"
 # Created only when absent, and never re-moded. An unconditional
 # `install -d -m 0750` made the assertions below unreachable: whatever state the
 # directory was in, it was 0750 by the time anything looked, and five
@@ -120,6 +124,10 @@ LOCK_DIR_OTH="${LOCK_DIR_MODE: -1}"
 if [ $(( LOCK_DIR_GRP & 2 )) -ne 0 ] || [ $(( LOCK_DIR_OTH & 2 )) -ne 0 ]; then
     fail "$LOCK_DIR is writable by group or others (mode $LOCK_DIR_MODE); the lock can be planted or symlinked"
 fi
+
+# Nobody else can write in this directory by now, so a symlink here would have to
+# predate it. Cheap to refuse, and `exec 9>` would otherwise follow it.
+[ ! -L "$LOCK_FILE" ] || fail "$LOCK_FILE is a symlink"
 
 exec 9>"$LOCK_FILE" || fail "cannot open lock $LOCK_FILE"
 lock_rc=0

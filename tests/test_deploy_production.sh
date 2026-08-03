@@ -158,7 +158,6 @@ run_guard() {
       SITE_URL="http://stand.invalid" \
       MANIFEST_DIR="${MANIFEST_OVERRIDE:-$SANDBOX/manifests}" \
       DEPLOY_LOCK_DIR="${LOCK_DIR_OVERRIDE:-$SANDBOX/lockdir}" \
-      DEPLOY_LOCK="${LOCK_OVERRIDE:-$SANDBOX/deploy.lock}" \
       HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-3}" \
       HEALTH_DELAY=0 \
         bash "$SCRIPT" "$@" ) > "$SANDBOX/out" 2>&1
@@ -423,7 +422,7 @@ echo "== the lock must not sit anywhere others can write =="
 for mode in 700 750 755 711; do
     new_sandbox
     mkdir -p "$SANDBOX/lockdir"; chmod "$mode" "$SANDBOX/lockdir"
-    LOCK_OVERRIDE="$SANDBOX/lockdir/deploy.lock" run_guard
+    LOCK_DIR_OVERRIDE="$SANDBOX/lockdir" run_guard
     check "mode $mode is accepted" \
         "$([ "$RC" = 0 ] && echo ok || echo "refused: $(grep -m1 REFUSED "$SANDBOX/out")")" "ok"
     rm -rf "$SANDBOX"
@@ -431,7 +430,7 @@ done
 for mode in 770 757 777 720 702; do
     new_sandbox
     mkdir -p "$SANDBOX/lockdir"; chmod "$mode" "$SANDBOX/lockdir"
-    LOCK_OVERRIDE="$SANDBOX/lockdir/deploy.lock" run_guard
+    LOCK_DIR_OVERRIDE="$SANDBOX/lockdir" run_guard
     refused_because "mode $mode is refused" "writable by group or others"
     rm -rf "$SANDBOX"
 done
@@ -441,7 +440,7 @@ new_sandbox
 # up somewhere else entirely -- possibly somewhere the attacker chose.
 mkdir -p "$SANDBOX/real"; chmod 0750 "$SANDBOX/real"
 ln -s "$SANDBOX/real" "$SANDBOX/linkdir"
-LOCK_DIR_OVERRIDE="$SANDBOX/linkdir" LOCK_OVERRIDE="$SANDBOX/linkdir/deploy.lock" run_guard
+LOCK_DIR_OVERRIDE="$SANDBOX/linkdir" run_guard
 refused_because "a symlinked lock directory" "is a symlink"
 rm -rf "$SANDBOX"
 
@@ -456,7 +455,7 @@ if [ "$(id -u)" = 0 ]; then
 else
     OTHER_DIR="/usr"     # root-owned, 0755
 fi
-LOCK_DIR_OVERRIDE="$OTHER_DIR" LOCK_OVERRIDE="$SANDBOX/unused.lock" run_guard
+LOCK_DIR_OVERRIDE="$OTHER_DIR" run_guard
 refused_because "a lock directory owned by someone else" "not by the deploying user"
 rm -rf "$SANDBOX"
 
@@ -465,12 +464,29 @@ new_sandbox
 # Contention must refuse, not skip. A backup that skips has lost nothing; a
 # deployment that skips has silently not happened while its operator believes
 # it did.
-(
-    exec 9>"$SANDBOX/deploy.lock"
-    flock -n 9
-    run_guard
-    refused_because "a second deployment while one holds the lock" "another deployment holds"
-)
+# The holder runs in the background; the assertion stays in this shell.
+#
+# It used to be the other way round -- guard and assertion both inside a
+# subshell -- and the PASS/FAIL counters incremented there never reached the
+# summary. A genuine failure printed FAIL and the run still ended "failed: 0".
+# A test that can fail without changing the result is worse than no test.
+#
+# 0750 explicitly: mkdir uses the caller's umask, which is 002 for the CI
+# runner, and the guard rightly refuses the 775 that produces. The lock path is
+# the one the guard derives; it is no longer overridable, because an override
+# let the file sit outside the directory all the checks validate.
+mkdir -p "$SANDBOX/lockdir"; chmod 0750 "$SANDBOX/lockdir"
+( exec 9>"$SANDBOX/lockdir/deploy.lock"; flock -n 9 && sleep 30 ) &
+HOLDER=$!
+# Wait until the lock is genuinely held rather than guessing at a sleep.
+for _ in $(seq 1 50); do
+    flock -n "$SANDBOX/lockdir/deploy.lock" true 2>/dev/null || break
+    sleep 0.1
+done
+run_guard
+refused_because "a second deployment while one holds the lock" "another deployment holds"
+kill "$HOLDER" 2>/dev/null
+wait "$HOLDER" 2>/dev/null
 rm -rf "$SANDBOX"
 
 new_sandbox
