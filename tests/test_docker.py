@@ -38,7 +38,27 @@ def test_docker_compose_services():
     assert "redis" in services
     assert "prometheus" in services
     assert "grafana" in services
-    assert "8000:8000" in services["app"].get("ports", [])
+    # Every published port of the API must bind loopback -- stated as a property
+    # over all entries, not as a list of forbidden strings.
+    #
+    # The first version of this assertion banned the exact string "8000:8000".
+    # That is the wrong shape: "9000:8000", "0.0.0.0:9000:8000" and a bare
+    # "8000" all publish to every interface and all would have passed it. On the
+    # production host that is what put the API on the internet unencrypted, past
+    # nginx and its TLS.
+    ports = services["app"].get("ports", [])
+    assert ports, "the app service publishes nothing; expected a loopback mapping"
+
+    for entry in ports:
+        if isinstance(entry, dict):          # long syntax
+            host_ip = entry.get("host_ip")
+        else:                                # short syntax: [IP:][HOST:]CONTAINER
+            parts = str(entry).split(":")
+            host_ip = parts[0] if len(parts) >= 3 else None
+        assert host_ip == "127.0.0.1", (
+            f"app port {entry!r} does not bind loopback (host_ip={host_ip!r}); "
+            "it would publish the API on every interface"
+        )
 
 
 def test_nginx_config():
