@@ -105,21 +105,43 @@ services:
       - "5556"
 
   nginx:
-    # Built rather than pulled: the nginx-spa stage bakes in the same SPA build
-    # the backend gets, replacing the bind-mount of the host directory.
-    build:
-      context: .
-      dockerfile: Dockerfile.prod
-      target: nginx-spa
+    # This service described a production that had never run. Measured on the
+    # host on 2026-08-03, every line of it disagreed with the container actually
+    # serving the site, which came from docker-compose.yml instead:
+    #
+    #   image      built nginx-spa    vs  nginx:alpine running
+    #   config     ./nginx.conf as a conf.d fragment, missing limit_req,
+    #              ssl_session_cache, ssl_session_timeout and proxy_connect_timeout
+    #              -- 7 location blocks against the 9 that were live
+    #   certs      ./certs, holding a certificate three weeks older than
+    #              /etc/letsencrypt and not on certbot's renewal path, so it
+    #              would have expired under a renewal that updates elsewhere
+    #
+    # Deploying with this file would therefore have dropped rate limiting and
+    # TLS session resumption immediately, and taken TLS down later. It is
+    # converged onto the topology that is verified to work, so that "deploy only
+    # with the production file" becomes safe to require.
+    #
+    # Baking the SPA into an nginx image is a reasonable thing to want -- the
+    # site currently serves it through the backend -- but it has never been
+    # exercised, and adopting it silently as part of a deployment guard is how
+    # the untested becomes the deployed. It belongs in its own change, with a
+    # test.
+    image: nginx:alpine
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./certs:/etc/nginx/certs:ro
-      - ./certbot/www:/var/www/certbot
-      - ./certs:/etc/letsencrypt
+      # The full configuration, not a fragment. A single bind-mounted file is
+      # pinned to its inode, so a later `git pull` that replaces the file leaves
+      # the container reading the old copy and `nginx -s reload` re-reads the
+      # stale one. scripts/deploy_production.sh recreates nginx and then compares
+      # the container's copy against the repository's, because the mount cannot
+      # be trusted to have followed.
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
     depends_on:
       - backend
 

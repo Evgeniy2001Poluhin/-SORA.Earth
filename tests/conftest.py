@@ -12,6 +12,53 @@ os.environ.setdefault("RUN_SCHEDULER", "false")
 import pytest
 from unittest.mock import MagicMock, patch
 
+
+def _provision_test_schema():
+    """Build the schema for the suite's scratch database.
+
+    The application used to do this as a side effect of being imported, which is
+    what let four tables exist with no migration behind them (issue #51). It now
+    checks the schema and refuses to start without it, so the harness provisions
+    it -- explicitly, and here, because pytest imports this file before any test
+    module imports the application.
+
+    Only app.database is imported: it defines the models and the engine without
+    loading the ML models that app.main pulls in.
+    """
+    from app.database import Base, engine
+
+    # Refuse anything that is not obviously a throwaway. checkfirst=True skips
+    # existing tables but still issues CREATE TABLE for missing ones, so pointing
+    # DATABASE_URL at a shared or production database and running pytest would
+    # change that schema -- which is the exact behaviour this branch removes from
+    # the application. Reintroducing it in the harness would be worse, not better.
+    # The guard is on the *action*, not on the name. An allowlist of safe names
+    # cannot be written -- the CI databases are called sora_earth and
+    # sora_bootstrap, and an earlier version of this refused both.
+    #
+    # So: if nothing is missing, nothing is created, and there is nothing to
+    # guard against. That is the CI case, where `alembic upgrade head` has
+    # already run. Only when tables would actually be created does it matter
+    # which database this is, and then only SQLite is taken as obviously
+    # disposable.
+    from sqlalchemy import inspect
+
+    missing = sorted(set(Base.metadata.tables) - set(inspect(engine).get_table_names()))
+    if not missing:
+        return
+    if engine.url.get_backend_name() != "sqlite":
+        raise RuntimeError(
+            "refusing to create %d table(s) in %r: %s\n"
+            "The suite provisions only SQLite for itself. Against a server "
+            "database, run `alembic upgrade head` first -- creating tables here "
+            "is the behaviour this branch removes from the application."
+            % (len(missing), engine.url.database, ", ".join(missing)))
+
+    Base.metadata.create_all(bind=engine, checkfirst=True)
+
+
+_provision_test_schema()
+
 # Create in-memory mock cache BEFORE any imports
 mock_cache = {}
 mock_lists = {}  # For Redis list operations (rpush, lrange)
@@ -387,9 +434,20 @@ def no_scheduler_left_running():
     firing ingestion and retrain jobs for the rest of the session.
     """
     yield
-    try:
-        from app.scheduler import scheduler
-    except Exception:
+    # Look in sys.modules; do not import. This teardown ran for every test, and
+    # `from app.scheduler import scheduler` pulls in app.main with torch, SHAP and
+    # transformers behind it -- more than the per-test timeout on a CI runner. The
+    # body passed, the teardown was killed mid-import, the half-built module was
+    # dropped from sys.modules, and the next test paid it again: PASSED-then-ERROR
+    # at exactly the timeout, once per test, until the job was cancelled.
+    #
+    # A test that never imported app.scheduler cannot have started the scheduler.
+    import sys
+    module = sys.modules.get("app.scheduler")
+    if module is None:
+        return
+    scheduler = getattr(module, "scheduler", None)
+    if scheduler is None:
         return
     if scheduler.running:
         scheduler.remove_all_jobs()

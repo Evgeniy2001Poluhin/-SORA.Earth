@@ -329,7 +329,14 @@ def test_the_historical_bootstrap_does_not_run_on_an_existing_deployment():
     treats it as applied and never executes it. If that ever stopped being
     true, this revision would be redundant — and if the reverse happened and
     the catch-up fell behind the recorded version, it would be inert. The path
-    from 0b0ff6d1594e to head must therefore be exactly this one revision.
+    from 0b0ff6d1594e to head must therefore contain the catch-up and must not
+    contain the bootstrap.
+
+    Those two facts are asserted directly. An earlier version pinned the whole
+    path to ["e3f8a7c15d92"], which said the same thing only while that revision
+    happened to be head: every later revision then failed this test for a reason
+    it does not guard against. The pin is not what carries the claim -- the two
+    memberships are.
     """
     from alembic.config import Config
     from alembic.script import ScriptDirectory
@@ -339,8 +346,8 @@ def test_the_historical_bootstrap_does_not_run_on_an_existing_deployment():
 
     path = [rev.revision for rev in script.iterate_revisions("head", "0b0ff6d1594e")]
 
-    assert path == ["e3f8a7c15d92"], (
-        f"expected only the catch-up between 0b0ff6d1594e and head, got {path}"
+    assert "e3f8a7c15d92" in path, (
+        f"the catch-up must still run on a deployment recorded at 0b0ff6d1594e, got {path}"
     )
     assert "b7c1e4a92f30" not in path, "the historical bootstrap must not be in this path"
 
