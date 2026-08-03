@@ -444,6 +444,8 @@ def test_a_non_default_search_path_does_not_produce_a_false_refusal():
 
         result = _alembic(url, "upgrade", "head")
         current = _alembic(url, "current")
+        # Captured here, while the scratch database still exists.
+        heads = _alembic(url, "heads")
 
         engine = create_engine(url)
         with engine.connect() as conn:
@@ -457,7 +459,16 @@ def test_a_non_default_search_path_does_not_produce_a_false_refusal():
     assert result.returncode == 0, (
         "a non-default search_path was refused:\n%s" % (result.stderr + result.stdout)[-2000:]
     )
-    assert "f2c9a1d47b30" in current.stdout, "did not reach head: %s" % current.stdout
+    # Compared against the head alembic reports, not a revision named here.
+    #
+    # This pinned "f2c9a1d47b30" and so failed the moment a revision was added
+    # on top -- which is every future migration. A test that breaks whenever the
+    # system it guards moves forward is a test of the constant, not of the
+    # behaviour: the behaviour is "upgrade head arrives at head".
+    head = heads.stdout.split()[0]
+    assert head in current.stdout, (
+        "did not reach head %s: %s" % (head, current.stdout)
+    )
     # The premise of the test: the tables really did land somewhere other than
     # public, so passing is not just the default case in disguise.
     assert landed == "app_schema", (
