@@ -157,7 +157,8 @@ run_guard() {
       COMPOSE_PROJECT_NAME="p" \
       SITE_URL="http://stand.invalid" \
       MANIFEST_DIR="${MANIFEST_OVERRIDE:-$SANDBOX/manifests}" \
-      DEPLOY_LOCK="$SANDBOX/deploy.lock" \
+      DEPLOY_LOCK_DIR="${LOCK_DIR_OVERRIDE:-$SANDBOX/lockdir}" \
+      DEPLOY_LOCK="${LOCK_OVERRIDE:-$SANDBOX/deploy.lock}" \
       HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-3}" \
       HEALTH_DELAY=0 \
         bash "$SCRIPT" "$@" ) > "$SANDBOX/out" 2>&1
@@ -409,6 +410,31 @@ check "the second deployed the new commit" \
 check "and names the first deploy's commit as replaced" \
     "$(awk '/^previous_commit /{print $2}' "$MAN2")" "$SECOND"
 rm -rf "$SANDBOX"
+
+echo "== the lock must not sit anywhere others can write =="
+# /var/lock is /run/lock, mode 1777. I checked the sticky bit, found it set, and
+# reported that as sufficient. It is not: the sticky bit stops another user
+# deleting root's lock file, not creating it first under its predictable name,
+# and not planting a symlink there for `exec 9>` to follow and truncate as root.
+#
+# Enumerated over the mode space rather than sampled, since the check is
+# arithmetic on two digits and it is easy to get the boundary wrong -- the first
+# version of it did.
+for mode in 700 750 755 711; do
+    new_sandbox
+    mkdir -p "$SANDBOX/lockdir"; chmod "$mode" "$SANDBOX/lockdir"
+    LOCK_OVERRIDE="$SANDBOX/lockdir/deploy.lock" run_guard
+    check "mode $mode is accepted" \
+        "$([ "$RC" = 0 ] && echo ok || echo "refused: $(grep -m1 REFUSED "$SANDBOX/out")")" "ok"
+    rm -rf "$SANDBOX"
+done
+for mode in 770 757 777 720 702; do
+    new_sandbox
+    mkdir -p "$SANDBOX/lockdir"; chmod "$mode" "$SANDBOX/lockdir"
+    LOCK_OVERRIDE="$SANDBOX/lockdir/deploy.lock" run_guard
+    refused_because "mode $mode is refused" "writable by group or others"
+    rm -rf "$SANDBOX"
+done
 
 echo "== deployments are serialised, and manifests are never overwritten =="
 new_sandbox

@@ -72,7 +72,38 @@ done
 #
 # -E 75 so contention is distinguishable from a broken lock. Without it a missing
 # directory or a permissions fault reads as "someone else is deploying".
-LOCK_FILE="${DEPLOY_LOCK:-/var/lock/sora-deploy.lock}"
+# In a directory only root can write to, not the shared one.
+#
+# /var/lock is /run/lock, mode 1777. The sticky bit stops another user deleting
+# root's lock file, which is what I checked and reported as sufficient. It is
+# not: nothing stops them creating the file first under its predictable name, so
+# a deployment can be blocked at will -- and nothing stops them putting a symlink
+# there, which `exec 9>` would follow and truncate as root.
+#
+# infra/tmpfiles.d/sora.conf recreates the directory on boot, because /run is a
+# tmpfs and does not survive one.
+LOCK_DIR="${DEPLOY_LOCK_DIR:-/run/sora}"
+LOCK_FILE="${DEPLOY_LOCK:-$LOCK_DIR/deploy.lock}"
+# Created only when absent. An unconditional `install -d -m 0750` silently
+# re-moded an existing directory, which made the assertion below unreachable:
+# whatever state the directory was in, it was 0750 by the time anything looked.
+# Repairing it would also be too late -- a symlink planted while it was writable
+# is already inside.
+if [ ! -d "$LOCK_DIR" ]; then
+    install -d -m 0750 -o root -g root "$LOCK_DIR" 2>/dev/null \
+        || fail "cannot create $LOCK_DIR"
+fi
+
+# The point of moving the lock is that no one else can write beside it, so that
+# is asserted rather than assumed -- a directory left group- or world-writable by
+# some later change would bring the whole problem back silently.
+LOCK_DIR_MODE="$(stat -c '%a' "$LOCK_DIR")"
+LOCK_DIR_GRP="${LOCK_DIR_MODE: -2:1}"
+LOCK_DIR_OTH="${LOCK_DIR_MODE: -1}"
+if [ $(( LOCK_DIR_GRP & 2 )) -ne 0 ] || [ $(( LOCK_DIR_OTH & 2 )) -ne 0 ]; then
+    fail "$LOCK_DIR is writable by group or others (mode $LOCK_DIR_MODE); the lock can be planted or symlinked"
+fi
+
 exec 9>"$LOCK_FILE" || fail "cannot open lock $LOCK_FILE"
 lock_rc=0
 flock -n -E 75 9 || lock_rc=$?
