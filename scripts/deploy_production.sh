@@ -146,13 +146,27 @@ step "recording the state being replaced"
 # `set -e` ended the run before it began -- on the very first deployment, the one
 # case where there is nothing to read.
 mkdir -p "$MANIFEST_DIR"
-PREV_MANIFEST="$(find "$MANIFEST_DIR" -maxdepth 1 -name '*.txt' 2>/dev/null | sort | tail -1 || true)"
-if [ -n "$PREV_MANIFEST" ]; then
-    PREV_COMMIT="$(awk '/^commit /{print $2}' "$PREV_MANIFEST")"
+LATEST="$MANIFEST_DIR/latest"
+
+# Followed through an explicit pointer, never by sorting filenames.
+#
+# Picking the newest by name was wrong twice over. It assumed the clock supplies
+# ordering, and the collision suffix broke even that: '-' (0x2D) sorts before
+# '.' (0x2E), so "<stamp>-1.txt" comes out older than "<stamp>.txt" and the run
+# after a collision read the file it had just been careful not to overwrite. The
+# fix for the collision broke the chain it existed to protect, and the test
+# missed it because it asserted the new file existed rather than that the next
+# run would find it.
+#
+# `latest` is switched atomically after the smoke checks pass, so ordering does
+# not depend on names, on the clock, or on how a shell sorts punctuation.
+if [ -L "$LATEST" ] || [ -e "$LATEST" ]; then
+    PREV_MANIFEST="$MANIFEST_DIR/$(readlink "$LATEST")"
+    PREV_COMMIT="$(awk '/^commit /{print $2}' "$PREV_MANIFEST" 2>/dev/null || true)"
     echo "  previously deployed: ${PREV_COMMIT:-unrecorded} (from $(basename "$PREV_MANIFEST"))"
 else
     PREV_COMMIT=""
-    echo "  no previous manifest in $MANIFEST_DIR; this is the first recorded deployment"
+    echo "  no previous deployment recorded in $MANIFEST_DIR"
 fi
 
 PREV_IMAGES="$(docker ps -a --filter "label=com.docker.compose.project=$PROJECT" \
@@ -330,17 +344,12 @@ step "recording what was deployed"
 # earlier, or written in pieces, would name a state that was never reached and
 # would then be read as the rollback target by the next run.
 mkdir -p "$MANIFEST_DIR"
+# Unique by construction rather than by hoping the clock has moved. The name
+# carries a timestamp because a human reading the directory wants one, but
+# nothing depends on it: mktemp guarantees the file is new, and `latest` decides
+# which one is current.
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-MANIFEST="$MANIFEST_DIR/$STAMP.txt"
-# Never overwrite. The lock above makes a collision from this script impossible,
-# but a manifest restored from a backup or written by hand would still be there,
-# and losing one destroys the chain a rollback walks back through. A suffix is
-# added rather than the file replaced.
-if [ -e "$MANIFEST" ]; then
-    n=1
-    while [ -e "$MANIFEST_DIR/$STAMP-$n.txt" ]; do n=$((n + 1)); done
-    MANIFEST="$MANIFEST_DIR/$STAMP-$n.txt"
-fi
+MANIFEST="$(mktemp "$MANIFEST_DIR/$STAMP-XXXXXX.txt")"
 TMP_MANIFEST="$MANIFEST.tmp"
 {
     echo "deployed_at    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -369,6 +378,13 @@ TMP_MANIFEST="$MANIFEST.tmp"
     printf '%s\n' "$PREV_IMAGES" | sed 's/^/  /'
 } > "$TMP_MANIFEST"
 mv "$TMP_MANIFEST" "$MANIFEST"
+
+# The pointer moves last, and atomically. Everything above can refuse, and every
+# refusal exits before this line, so a run that failed leaves `latest` naming the
+# deployment that is still serving -- which is what the next run must roll back
+# to. `ln -sfn` alone is not atomic; the rename is.
+ln -sfn "$(basename "$MANIFEST")" "$MANIFEST_DIR/.latest.$$"
+mv -Tf "$MANIFEST_DIR/.latest.$$" "$LATEST"
 
 cat "$MANIFEST"
 echo

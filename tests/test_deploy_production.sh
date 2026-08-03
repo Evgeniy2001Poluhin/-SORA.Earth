@@ -122,6 +122,18 @@ printf '%s' "$code"
 [ "$code" = "000" ] && exit 7
 exit 0
 STUB
+    # Frozen, so "two deployments in the same second" is a fact of the test
+    # rather than a race against the wall clock. The earlier version waited for
+    # the second to roll over, which made the case it cared about the one it was
+    # least likely to exercise.
+    cat > "$STUB_DIR/bin/date" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+    *%Y%m%dT%H%M%SZ*)      echo "20260803T120000Z" ;;
+    *%Y-%m-%dT%H:%M:%SZ*)  echo "2026-08-03T12:00:00Z" ;;
+    *)                     command date "$@" ;;
+esac
+STUB
     cat > "$STUB_DIR/bin/systemctl" <<'STUB'
 #!/usr/bin/env bash
 exit 1
@@ -332,7 +344,7 @@ new_sandbox
 run_guard
 check "exit status is 0"          "$RC" "0"
 check "a manifest was written"    "$(find "$SANDBOX/manifests" -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')" "1"
-MAN="$(find "$SANDBOX/manifests" -name '*.txt' 2>/dev/null | head -1)"
+MAN="$SANDBOX/manifests/$(readlink "$SANDBOX/manifests/latest")"
 check "it records the commit"     "$(grep -c "^commit         $SECOND" "$MAN")" "1"
 check "it records the mode"       "$(grep -c '^mode           deploy' "$MAN")" "1"
 check "it records the config hash" "$(grep -c "^nginx_config   sha256:$CONF_SUM" "$MAN")" "1"
@@ -366,7 +378,7 @@ echo "== the manifest names what it replaced, not what it deployed =="
 new_sandbox
 run_guard
 check "first deploy succeeds" "$RC" "0"
-MAN1="$(find "$SANDBOX/manifests" -name '*.txt' | head -1)"
+MAN1="$SANDBOX/manifests/$(readlink "$SANDBOX/manifests/latest")"
 check "with no previous deployment recorded" \
     "$(grep -c '^previous_commit none-recorded' "$MAN1")" "1"
 
@@ -383,7 +395,9 @@ THIRD="$(git -C "$REPO" rev-parse HEAD)"
 sleep 1
 run_guard
 check "second deploy succeeds" "$RC" "0"
-MAN2="$(find "$SANDBOX/manifests" -name '*.txt' | sort | tail -1)"
+# Followed through the pointer, not chosen by sorting names -- the sorting is
+# what broke, so a test that sorts would agree with the bug.
+MAN2="$SANDBOX/manifests/$(readlink "$SANDBOX/manifests/latest")"
 check "two manifests exist" \
     "$(find "$SANDBOX/manifests" -name '*.txt' | wc -l | tr -d ' ')" "2"
 check "the second deployed the new commit" \
@@ -410,16 +424,90 @@ new_sandbox
 rm -rf "$SANDBOX"
 
 new_sandbox
-# Two manifests in the same second used to collide, and the survivor's record of
-# what it replaced was gone with the file it overwrote.
-mkdir -p "$SANDBOX/manifests"
-STAMP_NOW="$(date -u +%Y%m%dT%H%M%SZ)"
-echo "planted" > "$SANDBOX/manifests/$STAMP_NOW.txt"
+# The clock is frozen, so both of these land on the same timestamp. An earlier
+# fix gave the second a "-1" suffix, and '-' sorts before '.', so picking the
+# newest by name returned the *first* one -- the collision fix broke the chain it
+# was written to protect. Nothing sorts names now; `latest` is followed.
+#
+# The assertion is deliberately about the chain rather than about files existing.
+# The test this replaces checked that a new file appeared beside the old one,
+# which stayed true while the chain was broken.
+echo third > "$REPO/third.txt"
+git -C "$REPO" add -A >/dev/null; git -C "$REPO" commit -qm third
+git -C "$REPO" push -q origin main 2>/dev/null
+THIRD="$(git -C "$REPO" rev-parse HEAD)"
+
+git -C "$REPO" reset -q --hard "$SECOND"
+git -C "$REPO" push -qf origin "HEAD:main" 2>/dev/null
 run_guard
-check "the deploy succeeds"           "$RC" "0"
-check "the existing manifest survives" "$(cat "$SANDBOX/manifests/$STAMP_NOW.txt")" "planted"
-check "and the new one sits beside it" \
-    "$(find "$SANDBOX/manifests" -name "$STAMP_NOW-*.txt" | wc -l | tr -d ' ')" "1"
+check "first deploy in this second succeeds"  "$RC" "0"
+FIRST_MAN="$(readlink "$SANDBOX/manifests/latest")"
+
+git -C "$REPO" reset -q --hard "$THIRD"
+git -C "$REPO" push -qf origin "HEAD:main" 2>/dev/null
+run_guard
+check "second deploy in the same second succeeds" "$RC" "0"
+SECOND_MAN="$(readlink "$SANDBOX/manifests/latest")"
+check "they are different files"    "$([ "$FIRST_MAN" != "$SECOND_MAN" ] && echo different || echo same)" "different"
+check "both manifests survive"      "$(find "$SANDBOX/manifests" -name '*.txt' | wc -l | tr -d ' ')" "2"
+check "latest names the second"     "$(awk '/^commit /{print $2}' "$SANDBOX/manifests/$SECOND_MAN")" "$THIRD"
+# The one that matters: the next run must read the second, not the first.
+check "and the second names the first as replaced" \
+    "$(awk '/^previous_commit /{print $2}' "$SANDBOX/manifests/$SECOND_MAN")" "$SECOND"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# A third deployment, still in the same frozen second, must see the second.
+run_guard
+echo third > "$REPO/third.txt"; git -C "$REPO" add -A >/dev/null
+git -C "$REPO" commit -qm third; git -C "$REPO" push -q origin main 2>/dev/null
+THIRD="$(git -C "$REPO" rev-parse HEAD)"
+run_guard
+echo fourth > "$REPO/fourth.txt"; git -C "$REPO" add -A >/dev/null
+git -C "$REPO" commit -qm fourth; git -C "$REPO" push -q origin main 2>/dev/null
+FOURTH="$(git -C "$REPO" rev-parse HEAD)"
+run_guard
+check "the third deploy succeeds"   "$RC" "0"
+MAN3="$SANDBOX/manifests/$(readlink "$SANDBOX/manifests/latest")"
+check "it deployed the newest commit"        "$(awk '/^commit /{print $2}' "$MAN3")" "$FOURTH"
+check "and names the second deploy as previous" \
+    "$(awk '/^previous_commit /{print $2}' "$MAN3")" "$THIRD"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# The pointer must win over any name in the directory.
+#
+# Without this the suite could not tell the pointer from sorting at all: with
+# mktemp suffixes every manifest has the same shape, so picking the newest by
+# name lands on the right file about half the time and a mutant that sorts
+# survives. Confirmed -- one did, 66 tests green.
+#
+# The decoy sorts after every real manifest and names a commit that was never
+# deployed. Anything that chooses by name reads it; anything that follows the
+# pointer does not.
+run_guard
+REAL_PREV="$SECOND"
+echo "commit deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" > "$SANDBOX/manifests/zzzz-decoy.txt"
+echo third > "$REPO/third.txt"; git -C "$REPO" add -A >/dev/null
+git -C "$REPO" commit -qm third; git -C "$REPO" push -q origin main 2>/dev/null
+run_guard
+check "the deploy after a decoy succeeds" "$RC" "0"
+MAND="$SANDBOX/manifests/$(readlink "$SANDBOX/manifests/latest")"
+check "the decoy is ignored" \
+    "$(awk '/^previous_commit /{print $2}' "$MAND")" "$REAL_PREV"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# A failed deployment must leave the pointer where it was: the previous
+# deployment is still what is serving, and is still what a rollback aims at.
+run_guard
+GOOD_MAN="$(readlink "$SANDBOX/manifests/latest")"
+echo 502 > "$STUB_DIR/http_code"
+run_guard
+refused_because "the second run fails smoke" "returned 502"
+check "latest still names the good deployment" \
+    "$(readlink "$SANDBOX/manifests/latest")" "$GOOD_MAN"
+check "and no manifest was added"   "$(find "$SANDBOX/manifests" -name '*.txt' | wc -l | tr -d ' ')" "1"
 rm -rf "$SANDBOX"
 
 echo "== rollback reads the previous manifest, not the checkout =="
@@ -428,7 +516,7 @@ run_guard                       # records SECOND as deployed
 sleep 1
 run_guard --rollback "$FIRST"   # rolls back to FIRST
 check "the rollback succeeds"   "$RC" "0"
-MANR="$(find "$SANDBOX/manifests" -name '*.txt' | sort | tail -1)"
+MANR="$SANDBOX/manifests/$(readlink "$SANDBOX/manifests/latest")"
 check "it records the rollback target"  "$(awk '/^commit /{print $2}' "$MANR")" "$FIRST"
 check "it records the mode"             "$(grep -c '^mode           rollback' "$MANR")" "1"
 # Taken from the previous manifest. Read from the checkout it would have been
