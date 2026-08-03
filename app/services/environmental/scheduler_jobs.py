@@ -159,10 +159,16 @@ def _log_job_execution(
         )
         db.add(log)
         db.commit()
-        logger.info(
-            "Job %s: %s (processed=%d, rejected=%d, duration=%.2fs)",
+        # Warning for anything short of success. A degraded run recorded at
+        # info level disappears wherever info is filtered -- which is most
+        # places -- leaving exactly the invisibility this change removes from
+        # the database while keeping it in the logs.
+        emit = logger.info if status == "success" else logger.warning
+        emit(
+            "Job %s: %s (processed=%d, rejected=%d, duration=%.2fs)%s",
             job_name, status, records_processed, records_rejected,
-            duration_sec or 0
+            duration_sec or 0,
+            " -- %s" % error_message if error_message and status != "success" else "",
         )
     except Exception as e:
         db.rollback()
@@ -281,8 +287,12 @@ def scheduled_openaq_ingestion():
             persist_result.inserted, persist_result.updated, duration
         )
 
+        # The verdict, not a constant. Returning "success" beside a row
+        # recorded as degraded gives the same run two different answers
+        # depending on who asks, which is how the two drift apart.
         return {
-            "status": "success",
+            "status": verdict.status,
+            "failure_reason": verdict.failure_reason,
             "signals_count": fetched_count,
             "valid_count": len(quality_valid_signals),
             "rejected_count": quality_invalid_count,
@@ -408,8 +418,12 @@ def scheduled_openmeteo_ingestion():
             persist_result.inserted, persist_result.updated, duration
         )
 
+        # The verdict, not a constant. Returning "success" beside a row
+        # recorded as degraded gives the same run two different answers
+        # depending on who asks, which is how the two drift apart.
         return {
-            "status": "success",
+            "status": verdict.status,
+            "failure_reason": verdict.failure_reason,
             "signals_count": fetched_count,
             "persisted": persist_result.accepted,
             "duration_sec": duration,

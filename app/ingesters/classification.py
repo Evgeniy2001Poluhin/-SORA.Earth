@@ -36,6 +36,7 @@ DATA = "data"                # the source returned records
 EMPTY = "empty"              # the source answered, and had nothing
 UNAVAILABLE = "unavailable"  # the source could not be reached or refused
 REJECTED = "rejected"        # records arrived and none survived validation
+UNKNOWN = "unknown"          # the run died before the source could answer
 
 # data_outcome
 PRIMARY = "primary"          # everything stored came from the expected source
@@ -72,6 +73,7 @@ def classify_run(
     rejected: int = 0,
     used_fallback: bool = False,
     unreachable: bool = False,
+    write_failed: bool = False,
 ) -> RunVerdict:
     """The verdict for one ingester run.
 
@@ -80,9 +82,22 @@ def classify_run(
     one the schema permits; there is no default that quietly means success.
     """
     if raised is not None:
+        # Derived from what was actually seen, not assumed.
+        #
+        # This said DATA whenever `unreachable` was false -- so a crash before
+        # the first request recorded "the source returned records" beside
+        # records_received=0, which is a statement contradicted by the row it
+        # sits in. A run that died before the source could answer knows nothing
+        # about the source, and UNKNOWN says exactly that.
+        if unreachable:
+            source_status = UNAVAILABLE
+        elif received > 0:
+            source_status = DATA
+        else:
+            source_status = UNKNOWN
         return RunVerdict(
             execution_status=FAILED,
-            primary_source_status=UNAVAILABLE if unreachable else DATA,
+            primary_source_status=source_status,
             data_outcome=PARTIAL if accepted else NONE,
             status=FAILURE,
             records_received=received,
@@ -93,6 +108,24 @@ def classify_run(
 
     # Finished cleanly. What it achieved is a separate question, and this is the
     # one the old code never asked.
+    if write_failed:
+        # The source did its part and the database did not.
+        #
+        # Without this, a persistence failure arrives as accepted=0 with a
+        # rejected count and is read as REJECTED -- "the source is producing
+        # something we cannot use" -- which points the investigation at the
+        # wrong end of the pipe entirely.
+        return RunVerdict(
+            execution_status=COMPLETED,
+            primary_source_status=DATA if received else UNKNOWN,
+            data_outcome=NONE,
+            status=FAILURE,
+            records_received=received,
+            records_accepted=accepted,
+            records_rejected=rejected,
+            failure_reason="records were fetched but could not be persisted",
+        )
+
     if unreachable:
         # Reached nothing, but handled it without raising -- which is exactly how
         # a silent success is manufactured.

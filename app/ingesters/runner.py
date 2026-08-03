@@ -41,11 +41,30 @@ def _persist_signals(signals: list[Signal], source: str) -> dict:
     try:
         from app.ingesters.persist import persist_environmental_observations
     except ImportError:
+        # Shaped like every other return from here, and explicitly a write
+        # failure.
+        #
+        # It used to return {"saved": 0, "error": "persist_unavailable"} -- no
+        # `received`, no `accepted` -- so both .get() calls in the caller yielded
+        # 0 and a missing persistence layer was classified as a source that had
+        # nothing to give. A broken database reported as an empty API is the
+        # same silent success this whole change exists to remove, reintroduced
+        # in a new place by the change itself.
         log.warning("[runner] persist module not available")
-        return {"saved": 0, "error": "persist_unavailable"}
+        return {
+            "received": len(list(signals)),
+            "inserted": 0, "updated": 0, "accepted": 0, "rejected": 0,
+            "duplicates": 0,
+            "write_failed": True,
+            "errors": ["persist_unavailable"],
+        }
 
     result = persist_environmental_observations(signals, source)
 
+    # The same key set as the failure path above, write_failed included. A
+    # result whose shape depends on which branch produced it is one every caller
+    # has to guess at, and the guess that started this was `.get(..., 0)` on keys
+    # that were simply absent.
     return {
         "received": result.received,
         "inserted": result.inserted,
@@ -53,6 +72,7 @@ def _persist_signals(signals: list[Signal], source: str) -> dict:
         "accepted": result.accepted,
         "rejected": result.rejected,
         "duplicates": result.duplicates,
+        "write_failed": False,
         "errors": result.errors[:5] if result.errors else [],
     }
 
@@ -136,6 +156,7 @@ async def run_all_ingesters() -> dict:
                 received=persist_result.get("received", 0),
                 accepted=persist_result.get("accepted", 0),
                 rejected=persist_result.get("rejected", 0),
+                write_failed=persist_result.get("write_failed", False),
             )
             stats["ingesters"][ing.name].update(verdict.as_dict())
             if verdict.status == "success":

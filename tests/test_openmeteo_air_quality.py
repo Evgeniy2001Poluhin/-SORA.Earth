@@ -13,6 +13,7 @@ apart from an instrument reading is a worse outcome than no number.
 import asyncio
 from datetime import datetime, timezone
 
+from app.ingesters.openmeteo import REGION_CAPITALS
 from app.ingesters.openmeteo_air_quality import (
     OpenMeteoAirQualityIngester,
     POLLUTANTS,
@@ -150,3 +151,17 @@ def test_a_naive_time_is_read_as_utc():
     out = _parse_time("2026-08-03T12:00", datetime(2026, 1, 1, tzinfo=timezone.utc), "X")
     assert out == datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc)
     assert out.tzinfo is timezone.utc
+
+
+def test_a_non_numeric_value_costs_its_own_pollutant_and_nothing_else():
+    """float() sat outside the per-region guard, so one bad value aborted every
+    remaining region -- defeating the isolation the test above claims to prove.
+    The test passed because the stub never produced a value float() rejects."""
+    bad = _Response({"current": {"time": "2026-08-03T12:00", "pm10": "n/a", "pm2_5": 19.3}})
+    ing, _ = _ingester([bad, _full_current()])
+    signals = asyncio.run(ing.fetch())
+
+    first = [s for s in signals if s.region_code == REGION_CAPITALS[0][0]]
+    assert [s.metric for s in first] == ["pm2_5"]
+    # the second region is untouched
+    assert len(signals) == 1 + len(POLLUTANTS)

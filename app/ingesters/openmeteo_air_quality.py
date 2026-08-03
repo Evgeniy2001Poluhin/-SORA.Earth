@@ -82,12 +82,23 @@ class OpenMeteoAirQualityIngester(BaseIngester):
                     value = current.get(pollutant)
                     if value is None:
                         continue
+                    # Converted inside its own guard. This sat outside the
+                    # per-region try, so a single non-numeric value -- a string,
+                    # a dict, anything the API might return on a bad day --
+                    # would abort every remaining region and defeat the
+                    # isolation the test above claims to prove.
+                    try:
+                        numeric = float(value)
+                    except (TypeError, ValueError):
+                        log.warning("[%s] %s %s: non-numeric value %r",
+                                    self.name, code, pollutant, value)
+                        continue
                     out.append(
                         Signal(
                             region_code=code,
                             source=self.name,
                             metric=pollutant,
-                            value=float(value),
+                            value=numeric,
                             unit=unit,
                             observed_at=observed_at,
                             metadata={

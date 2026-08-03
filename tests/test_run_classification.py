@@ -16,7 +16,7 @@ import pytest
 from app.ingesters.classification import (
     classify_run,
     COMPLETED, FAILED,
-    DATA, EMPTY, UNAVAILABLE, REJECTED,
+    DATA, EMPTY, UNAVAILABLE, REJECTED, UNKNOWN,
     PRIMARY, PARTIAL, FALLBACK, NONE,
     SUCCESS, DEGRADED, FAILURE,
 )
@@ -29,21 +29,24 @@ COUNTS = [
     (10, 7, 3),     # some stored, some rejected
     (10, 0, 10),    # everything rejected
 ]
-FLAGS = list(itertools.product([None, RuntimeError("boom")], [False, True], [False, True]))
+FLAGS = list(itertools.product(
+    [None, RuntimeError("boom")], [False, True], [False, True], [False, True]
+))
 
 
 @pytest.mark.parametrize("received,accepted,rejected", COUNTS)
-@pytest.mark.parametrize("raised,unreachable,used_fallback", FLAGS)
+@pytest.mark.parametrize("raised,unreachable,used_fallback,write_failed", FLAGS)
 def test_every_combination_obeys_the_invariants(
-    received, accepted, rejected, raised, unreachable, used_fallback
+    received, accepted, rejected, raised, unreachable, used_fallback, write_failed
 ):
     v = classify_run(
         raised=raised, received=received, accepted=accepted,
         rejected=rejected, unreachable=unreachable, used_fallback=used_fallback,
+        write_failed=write_failed,
     )
 
     assert v.execution_status in (COMPLETED, FAILED)
-    assert v.primary_source_status in (DATA, EMPTY, UNAVAILABLE, REJECTED)
+    assert v.primary_source_status in (DATA, EMPTY, UNAVAILABLE, REJECTED, UNKNOWN)
     assert v.data_outcome in (PRIMARY, PARTIAL, FALLBACK, NONE)
     assert v.status in (SUCCESS, DEGRADED, FAILURE)
 
@@ -56,12 +59,19 @@ def test_every_combination_obeys_the_invariants(
         assert v.records_accepted > 0, v
         assert raised is None, v
         assert not unreachable, v
+        assert not write_failed, v
 
     # A run that raised is never anything but failed.
     if raised is not None:
         assert v.execution_status == FAILED, v
         assert v.status == FAILURE, v
         assert v.failure_reason, v
+
+    # A write failure is a failure, never an empty source and never degraded.
+    # Read as either, a database outage sends the investigation to the API.
+    if write_failed and raised is None:
+        assert v.status == FAILURE, v
+        assert v.primary_source_status != EMPTY, v
 
     # Nothing stored is never a success, whatever the reason.
     if v.records_accepted == 0:
@@ -151,3 +161,38 @@ def test_a_raise_carries_its_reason():
     assert v.primary_source_status == UNAVAILABLE
     assert "ValueError" in v.failure_reason
     assert "503" in v.failure_reason
+
+
+# --- the cases review found --------------------------------------------------
+
+def test_a_crash_before_the_source_answered_claims_nothing_about_it():
+    """This reported DATA -- "the source returned records" -- beside
+    records_received=0, a statement its own row contradicted."""
+    v = classify_run(raised=RuntimeError("died in setup"))
+    assert v.primary_source_status == UNKNOWN
+    assert v.records_received == 0
+
+
+def test_a_crash_after_records_arrived_does_say_the_source_answered():
+    v = classify_run(raised=RuntimeError("died persisting"), received=12)
+    assert v.primary_source_status == DATA
+
+
+def test_a_write_failure_is_not_a_validation_rejection():
+    """Both arrive as accepted=0 with a rejected count, and they point at
+    opposite ends of the pipe. Read as REJECTED, a database outage sends the
+    investigation to the source."""
+    write = classify_run(received=10, accepted=0, rejected=10, write_failed=True)
+    reject = classify_run(received=10, accepted=0, rejected=10)
+
+    assert write.primary_source_status == DATA
+    assert reject.primary_source_status == REJECTED
+    assert write.status == FAILURE
+    assert reject.status == DEGRADED
+    assert "could not be persisted" in write.failure_reason
+
+
+def test_a_write_failure_before_any_record_arrived_claims_nothing():
+    v = classify_run(write_failed=True)
+    assert v.primary_source_status == UNKNOWN
+    assert v.status == FAILURE
