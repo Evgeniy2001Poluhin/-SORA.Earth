@@ -70,7 +70,20 @@ done
 cmd="${1:-}"; shift || true
 case "$cmd" in
     pg_isready)
-        [ -f "$STUB_DIR/fail_isready" ] && exit 2
+        if [ -f "$STUB_DIR/fail_isready" ]; then
+            # Consume the timeout the caller asked for, the way a real probe
+            # against an unreachable server does. Exiting instantly made the
+            # budget test measure only the script's sleeps, so dropping the
+            # per-probe -t cap would not have shown up. With no -t the wait is
+            # deliberately long enough to overrun any budget these tests set.
+            t=10
+            while [ $# -gt 0 ]; do
+                [ "$1" = "-t" ] && { t="$2"; break; }
+                shift
+            done
+            sleep "$t"
+            exit 2
+        fi
         exit 0 ;;
     pg_dump)
         [ -f "$STUB_DIR/fail_dump" ] && exit 1
@@ -86,7 +99,16 @@ case "$cmd" in
         [ -f "$STUB_DIR/fail_list" ] && exit 1
         exit 0 ;;
     cat)
-        cat "$1"; exit 0 ;;
+        # truncate_copy holds how many bytes survive the copy out. stat still
+        # reports the true size, so the two disagree exactly as they would if the
+        # pipe were cut mid-transfer. Without this the stub always made them
+        # agree, and the size check could be deleted with every test still green.
+        if [ -f "$STUB_DIR/truncate_copy" ]; then
+            head -c "$(cat "$STUB_DIR/truncate_copy")" "$1"
+        else
+            cat "$1"
+        fi
+        exit 0 ;;
     stat)
         # stat -c %s <file>
         wc -c < "$3" | tr -d ' '; exit 0 ;;
@@ -204,14 +226,34 @@ new_sandbox
 )
 rm -rf "$SANDBOX"
 
+echo "== a truncated copy out is not published =="
+# pg_dump succeeds, validation succeeds, and the transfer to the host loses half
+# the bytes. Only the size comparison catches it: the short file still lists
+# correctly, so pg_restore --list would accept it and a checksum computed after
+# the truncation would agree with itself.
+new_sandbox
+echo 32 > "$STUB_DIR/truncate_copy"   # of the 64 the dump contains
+rc="$(run_script)"
+check "exit status is non-zero"         "$([ "$rc" != 0 ] && echo yes || echo no)" "yes"
+check "nothing published"               "$(dumps)" "0"
+check "no .tmp left behind"             "$(tmpfiles)" "0"
+check "the failure names the size gap"  "$(grep -qiE 'copied .* bytes, container reported' "$SANDBOX/out" && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
 echo "== an unready database fails within its budget =="
+# The stub now consumes the -t it is given, so this measures the real wait rather
+# than the script's sleeps alone. The allowance is one second for clock
+# granularity: with a 4s budget the script spends about 2s probing and 2s
+# waiting. Dropping the per-probe cap makes the stub wait its 10s default and
+# overruns this, which is the regression the loose six-second bound permitted.
 new_sandbox
 touch "$STUB_DIR/fail_isready"
 start=$SECONDS
 READY_TIMEOUT=4 rc="$(run_script)"
 elapsed=$(( SECONDS - start ))
 check "exit status is non-zero"         "$([ "$rc" != 0 ] && echo yes || echo no)" "yes"
-check "within the budget"               "$([ "$elapsed" -le 6 ] && echo yes || echo no)" "yes"
+check "within the stated budget"        "$([ "$elapsed" -le 5 ] && echo yes || echo no)" "yes"
+check "it actually waited"              "$([ "$elapsed" -ge 3 ] && echo yes || echo no)" "yes"
 check "nothing published"               "$(dumps)" "0"
 rm -rf "$SANDBOX"
 

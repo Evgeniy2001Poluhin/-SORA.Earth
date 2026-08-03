@@ -23,7 +23,12 @@ trap 'rm -rf "$WORK"' EXIT
 
 PASS=0; FAIL=0
 
-# name | expected-failing-test-substring | sed program
+# name | expected-failing-test-substring | replacement, as "old||=>||new"
+#
+# Not a sed program, whatever the shape suggests: the third argument is split on
+# ||=>|| and handed to Python's str.replace, so both halves are literal text. Any
+# sed syntax written here -- addresses, s///, backreferences -- would be matched
+# character for character and silently find nothing.
 run_mutation() {
     local name="$1" expect="$2" program="$3"
     local mutant="$WORK/mutant.sh"
@@ -86,6 +91,14 @@ run_mutation "checksum not written" "checksum written" \
 
 run_mutation "empty dump accepted" "the failure names emptiness" \
 '[ -s "$TMP" ] || fail "dump is empty after copying out"||=>||true'
+
+# The size comparison was untested until the stub gained a way to truncate the
+# copy: it always reported the same size on both sides, so the two could never
+# disagree. A guard that cannot fail is indistinguishable from no guard, and this
+# mutation is what makes the difference visible.
+run_mutation "truncated copy accepted" "the failure names the size gap" \
+'[ "$CONTAINER_SIZE" = "$HOST_SIZE" ] \
+    || fail "copied $HOST_SIZE bytes, container reported $CONTAINER_SIZE"||=>||true'
 
 echo
 echo "  caught: $PASS   missed: $FAIL"

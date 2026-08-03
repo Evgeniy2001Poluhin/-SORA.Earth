@@ -412,35 +412,25 @@ jobs:
             echo "$unit verified clean"
           done
 
-      # A dump that has never been restored is a hypothesis. This one is written
-      # by a real pg_dump and read back by a real pg_restore into a second
-      # database, then compared.
+      # A dump that has never been restored is a hypothesis. This runs the script
+      # itself against a throwaway Compose stand and restores the archive the
+      # script published -- not one this step made with its own pg_dump, which
+      # would prove PostgreSQL can round-trip a file and nothing about the
+      # container invocation or the copy out, where the real risk lives.
       #
-      # In a container rather than a `services:` block so the client and the
-      # server come from the same image. With the runner's own psql the two
-      # versions drift independently, and pg_dump refuses a newer server -- a
-      # failure that would say nothing about this change.
+      # The test owns its stand: it brings the project up, waits with a real
+      # deadline, and fails if the database never arrives. An earlier version of
+      # this step did the waiting here in a loop that never checked whether the
+      # budget was exhausted, so an unready database fell through to a test that
+      # prints SKIP and exits 0 -- green, having verified nothing.
       - name: Restore against a real PostgreSQL
-        run: |
-          docker run -d --name pg-restore-test --network none \
-            --tmpfs /var/lib/postgresql/data:rw \
-            -e POSTGRES_USER=sora -e POSTGRES_PASSWORD=sora2026 \
-            -e POSTGRES_DB=postgres -e PGDATA=/var/lib/postgresql/data/pg \
-            postgres:16
+        run: bash tests/test_backup_local_integration.sh
 
-          for _ in $(seq 1 30); do
-            docker exec pg-restore-test pg_isready -U sora -q && break
-            sleep 2
-          done
-
-          docker cp tests/test_backup_local_integration.sh pg-restore-test:/it.sh
-          docker exec \
-            -e PGHOST=localhost -e PGUSER=sora -e PGPASSWORD=sora2026 \
-            pg-restore-test bash /it.sh
-
-      - name: Remove the PostgreSQL stand
+      - name: Remove any stand left behind
         if: always()
-        run: docker rm -f pg-restore-test 2>/dev/null || true
+        run: |
+          docker ps -aq --filter 'name=sora-backup-it-' | xargs -r docker rm -f
+          docker volume ls -q --filter 'name=sora-backup-it-' | xargs -r docker volume rm -f
 
   # A clean database must be reachable from migrations alone. Production was
   # bootstrapped with Base.metadata.create_all(), which is not reproducible from
