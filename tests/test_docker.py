@@ -38,7 +38,14 @@ def test_docker_compose_services():
     assert "redis" in services
     assert "prometheus" in services
     assert "grafana" in services
-    assert "8000:8000" in services["app"].get("ports", [])
+    # Bound to loopback, and asserted as an absence as well as a presence.
+    # "8000:8000" binds every interface. On a laptop that is harmless; on the
+    # production host it published the API to the internet unencrypted, past
+    # nginx and its TLS. Checking only for the new string would let the old one
+    # come back alongside it, so the unrestricted form is named and forbidden.
+    ports = services["app"].get("ports", [])
+    assert "127.0.0.1:8000:8000" in ports, ports
+    assert "8000:8000" not in ports, f"port 8000 is bound to every interface: {ports}"
 
 
 def test_nginx_config():
