@@ -1,100 +1,152 @@
-"""Three contracts the verdict has to keep outside the classifier itself.
+"""One verdict, three readers -- checked by running the job, not by reading it.
 
-classify_run() is enumerated in tests/test_run_classification.py. That proves
-the verdict is right; it says nothing about whether the verdict is what the rest
-of the system then reports. These are the seams where it could diverge:
+The first version of this file parsed the source and asserted that the string
+`status="success"` no longer appeared. That is brittle in both directions: it
+breaks on a rename that changes nothing, and it passes on a rewrite that
+reintroduces the divergence through a variable. It tested the text.
 
-  1. every persist result carries the same keys, including on failure
-  2. the status a job returns is the status it records and the status it labels
-  3. a write failure never arrives as an empty source
+These call the jobs with a persist result shaped for each verdict and assert the
+three readers agree:
 
-The second is the one that goes wrong quietly. A job that records `degraded` and
-returns `success` gives the same run two different answers depending on who
-asks, and the two readers drift apart with nobody noticing.
+  the value the function returns
+  the status written to environmental_job_log
+  the label attached to the Prometheus counter
+
+The divergence this guards against is quiet by nature. A job that records
+`degraded` and returns `success` is not wrong anywhere a test usually looks --
+each reader is self-consistent, and they only disagree with each other.
 """
-import ast
-import inspect
-from pathlib import Path
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.ingesters import runner
+import pytest
+
+from app.ingesters.base import Signal
+from app.ingesters.persist import PersistResult
+from app.services.environmental import scheduler_jobs
 from app.ingesters.classification import classify_run, EMPTY, FAILURE
 
 
-REPO = Path(__file__).resolve().parents[1]
-JOBS = REPO / "app" / "services" / "environmental" / "scheduler_jobs.py"
+def _signal(region="RU-MOW"):
+    """A real Signal, because the job reads .metadata off each one.
 
-
-# --- 1. one shape, every path ------------------------------------------------
-
-def _returned_dict_keys(func) -> list[set]:
-    """Key sets of every dict literal returned by a function."""
-    tree = ast.parse(inspect.getsource(func))
-    out = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict):
-            keys = {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
-            if keys:
-                out.append(keys)
-    return out
-
-
-def test_persist_results_have_identical_keys_on_every_path():
-    """The failure path returned {"saved": 0, "error": ...} -- no `received`,
-    no `accepted` -- so `.get(key, 0)` in the caller yielded 0 for both and a
-    missing persistence layer was classified as a source with nothing to give.
-
-    A result whose shape depends on which branch produced it is one every caller
-    has to guess at.
+    A bare object() got as far as the quality filter and raised there -- the
+    fake has to satisfy the code path, not merely occupy the list.
     """
-    shapes = _returned_dict_keys(runner._persist_signals)
-    assert len(shapes) >= 2, "expected a success and a failure return"
-    assert len(set(map(frozenset, shapes))) == 1, (
-        "persist results differ by branch: %s" % [sorted(s) for s in shapes]
+    return Signal(
+        region_code=region, source="openaq", metric="pm25_ugm3",
+        value=1.0, unit="ug/m3",
+        observed_at=datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc),
+        metadata={},
+    )
+
+
+def _persist(received, accepted, rejected=0):
+    return PersistResult(
+        received=received, inserted=accepted, updated=0,
+        rejected=rejected, duplicates=0, accepted=accepted, errors=[],
+    )
+
+
+def _run_openaq(signals, persist_result):
+    """Run the job with everything external mocked, and collect all three readers."""
+    ingestion_counter = MagicMock()
+    with patch(
+        "app.ingesters.openaq.OpenAQIngester.fetch",
+        new_callable=AsyncMock, return_value=signals,
+    ), patch(
+        "app.ingesters.persist.persist_environmental_observations",
+        return_value=persist_result,
+    ), patch(
+        "app.prom_metrics.sora_environmental_ingestion_total", ingestion_counter,
+    ), patch(
+        "app.prom_metrics.sora_environmental_observations_total", MagicMock(),
+    ), patch.object(scheduler_jobs, "_log_job_execution") as logged:
+        returned = scheduler_jobs.scheduled_openaq_ingestion()
+
+    label = None
+    if ingestion_counter.labels.call_args is not None:
+        label = ingestion_counter.labels.call_args.kwargs.get("status")
+    recorded = logged.call_args.kwargs.get("status") if logged.call_args else None
+    return returned, recorded, label
+
+
+@pytest.mark.parametrize(
+    "signals,persist_result,expected",
+    [
+        # The source gave nothing: 398 production runs, every one recorded
+        # success before this change.
+        ([], _persist(0, 0), "degraded"),
+        # Everything asked for, stored.
+        ([_signal()], _persist(3, 3), "success"),
+        # Some stored, some rejected -- something was stored, but not what was
+        # asked for.
+        ([_signal()], _persist(3, 2, rejected=1), "degraded"),
+    ],
+)
+def test_the_three_readers_agree(signals, persist_result, expected):
+    returned, recorded, label = _run_openaq(signals, persist_result)
+
+    assert returned["status"] == expected, "returned value"
+    assert recorded == expected, "database row"
+    assert label == expected, "prometheus label"
+
+
+def test_they_agree_when_the_run_fails():
+    """The failure path is a separate branch and can drift on its own."""
+    ingestion_counter = MagicMock()
+    with patch(
+        "app.ingesters.openaq.OpenAQIngester.fetch",
+        new_callable=AsyncMock, side_effect=RuntimeError("upstream 503"),
+    ), patch(
+        "app.prom_metrics.sora_environmental_ingestion_total", ingestion_counter,
+    ), patch.object(scheduler_jobs, "_log_job_execution") as logged:
+        returned = scheduler_jobs.scheduled_openaq_ingestion()
+
+    recorded = logged.call_args.kwargs.get("status") if logged.call_args else None
+    assert returned.get("status") in ("error", "failed"), returned
+    assert recorded == "failed", recorded
+
+
+def test_a_degraded_run_carries_its_reason_to_every_reader():
+    """A verdict without a reason is as unreadable as the `ok` it replaces, and
+    the reason has to survive the trip out of the job."""
+    returned, _, _ = _run_openaq([], _persist(0, 0))
+    assert returned["failure_reason"], returned
+
+
+# --- the persist contract ----------------------------------------------------
+
+def test_persist_results_have_the_same_keys_on_every_path():
+    """Checked by calling both paths, not by parsing them.
+
+    The failure path returned {"saved": 0, "error": ...} -- no `received`, no
+    `accepted` -- so `.get(key, 0)` yielded 0 for both and a missing persistence
+    layer was classified as a source with nothing to give.
+    """
+    from app.ingesters import runner
+
+    good = runner._persist_signals([], "test")
+
+    with patch.dict("sys.modules", {"app.ingesters.persist": None}):
+        broken = runner._persist_signals([], "test")
+
+    assert set(good) == set(broken), (
+        "persist results differ by branch: %s vs %s" % (sorted(good), sorted(broken))
     )
     for required in ("received", "accepted", "rejected", "write_failed"):
-        assert all(required in s for s in shapes), required
+        assert required in good and required in broken, required
+    assert broken["write_failed"] is True
+    assert good["write_failed"] is False
 
 
-# --- 2. one status, three readers --------------------------------------------
+def test_a_missing_persistence_layer_is_a_failure_not_an_empty_source():
+    """End to end for the defect this change introduced and review caught."""
+    from app.ingesters import runner
 
-def _source_of(name: str) -> str:
-    tree = ast.parse(JOBS.read_text())
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == name:
-            return ast.get_source_segment(JOBS.read_text(), node) or ""
-    raise AssertionError("job %s not found" % name)
+    with patch.dict("sys.modules", {"app.ingesters.persist": None}):
+        result = runner._persist_signals([], "test")
 
-
-def test_the_jobs_report_one_status_to_every_reader():
-    """The database row, the Prometheus label and the return value must be the
-    same verdict. Each was a separate literal before, and a degraded run showed
-    as degraded in one place and success in the other two.
-    """
-    for job in ("scheduled_openaq_ingestion", "scheduled_openmeteo_ingestion"):
-        src = _source_of(job)
-        assert "verdict = classify_run(" in src, job
-        # the three readers
-        assert "status=verdict.status" in src, "%s: database row" % job
-        assert "status=verdict.status\n        ).inc()" in src or \
-               "status=verdict.status" in src, "%s: prometheus label" % job
-        assert '"status": verdict.status' in src, "%s: return value" % job
-        # and no literal success left to diverge from them
-        assert 'status="success"' not in src, (
-            "%s still reports a hard-coded success somewhere" % job
-        )
-
-
-# --- 3. a write failure is a failure -----------------------------------------
-
-def test_a_missing_persistence_layer_is_not_an_empty_source():
-    """End to end for the defect this change introduced and review caught:
-    the shape returned when persistence is unavailable, run through the
-    classifier that consumes it."""
-    result = {
-        "received": 48, "inserted": 0, "updated": 0, "accepted": 0,
-        "rejected": 0, "duplicates": 0, "write_failed": True,
-        "errors": ["persist_unavailable"],
-    }
     v = classify_run(
         received=result["received"],
         accepted=result["accepted"],
@@ -104,3 +156,23 @@ def test_a_missing_persistence_layer_is_not_an_empty_source():
     assert v.status == FAILURE
     assert v.primary_source_status != EMPTY
     assert "could not be persisted" in v.failure_reason
+
+
+def test_signals_without_timestamps_do_not_crash_the_run():
+    """A latent crash this file found while being written.
+
+    The freshness metric was guarded by `if signals:` and then took max() over
+    the ones whose observed_at is a datetime. A batch where none is -- a source
+    that omitted the field, or returned it unparseable -- left max() with an
+    empty sequence and raised ValueError, failing a run that had otherwise
+    worked. Both real ingesters can produce that shape.
+    """
+    undated = Signal(
+        region_code="RU-MOW", source="openaq", metric="pm25_ugm3",
+        value=1.0, unit="ug/m3", observed_at=None, metadata={},
+    )
+    returned, recorded, label = _run_openaq([undated], _persist(1, 1))
+
+    assert returned["status"] == "success"
+    assert recorded == "success"
+    assert label == "success"

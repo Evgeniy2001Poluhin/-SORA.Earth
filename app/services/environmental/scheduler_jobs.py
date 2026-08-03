@@ -247,11 +247,20 @@ def scheduled_openaq_ingestion():
             ).inc(count)
 
         # Calculate data freshness (time since most recent observation)
-        if signals:
-            latest_time = max(
-                s.observed_at for s in signals
-                if isinstance(s.observed_at, datetime)
-            )
+        # Guarded on the timestamps, not on the signals.
+        #
+        # `if signals:` is not the condition this needs: the generator filters to
+        # signals whose observed_at is a datetime, and a batch where none is --
+        # a source that omitted the field, or returned it unparseable -- leaves
+        # max() with an empty sequence and raises ValueError, failing a run that
+        # had otherwise succeeded. Found by a test that passed a signal without a
+        # timestamp, which is a shape the real sources can produce.
+        observed_times = [
+            s.observed_at for s in signals
+            if isinstance(s.observed_at, datetime)
+        ]
+        if observed_times:
+            latest_time = max(observed_times)
             freshness_seconds = (datetime.now(timezone.utc) - latest_time).total_seconds()
             sora_environmental_source_freshness_seconds.labels(source="openaq").set(
                 freshness_seconds
@@ -379,11 +388,20 @@ def scheduled_openmeteo_ingestion():
             ).inc(count)
 
         # Calculate data freshness
-        if signals:
-            latest_time = max(
-                s.observed_at for s in signals
-                if isinstance(s.observed_at, datetime)
-            )
+        # Guarded on the timestamps, not on the signals.
+        #
+        # `if signals:` is not the condition this needs: the generator filters to
+        # signals whose observed_at is a datetime, and a batch where none is --
+        # a source that omitted the field, or returned it unparseable -- leaves
+        # max() with an empty sequence and raises ValueError, failing a run that
+        # had otherwise succeeded. Found by a test that passed a signal without a
+        # timestamp, which is a shape the real sources can produce.
+        observed_times = [
+            s.observed_at for s in signals
+            if isinstance(s.observed_at, datetime)
+        ]
+        if observed_times:
+            latest_time = max(observed_times)
             freshness_seconds = (datetime.now(timezone.utc) - latest_time).total_seconds()
             sora_environmental_source_freshness_seconds.labels(source="openmeteo").set(
                 freshness_seconds
