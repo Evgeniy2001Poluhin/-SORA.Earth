@@ -72,7 +72,7 @@ done
 #
 # -E 75 so contention is distinguishable from a broken lock. Without it a missing
 # directory or a permissions fault reads as "someone else is deploying".
-# In a directory only root can write to, not the shared one.
+# In a directory no one but its owner can write to, rather than the shared one.
 #
 # /var/lock is /run/lock, mode 1777. The sticky bit stops another user deleting
 # root's lock file, which is what I checked and reported as sufficient. It is
@@ -84,19 +84,36 @@ done
 # tmpfs and does not survive one.
 LOCK_DIR="${DEPLOY_LOCK_DIR:-/run/sora}"
 LOCK_FILE="${DEPLOY_LOCK:-$LOCK_DIR/deploy.lock}"
-# Created only when absent. An unconditional `install -d -m 0750` silently
-# re-moded an existing directory, which made the assertion below unreachable:
-# whatever state the directory was in, it was 0750 by the time anything looked.
-# Repairing it would also be too late -- a symlink planted while it was writable
-# is already inside.
+# Created only when absent, and never re-moded. An unconditional
+# `install -d -m 0750` made the assertions below unreachable: whatever state the
+# directory was in, it was 0750 by the time anything looked, and five
+# deliberately unsafe modes passed. Repairing it would be too late regardless --
+# a symlink planted while it was writable is already inside.
+#
+# No -o/-g here. Forcing root ownership fails outright for a non-root caller,
+# which is how CI runs: every deployment test failed there while all 77 passed in
+# a root container. The ownership property is asserted below instead, against
+# whoever is actually running, which is the honest form of it.
 if [ ! -d "$LOCK_DIR" ]; then
-    install -d -m 0750 -o root -g root "$LOCK_DIR" 2>/dev/null \
-        || fail "cannot create $LOCK_DIR"
+    install -d -m 0750 "$LOCK_DIR" 2>/dev/null || fail "cannot create $LOCK_DIR"
 fi
 
-# The point of moving the lock is that no one else can write beside it, so that
-# is asserted rather than assumed -- a directory left group- or world-writable by
-# some later change would bring the whole problem back silently.
+# A real directory. -d follows symlinks, so a link pointing at somewhere
+# writable satisfies it while leaving the lock somewhere else entirely.
+[ ! -L "$LOCK_DIR" ] || fail "$LOCK_DIR is a symlink; the lock must sit in a real directory"
+[ -d "$LOCK_DIR" ]   || fail "$LOCK_DIR is not a directory"
+
+# Owned by whoever is deploying -- root in production, the runner in CI. Stated
+# this way rather than "UID 0" because a check that only holds as root is one
+# that never runs anywhere it could be tested, and the property that matters is
+# that nobody *else* controls the directory.
+LOCK_DIR_UID="$(stat -c '%u' "$LOCK_DIR")"
+[ "$LOCK_DIR_UID" = "$(id -u)" ] \
+    || fail "$LOCK_DIR is owned by uid $LOCK_DIR_UID, not by the deploying user ($(id -u))"
+
+# And writable by nobody else. Not "only root can write" -- 0755 and 0711 are
+# perfectly safe from planting, and describing them as root-only would be wrong.
+# The property is the absence of group and other write bits.
 LOCK_DIR_MODE="$(stat -c '%a' "$LOCK_DIR")"
 LOCK_DIR_GRP="${LOCK_DIR_MODE: -2:1}"
 LOCK_DIR_OTH="${LOCK_DIR_MODE: -1}"

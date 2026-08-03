@@ -436,6 +436,30 @@ for mode in 770 757 777 720 702; do
     rm -rf "$SANDBOX"
 done
 
+new_sandbox
+# -d follows symlinks, so a link satisfies "is a directory" while the lock ends
+# up somewhere else entirely -- possibly somewhere the attacker chose.
+mkdir -p "$SANDBOX/real"; chmod 0750 "$SANDBOX/real"
+ln -s "$SANDBOX/real" "$SANDBOX/linkdir"
+LOCK_DIR_OVERRIDE="$SANDBOX/linkdir" LOCK_OVERRIDE="$SANDBOX/linkdir/deploy.lock" run_guard
+refused_because "a symlinked lock directory" "is a symlink"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# A directory someone else owns. They can replace the lock whatever its mode.
+# Root can stage this directly; a non-root run borrows a system directory that
+# root owns, which is the same property seen from the other side.
+if [ "$(id -u)" = 0 ]; then
+    mkdir -p "$SANDBOX/lockdir"; chmod 0750 "$SANDBOX/lockdir"
+    chown 65534:65534 "$SANDBOX/lockdir" 2>/dev/null
+    OTHER_DIR="$SANDBOX/lockdir"
+else
+    OTHER_DIR="/usr"     # root-owned, 0755
+fi
+LOCK_DIR_OVERRIDE="$OTHER_DIR" LOCK_OVERRIDE="$SANDBOX/unused.lock" run_guard
+refused_because "a lock directory owned by someone else" "not by the deploying user"
+rm -rf "$SANDBOX"
+
 echo "== deployments are serialised, and manifests are never overwritten =="
 new_sandbox
 # Contention must refuse, not skip. A backup that skips has lost nothing; a

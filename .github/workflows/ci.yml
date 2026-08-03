@@ -369,8 +369,17 @@ jobs:
       # refusals: a wrong branch, an unmerged rollback target, a container the
       # compose file does not declare, a port reachable off-host, a certificate
       # store nothing renews. Each stands for something that actually happened.
+      # Twice, because the two environments differ in the way that matters.
+      # Production deploys as root; this runner is not root. An earlier version
+      # created the lock directory with `install -d -o root -g root`, which a
+      # non-root caller cannot do: all 77 tests passed in a root container and 47
+      # failed here. Testing one privilege level leaves the other unverified, and
+      # it was the untested one that shipped.
       - name: Behavioural tests for the deployment guard
         run: bash tests/test_deploy_production.sh
+
+      - name: Behavioural tests for the deployment guard (as root)
+        run: sudo -E bash tests/test_deploy_production.sh
 
       # Runs the suite against deliberately broken copies of the script and fails
       # if any of them survives. Without it, "23 tests pass" is a statement about
