@@ -476,15 +476,30 @@ new_sandbox
 # the one the guard derives; it is no longer overridable, because an override
 # let the file sit outside the directory all the checks validate.
 mkdir -p "$SANDBOX/lockdir"; chmod 0750 "$SANDBOX/lockdir"
-( exec 9>"$SANDBOX/lockdir/deploy.lock"; flock -n 9 && sleep 30 ) &
+# The holder announces success; the test waits for that announcement.
+#
+# Polling `flock -n` and treating any non-zero result as "held" was wrong twice:
+# flock returns non-zero for reasons other than contention, and after fifty
+# failed probes the loop fell through and ran the guard anyway. If the holder
+# never acquired the lock, the refusal under test would have been asserted
+# against no contention at all -- passing or failing for reasons unrelated to
+# the thing being checked.
+( exec 9>"$SANDBOX/lockdir/deploy.lock"
+  flock -n 9 || exit 1
+  touch "$SANDBOX/lock-held"
+  sleep 30 ) &
 HOLDER=$!
-# Wait until the lock is genuinely held rather than guessing at a sleep.
-for _ in $(seq 1 50); do
-    flock -n "$SANDBOX/lockdir/deploy.lock" true 2>/dev/null || break
+HELD=0
+for _ in $(seq 1 100); do
+    if [ -f "$SANDBOX/lock-held" ]; then HELD=1; break; fi
     sleep 0.1
 done
-run_guard
-refused_because "a second deployment while one holds the lock" "another deployment holds"
+if [ "$HELD" != 1 ]; then
+    bad "the lock holder never acquired the lock; contention was never tested"
+else
+    run_guard
+    refused_because "a second deployment while one holds the lock" "another deployment holds"
+fi
 kill "$HOLDER" 2>/dev/null
 wait "$HOLDER" 2>/dev/null
 rm -rf "$SANDBOX"
