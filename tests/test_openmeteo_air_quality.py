@@ -10,9 +10,8 @@ The assertion that matters most is the dull one: every signal says it is
 modelled. Where OpenAQ measured, this computes, and a number that cannot be told
 apart from an instrument reading is a worse outcome than no number.
 """
+import asyncio
 from datetime import datetime, timezone
-
-import pytest
 
 from app.ingesters.openmeteo_air_quality import (
     OpenMeteoAirQualityIngester,
@@ -66,11 +65,10 @@ def _full_current(t="2026-08-03T12:00"):
     return _Response({"current": dict({"time": t}, **{p: 10.0 for p in POLLUTANTS})})
 
 
-@pytest.mark.asyncio
-async def test_every_signal_declares_that_it_is_modelled():
+def test_every_signal_declares_that_it_is_modelled():
     """The honest cost of this source, asserted on every row rather than once."""
     ing, _ = _ingester([_full_current()])
-    signals = await ing.fetch()
+    signals = asyncio.run(ing.fetch())
 
     assert signals
     for s in signals:
@@ -78,8 +76,7 @@ async def test_every_signal_declares_that_it_is_modelled():
         assert "CAMS" in s.metadata["model"], s
 
 
-@pytest.mark.asyncio
-async def test_one_failing_region_does_not_lose_the_others():
+def test_one_failing_region_does_not_lose_the_others():
     """A region that errors costs its own records and nothing else.
 
     The alternative -- abandoning the run -- would turn a partial result into an
@@ -87,46 +84,42 @@ async def test_one_failing_region_does_not_lose_the_others():
     reason.
     """
     ing, _ = _ingester([RuntimeError("upstream 503"), _full_current(), _full_current()])
-    signals = await ing.fetch()
+    signals = asyncio.run(ing.fetch())
 
     assert len(signals) == 2 * len(POLLUTANTS)
     assert len({s.region_code for s in signals}) == 2
 
 
-@pytest.mark.asyncio
-async def test_an_empty_current_block_yields_nothing_rather_than_zeroes():
+def test_an_empty_current_block_yields_nothing_rather_than_zeroes():
     """Absent is not zero.
 
     Storing 0 µg/m³ for a region the source said nothing about would be a
     fabricated measurement, and one that looks entirely plausible.
     """
     ing, _ = _ingester([_Response({"current": {}}), _Response({})])
-    assert await ing.fetch() == []
+    assert asyncio.run(ing.fetch()) == []
 
 
-@pytest.mark.asyncio
-async def test_a_pollutant_the_source_omitted_is_skipped_not_defaulted():
+def test_a_pollutant_the_source_omitted_is_skipped_not_defaulted():
     payload = {"current": {"time": "2026-08-03T12:00", "pm10": 24.3}}
     ing, _ = _ingester([_Response(payload)])
-    signals = await ing.fetch()
+    signals = asyncio.run(ing.fetch())
 
     assert [s.metric for s in signals] == ["pm10"]
     assert signals[0].value == 24.3
 
 
-@pytest.mark.asyncio
-async def test_the_observation_time_comes_from_the_source():
+def test_the_observation_time_comes_from_the_source():
     ing, _ = _ingester([_full_current("2026-08-03T09:00")])
-    signals = await ing.fetch()
+    signals = asyncio.run(ing.fetch())
 
     assert all(s.observed_at == datetime(2026, 8, 3, 9, 0, tzinfo=timezone.utc) for s in signals)
 
 
-@pytest.mark.asyncio
-async def test_all_six_pollutants_are_requested():
+def test_all_six_pollutants_are_requested():
     """A silently shortened request would look like a source with less to give."""
     ing, client = _ingester([_full_current()])
-    await ing.fetch()
+    asyncio.run(ing.fetch())
 
     requested = client.calls[0][1]["current"].split(",")
     assert sorted(requested) == sorted(POLLUTANTS)
