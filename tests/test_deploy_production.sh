@@ -103,9 +103,24 @@ case "$argv" in
     *) exit 0 ;;
 esac
 STUB
+    # One status per line, consumed in order; the last line repeats once the list
+    # runs out. That is what tells a transient failure from a permanent one --
+    # with a single fixed status the retry loop cannot be observed at all, and a
+    # broken retry would pass.
     cat > "$STUB_DIR/bin/curl" <<'STUB'
 #!/usr/bin/env bash
-cat "$STUB_DIR/http_code"
+seq_file="$STUB_DIR/http_code"
+n_file="$STUB_DIR/http_calls"
+n=$(( $(cat "$n_file" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$n_file"
+total=$(wc -l < "$seq_file")
+line=$(( n <= total ? n : total ))
+code="$(sed -n "${line}p" "$seq_file")"
+# curl prints 000 and exits non-zero when it cannot connect, which is exactly
+# the case the caller has to handle without appending a second 000.
+printf '%s' "$code"
+[ "$code" = "000" ] && exit 7
+exit 0
 STUB
     cat > "$STUB_DIR/bin/systemctl" <<'STUB'
 #!/usr/bin/env bash
@@ -129,7 +144,9 @@ run_guard() {
       COMPOSE_FILE="$REPO/compose.yml" \
       COMPOSE_PROJECT_NAME="p" \
       SITE_URL="http://stand.invalid" \
-      MANIFEST_DIR="$SANDBOX/manifests" \
+      MANIFEST_DIR="${MANIFEST_OVERRIDE:-$SANDBOX/manifests}" \
+      HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-3}" \
+      HEALTH_DELAY=0 \
         bash "$SCRIPT" "$@" ) > "$SANDBOX/out" 2>&1
     RC=$?
 }
@@ -274,11 +291,39 @@ run_guard
 refused_because "a certificate store that is not renewed" "not /etc/letsencrypt"
 rm -rf "$SANDBOX"
 
-echo "== it refuses a site that does not answer =="
+echo "== health checks are retried, but not forever =="
+new_sandbox
+# Transient: nginx has just been recreated and the backend may still be taking
+# its first connections, so one failure means nothing.
+printf '000\n200\n' > "$STUB_DIR/http_code"
+run_guard
+check "a first failure is retried, not fatal"  "$RC" "0"
+check "and the retry is reported"              "$(grep -c 'retrying' "$SANDBOX/out")" "1"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# Permanent: every attempt fails and the deployment must end in an error rather
+# than hang.
+printf '000\n' > "$STUB_DIR/http_code"
+run_guard
+refused_because "a persistent failure" "after 3 attempts"
+check "the status is not doubled" \
+    "$(grep -c 'returned 000000' "$SANDBOX/out")" "0"
+check "it reports the real status" \
+    "$(grep -c 'returned 000 after' "$SANDBOX/out")" "1"
+rm -rf "$SANDBOX"
+
 new_sandbox
 echo 502 > "$STUB_DIR/http_code"
 run_guard
 refused_because "a non-200 from the site" "returned 502"
+# The manifest is the next run's idea of what is deployed. Publishing one for a
+# deployment whose smoke checks failed would name a state that was never
+# reached, and the following rollback would aim at it.
+check "no manifest is published when smoke fails" \
+    "$(find "$SANDBOX/manifests" -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')" "0"
+check "and no partial file is left behind" \
+    "$(find "$SANDBOX/manifests" -name '*.tmp' 2>/dev/null | wc -l | tr -d ' ')" "0"
 rm -rf "$SANDBOX"
 
 echo "== a good deployment is recorded =="
@@ -297,6 +342,71 @@ check "including the previous commit" "$(grep -c '^previous_commit ' "$MAN")" "1
 check "and the previous images"     "$(grep -c '^previous_images:' "$MAN")" "1"
 check "it warns about certificate renewal" \
     "$(grep -qi 'no certbot timer' "$SANDBOX/out" && echo yes || echo no)" "yes"
+# The guard refuses a dirty tree, so a guard that dirties the tree refuses its
+# own next run. The default manifest directory was inside the checkout and every
+# test overrode it, which is precisely why nobody noticed.
+check "the checkout is left clean" \
+    "$(git -C "$REPO" status --porcelain | wc -l | tr -d ' ')" "0"
+rm -rf "$SANDBOX"
+
+echo "== and the checkout would not stay clean if manifests lived in it =="
+# The control for the line above: with the manifest directory inside the
+# checkout, the tree is dirty afterwards and the next deployment is refused.
+# Without this the "left clean" assertion could pass for any reason at all.
+new_sandbox
+MANIFEST_OVERRIDE="$REPO/docs/evidence" run_guard
+check "a manifest written into the checkout dirties it" \
+    "$([ "$(git -C "$REPO" status --porcelain | wc -l)" -gt 0 ] && echo dirty || echo clean)" "dirty"
+run_guard
+refused_because "and the next run is then refused" "working tree is not clean"
+rm -rf "$SANDBOX"
+
+echo "== the manifest names what it replaced, not what it deployed =="
+new_sandbox
+run_guard
+check "first deploy succeeds" "$RC" "0"
+MAN1="$(find "$SANDBOX/manifests" -name '*.txt' | head -1)"
+check "with no previous deployment recorded" \
+    "$(grep -c '^previous_commit none-recorded' "$MAN1")" "1"
+
+# A third commit, so the second deployment has a different target from the
+# first. Deploying the same commit twice would make previous_commit and commit
+# equal for an honest reason, and the assertion below could not tell a correct
+# implementation from the bug it exists to catch -- both produce SECOND.
+echo third > "$REPO/third.txt"
+git -C "$REPO" add -A >/dev/null
+git -C "$REPO" commit -qm third
+git -C "$REPO" push -q origin main 2>/dev/null
+THIRD="$(git -C "$REPO" rev-parse HEAD)"
+
+sleep 1
+run_guard
+check "second deploy succeeds" "$RC" "0"
+MAN2="$(find "$SANDBOX/manifests" -name '*.txt' | sort | tail -1)"
+check "two manifests exist" \
+    "$(find "$SANDBOX/manifests" -name '*.txt' | wc -l | tr -d ' ')" "2"
+check "the second deployed the new commit" \
+    "$(awk '/^commit /{print $2}' "$MAN2")" "$THIRD"
+# The field a rollback depends on. It used to be `git rev-parse HEAD`, which on
+# a deploy is already the target -- so it recorded the commit being deployed as
+# the one being replaced, confidently and always wrongly. With two different
+# commits the two answers finally differ.
+check "and names the first deploy's commit as replaced" \
+    "$(awk '/^previous_commit /{print $2}' "$MAN2")" "$SECOND"
+rm -rf "$SANDBOX"
+
+echo "== rollback reads the previous manifest, not the checkout =="
+new_sandbox
+run_guard                       # records SECOND as deployed
+sleep 1
+run_guard --rollback "$FIRST"   # rolls back to FIRST
+check "the rollback succeeds"   "$RC" "0"
+MANR="$(find "$SANDBOX/manifests" -name '*.txt' | sort | tail -1)"
+check "it records the rollback target"  "$(awk '/^commit /{print $2}' "$MANR")" "$FIRST"
+check "it records the mode"             "$(grep -c '^mode           rollback' "$MANR")" "1"
+# Taken from the previous manifest. Read from the checkout it would have been
+# FIRST, because the rollback checkout has already happened by that point.
+check "and names the commit it replaced" "$(awk '/^previous_commit /{print $2}' "$MANR")" "$SECOND"
 rm -rf "$SANDBOX"
 
 echo

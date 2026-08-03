@@ -26,7 +26,17 @@ COMPOSE="${COMPOSE_FILE:-$REPO/docker-compose.prod.yml}"
 # file. It must keep matching the existing containers.
 PROJECT="${COMPOSE_PROJECT_NAME:-sora_earth_ai_platform}"
 SITE="${SITE_URL:-https://sora-earth.online}"
-MANIFEST_DIR="${MANIFEST_DIR:-$REPO/docs/maximum/evidence/deployments}"
+# Outside the checkout, deliberately. The default was inside it, which made the
+# guard refuse its own second run: it writes a manifest, the manifest dirties the
+# tree, and the next deployment is declined for an unclean tree. The behavioural
+# tests missed it because every one of them pointed MANIFEST_DIR at a sandbox --
+# the setup supplied the condition under test and made it unobservable.
+#
+# .gitignore would have hidden it rather than fixed it. Deployment evidence is
+# operational state, not source, and does not belong in a working copy at all.
+MANIFEST_DIR="${MANIFEST_DIR:-/var/lib/sora/deployments}"
+HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-5}"
+HEALTH_DELAY="${HEALTH_DELAY:-3}"
 DC=(docker compose -p "$PROJECT" -f "$COMPOSE")
 
 cd "$REPO"
@@ -93,21 +103,45 @@ fi
 # manifest of the run that breaks production is the only record of what it
 # replaced.
 step "recording the state being replaced"
-PREV_FILE="$(mktemp)"
-{
-    echo "previous_commit $(git rev-parse HEAD)"
-    echo "previous_images:"
-    docker ps -a --filter "label=com.docker.compose.project=$PROJECT" \
-        --format '{{.Label "com.docker.compose.service"}} {{.Image}} {{.ID}}' \
-        | sort | sed 's/^/  /' || true
-} > "$PREV_FILE"
-sed 's/^/  /' "$PREV_FILE"
+
+# From the last published manifest, not from git HEAD.
+#
+# `git rev-parse HEAD` was wrong in both modes: on a deploy HEAD is already the
+# target, and on a rollback the checkout has happened by this point. It recorded
+# the commit being deployed as the commit being replaced, so the one field a
+# rollback needs always pointed at the wrong place -- and pointed there
+# confidently.
+#
+# The last manifest is the only record of what is actually running, which is why
+# a new one is published solely after the smoke checks pass: an aborted run must
+# not overwrite the state it failed to replace.
+# Created here rather than at publication time: under `set -o pipefail` a find
+# over a directory that does not exist fails the whole pipeline, which under
+# `set -e` ended the run before it began -- on the very first deployment, the one
+# case where there is nothing to read.
+mkdir -p "$MANIFEST_DIR"
+PREV_MANIFEST="$(find "$MANIFEST_DIR" -maxdepth 1 -name '*.txt' 2>/dev/null | sort | tail -1 || true)"
+if [ -n "$PREV_MANIFEST" ]; then
+    PREV_COMMIT="$(awk '/^commit /{print $2}' "$PREV_MANIFEST")"
+    echo "  previously deployed: ${PREV_COMMIT:-unrecorded} (from $(basename "$PREV_MANIFEST"))"
+else
+    PREV_COMMIT=""
+    echo "  no previous manifest in $MANIFEST_DIR; this is the first recorded deployment"
+fi
+
+PREV_IMAGES="$(docker ps -a --filter "label=com.docker.compose.project=$PROJECT" \
+    --format '{{.Label "com.docker.compose.service"}} {{.Image}} {{.ID}}' | sort || true)"
 
 # Declared services come from `docker compose config`, not from parsing the YAML
 # here: it resolves interpolation, overrides and extends, so what is checked is
 # what compose will act on rather than what the file appears to say.
-DECLARED="$("${DC[@]}" config --services | sort | tr '\n' ' ')"
-echo "  declared services: $DECLARED"
+#
+# Held in an array. As a space-joined string every use needed unquoted expansion,
+# and a service name with a space in it would have split into two names that are
+# each "not running" -- a refusal with a nonsense reason.
+mapfile -t DECLARED < <("${DC[@]}" config --services | sort)
+[ "${#DECLARED[@]}" -gt 0 ] || fail "$COMPOSE declares no services"
+echo "  declared services: ${DECLARED[*]}"
 
 # ------------------------------------------------------------------- deployment
 
@@ -125,7 +159,7 @@ step "deploying"
 step "verifying what is actually running"
 
 RUNNING="$("${DC[@]}" ps --format '{{.Service}}' | sort | tr '\n' ' ')"
-for svc in $DECLARED; do
+for svc in "${DECLARED[@]}"; do
     case " $RUNNING " in
         *" $svc "*) ;;
         *) fail "declared service '$svc' is not running (running: $RUNNING)" ;;
@@ -139,7 +173,7 @@ done
 EXTRA=""
 while IFS= read -r svc; do
     [ -n "$svc" ] || continue
-    case " $DECLARED " in
+    case " ${DECLARED[*]} " in
         *" $svc "*) ;;
         *) EXTRA="$EXTRA $svc" ;;
     esac
@@ -224,18 +258,55 @@ else
 fi
 
 step "the site answers"
+
+# `code="$(curl ... || echo 000)"` looked defensive and was not: on a connection
+# failure curl prints its own "000" and exits non-zero, so the fallback appended
+# a second one and the variable became "000000" -- never equal to 200, so the
+# refusal still happened, but the message reported a status that does not exist.
+# Captured explicitly instead.
+http_code() {
+    local code
+    if ! code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$1" 2>/dev/null)"; then
+        code=000
+    fi
+    printf '%s' "$code"
+}
+
+# Bounded retries. nginx has just been recreated and the backend may still be
+# accepting its first connections, so one immediate failure means little; five
+# in a row means the deployment is broken. Without a limit this would hang
+# instead of failing, which is worse than either.
 for path in /health /api/v1/health /; do
-    code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$SITE$path" || echo 000)"
-    [ "$code" = "200" ] || fail "$SITE$path returned $code"
+    code=000
+    attempt=1
+    while [ "$attempt" -le "$HEALTH_ATTEMPTS" ]; do
+        code="$(http_code "$SITE$path")"
+        if [ "$code" = "200" ]; then break; fi
+        if [ "$attempt" -lt "$HEALTH_ATTEMPTS" ]; then
+            echo "  $path returned $code, retrying ($attempt/$HEALTH_ATTEMPTS)"
+            sleep "$HEALTH_DELAY"
+        fi
+        attempt=$((attempt + 1))
+    done
+    [ "$code" = "200" ] || fail "$SITE$path returned $code after $HEALTH_ATTEMPTS attempts"
     printf '  %-18s %s\n' "$path" "$code"
 done
 
 # ------------------------------------------------------------------- the record
 
 step "recording what was deployed"
+
+# Published only here, and atomically.
+#
+# Everything above can refuse, and every refusal exits before this line, so a run
+# that failed leaves the previous manifest as the newest -- which is correct,
+# because the previous deployment is still what is serving. A manifest written
+# earlier, or written in pieces, would name a state that was never reached and
+# would then be read as the rollback target by the next run.
 mkdir -p "$MANIFEST_DIR"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 MANIFEST="$MANIFEST_DIR/$STAMP.txt"
+TMP_MANIFEST="$MANIFEST.tmp"
 {
     echo "deployed_at    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "mode           $MODE"
@@ -247,7 +318,7 @@ MANIFEST="$MANIFEST_DIR/$STAMP.txt"
     echo "nginx_upstream $UPSTREAM"
     echo
     echo "images now:"
-    for svc in $DECLARED; do
+    for svc in "${DECLARED[@]}"; do
         cid="$("${DC[@]}" ps -q "$svc" 2>/dev/null | head -1)"
         [ -n "$cid" ] || continue
         printf '  %-12s %s\n' "$svc" "$(docker inspect -f '{{.Image}}' "$cid")"
@@ -258,11 +329,17 @@ MANIFEST="$MANIFEST_DIR/$STAMP.txt"
         --format '  {{.Names}} {{.Ports}}' | grep -- '->' || echo "  (none)"
     echo
     echo "--- state replaced by this run ---"
-    cat "$PREV_FILE"
-} > "$MANIFEST"
-rm -f "$PREV_FILE"
+    echo "previous_commit ${PREV_COMMIT:-none-recorded}"
+    echo "previous_images:"
+    printf '%s\n' "$PREV_IMAGES" | sed 's/^/  /'
+} > "$TMP_MANIFEST"
+mv "$TMP_MANIFEST" "$MANIFEST"
 
 cat "$MANIFEST"
 echo
 echo "manifest: $MANIFEST"
-echo "to undo:  $0 --rollback <previous_commit from the section above>"
+if [ -n "$PREV_COMMIT" ]; then
+    echo "to undo:  $0 --rollback $PREV_COMMIT"
+else
+    echo "to undo:  no previous deployment is recorded; nothing to roll back to"
+fi
