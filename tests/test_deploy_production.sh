@@ -157,7 +157,7 @@ run_guard() {
       COMPOSE_PROJECT_NAME="p" \
       SITE_URL="http://stand.invalid" \
       MANIFEST_DIR="${MANIFEST_OVERRIDE:-$SANDBOX/manifests}" \
-      DEPLOY_LOCK="$SANDBOX/deploy.lock" \
+      DEPLOY_LOCK_DIR="${LOCK_DIR_OVERRIDE:-$SANDBOX/lockdir}" \
       HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-3}" \
       HEALTH_DELAY=0 \
         bash "$SCRIPT" "$@" ) > "$SANDBOX/out" 2>&1
@@ -410,17 +410,98 @@ check "and names the first deploy's commit as replaced" \
     "$(awk '/^previous_commit /{print $2}' "$MAN2")" "$SECOND"
 rm -rf "$SANDBOX"
 
+echo "== the lock must not sit anywhere others can write =="
+# /var/lock is /run/lock, mode 1777. I checked the sticky bit, found it set, and
+# reported that as sufficient. It is not: the sticky bit stops another user
+# deleting root's lock file, not creating it first under its predictable name,
+# and not planting a symlink there for `exec 9>` to follow and truncate as root.
+#
+# Enumerated over the mode space rather than sampled, since the check is
+# arithmetic on two digits and it is easy to get the boundary wrong -- the first
+# version of it did.
+for mode in 700 750 755 711; do
+    new_sandbox
+    mkdir -p "$SANDBOX/lockdir"; chmod "$mode" "$SANDBOX/lockdir"
+    LOCK_DIR_OVERRIDE="$SANDBOX/lockdir" run_guard
+    check "mode $mode is accepted" \
+        "$([ "$RC" = 0 ] && echo ok || echo "refused: $(grep -m1 REFUSED "$SANDBOX/out")")" "ok"
+    rm -rf "$SANDBOX"
+done
+for mode in 770 757 777 720 702; do
+    new_sandbox
+    mkdir -p "$SANDBOX/lockdir"; chmod "$mode" "$SANDBOX/lockdir"
+    LOCK_DIR_OVERRIDE="$SANDBOX/lockdir" run_guard
+    refused_because "mode $mode is refused" "writable by group or others"
+    rm -rf "$SANDBOX"
+done
+
+new_sandbox
+# -d follows symlinks, so a link satisfies "is a directory" while the lock ends
+# up somewhere else entirely -- possibly somewhere the attacker chose.
+mkdir -p "$SANDBOX/real"; chmod 0750 "$SANDBOX/real"
+ln -s "$SANDBOX/real" "$SANDBOX/linkdir"
+LOCK_DIR_OVERRIDE="$SANDBOX/linkdir" run_guard
+refused_because "a symlinked lock directory" "is a symlink"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# A directory someone else owns. They can replace the lock whatever its mode.
+# Root can stage this directly; a non-root run borrows a system directory that
+# root owns, which is the same property seen from the other side.
+if [ "$(id -u)" = 0 ]; then
+    mkdir -p "$SANDBOX/lockdir"; chmod 0750 "$SANDBOX/lockdir"
+    chown 65534:65534 "$SANDBOX/lockdir" 2>/dev/null
+    OTHER_DIR="$SANDBOX/lockdir"
+else
+    OTHER_DIR="/usr"     # root-owned, 0755
+fi
+LOCK_DIR_OVERRIDE="$OTHER_DIR" run_guard
+refused_because "a lock directory owned by someone else" "not by the deploying user"
+rm -rf "$SANDBOX"
+
 echo "== deployments are serialised, and manifests are never overwritten =="
 new_sandbox
 # Contention must refuse, not skip. A backup that skips has lost nothing; a
 # deployment that skips has silently not happened while its operator believes
 # it did.
-(
-    exec 9>"$SANDBOX/deploy.lock"
-    flock -n 9
+# The holder runs in the background; the assertion stays in this shell.
+#
+# It used to be the other way round -- guard and assertion both inside a
+# subshell -- and the PASS/FAIL counters incremented there never reached the
+# summary. A genuine failure printed FAIL and the run still ended "failed: 0".
+# A test that can fail without changing the result is worse than no test.
+#
+# 0750 explicitly: mkdir uses the caller's umask, which is 002 for the CI
+# runner, and the guard rightly refuses the 775 that produces. The lock path is
+# the one the guard derives; it is no longer overridable, because an override
+# let the file sit outside the directory all the checks validate.
+mkdir -p "$SANDBOX/lockdir"; chmod 0750 "$SANDBOX/lockdir"
+# The holder announces success; the test waits for that announcement.
+#
+# Polling `flock -n` and treating any non-zero result as "held" was wrong twice:
+# flock returns non-zero for reasons other than contention, and after fifty
+# failed probes the loop fell through and ran the guard anyway. If the holder
+# never acquired the lock, the refusal under test would have been asserted
+# against no contention at all -- passing or failing for reasons unrelated to
+# the thing being checked.
+( exec 9>"$SANDBOX/lockdir/deploy.lock"
+  flock -n 9 || exit 1
+  touch "$SANDBOX/lock-held"
+  sleep 30 ) &
+HOLDER=$!
+HELD=0
+for _ in $(seq 1 100); do
+    if [ -f "$SANDBOX/lock-held" ]; then HELD=1; break; fi
+    sleep 0.1
+done
+if [ "$HELD" != 1 ]; then
+    bad "the lock holder never acquired the lock; contention was never tested"
+else
     run_guard
     refused_because "a second deployment while one holds the lock" "another deployment holds"
-)
+fi
+kill "$HOLDER" 2>/dev/null
+wait "$HOLDER" 2>/dev/null
 rm -rf "$SANDBOX"
 
 new_sandbox
