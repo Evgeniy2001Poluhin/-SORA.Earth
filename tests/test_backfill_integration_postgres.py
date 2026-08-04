@@ -195,9 +195,11 @@ def test_the_request_narrows_the_series_in_no_way(scratch_db, stub):
     been recorded as `no_match_current_vintage`: an assertion that the source
     revised the figure away, when nobody had looked.
 
-    Measured before removing it (2026-08-04, country=all, no filter, 17,490
-    records per indicator): nothing outside the bound for any of the four
-    indicators in the table. The bound cost nothing and is gone anyway -- that
+    Measured before removing it (2026-08-04, country=all, no filter): nothing
+    outside the bound for any of the four indicators in the table. Counted over
+    rows that carry a figure -- 17,126 / 14,745 / 8,203 / 2,430 — not over the
+    17,490 rows the API returns for each, which is the country x year grid and
+    identical for all four. The bound cost nothing and is gone anyway: that
     measurement would have to be repeated for every indicator added later, by
     someone who knew to.
     """

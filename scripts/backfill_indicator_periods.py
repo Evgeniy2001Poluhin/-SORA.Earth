@@ -95,12 +95,23 @@ API = API_ROOT + "/country/{iso}/indicator/{ind}"
 # have been recorded as `no_match_current_vintage`, which asserts the source
 # revised the figure away, when the truth is that nobody looked there.
 #
-# Measured 2026-08-04 over the whole dataset for the four indicators this touches
-# (country=all, no date filter, 17,490 records each): SP.DYN.LE00.IN 1960-2024,
-# NY.GDP.PCAP.CD 1960-2025, EG.FEC.RNEW.ZS 1990-2022, SI.POV.GINI 1963-2025.
-# Nothing fell outside. So the bound cost nothing -- and it is gone anyway,
-# because that measurement describes today's four indicators and would have to be
-# repeated, silently and by someone who knew to, for every one added later.
+# Measured 2026-08-04 over the whole dataset for the four indicators this
+# touches, country=all with no date filter. The API returns a row per
+# country-year whether or not it holds a figure, so the count that matters is
+# the second one:
+#
+#   indicator          rows returned   rows with a value   years with a value
+#   SP.DYN.LE00.IN            17,490              17,126   1960-2024
+#   NY.GDP.PCAP.CD            17,490              14,745   1960-2025
+#   EG.FEC.RNEW.ZS            17,490               8,203   1990-2022
+#   SI.POV.GINI               17,490               2,430   1963-2025
+#
+# 17,490 is identical across all four because it is the country x year grid, not
+# an observation count -- quoting it alone would describe the shape of the
+# response rather than the data. Nothing fell outside 1960-2030, so the bound
+# cost nothing. It is gone anyway: that measurement describes today's four
+# indicators and would have to be repeated, silently and by someone who knew to,
+# for every one added later.
 PER_PAGE = 500
 
 DELAY_SECONDS = 1.5
