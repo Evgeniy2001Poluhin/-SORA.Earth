@@ -89,6 +89,13 @@ from app.api.embed.api import (
     ("https://a.example https://b.example", "https://a.example https://b.example"),
     ("https://*.example.com", "https://*.example.com"),
     ("example.com:8443", "example.com:8443"),
+    # Forms the first validator rejected, which mattered once a rejection became
+    # a refusal to boot: a too-narrow check would have stopped the process on a
+    # correct configuration.
+    ("https:", "https:"),                        # scheme-source: any https origin
+    ("wss:", "wss:"),
+    ("https://partner.example:*", "https://partner.example:*"),   # any port
+    ("https://*.a.example:* https://b.example", "https://*.a.example:* https://b.example"),
 ])
 def test_usable_values_are_passed_through(monkeypatch, value, expected):
     """Unset is not the same as wrong: absent means no restriction was asked
@@ -108,6 +115,8 @@ def test_usable_values_are_passed_through(monkeypatch, value, expected):
     "* https://a.example",                   # * with anything else is meaningless
     "'none' https://a.example",              # 'none' with anything else likewise
     "<script>",
+    "https://a.example/path",     # frame-ancestors matches an origin, not a path
+    "https://a.example:99999x",   # not a port
 ])
 def test_an_unusable_value_is_refused_not_widened(monkeypatch, value):
     """Refused, not fallen back to "*".

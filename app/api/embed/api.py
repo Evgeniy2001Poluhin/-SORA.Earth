@@ -50,16 +50,33 @@ _HTML = (pathlib.Path(__file__).parent / "widget.html").read_text(encoding="utf-
 #
 # Unset is different from wrong: absent means "no restriction requested", which
 # is the documented default for a widget whose purpose is to be embedded.
+# The grammar CSP actually defines for an ancestor-source, not a guess at it.
+#
+# A too-narrow validator is expensive now that a bad value is refused rather
+# than warned about: `https:` and `https://partner.example:*` are both valid
+# frame-ancestors sources, and rejecting them would stop the process booting on
+# a correct configuration. Fail-closed raises the cost of being wrong in this
+# direction, which is the argument for reading the grammar instead of inventing
+# one.
+#
+#   ancestor-source = scheme-source / host-source / "'self'" / "'none'" / "*"
+#   scheme-source   = scheme ":"
+#   host-source     = [ scheme "://" ] host [ ":" port ]
+#   host            = "*" / [ "*." ] 1*host-char *( "." 1*host-char )
+#   port            = 1*DIGIT / "*"
+#
+# No path-part: frame-ancestors is matched against an origin, and a path there
+# is meaningless rather than merely ignored.
+_SCHEME = r"[A-Za-z][A-Za-z0-9+.-]*"
+_HOST = r"(?:\*|(?:\*\.)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)"
+_PORT = r"(?::(?:\d{1,5}|\*))?"
 _ANCESTOR = re.compile(
-    r"""^(?:
-          \*                                   # any origin
-        | 'self' | 'none'                      # the two keywords CSP defines here
-        | (?:https?://)?                       # optional scheme
-          (?:\*\.)?                            # optional leading wildcard label
-          [A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*     # host
-          (?::\d{1,5})?                        # optional port
-    )$""",
-    re.VERBOSE,
+    r"^(?:"
+    r"\*"                                          # any origin
+    r"|'self'|'none'"                               # the keywords CSP defines here
+    rf"|{_SCHEME}:"                                 # scheme-source, e.g. https:
+    rf"|(?:{_SCHEME}://)?{_HOST}{_PORT}"            # host-source, optional scheme and port
+    r")$"
 )
 
 
