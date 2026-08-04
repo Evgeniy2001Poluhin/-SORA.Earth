@@ -833,6 +833,17 @@ async def startup_event():
     # application -- for alembic, a CLI, or test collection -- does not require a
     # reachable database.
     assert_schema_ready()
+
+    # A misconfigured frame policy stops the boot rather than the page.
+    #
+    # Discovering it on the first embed request would leave the deployment
+    # looking healthy -- every other route working, health green -- while the
+    # one control that module exists to provide was unusable. Unset is fine and
+    # means the documented open default; set-and-malformed is refused, because
+    # nobody sets it except to restrict.
+    from app.api.embed.api import validate_frame_ancestors_config
+    validate_frame_ancestors_config()
+
     async def _bg_refresh():
         try:
             from app.external_data import refresh_all_countries
