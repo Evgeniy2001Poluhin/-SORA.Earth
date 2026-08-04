@@ -239,6 +239,96 @@ mapfile -t DECLARED < <("${DC[@]}" config --services | sort)
 [ "${#DECLARED[@]}" -gt 0 ] || fail "$COMPOSE declares no services"
 echo "  declared services: ${DECLARED[*]}"
 
+# --------------------------------------------------------------------- preflight
+
+# What this configuration *would* publish, checked before anything starts.
+#
+# The runtime check further down stays: it reads what is actually reachable and
+# catches a container started from a file this deployment never read. But it
+# runs after `up`, and `fail` only exits -- so an offending port is named
+# accurately and left open. Detection is not prevention, and the two are
+# different jobs.
+#
+# Rendered, never grepped. `config` resolves interpolation, overrides and
+# multiple -f; the YAML text does not say what compose will act on.
+step "what this configuration would publish"
+
+command -v python3 >/dev/null 2>&1 \
+    || fail "python3 is required to read the rendered compose configuration"
+
+# The rendered document carries interpolated environment values, so it is never
+# printed, logged or written to a manifest. Only the port tuple leaves this
+# pipeline.
+RENDERED_PORTS="$("${DC[@]}" config --format json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    sys.exit(3)
+for name, svc in sorted((doc.get("services") or {}).items()):
+    for spec in svc.get("ports") or []:
+        # \x1f (unit separator), not a tab. A tab is IFS whitespace, so bash
+        # collapses a run of them: an absent host_ip vanished and every
+        # later field shifted left, which turned "nginx, all interfaces,
+        # port 80" into "host address 80" and refused it.
+        print("%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s" % (
+            name,
+            # Absent and empty both mean every interface. Written as both,
+            # because nginx renders with no host_ip key at all.
+            spec.get("host_ip", "") or "",
+            # A string, and it can be a range: "8000-8010". Never parsed as a
+            # number -- an int() either throws or truncates, and a truncated
+            # "80-81" reads as the allowed 80.
+            spec.get("published", ""),
+            spec.get("target", ""),
+            spec.get("protocol", "tcp"),
+            spec.get("mode", ""),
+        ))
+')" || fail "the compose configuration could not be rendered"
+
+# `mode` is recorded but not treated as evidence about exposure. It describes
+# Swarm publication, and in a standalone deployment it does not change what is
+# reachable -- measured: mode: host published 0.0.0.0 and [::] exactly as
+# ingress would. It is refused when unexpected, as an unsupported configuration.
+BAD_DECL=""
+NGINX_80=0
+NGINX_443=0
+while IFS=$'\x1f' read -r svc ip pub tgt proto mode; do
+    [ -n "$svc" ] || continue
+    case "$ip" in
+        127.0.0.1|::1) continue ;;          # loopback, both families
+        ""|0.0.0.0|::) ;;                   # every interface
+        *) BAD_DECL="$BAD_DECL
+  $svc would publish on host address $ip"; continue ;;
+    esac
+
+    # Off-host from here. The whole tuple must match, exactly, as strings.
+    if [ "$proto" != "tcp" ] || { [ -n "$mode" ] && [ "$mode" != "ingress" ] && [ "$mode" != "host" ]; }; then
+        BAD_DECL="$BAD_DECL
+  $svc would publish $pub off-host with protocol '$proto' mode '$mode'"
+        continue
+    fi
+    case "$pub:$tgt" in
+        80:80)   [ "$svc" = nginx ] && NGINX_80=1 ;;
+        443:443) [ "$svc" = nginx ] && NGINX_443=1 ;;
+        *) BAD_DECL="$BAD_DECL
+  $svc would publish $pub->$tgt off-host" ; continue ;;
+    esac
+done <<< "$RENDERED_PORTS"
+
+if [ -n "$BAD_DECL" ]; then
+    echo "$BAD_DECL" >&2
+    fail "this configuration would publish a port other than 80/443 off-host"
+fi
+
+# The converse, and it is a separate property. "Nothing forbidden is published"
+# is satisfied by publishing nothing at all -- an empty list passes a universal
+# check. Losing 80 costs every caller who arrives over http://, and no refusal
+# anywhere fires for it: the smoke test only exercises https://.
+[ "$NGINX_80" = 1 ]  || fail "this configuration publishes no off-host 80/tcp for nginx"
+[ "$NGINX_443" = 1 ] || fail "this configuration publishes no off-host 443/tcp for nginx"
+echo "  only nginx 80/tcp and 443/tcp would be published off-host"
+
 # ------------------------------------------------------------------- deployment
 
 step "deploying"
@@ -305,7 +395,35 @@ if [ -n "$BAD" ]; then
     echo "$BAD" >&2
     fail "a port other than 80/443 is reachable off-host; only nginx should be"
 fi
-echo "  no port other than 80/443 is reachable off-host"
+
+# And that the ports which must be reachable are. The loop above is a safety
+# property -- "nothing forbidden" -- and an empty binding list satisfies it
+# completely. Every off-host row is evaluated, and the result is then checked
+# for what has to be present.
+#
+# One declaration can surface as more than one binding: on the host measured on
+# 2026-08-05 a single entry with no host_ip produced 0.0.0.0 and [::]. How many
+# appear depends on the daemon and the network configuration, so this asks
+# whether the endpoint is published at all, not how many rows carry it.
+SEEN_80=0
+SEEN_443=0
+while IFS='|' read -r name ports; do
+    case "$name" in *nginx*) ;; *) continue ;; esac
+    [ -n "$ports" ] || continue
+    while IFS= read -r p; do
+        case "$p" in *"->"*) ;; *) continue ;; esac
+        hostpart="${p%%->*}"
+        ip="${hostpart%:*}"
+        hostport="${hostpart##*:}"
+        case "$ip" in 127.0.0.1|::1|"[::1]") continue ;; esac
+        case "$p" in *"/tcp") ;; *) continue ;; esac
+        case "$hostport" in 80) SEEN_80=1 ;; 443) SEEN_443=1 ;; esac
+    done <<< "${ports//, /$'\n'}"
+done < <(docker ps --filter "label=com.docker.compose.project=$PROJECT" \
+             --format '{{.Names}}|{{.Ports}}')
+[ "$SEEN_80" = 1 ]  || fail "nginx publishes no off-host 80/tcp; http:// callers have nowhere to land"
+[ "$SEEN_443" = 1 ] || fail "nginx publishes no off-host 443/tcp"
+echo "  nginx publishes 80/tcp and 443/tcp, and nothing else is reachable off-host"
 
 # The configuration nginx holds must be the repository's. The mount cannot be
 # trusted to have followed the file -- that is why nginx is force-recreated
