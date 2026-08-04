@@ -277,13 +277,19 @@ def test_the_advertised_wait_reaches_the_client_over_http(monkeypatch):
     window this change exists to replace. A fix visible only to its own tests is
     not a fix.
 
-    The window here is long and the budget small, so a wait equal to the window
-    and a wait derived from the oldest hit are far apart and cannot be confused.
+    The first version of this test asserted `1 <= wait <= 600`, which the old
+    fixed value of 600 satisfies -- a regression test that could not tell the
+    regression from the fix, written to prevent exactly that. The hits are aged
+    instead, so the correct answer and the constant are far apart and only one
+    of them can pass.
     """
+    import time
+
     from app.rate_limit import RateLimiter
     import app.rate_limit as rl_module
 
-    limiter = RateLimiter(max_requests=2, window_seconds=600)
+    window = 600
+    limiter = RateLimiter(max_requests=2, window_seconds=window)
     monkeypatch.setattr(rl_module, "rate_limiter", limiter)
 
     app = FastAPI()
@@ -297,9 +303,18 @@ def test_the_advertised_wait_reaches_the_client_over_http(monkeypatch):
     for _ in range(2):
         client.get("/thing")
 
-    # The two hits are moments old, so the oldest expires in roughly the whole
-    # window -- but not exactly, and never the bare 600 the constant would give.
+    # Age every recorded hit by 500 seconds. The oldest then expires in about
+    # 100, so a correct Retry-After is nowhere near the 600 the constant gives.
+    aged = time.monotonic() - 500
+    for key in list(limiter.requests):
+        limiter.requests[key] = [aged for _ in limiter.requests[key]]
+
     r = client.get("/thing")
     assert r.status_code == 429
+
     wait = int(r.headers["Retry-After"])
-    assert 1 <= wait <= 600
+    assert wait != window, (
+        "Retry-After is the whole window, which is the fixed value this change "
+        "replaces -- the exception's header is being discarded again"
+    )
+    assert 90 <= wait <= 110, wait
