@@ -1,0 +1,20 @@
+# The schedule. `systemctl enable --now sora-backup.timer` is the step that
+# turns a set of tested scripts into a backup that happens.
+
+[Unit]
+Description=Nightly SORA.Earth database backup
+Documentation=file:///opt/sora_earth_ai_platform/docs/BACKUP_AUTOMATION.md
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+
+# Every host running this would otherwise start at exactly 03:00 and hit the
+# object store together.
+RandomizedDelaySec=15m
+
+# Runs a missed backup once the host is back. Without this a machine that was
+# down at 03:00 simply has no backup for that night, and nothing says so.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

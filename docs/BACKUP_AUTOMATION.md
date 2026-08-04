@@ -88,6 +88,50 @@ openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out identity.pem
 openssl pkey -in identity.pem -pubout -out recipient.pem
 ```
 
+## Installing the schedule
+
+The scripts do not run themselves. Until the timer below is enabled there is no
+backup, however green the tests are — this was GAP-007's `PARTIAL` standing.
+
+They run **on the host**, not in an image: `pg_lib.sh` reaches the database with
+`docker exec "$PG_CONTAINER"`, because PostgreSQL's client tools refuse to dump a
+server newer than themselves. That is why no Dockerfile ships `scripts/`.
+
+```bash
+sudo install -m 0644 infra/systemd/sora-backup.service /etc/systemd/system/
+sudo install -m 0644 infra/systemd/sora-backup.timer   /etc/systemd/system/
+sudo install -d -m 0700 -o sora -g sora /etc/sora-earth
+# Created only when absent. `install /dev/null` truncates the destination, so
+# running this a second time -- following the same documented instructions --
+# erases the S3 credentials and every setting in the file, and the next backup
+# fails with no obvious connection to what was done.
+sudo test -e /etc/sora-earth/backup.env \
+  || sudo install -m 0600 -o sora -g sora /dev/null /etc/sora-earth/backup.env
+# then write BACKUP_RECIPIENT_KEY, BACKUP_S3_* and PG_CONTAINER into that file
+sudo systemctl daemon-reload
+sudo systemctl enable --now sora-backup.timer
+```
+
+Two settings in the unit are not decoration:
+
+`RuntimeDirectory=sora-earth` with `RuntimeDirectoryMode=0700` is what
+`backup_lock.sh` demands in production — it refuses to guess a lock directory,
+and its error message names these two lines. systemd creates `/run/sora-earth`
+owned by the service user on start and removes it on stop.
+
+`SuccessExitStatus=75` matters more than it looks. `backup_run.sh` exits 75
+(EX_TEMPFAIL) when another run already holds the lock. Without this line systemd
+records a skipped run as a failed unit, and a benign overlap pages somebody — the
+same outcome the `LOCK_SKIP` flag prevents one layer down.
+
+Checking that it is actually running, which is the M0 criterion:
+
+```bash
+systemctl list-timers sora-backup.timer
+journalctl -u sora-backup.service --since '2 days ago'
+./scripts/backup_retention.sh          # lists what is in the object store
+```
+
 ## Configuration
 
 | variable | meaning |
