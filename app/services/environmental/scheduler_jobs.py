@@ -634,18 +634,42 @@ def scheduled_data_quality_aggregation():
         duration = time.time() - start_time
         db.close()
 
-        # Log aggregation
+        # What it examined, recorded where the column says it goes.
+        #
+        # This never passed records_processed, so every one of 393 runs stored a
+        # zero -- read by anyone who does not know the history as "processed
+        # nothing", which is exactly how openaq stayed invisible for 398 runs
+        # (#56, #69). A column that is always zero is worse than an absent one.
+        examined = sum(st["total_observations"] for st in quality_stats.values())
+
+        # An aggregation over nothing is not a success in the sense that
+        # matters. Every source silent for 24 hours is a finding, and the run
+        # that noticed should say so rather than report the same green as a run
+        # that had data to work with.
+        status = "success" if examined else "degraded"
+        reason = None if examined else (
+            "no observations from any source in the last 24 hours"
+        )
+
         _log_job_execution(
             job_name=job_name,
-            status="success",
+            status=status,
             duration_sec=duration,
+            records_processed=examined,
+            error_message=reason,
             metadata={"quality_stats": quality_stats}
         )
 
-        logger.info("Data quality aggregation completed: %s", quality_stats)
+        if examined:
+            logger.info("Data quality aggregation completed: %s", quality_stats)
+        else:
+            logger.warning("Data quality aggregation had nothing to aggregate: "
+                           "no observations from any source in 24h")
 
         return {
-            "status": "success",
+            "status": status,
+            "failure_reason": reason,
+            "records_processed": examined,
             "quality_stats": quality_stats,
             "duration_sec": duration,
         }
