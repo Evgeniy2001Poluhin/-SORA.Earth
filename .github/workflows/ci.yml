@@ -425,6 +425,12 @@ jobs:
       # every exit path. Six abandoned polling loops in one session -- one of
       # them waiting on a process its own watchdog had killed hours earlier --
       # are what this replaces. Almost all of its tests are refusals.
+      # The waiter is Python behind a thin shell wrapper. Compiled before it is
+      # run, so a syntax error is reported as one rather than as every
+      # behavioural case failing at once.
+      - name: The managed-wait implementation compiles
+        run: python3 -m py_compile tools/wait_for.py
+
       - name: Behavioural tests for managed waits
         run: bash tests/test_wait_for.sh
 
