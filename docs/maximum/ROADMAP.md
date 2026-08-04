@@ -119,6 +119,23 @@ Read-only, with the owner's explicit permission given in chat.
 | `sora-backup-local.timer` | enabled, active; last run 2026-08-04 03:30:07 UTC, exit 0 |
 | `sora-backup.timer` | not installed on the host |
 
+The queries, so the figures above can be re-derived rather than taken on trust.
+Unqualified: this database keeps these tables in the default search path, and
+naming a schema that does not exist here would make the check fail in a way that
+looks like missing data.
+
+```sql
+SELECT count(*) FROM environmental_observations;                  -- 24230
+SELECT version_num FROM alembic_version;                          -- c4d1f8a26b93
+SELECT count(*) FILTER (WHERE as_of_date IS NULL), count(*)
+  FROM country_indicator_history;                                 -- 90461 | 93623
+```
+
+```bash
+systemctl list-timers --all | grep -i sora   # sora-backup-local.timer, next 08-05 03:30
+ls -lh /var/backups/sora/                    # three dumps, each with a .sha256
+```
+
 **A wrong reading, corrected before it was written down.** The first query asked
 for `sora-backup.timer`, got "inactive" and "0 timers listed", and would have
 supported the claim that nothing backs this system up. The unit that runs is
