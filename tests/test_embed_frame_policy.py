@@ -115,7 +115,6 @@ def test_usable_values_are_passed_through(monkeypatch, value, expected):
     "* https://a.example",                   # * with anything else is meaningless
     "'none' https://a.example",              # 'none' with anything else likewise
     "<script>",
-    "https://a.example/path",     # frame-ancestors matches an origin, not a path
     "https://a.example:99999x",   # not a port
 ])
 def test_an_unusable_value_is_refused_not_widened(monkeypatch, value):
@@ -156,3 +155,30 @@ def test_startup_validation_refuses_a_bad_policy(monkeypatch):
 def test_startup_validation_accepts_an_unset_policy(monkeypatch):
     monkeypatch.delenv("SORA_EMBED_FRAME_ANCESTORS", raising=False)
     assert validate_frame_ancestors_config() == "*"
+
+
+def test_a_path_is_refused_as_our_limitation_not_as_a_malformed_value(monkeypatch):
+    """CSP permits a path here; this setting does not, and says which is which.
+
+    CSP3 defines host-source with an optional path-part and frame-ancestors uses
+    host-source, so `https://partner.example/embed/` is legitimate. An earlier
+    version of this validator asserted the opposite -- that a path in
+    frame-ancestors is meaningless -- and under fail-closed a wrong assertion in
+    a validator refuses a correct configuration and stops the process.
+
+    Rather than approximate the normative grammar in a regular expression, the
+    supported format is narrower and the refusal names that. Telling an operator
+    their correct CSP is "unusable" would send them hunting a typo that is not
+    there.
+    """
+    monkeypatch.setenv("SORA_EMBED_FRAME_ANCESTORS", "https://partner.example/embed/")
+    with pytest.raises(FrameAncestorsError, match="origin-form sources only"):
+        _frame_ancestors()
+
+
+def test_a_malformed_value_is_not_reported_as_a_path_limitation(monkeypatch):
+    """The two refusals must stay distinguishable: one is the operator's
+    mistake, the other is ours."""
+    monkeypatch.setenv("SORA_EMBED_FRAME_ANCESTORS", "https://a.example; script-src *")
+    with pytest.raises(FrameAncestorsError, match="unusable source"):
+        _frame_ancestors()

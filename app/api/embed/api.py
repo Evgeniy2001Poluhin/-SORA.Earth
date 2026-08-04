@@ -50,23 +50,27 @@ _HTML = (pathlib.Path(__file__).parent / "widget.html").read_text(encoding="utf-
 #
 # Unset is different from wrong: absent means "no restriction requested", which
 # is the documented default for a widget whose purpose is to be embedded.
-# The grammar CSP actually defines for an ancestor-source, not a guess at it.
+# Origin-form sources only, and that is a documented limitation rather than a
+# claim about CSP.
 #
-# A too-narrow validator is expensive now that a bad value is refused rather
-# than warned about: `https:` and `https://partner.example:*` are both valid
-# frame-ancestors sources, and rejecting them would stop the process booting on
-# a correct configuration. Fail-closed raises the cost of being wrong in this
-# direction, which is the argument for reading the grammar instead of inventing
-# one.
+# CSP3 defines host-source with an optional path-part, and frame-ancestors uses
+# host-source, so `https://partner.example/embed/` is a legitimate value. An
+# earlier comment here asserted that a path in frame-ancestors is meaningless.
+# That was simply wrong, and under fail-closed a wrong assertion in a validator
+# refuses a correct configuration and stops the process.
 #
-#   ancestor-source = scheme-source / host-source / "'self'" / "'none'" / "*"
-#   scheme-source   = scheme ":"
-#   host-source     = [ scheme "://" ] host [ ":" port ]
-#   host            = "*" / [ "*." ] 1*host-char *( "." 1*host-char )
-#   port            = 1*DIGIT / "*"
+# The choice is between implementing the normative grammar properly and
+# accepting a narrower documented format. A partial CSP parser expressed as a
+# regular expression is the worst of both: it looks authoritative and is not,
+# which is the same failure as `X-Frame-Options: ALLOWALL` -- a thing that reads
+# as a decision and does not hold. So the supported format is stated, the
+# refusal says so, and an operator who needs a path knows immediately that the
+# limitation is ours rather than the specification's.
 #
-# No path-part: frame-ancestors is matched against an origin, and a path there
-# is meaningless rather than merely ignored.
+#   supported = "*" / "'self'" / "'none'" / scheme ":"
+#             / [ scheme "://" ] host [ ":" port ]
+#   host      = "*" / [ "*." ] label *( "." label )
+#   port      = 1*DIGIT / "*"
 _SCHEME = r"[A-Za-z][A-Za-z0-9+.-]*"
 _HOST = r"(?:\*|(?:\*\.)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)"
 _PORT = r"(?::(?:\d{1,5}|\*))?"
@@ -75,9 +79,11 @@ _ANCESTOR = re.compile(
     r"\*"                                          # any origin
     r"|'self'|'none'"                               # the keywords CSP defines here
     rf"|{_SCHEME}:"                                 # scheme-source, e.g. https:
-    rf"|(?:{_SCHEME}://)?{_HOST}{_PORT}"            # host-source, optional scheme and port
+    rf"|(?:{_SCHEME}://)?{_HOST}{_PORT}"            # origin-form host-source
     r")$"
 )
+
+_PATH_HINT = "/"
 
 
 class FrameAncestorsError(ValueError):
@@ -92,6 +98,19 @@ def _frame_ancestors() -> str:
     sources = raw.split()
     bad = [src for src in sources if not _ANCESTOR.match(src)]
     if bad:
+        # A path is the one rejection that is our limitation rather than a
+        # malformed value, so it is named separately. Telling an operator their
+        # correct CSP is "unusable" would send them looking for a typo that is
+        # not there.
+        with_path = [src for src in bad if _PATH_HINT in src.split("://")[-1]]
+        if with_path:
+            raise FrameAncestorsError(
+                "SORA_EMBED_FRAME_ANCESTORS contains %r. CSP permits a path in "
+                "a frame-ancestors source, but this setting supports "
+                "origin-form sources only -- scheme, host, optional port. Use "
+                "the origin without the path, or narrow the framing elsewhere."
+                % with_path
+            )
         raise FrameAncestorsError(
             "SORA_EMBED_FRAME_ANCESTORS contains unusable source(s) %r. "
             "A malformed frame-ancestors directive is ignored by browsers, "
