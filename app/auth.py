@@ -2,7 +2,7 @@
 SORA.Earth JWT Authentication + RBAC + API Keys
 Pure Python JWT (HS256) — no external deps
 """
-import hashlib, hmac, json, logging, os, time, base64
+import hashlib, hmac, json, logging, os, secrets, time, base64
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -15,6 +15,8 @@ import threading
 from fastapi import Depends, HTTPException, Security, Header, status
 from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 SECRET_KEY = os.getenv("SORA_JWT_SECRET", "sora-earth-dev-secret-change-in-production-2026")
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -394,28 +396,114 @@ USERS_DB: dict = {
     },
 }
 
-_refresh_tokens: set = set()
+# Refresh tokens are not kept in a list of the valid ones.
+#
+# They used to be: a process-local `set` of every token ever issued, and
+# validation was membership in it. That set answered one useful question -- has
+# this been revoked -- and three unintended ones. A restart emptied it, so every
+# refresh token in the world stopped working; `backend` and `scheduler` each had
+# their own, so a token issued by one was unknown to the other; and it grew
+# without bound, because entries left only by explicit revocation.
+#
+# Nothing was lost by inverting it. _jwt_decode already verifies the HMAC with a
+# constant-time comparison and rejects an expired `exp`, so authenticity and
+# lifetime are settled cryptographically before the store is consulted at all.
+# The only thing a store can add is revocation, and a list of revoked tokens says
+# that directly.
+#
+# What this changes, stated plainly: a refresh token now survives a restart. That
+# was never a security control -- it was mass invalidation as a side effect of
+# forgetting, indistinguishable from an outage to the user. Logging someone out
+# is revocation, and revocation still works.
+_REVOKED_PREFIX = "auth:refresh:revoked:"
+
+# The fallback when Redis is unreachable. Revocation then holds for the process
+# that served it and no longer, which is worse than Redis and far better than
+# nothing -- and it is exactly the guarantee the old code gave at its best.
+_revoked_locally: set = set()
+
+
+def _token_fingerprint(token: str) -> str:
+    """What goes in the store. Never the token itself: a revocation list holding
+    live credentials is a credential store nobody decided to build."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _redis():
+    try:
+        from app.redis_cache import redis_client, REDIS_AVAILABLE
+    except Exception:
+        return None
+    return redis_client if REDIS_AVAILABLE else None
+
+
+def _is_revoked(fingerprint: str) -> bool:
+    if fingerprint in _revoked_locally:
+        return True
+    client = _redis()
+    if client is None:
+        return False
+    try:
+        return bool(client.exists(_REVOKED_PREFIX + fingerprint))
+    except Exception:
+        # Redis went away mid-request. Refusing every refresh would turn a cache
+        # outage into a site-wide logout; the local set still holds whatever this
+        # process revoked.
+        logger.warning("refresh revocation list unreachable; "
+                       "revocation is process-local until Redis returns")
+        return False
 
 def create_access_token(data: dict) -> str:
     payload = {"sub": data.get("sub", ""), "role": data.get("role", ""), "type": "access", "iat": int(time.time()), "exp": int(time.time()) + ACCESS_TOKEN_EXPIRE_MINUTES * 60}
     return _jwt_encode(payload)
 
 def create_refresh_token(data: dict) -> str:
-    payload = {"sub": data.get("sub", ""), "role": data.get("role", ""), "type": "refresh", "iat": int(time.time()), "exp": int(time.time()) + REFRESH_TOKEN_EXPIRE_DAYS * 86400}
-    token = _jwt_encode(payload)
-    _refresh_tokens.add(token)
-    return token
+    # jti makes the token unique. Without it the payload is (sub, role, type,
+    # iat, exp) at one-second resolution, so two logins by the same account in
+    # the same second produced byte-identical tokens -- and revoking either one
+    # revoked both, because they were the same string. Logging out of one device
+    # logged out the other, and no test noticed because both halves looked right.
+    #
+    # Access tokens are left alone: nothing revokes them individually, so a nonce
+    # there would carry no meaning.
+    payload = {"sub": data.get("sub", ""), "role": data.get("role", ""), "type": "refresh",
+               "jti": secrets.token_urlsafe(16),
+               "iat": int(time.time()), "exp": int(time.time()) + REFRESH_TOKEN_EXPIRE_DAYS * 86400}
+    return _jwt_encode(payload)
 
 def validate_refresh_token(token: str) -> dict:
-    if token not in _refresh_tokens:
-        raise ValueError("Refresh token not found or already used")
+    # Decode first. It is cheap, it is local, and it settles both authenticity
+    # and expiry -- so a forged or stale token is refused without a round trip to
+    # the revocation list.
     payload = _jwt_decode(token)
     if payload.get("type") != "refresh":
         raise ValueError("Not a refresh token")
+    if _is_revoked(_token_fingerprint(token)):
+        raise ValueError("Refresh token has been revoked")
     return payload
 
 def revoke_refresh_token(token: str):
-    _refresh_tokens.discard(token)
+    fingerprint = _token_fingerprint(token)
+    _revoked_locally.add(fingerprint)
+    try:
+        payload = _jwt_decode(token)
+    except ValueError:
+        # Forged, or already past its own expiry. Either way there is nothing
+        # left to revoke and no reason to remember it.
+        return
+    ttl = int(payload.get("exp", 0) - time.time())
+    if ttl <= 0:
+        return
+    client = _redis()
+    if client is None:
+        return
+    try:
+        # The entry outlives the token by nothing: once the token expires on its
+        # own, _jwt_decode refuses it and the revocation has nothing left to do.
+        client.set(_REVOKED_PREFIX + fingerprint, "1", ex=ttl)
+    except Exception:
+        logger.warning("could not record a refresh-token revocation in Redis; "
+                       "it holds for this process only")
 
 def require_auth(authorization: str = Header(None)) -> UserInfo:
     if not authorization or not authorization.startswith("Bearer "):
