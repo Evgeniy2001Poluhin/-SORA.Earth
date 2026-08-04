@@ -91,7 +91,13 @@ class RateLimiter:
                 hits = [t for t in self.requests.get(key, ()) if now - t < self.window]
                 live[key] = hits
                 if len(hits) >= limit:
-                    blocked.append(hits)
+                    # The limit travels with the hits. Without it _retry_after
+                    # can only assume the bucket is exactly one slot over, and a
+                    # bucket holding more than its limit -- a tightened config,
+                    # or the same key measured against a looser limit elsewhere
+                    # -- would be told to retry before a slot exists, earning
+                    # another 429.
+                    blocked.append((hits, limit))
 
             if blocked:
                 # The trimmed lists are still worth storing -- the expired entries
@@ -125,7 +131,17 @@ class RateLimiter:
         about to free, and -- if several budgets block -- too short for the one
         that actually governs.
         """
-        waits = [self.window - (now - hits[0]) for hits in blocked if hits]
+        waits = []
+        for hits, limit in blocked:
+            if not hits:
+                continue
+            # The slot that has to expire is not necessarily the oldest. A bucket
+            # holding len(hits) against a limit of `limit` needs
+            # len(hits) - limit + 1 of them gone before there is room, so the
+            # pivot sits that far in rather than at hits[0]. Recorded in order,
+            # so indexing is enough.
+            pivot = min(len(hits) - 1, max(0, len(hits) - limit))
+            waits.append(self.window - (now - hits[pivot]))
         return max(1, math.ceil(max(waits))) if waits else self.window
 
     def get_usage(self, key: str):
@@ -294,15 +310,23 @@ class SlowAPIMiddleware:
 
         try:
             rate_limiter.check_many(budgets)
-        except HTTPException:
+        except HTTPException as exc:
             from starlette.responses import JSONResponse
+            # The header comes from the exception, not from a constant.
+            #
+            # This rebuilt the response with str(rate_limiter.window), discarding
+            # the per-budget Retry-After check_many had just computed. Over HTTP
+            # the behaviour was therefore identical to the fixed-window value
+            # this change exists to replace -- only direct callers, which is to
+            # say the tests, ever saw the new number. A fix visible only to its
+            # own tests is not a fix.
+            retry_after = (exc.headers or {}).get(
+                "Retry-After", str(rate_limiter.window)
+            )
             response = JSONResponse(
                 status_code=429,
                 content={"detail": "Rate limit exceeded"},
-                # Fixed window, so the caller waits at most one window. Saying so
-                # is what lets a well-behaved client back off instead of retrying
-                # immediately and spending the next window too.
-                headers={"Retry-After": str(rate_limiter.window)},
+                headers={"Retry-After": retry_after},
             )
             await response(scope, receive, send)
             return

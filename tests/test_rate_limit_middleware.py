@@ -51,7 +51,19 @@ def test_the_refusal_says_how_long_to_wait(app_with_limit):
     assert r.status_code == 429
     # Without this a well-behaved client retries immediately and spends the next
     # window too, which turns one refusal into a sustained one.
-    assert r.headers.get("Retry-After") == str(rate_limiter.window)
+    #
+    # A number, and one that is not the whole window.
+    #
+    # This asserted equality with rate_limiter.window -- the fixed value the
+    # change replaces -- so the test would have passed unchanged whether or not
+    # the per-bucket figure ever reached HTTP. It did not: the middleware caught
+    # the exception and rebuilt the response with the constant, discarding what
+    # had just been computed. Only direct callers saw the new number, and this
+    # assertion was the reason nobody noticed.
+    retry_after = r.headers.get("Retry-After")
+    assert retry_after is not None
+    assert retry_after.isdigit(), retry_after
+    assert 1 <= int(retry_after) <= rate_limiter.window
     assert r.json()["detail"] == "Rate limit exceeded"
 
 
@@ -254,3 +266,40 @@ def test_retry_after_reflects_the_bucket_that_blocks(monkeypatch):
     wait = int(excinfo.value.headers["Retry-After"])
     assert 0 < wait <= limiter.window
     limiter.requests.clear()
+
+
+def test_the_advertised_wait_reaches_the_client_over_http(monkeypatch):
+    """The per-bucket figure must survive the trip out of the middleware.
+
+    check_many computes a wait from the fullest blocking bucket and raises with
+    it. The middleware used to catch that and rebuild the response from
+    rate_limiter.window, so over HTTP the behaviour was identical to the fixed
+    window this change exists to replace. A fix visible only to its own tests is
+    not a fix.
+
+    The window here is long and the budget small, so a wait equal to the window
+    and a wait derived from the oldest hit are far apart and cannot be confused.
+    """
+    from app.rate_limit import RateLimiter
+    import app.rate_limit as rl_module
+
+    limiter = RateLimiter(max_requests=2, window_seconds=600)
+    monkeypatch.setattr(rl_module, "rate_limiter", limiter)
+
+    app = FastAPI()
+    app.add_middleware(SlowAPIMiddleware)
+
+    @app.get("/thing")
+    def thing():
+        return {"ok": True}
+
+    client = TestClient(app)
+    for _ in range(2):
+        client.get("/thing")
+
+    # The two hits are moments old, so the oldest expires in roughly the whole
+    # window -- but not exactly, and never the bare 600 the constant would give.
+    r = client.get("/thing")
+    assert r.status_code == 429
+    wait = int(r.headers["Retry-After"])
+    assert 1 <= wait <= 600
