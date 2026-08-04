@@ -158,11 +158,24 @@ def test_no_candidate_in_a_complete_answer_names_the_vintage():
     assert (year, n) == (None, 0)
 
 
-def test_no_candidate_in_a_truncated_answer_proves_nothing():
-    """The distinction the first draft lacked: it asked for a window of recent
-    values and read a miss as evidence of loss."""
-    status, _, _ = classify(35121.66, HISTORY, {"truncated": True})
+def test_an_incomplete_answer_yields_no_verdict_even_with_a_candidate():
+    """Checked before the candidates, not after.
+
+    The first version consulted the truncation flag only when it had found none,
+    so a unique match on the part that was read became `recovered_inferred`
+    while a second match sat unread beyond it -- a check that existed and could
+    not fire in the one case that needed it.
+
+    fetch_history no longer returns an incomplete answer at all; this pins the
+    ordering so that a future caller who does cannot get a verdict out of it.
+    """
+    # A value that matches, in an answer known to be partial.
+    status, year, n = classify(34536.66, HISTORY, {"incomplete": True})
     assert status == OUTSIDE_WINDOW == "outside_query_window"
+    assert year is None, "a candidate from a partial answer must not be adopted"
+
+    # And the same value in a complete one.
+    assert classify(34536.66, HISTORY, {})[0] == RECOVERED
 
 
 def test_no_answer_at_all_is_not_a_verdict():

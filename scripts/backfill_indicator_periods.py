@@ -114,35 +114,57 @@ def connect():
 
 
 def fetch_history(iso: str, ind: str):
-    """Everything the source will say about one indicator.
+    """Everything the source will say about one indicator, across every page.
 
     Returns (history, meta) or (None, None) when no conclusive answer was
     obtained. None is not an empty history: one means "ask again", the other
     means "the source has nothing right now", and only the second is evidence.
+
+    Pages are followed. An earlier version read only the first response and set
+    a `truncated` flag from its page count -- and `classify` consulted that flag
+    only when it had found no candidate. A unique match on page one was
+    therefore recorded as recovered while a second match sat unread on page two:
+    a check that existed, and could not fire in the case that needed it.
     """
-    url = (API.format(iso=iso, ind=ind)
-           + f"?format=json&per_page={PER_PAGE}&date={YEAR_FROM}:{YEAR_TO}")
-    for attempt in range(RETRIES):
-        try:
-            raw = urllib.request.urlopen(url, timeout=30).read()
-            payload = json.loads(raw.decode())
-            header = payload[0] if payload else {}
-            rows = payload[1] if len(payload) > 1 and payload[1] else []
+    history: dict = {}
+    hashes = []
+    page = 1
+    while True:
+        url = (API.format(iso=iso, ind=ind)
+               + f"?format=json&per_page={PER_PAGE}"
+               + f"&date={YEAR_FROM}:{YEAR_TO}&page={page}")
+        raw = None
+        for attempt in range(RETRIES):
+            try:
+                raw = urllib.request.urlopen(url, timeout=30).read()
+                break
+            except Exception:
+                if attempt == RETRIES - 1:
+                    # One unobtainable page makes the whole answer inconclusive.
+                    # Returning what arrived so far would let a partial read
+                    # produce a verdict, which is the defect above wearing a
+                    # different hat.
+                    return None, None
+                time.sleep(2 ** attempt * 2)
+
+        payload = json.loads(raw.decode())
+        header = payload[0] if payload else {}
+        rows = payload[1] if len(payload) > 1 and payload[1] else []
+        history.update({r["date"]: r["value"] for r in rows if r.get("value") is not None})
+        hashes.append(hashlib.sha256(raw).hexdigest())
+
+        pages = int(header.get("pages", 1) or 1)
+        if page >= pages:
             meta = {
-                # More than one page means the answer was cut short, and a miss
-                # against a truncated answer is not a miss.
-                "truncated": int(header.get("pages", 1) or 1) > 1,
-                # The vintage the verdict was made against, so a later revision
-                # can be told from a mistake.
                 "vintage": header.get("lastupdated"),
-                "sha256": hashlib.sha256(raw).hexdigest(),
+                # Over every page that formed the answer, so the hash identifies
+                # what the verdict was actually made from.
+                "sha256": hashlib.sha256("".join(hashes).encode()).hexdigest(),
+                "pages": pages,
             }
-            return {r["date"]: r["value"] for r in rows if r.get("value") is not None}, meta
-        except Exception:
-            if attempt == RETRIES - 1:
-                return None, None
-            time.sleep(2 ** attempt * 2)
-    return None, None
+            return history, meta
+        page += 1
+        time.sleep(DELAY_SECONDS)
 
 
 def candidate_years(value: float, history: dict) -> list:
@@ -156,16 +178,26 @@ def candidate_years(value: float, history: dict) -> list:
 
 
 def classify(value, history, meta):
-    """(status, year, candidate_count) for one stored value."""
+    """(status, year, candidate_count) for one stored value.
+
+    OUTSIDE_WINDOW is now reachable only if a caller hands over an answer it
+    knows to be incomplete; fetch_history refuses to return one. The status
+    stays in the vocabulary because the question it answers -- "did the search
+    cover the whole history?" -- is real, and the year range here is asserted
+    rather than proven for every indicator ever ingested.
+    """
     if history is None:
         return UNAVAILABLE, None, None
+    if meta.get("incomplete"):
+        # Checked before the candidates, not after. Consulted only on the
+        # zero-candidate path, it could never fire for the case that matters:
+        # a single match found in the part that was read.
+        return OUTSIDE_WINDOW, None, None
     years = candidate_years(value, history)
     if len(years) == 1:
         return RECOVERED, years[0], 1
     if len(years) > 1:
         return AMBIGUOUS, None, len(years)
-    if meta.get("truncated"):
-        return OUTSIDE_WINDOW, None, 0
     return NO_MATCH, None, 0
 
 
@@ -219,11 +251,17 @@ def main() -> int:
     # Identities are fixed here. Updating by (country, indicator, value) would
     # reach rows the ingester wrote after this read, which no evidence in this
     # run covers.
+    # No `as_of_date IS NULL` here.
+    #
+    # It was there, and it excluded exactly the rows a recheck exists for: a
+    # `recovered_inferred` row carries a date, so a corrected rule could never
+    # reach the verdicts the old rule got wrong. Undecided rows are still
+    # selected by period_status IS NULL, which they satisfy on their own.
     cur.execute(
         f"""SELECT id, country_iso3, indicator_code, value
             FROM country_indicator_history
             WHERE {eligible}
-              AND as_of_date IS NULL
+              AND (period_status IS NOT NULL OR as_of_date IS NULL)
               AND source <> ALL(%s)""",
         (*params, list(PERIODLESS_SOURCES)),
     )
@@ -254,8 +292,15 @@ def main() -> int:
                 continue
 
             cur.execute(
+                # Assigned, not coalesced.
+                #
+                # COALESCE kept the old date when the new verdict had none, so a
+                # row reclassified from recovered_inferred to ambiguous would
+                # have carried the date its discredited verdict produced -- and
+                # the CHECK constraint forbids that pairing, so the correction
+                # would have failed loudly at best and been believed at worst.
                 """UPDATE country_indicator_history
-                   SET as_of_date = COALESCE(%s, as_of_date),
+                   SET as_of_date = %s,
                        period_status = %s,
                        period_run_id = %s,
                        period_method = %s,

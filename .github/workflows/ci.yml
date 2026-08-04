@@ -358,7 +358,8 @@ jobs:
             tests/test_backup_local_integration.sh \
             tools/mutation_backup_local.sh \
             scripts/deploy_production.sh \
-            tests/test_deploy_production.sh
+            tests/test_deploy_production.sh \
+            tests/test_backfill_against_postgres.sh
 
       # These skip on macOS -- flock does not exist there -- so this Linux job is
       # the only place they actually execute.
@@ -377,6 +378,13 @@ jobs:
       # it was the untested one that shipped.
       - name: Behavioural tests for the deployment guard
         run: bash tests/test_deploy_production.sh
+
+      # The backfill's write path lives in SQL, and the two defects review found
+      # there -- a recheck that could not reach the rows it exists to correct,
+      # and a date left behind when a verdict was withdrawn -- were invisible to
+      # every test that did not run a database.
+      - name: The backfill write path against PostgreSQL
+        run: bash tests/test_backfill_against_postgres.sh
 
       - name: Behavioural tests for the deployment guard (as root)
         run: sudo -E bash tests/test_deploy_production.sh
