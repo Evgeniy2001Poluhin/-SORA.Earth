@@ -75,8 +75,16 @@ class DataRefreshLog(Base):
     countries_fetched = Column(Integer, default=0)
     total_countries = Column(Integer, default=0)
     message = Column(Text, nullable=True)
-    started_at = Column(DateTime, nullable=True)
-    finished_at = Column(DateTime, nullable=True)
+    # timezone=True to match migration 0d88c3e3c633, which declares these
+    # columns `sa.DateTime(timezone=True)`. The model said naive while the
+    # database has been timestamptz since that revision, and nothing reconciled
+    # them -- found by the startup schema check, which is what it is for.
+    #
+    # The declaration alone fixes nothing about *comparisons*: a naive Python
+    # datetime bound against timestamptz is interpreted in the session's
+    # TimeZone, so the boundary moves. See app/api/admin_snapshot.py.
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
     duration_sec = Column(Float, nullable=True)
     trigger_source = Column(String(50), nullable=True, default="manual")
 
@@ -167,8 +175,14 @@ class ForecastModelMetrics(Base):
     metadata_json = Column(Text, nullable=True)  # Additional metadata (hyperparameters, etc.)
 
 
-def init_db():
-    Base.metadata.create_all(bind=engine, checkfirst=True)
+# init_db() lived here and called Base.metadata.create_all(). It is gone rather
+# than merely unused: leaving it defined invites the next caller, and its one
+# caller was app.main at import time -- which is how four tables came to exist
+# with no migration behind them (issue #51).
+#
+# Alembic owns the schema now. The application checks it at startup
+# (app.main.assert_schema_ready) and the test suite provisions its own scratch
+# database explicitly (tests/conftest.py).
 
 
 def get_db():

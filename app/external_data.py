@@ -126,6 +126,42 @@ def _fetch_wb_indicator(iso3: str, indicator_code: str, mrv: int = 3) -> Optiona
     return None
 
 
+def _fetch_wb_indicator_dated(
+    iso3: str, indicator_code: str, mrv: int = 3
+) -> Tuple[Optional[float], Optional[str]]:
+    """The same fetch, keeping the period the value describes.
+
+    `_fetch_wb_indicator` returns the number and discards `entry["date"]`, which
+    is the year the World Bank states the observation is for. Every row in
+    country_indicator_history was stored with `as_of_date=None` because of it --
+    87,005 of them -- so the database could say when a figure was downloaded and
+    never what it measured. See issue #58.
+
+    Returns (value, period). The period is the source's own string, e.g. "2025",
+    kept verbatim rather than parsed into a date here: an annual indicator has a
+    year, not a day, and inventing 1 January would assert precision the source
+    did not give.
+    """
+    if os.getenv("SORA_OFFLINE", "0") == "1":
+        return None, None
+
+    url = (
+        f"{WB_BASE}/country/{iso3}/indicator/{indicator_code}"
+        f"?format=json&per_page={mrv}&mrv={mrv}"
+    )
+    try:
+        resp = httpx.get(url, timeout=5.0)
+        resp.raise_for_status()
+        data = resp.json()
+        if len(data) >= 2 and data[1]:
+            for entry in data[1]:
+                if entry.get("value") is not None:
+                    return round(float(entry["value"]), 2), entry.get("date")
+    except Exception as e:
+        logger.warning("World Bank API error for %s/%s: %s", iso3, indicator_code, e)
+    return None, None
+
+
 def _fetch_oecd_indicator(iso3: str, key: str) -> Optional[float]:
     """Fetch indicator from OECD SDMX (CSV format).
 
@@ -168,33 +204,41 @@ def _fetch_with_fallback_impl(
     key: str,
     indicator_code: str,
     country_name: str,
-) -> Tuple[Optional[float], str]:
+) -> Tuple[Optional[float], str, Optional[str]]:
     """Unified fetch with fallback chain.
 
     Order: World Bank → OECD → static benchmark → global average.
-    Returns (value, source_tag).
+    Returns (value, source_tag, period).
+
+    The period travels in the return rather than in a side table. An earlier
+    version kept a module-level dict keyed by (iso3, indicator_code), written
+    just before the return that produced it -- which is correct only while calls
+    are sequential, and nothing guarantees that. Two concurrent fetches of the
+    same pair could have one overwrite the other's period, and the wrong
+    as_of_date would be persisted against a right-looking value. Sources other
+    than World Bank state no period and return None.
     """
     # 1. World Bank
-    val = _fetch_wb_indicator(iso3, indicator_code)
+    val, period = _fetch_wb_indicator_dated(iso3, indicator_code)
     if val is not None:
-        return val, "world_bank"
+        return val, "world_bank", period
 
     # 2. OECD (only for keys that have a mapping)
     val = _fetch_oecd_indicator(iso3, key)
     if val is not None:
-        return val, "oecd"
+        return val, "oecd", None
 
     # 3. Static benchmark
     bench = BENCHMARKS.get(country_name, {})
     if key in bench:
         logger.info("Using static benchmark for %s/%s", country_name, key)
-        return bench[key], "benchmark"
+        return bench[key], "benchmark", None
 
     # 4. Global average (offline mode only)
     if os.getenv("SORA_OFFLINE", "0") == "1" and key in GLOBAL_AVG:
-        return GLOBAL_AVG[key], "global_avg"
+        return GLOBAL_AVG[key], "global_avg", None
 
-    return None, "none"
+    return None, "none", None
 
 # ---------------------------------------------------------------------------
 # Public API — country data
@@ -215,13 +259,18 @@ def get_country_esg_realtime(country_name: str) -> Optional[Dict]:
         "source": "World Bank API + OECD + benchmarks",
         "indicators": {},
         "indicator_sources": {},
+        # What period each value describes, when the source states one. World
+        # Bank does; the static benchmarks and the offline global averages do
+        # not, and they get None rather than a guess. See issue #58.
+        "indicator_periods": {},
     }
 
     for key, indicator_code in INDICATORS.items():
-        val, src = _fetch_with_fallback_impl(iso3, key, indicator_code, country_name)
+        val, src, period = _fetch_with_fallback_impl(iso3, key, indicator_code, country_name)
         if val is not None:
             result["indicators"][key] = val
             result["indicator_sources"][key] = src
+            result["indicator_periods"][key] = period
             # backward compat: top-level keys too
             result[key] = val
 
@@ -269,6 +318,35 @@ def get_all_countries_merged() -> Dict[str, dict]:
 # Refresh logic
 # ---------------------------------------------------------------------------
 
+def _period_to_date(period: Optional[str]) -> Optional[datetime]:
+    """The source's period string as a date, or None when it stated none.
+
+    World Bank annual indicators carry a year: "2025". Stored as the first day of
+    that year, because the column is a DateTime and there is nowhere else to put
+    it -- but the day is an artefact of the column type, not a claim by the
+    source. A specialist reading 2025-01-01 should understand "the 2025 figure",
+    which is why the period is also kept verbatim upstream.
+
+    None stays None. A benchmark or a global average has no period, and inventing
+    one would make a fallback indistinguishable from a dated observation --
+    exactly the confusion issue #58 is about.
+    """
+    if not period:
+        return None
+    text = str(period).strip()
+    # Exactly four digits, nothing else. Slicing the first four characters turned
+    # "2025-invalid" and "20250" into 2025-01-01 -- a false observation date,
+    # which is worse than none: it looks answerable and is wrong.
+    if not (len(text) == 4 and text.isdigit()):
+        logger.warning("Unparseable indicator period %r; storing no date", period)
+        return None
+    try:
+        return datetime(int(text), 1, 1)
+    except ValueError:
+        logger.warning("Out-of-range indicator period %r; storing no date", period)
+        return None
+
+
 def refresh_all_countries() -> Dict:
     """Full refresh: invalidate cache, fetch live data, persist history."""
     db = SessionLocal()
@@ -291,7 +369,8 @@ def refresh_all_countries() -> Dict:
                     indicator_name=key,
                     value=value,
                     source=data.get("indicator_sources", {}).get(key, "unknown"),
-                    as_of_date=None,
+                    as_of_date=_period_to_date(
+                        data.get("indicator_periods", {}).get(key)),
                     fetched_at=fetched_at,
                     refresh_job_name="external_data_refresh",
                 )
@@ -409,7 +488,7 @@ def _fetch_with_fallback(
     - Старые тесты зовут без want_source -> получают только value.
     - Новый код может звать с want_source=True -> (value, source).
     """
-    val, src = _fetch_with_fallback_impl(iso3, key, indicator_code, country_name)
+    val, src, _period = _fetch_with_fallback_impl(iso3, key, indicator_code, country_name)
     if want_source:
         return val, src
     return val
@@ -422,7 +501,7 @@ def _fetch_with_fallback(
     *,
     want_source: bool = False,
 ):
-    val, src = _fetch_with_fallback_impl(iso3, key, indicator_code, country_name)
+    val, src, _period = _fetch_with_fallback_impl(iso3, key, indicator_code, country_name)
     if want_source:
         return val, src
     return val

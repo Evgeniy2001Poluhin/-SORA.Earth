@@ -63,13 +63,32 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 logger = logging.getLogger(__name__)
 
-try:
-    from app.main import (sora_retrain_total, sora_refresh_total,
-                          sora_full_pipeline_total, sora_drift_detected_total,
-                          sora_model_promoted_total, sora_model_rejected_total)
-except ImportError:
-    sora_retrain_total = sora_refresh_total = sora_full_pipeline_total = None
-    sora_drift_detected_total = sora_model_promoted_total = sora_model_rejected_total = None
+# From app.prom_metrics, where these actually live, and without a try/except.
+#
+# This read `from app.main import ...` for six counters that are not defined
+# there. The ImportError was caught and all six were set to None, so every
+# scheduler metric -- retrains, refreshes, drift, promotions, rejections -- was
+# silently not recorded. The cost was still paid: the exception is raised after
+# app.main has finished importing torch, SHAP and transformers.
+#
+# Three of the names also differ. The `_total` suffix belongs to the Prometheus
+# metric name, not to the Python variable, so the aliases below are explicit
+# rather than assumed:
+#
+#     sora_drift_detected   -> Counter("sora_drift_detected_total")
+#     sora_model_promoted   -> Counter("sora_model_promoted_total")
+#     sora_model_rejected   -> Counter("sora_model_rejected_total")
+#
+# No except: a missing counter is a fault to see, not one to swallow. That is
+# what hid this for as long as it lasted.
+from app.prom_metrics import (
+    sora_retrain_total,
+    sora_refresh_total,
+    sora_full_pipeline_total,
+    sora_drift_detected as sora_drift_detected_total,
+    sora_model_promoted as sora_model_promoted_total,
+    sora_model_rejected as sora_model_rejected_total,
+)
 
 
 

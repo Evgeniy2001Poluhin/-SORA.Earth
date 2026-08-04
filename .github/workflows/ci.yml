@@ -140,7 +140,13 @@ jobs:
 
   environmental-postgres-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 was right when this job ran one test file. It now also runs the schema
+    # checks -- 18 cases, each creating its own database and driving alembic in a
+    # subprocess. Measured on the runner: ~2.5 min for pip install, then roughly
+    # 2 minutes per case against ~30s locally, and the job was cancelled after
+    # two of them. The cancellation also destroys pytest's own diagnostic, so the
+    # budget has to hold before any failure inside it can be read at all.
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16
@@ -173,6 +179,31 @@ jobs:
       # exist, so the chain is now run explicitly rather than incidentally.
       - name: alembic upgrade head
         run: alembic upgrade head
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
+      # Asserts that `alembic upgrade head` alone builds the whole schema, which
+      # the step above cannot check: it migrates the shared database, and any
+      # later import of the application would fill in a missing table via
+      # create_all() before anyone looked. This test provisions its own scratch
+      # database instead, so it is unaffected by the job's other steps and by
+      # whatever the test process has imported.
+      - name: Alembic builds the entire schema on its own
+        run: |
+          python -m pytest \
+            tests/test_schema_is_migrated.py \
+            -v --tb=short --timeout=300
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
+      # Five of its six cases need a real PostgreSQL: the session TimeZone
+      # behaviour they pin down is PostgreSQL's, and on SQLite they skip. A
+      # skipped test proves nothing, so it needs a job where it runs.
+      - name: data_refresh_log timestamp handling against PostgreSQL
+        run: |
+          python -m pytest \
+            tests/test_refresh_log_timestamps.py \
+            -v --tb=short --timeout=300
         env:
           DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
 
@@ -245,6 +276,32 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-timeout
 
+      # This job had no schema step: it relied on conftest's create_all() to
+      # build the tables as a side effect of importing. That is the behaviour
+      # this branch removes, and the guard in conftest refused it -- 15 tables
+      # in an empty sora_earth. Provisioning goes through migrations, like
+      # everywhere else.
+      - name: alembic upgrade head
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
+      # Here rather than in environmental-postgres-tests: the startup check
+      # imports app.main, which unpickles models/*.pkl, and this is the job that
+      # materialises LFS. The column type comparison also runs on PostgreSQL only
+      # and skips on SQLite, so it needs a job where it actually runs.
+      - name: Startup schema check against PostgreSQL
+        run: |
+          python -m pytest tests/test_startup_schema_check.py \
+            -v --tb=short --timeout=180
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+          REDIS_URL: "redis://localhost:6379/0"
+          SECRET_KEY: "ci-test-secret"
+          SORA_ADMIN_TOKEN: "ci-test-admin"
+          SORA_OFFLINE: "1"
+          RUN_SCHEDULER: "false"
+
       - name: Run integration tests
         run: |
           python -m pytest tests/test_api.py \
@@ -262,6 +319,136 @@ jobs:
           # completion, so nobody found out.
           SORA_OFFLINE: "1"
           RUN_SCHEDULER: "false"
+
+  # The shell scripts had no CI at all. tests/test_backup_lock.sh has existed for
+  # a while and has never run here, which is the same as not having it: a test
+  # nobody executes cannot fail, and a green board said nothing about any of this.
+  shell-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Two gates, deliberately at different strictness.
+      #
+      # Repo-wide at `error` only. Eight scripts carry warning- and style-level
+      # findings today (tests/test_backup_lock.sh alone has 22). Gating everything
+      # at full strictness would mean fixing all of them here, in a pull request
+      # about backups -- so the wide gate catches what is actually broken, and the
+      # existing findings are left for their own change rather than absorbed
+      # silently into this one.
+      #
+      # The files this pull request owns are held to every severity, where they
+      # already stand at zero. New debt in them is blocked from the start; that is
+      # much cheaper than the 22 findings above, which were also once zero.
+      - name: ShellCheck
+        run: |
+          shellcheck --version | head -2
+
+          echo "--- every shell script, error severity"
+          find . -name '*.sh' -not -path './node_modules/*' -not -path './.git/*' \
+            -print0 | xargs -0 shellcheck -S error
+
+          echo "--- the owned set, every severity"
+          shellcheck -S style \
+            scripts/backup_local_daily.sh \
+            tests/test_backup_local_daily.sh \
+            tests/test_backup_local_integration.sh \
+            tools/mutation_backup_local.sh \
+            scripts/deploy_production.sh \
+            tests/test_deploy_production.sh
+
+      # These skip on macOS -- flock does not exist there -- so this Linux job is
+      # the only place they actually execute.
+      - name: Behavioural tests for the daily local backup
+        run: bash tests/test_backup_local_daily.sh
+
+      # The guard is almost entirely refusals, so the tests are almost entirely
+      # refusals: a wrong branch, an unmerged rollback target, a container the
+      # compose file does not declare, a port reachable off-host, a certificate
+      # store nothing renews. Each stands for something that actually happened.
+      # Twice, because the two environments differ in the way that matters.
+      # Production deploys as root; this runner is not root. An earlier version
+      # created the lock directory with `install -d -o root -g root`, which a
+      # non-root caller cannot do: all 77 tests passed in a root container and 47
+      # failed here. Testing one privilege level leaves the other unverified, and
+      # it was the untested one that shipped.
+      - name: Behavioural tests for the deployment guard
+        run: bash tests/test_deploy_production.sh
+
+      - name: Behavioural tests for the deployment guard (as root)
+        run: sudo -E bash tests/test_deploy_production.sh
+
+      # Runs the suite against deliberately broken copies of the script and fails
+      # if any of them survives. Without it, "23 tests pass" is a statement about
+      # the tests, not about the script: an earlier run of this tool is what
+      # showed the empty-dump guard could be deleted with every test still green.
+      # The copies are temporary; the tracked script is never modified.
+      - name: Mutation testing
+        run: bash tools/mutation_backup_local.sh
+
+      # Verified where the unit's assumptions hold. In a bare container it reports
+      # a missing docker.service and a non-executable command -- both artefacts of
+      # the container, not defects, and indistinguishable from real findings unless
+      # the environment is made to match. So the production path is staged first.
+      - name: systemd unit verification
+        run: |
+          # Modes come from the repository, never forced here.
+          #
+          # This step first used `install -m 0755`, which hid the defect it exists
+          # to catch: scripts/backup_local_daily.sh was committed non-executable,
+          # so ExecStart could not run it. Production survived only because a
+          # hand-installed copy carried the bit, and a `git pull` replaced it with
+          # the tracked one -- leaving the nightly backup broken with nothing
+          # reporting it. Forcing the mode made CI green over exactly that.
+          #
+          # systemd-analyze does detect it: a present but non-executable command
+          # gives "is not executable: Permission denied" and exit 1. Measured.
+          sudo mkdir -p /opt/sora_earth_ai_platform/scripts
+          sudo cp --preserve=mode scripts/backup_local_daily.sh \
+            /opt/sora_earth_ai_platform/scripts/backup_local_daily.sh
+          sudo cp --preserve=mode infra/systemd/sora-backup-local.service \
+            /etc/systemd/system/sora-backup-local.service
+          sudo cp --preserve=mode infra/systemd/sora-backup-local.timer \
+            /etc/systemd/system/sora-backup-local.timer
+
+          for unit in sora-backup-local.service sora-backup-local.timer; do
+            # Status and output both. Measured: systemd-analyze exits 1 whenever it
+            # reports anything, so the status is a real signal -- checked against a
+            # unit with an unknown key and a missing command, which it caught. The
+            # output is asserted empty as well because that is the legible half:
+            # the status says something is wrong, the text says what.
+            rc=0
+            out="$(systemd-analyze verify "/etc/systemd/system/$unit" 2>&1)" || rc=$?
+            if [ -n "$out" ] || [ "$rc" -ne 0 ]; then
+              echo "$unit failed verification (exit $rc):" >&2
+              echo "$out" >&2
+              exit 1
+            fi
+            echo "$unit verified clean"
+          done
+
+      # A dump that has never been restored is a hypothesis. This runs the script
+      # itself against a throwaway Compose stand and restores the archive the
+      # script published -- not one this step made with its own pg_dump, which
+      # would prove PostgreSQL can round-trip a file and nothing about the
+      # container invocation or the copy out, where the real risk lives.
+      #
+      # The test owns its stand: it brings the project up, waits with a real
+      # deadline, and fails if the database never arrives. An earlier version of
+      # this step did the waiting here in a loop that never checked whether the
+      # budget was exhausted, so an unready database fell through to a test that
+      # prints SKIP and exits 0 -- green, having verified nothing.
+      - name: Restore against a real PostgreSQL
+        run: bash tests/test_backup_local_integration.sh
+
+      - name: Remove any stand left behind
+        if: always()
+        run: |
+          docker ps -aq --filter 'name=sora-backup-it-' | xargs -r docker rm -f
+          docker volume ls -q --filter 'name=sora-backup-it-' | xargs -r docker volume rm -f
 
   # A clean database must be reachable from migrations alone. Production was
   # bootstrapped with Base.metadata.create_all(), which is not reproducible from
@@ -343,10 +530,73 @@ jobs:
           print(f"{len(tables)} tables, {len(views)} views")
           PY
 
-      - name: downgrade and upgrade round-trip
+      # f2c9a1d47b30 is irreversible by construction: it creates tables only
+      # where they are absent, so it cannot tell the ones it created from the
+      # ones create_all() had already made -- and those hold data. It refuses
+      # rather than move alembic_version back over tables that stay behind,
+      # which would leave the recorded revision and the actual schema
+      # disagreeing. That refusal is a property of the chain now, so it is
+      # asserted rather than assumed.
+      # The chain has three regions and each needs its own coverage. Writing the
+      # round-trip as "up to the last reversible revision" would have frozen it
+      # there: every revision added above f2c9a1d47b30 from now on would go
+      # untested for ever, which is the opposite of what a round-trip check is
+      # for. The boundary is named explicitly instead, so the region above it
+      # grows with the chain.
+
+      # 1. Everything ABOVE the boundary. Empty today -- f2c9a1d47b30 is head --
+      #    and this becomes real coverage the moment a revision is added on top.
+      #    Verified with a throwaway revision placed above it: its downgrade and
+      #    its upgrade both ran.
+      - name: downgrade and upgrade round-trip above the irreversible revision
         run: |
-          alembic downgrade -1
+          alembic downgrade f2c9a1d47b30
+          alembic current | grep -q f2c9a1d47b30
           alembic upgrade head
+          alembic current | grep -q "$(alembic heads | awk '{print $1}')"
+
+      # 2. The boundary itself. Named rather than reached with `-1`, which will
+      #    stop pointing at it as soon as anything is stacked above.
+      - name: the irreversible revision refuses to be downgraded
+        run: |
+          # Position at the boundary first. The step above ends at head, so once a
+          # revision exists above f2c9a1d47b30 this would downgrade that one before
+          # reaching the boundary -- testing something else and mutating state.
+          alembic downgrade f2c9a1d47b30
+          before="$(alembic current)"
+          if alembic downgrade e3f8a7c15d92 2>/tmp/downgrade.err; then
+            echo "expected the downgrade to be refused, but it succeeded" >&2
+            exit 1
+          fi
+          grep -q "cannot be downgraded automatically" /tmp/downgrade.err
+          if [ "$(alembic current)" != "$before" ]; then
+            echo "the recorded revision moved despite the refusal" >&2
+            exit 1
+          fi
+          echo "refused, and the recorded revision did not move"
+
+      # 3. Everything BELOW the boundary, on its own database: it cannot be
+      #    reached from head any more without crossing f2c9a1d47b30.
+      - name: downgrade and upgrade round-trip below the irreversible revision
+        env:
+          ROUNDTRIP_URL: "postgresql://sora:sora2026@localhost:5432/sora_roundtrip"
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          admin = create_engine(os.environ["DATABASE_URL"], isolation_level="AUTOCOMMIT")
+          with admin.connect() as conn:
+              conn.execute(text("DROP DATABASE IF EXISTS sora_roundtrip"))
+              conn.execute(text("CREATE DATABASE sora_roundtrip"))
+          admin.dispose()
+          PY
+          DATABASE_URL="$ROUNDTRIP_URL" alembic upgrade e3f8a7c15d92
+          DATABASE_URL="$ROUNDTRIP_URL" alembic downgrade -1
+          DATABASE_URL="$ROUNDTRIP_URL" alembic upgrade e3f8a7c15d92
+          # Assert where it landed. `alembic current` alone only proves the command
+          # ran, and passes just as well from the wrong revision.
+          DATABASE_URL="$ROUNDTRIP_URL" alembic current | grep -q e3f8a7c15d92
 
       - name: Offline SQL generation
         run: |

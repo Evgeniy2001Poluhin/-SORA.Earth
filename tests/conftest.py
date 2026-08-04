@@ -12,28 +12,135 @@ os.environ.setdefault("RUN_SCHEDULER", "false")
 import pytest
 from unittest.mock import MagicMock, patch
 
+
+def _provision_test_schema():
+    """Build the schema for the suite's scratch database.
+
+    The application used to do this as a side effect of being imported, which is
+    what let four tables exist with no migration behind them (issue #51). It now
+    checks the schema and refuses to start without it, so the harness provisions
+    it -- explicitly, and here, because pytest imports this file before any test
+    module imports the application.
+
+    Only app.database is imported: it defines the models and the engine without
+    loading the ML models that app.main pulls in.
+    """
+    from app.database import Base, engine
+
+    # Refuse anything that is not obviously a throwaway. checkfirst=True skips
+    # existing tables but still issues CREATE TABLE for missing ones, so pointing
+    # DATABASE_URL at a shared or production database and running pytest would
+    # change that schema -- which is the exact behaviour this branch removes from
+    # the application. Reintroducing it in the harness would be worse, not better.
+    # The guard is on the *action*, not on the name. An allowlist of safe names
+    # cannot be written -- the CI databases are called sora_earth and
+    # sora_bootstrap, and an earlier version of this refused both.
+    #
+    # So: if nothing is missing, nothing is created, and there is nothing to
+    # guard against. That is the CI case, where `alembic upgrade head` has
+    # already run. Only when tables would actually be created does it matter
+    # which database this is, and then only SQLite is taken as obviously
+    # disposable.
+    from sqlalchemy import inspect
+
+    missing = sorted(set(Base.metadata.tables) - set(inspect(engine).get_table_names()))
+    if not missing:
+        return
+    if engine.url.get_backend_name() != "sqlite":
+        raise RuntimeError(
+            "refusing to create %d table(s) in %r: %s\n"
+            "The suite provisions only SQLite for itself. Against a server "
+            "database, run `alembic upgrade head` first -- creating tables here "
+            "is the behaviour this branch removes from the application."
+            % (len(missing), engine.url.database, ", ".join(missing)))
+
+    Base.metadata.create_all(bind=engine, checkfirst=True)
+
+
+_provision_test_schema()
+
 # Create in-memory mock cache BEFORE any imports
 mock_cache = {}
 mock_lists = {}  # For Redis list operations (rpush, lrange)
+mock_expiry = {}  # key -> seconds requested at write time, for ttl()
 
 
 def mock_get(key):
     return mock_cache.get(key)
 
 
-def mock_set(key, value, ttl=None):
+def mock_set(key, value, ttl=None, ex=None, px=None, nx=False, xx=False):
+    """Redis SET, accepting the expiry keywords real callers actually pass.
+
+    This took `ttl` only, so `client.set(key, value, ex=seconds)` -- the form
+    redis-py documents and the refresh-token store uses -- raised TypeError.
+    Callers that wrap the write in `except Exception` then logged a warning and
+    carried on, so the value was never stored and nothing said so out loud.
+
+    The expiry is recorded rather than enforced. Nothing here ages entries, so a
+    test must not expect a key to vanish; but ttl() can report what was asked
+    for, which is what a caller checking "does this expire with the token"
+    actually needs to know.
+    """
     mock_cache[key] = value
+    seconds = ex if ex is not None else (px / 1000 if px is not None else ttl)
+    if seconds is not None:
+        mock_expiry[key] = int(seconds)
     return True
 
 
 def mock_delete(key):
     mock_cache.pop(key, None)
     mock_lists.pop(key, None)
+    mock_expiry.pop(key, None)
     return True
+
+
+def mock_ttl(key):
+    """Redis TTL, with its actual return values.
+
+    -2 when the key is absent and -1 when it exists without an expiry. A fake
+    returning 0 or None for those would read as "expires immediately", which is
+    the opposite of what -1 means.
+    """
+    if key not in mock_cache and key not in mock_lists:
+        return -2
+    return mock_expiry.get(key, -1)
+
+
+def mock_scan_iter(match=None, count=None):
+    """Redis SCAN_ITER over the keys this fake holds.
+
+    Unconfigured, this returned a MagicMock, and iterating one raises TypeError
+    -- which at least fails loudly. `exists` was the dangerous case: it answered
+    truthy for every key and nothing looked wrong.
+    """
+    import fnmatch
+    keys = list(mock_cache) + [k for k in mock_lists if k not in mock_cache]
+    if match is None:
+        yield from keys
+        return
+    yield from (k for k in keys if fnmatch.fnmatch(k, match))
 
 
 def mock_ping():
     return True
+
+
+def mock_exists(*keys):
+    """Redis EXISTS, backed by the same store the other operations use.
+
+    Without this the shared fake answered `exists` with an unconfigured
+    MagicMock, which is truthy -- so any code asking "is this key present?" was
+    told yes for every key it ever asked about. That is what broke the refresh
+    token store: every freshly minted token read as revoked, in the full suite
+    only, because the fake is session-scoped and a file run alone never sees it.
+
+    The failure mode is worse than a missing method, which would have raised.
+    A mock that answers questions it was never taught agrees with whatever the
+    caller hoped, and the tests it breaks look like defects in the code.
+    """
+    return sum(1 for key in keys if key in mock_cache or key in mock_lists)
 
 
 def mock_rpush(key, *values):
@@ -72,6 +179,9 @@ mock_client.set.side_effect = mock_set
 mock_client.setex.side_effect = lambda k, ttl, v: mock_set(k, v, ttl)
 mock_client.delete.side_effect = mock_delete
 mock_client.ping.side_effect = mock_ping
+mock_client.exists.side_effect = mock_exists
+mock_client.ttl.side_effect = mock_ttl
+mock_client.scan_iter.side_effect = mock_scan_iter
 mock_client.rpush.side_effect = mock_rpush
 mock_client.lrange.side_effect = mock_lrange
 mock_client.ltrim.side_effect = mock_ltrim
@@ -387,9 +497,20 @@ def no_scheduler_left_running():
     firing ingestion and retrain jobs for the rest of the session.
     """
     yield
-    try:
-        from app.scheduler import scheduler
-    except Exception:
+    # Look in sys.modules; do not import. This teardown ran for every test, and
+    # `from app.scheduler import scheduler` pulls in app.main with torch, SHAP and
+    # transformers behind it -- more than the per-test timeout on a CI runner. The
+    # body passed, the teardown was killed mid-import, the half-built module was
+    # dropped from sys.modules, and the next test paid it again: PASSED-then-ERROR
+    # at exactly the timeout, once per test, until the job was cancelled.
+    #
+    # A test that never imported app.scheduler cannot have started the scheduler.
+    import sys
+    module = sys.modules.get("app.scheduler")
+    if module is None:
+        return
+    scheduler = getattr(module, "scheduler", None)
+    if scheduler is None:
         return
     if scheduler.running:
         scheduler.remove_all_jobs()

@@ -198,10 +198,20 @@ def get_admin_snapshot(
 
     # DB-fallback: scheduler may run in a separate container (RUN_SCHEDULER=false here)
     # Detect liveness via recent DataRefreshLog entries within 48h window
-    from datetime import timedelta
+    from datetime import timedelta, timezone
     sched_running = sched.get("running")
     if not sched_running:
-        cutoff = datetime.utcnow() - timedelta(hours=48)
+        # Aware, not utcnow(). A naive value bound against a timestamptz column
+        # is read in the session's TimeZone, so the 48-hour window slid with it.
+        # Measured on PostgreSQL 16, rows at 09:00Z and 11:00Z, cutoff 10:00Z:
+        #
+        #     TimeZone=UTC             naive -> 1 row    aware -> 1 row
+        #     TimeZone=Europe/Moscow   naive -> 2 rows   aware -> 1 row
+        #
+        # The server runs UTC, which is why nothing had gone wrong yet. The
+        # model declaring the column timezone-aware does not fix this; the
+        # comparison does.
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
         recent = (
             db.query(DataRefreshLog)
             .filter(DataRefreshLog.started_at > cutoff)

@@ -1,4 +1,5 @@
 import ipaddress
+import math
 import os
 import threading
 import time
@@ -60,27 +61,88 @@ class RateLimiter:
             self.requests.popitem(last=False)
 
     def check(self, key: str, max_requests: int | None = None):
-        limit = self.max_requests if max_requests is None else max_requests
+        """One budget. A thin call onto check_many, which is where the rules are."""
+        self.check_many([(key, self.max_requests if max_requests is None else max_requests)])
+
+    def check_many(self, budgets):
+        """Spend one request against several budgets at once, or against none.
+
+        Two sequential check() calls do not compose. The first records the
+        request before the second has decided, so a request refused by the
+        endpoint budget has already been charged to the general one -- a caller
+        hammering a limited endpoint would burn through their ordinary allowance
+        while being told no. Every budget is therefore examined before any is
+        written to, under one lock, so a refusal costs nothing.
+
+        `budgets` is (key, limit) pairs. Duplicate keys would be charged twice by
+        the loop below, so they are collapsed to the tightest limit named.
+        """
         now = time.monotonic()
+        tightest = {}
+        for key, limit in budgets:
+            tightest[key] = min(limit, tightest.get(key, limit))
+
         with self._lock:
             self._sweep(now)
-            hits = [t for t in self.requests.get(key, ()) if now - t < self.window]
-            if len(hits) >= limit:
-                self.requests[key] = hits
-                self.requests.move_to_end(key)
+
+            # Read every bucket first. Nothing is recorded in this pass.
+            live, blocked = {}, []
+            for key, limit in tightest.items():
+                hits = [t for t in self.requests.get(key, ()) if now - t < self.window]
+                live[key] = hits
+                if len(hits) >= limit:
+                    # The limit travels with the hits. Without it _retry_after
+                    # can only assume the bucket is exactly one slot over, and a
+                    # bucket holding more than its limit -- a tightened config,
+                    # or the same key measured against a looser limit elsewhere
+                    # -- would be told to retry before a slot exists, earning
+                    # another 429.
+                    blocked.append((hits, limit))
+
+            if blocked:
+                # The trimmed lists are still worth storing -- the expired entries
+                # are gone either way -- but no new hit is added.
+                for key, hits in live.items():
+                    if hits:
+                        self.requests[key] = hits
+                        self.requests.move_to_end(key)
                 raise HTTPException(
                     status_code=429,
                     detail="Rate limit exceeded",
-                    headers={"Retry-After": str(self.window)},
+                    headers={"Retry-After": str(self._retry_after(now, blocked))},
                 )
-            hits.append(now)
-            self.requests[key] = hits
-            self.requests.move_to_end(key)
+
+            for key, hits in live.items():
+                hits.append(now)
+                self.requests[key] = hits
+                self.requests.move_to_end(key)
             # At most one eviction per insertion, from the front: a flood of
             # single-use keys is discarded before buckets belonging to callers
             # who keep coming back.
             while len(self.requests) > self.max_buckets:
                 self.requests.popitem(last=False)
+
+    def _retry_after(self, now: float, blocked) -> int:
+        """When the longest-blocking budget frees a slot.
+
+        A fixed window empties one request at a time, so the caller may retry
+        once the oldest hit in the fullest bucket falls out. Reporting the whole
+        window instead would be wrong in both directions: too long when a slot is
+        about to free, and -- if several budgets block -- too short for the one
+        that actually governs.
+        """
+        waits = []
+        for hits, limit in blocked:
+            if not hits:
+                continue
+            # The slot that has to expire is not necessarily the oldest. A bucket
+            # holding len(hits) against a limit of `limit` needs
+            # len(hits) - limit + 1 of them gone before there is room, so the
+            # pivot sits that far in rather than at hits[0]. Recorded in order,
+            # so indexing is enough.
+            pivot = min(len(hits) - 1, max(0, len(hits) - limit))
+            waits.append(self.window - (now - hits[pivot]))
+        return max(1, math.ceil(max(waits))) if waits else self.window
 
     def get_usage(self, key: str):
         now = time.monotonic()
@@ -234,22 +296,37 @@ class SlowAPIMiddleware:
             return
 
         from starlette.requests import Request
+        address = client_address(Request(scope))
         suffix, limit = _budget_for(path)
-        key = client_address(Request(scope))
+
+        # Both budgets, not one of them. A tighter endpoint limit is an extra
+        # restriction on top of the general allowance, not an alternative to it:
+        # charging only the endpoint bucket let a caller spend 100 ordinary
+        # requests and 10 retrains in the same minute, while the documented limit
+        # was 100 in total.
+        budgets = [(address, rate_limiter.max_requests)]
         if suffix:
-            key = f"{key}|{suffix}"
+            budgets.append((f"{address}|{suffix}", limit))
 
         try:
-            rate_limiter.check(key, max_requests=limit)
-        except HTTPException:
+            rate_limiter.check_many(budgets)
+        except HTTPException as exc:
             from starlette.responses import JSONResponse
+            # The header comes from the exception, not from a constant.
+            #
+            # This rebuilt the response with str(rate_limiter.window), discarding
+            # the per-budget Retry-After check_many had just computed. Over HTTP
+            # the behaviour was therefore identical to the fixed-window value
+            # this change exists to replace -- only direct callers, which is to
+            # say the tests, ever saw the new number. A fix visible only to its
+            # own tests is not a fix.
+            retry_after = (exc.headers or {}).get(
+                "Retry-After", str(rate_limiter.window)
+            )
             response = JSONResponse(
                 status_code=429,
                 content={"detail": "Rate limit exceeded"},
-                # Fixed window, so the caller waits at most one window. Saying so
-                # is what lets a well-behaved client back off instead of retrying
-                # immediately and spending the next window too.
-                headers={"Retry-After": str(rate_limiter.window)},
+                headers={"Retry-After": retry_after},
             )
             await response(scope, receive, send)
             return

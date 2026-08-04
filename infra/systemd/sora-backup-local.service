@@ -1,0 +1,33 @@
+[Unit]
+Description=SORA daily local PostgreSQL dump (operational copy, not disaster recovery)
+Documentation=https://github.com/Evgeniy2001Poluhin/-SORA.Earth/issues/51
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sora_earth_ai_platform/scripts/backup_local_daily.sh
+
+# The lock lives here, created as this unit's user and removed on stop, so the
+# script never has to guess a path or trust one it did not create.
+RuntimeDirectory=sora-backup
+RuntimeDirectoryMode=0700
+
+# No credentials on the command line or in this file. pg_dump runs inside the
+# container as its own user; nothing secret is passed through argv, where every
+# process on the host can read it from /proc/<pid>/cmdline.
+Environment=BACKUP_DIR=/var/backups/sora
+Environment=LOCK_FILE=/run/sora-backup/daily.lock
+Environment=KEEP_DAYS=7
+
+# A skipped run because another is still going is not a failure.
+SuccessExitStatus=0
+
+# Failures are visible: journal, and systemd marks the unit failed rather than
+# letting a broken schedule look healthy -- which is exactly how a backup that
+# has not run for months goes unnoticed.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
