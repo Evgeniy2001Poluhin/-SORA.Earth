@@ -161,23 +161,42 @@ check "and it is gone too" \
 
 fi
 
-if want "a predicate without its own process group is refused"; then
-# The tool's own precondition, checked rather than assumed. `set -m` gives an
-# asynchronous command a private group on macOS and on Linux -- both verified --
-# but that is a platform property, not a POSIX guarantee. Unchecked it would
-# degrade in silence: a negative kill against a group the tool does not own
-# matches nothing, and the sweep goes back to leaking without saying so.
-#
-# `ps` is shadowed to report a group the predicate is not the leader of. The
-# tool must refuse rather than continue with a guarantee it cannot keep.
-mkdir -p "$WORK/bin"
-printf '#!/bin/sh\necho "  99999"\n' > "$WORK/bin/ps"
-chmod +x "$WORK/bin/ps"
-PSOUT="$(PATH="$WORK/bin:$PATH" bash "$SCRIPT" --deadline 5 --interval 1 --until 'sleep 2; true' 2>&1)"
-check "refused with EX_OSERR"   "$?" "71"
-check "and says why" \
-    "$(printf '%s' "$PSOUT" | grep -qc 'private process group' && echo yes || echo no)" "yes"
-rm -rf "${WORK:?}/bin"
+
+
+if want "the predicate really does get its own process group"; then
+# start_new_session=True is an operating-system guarantee rather than a platform
+# property to probe for -- which is why there is no handshake here, and no
+# `PGID == PID` check. Asserted anyway: the whole cleanup rests on it, and an
+# invariant with no test is the thing that hid three of this branch's defects.
+rm -f "$WORK/pgid"
+run --deadline 10 --interval 1 --until "sh -c 'ps -o pgid= -p \$\$ > $WORK/pgid; true'"
+check "exit status is 0"        "$STATUS" "0"
+PG="$(tr -d '[:space:]' < "$WORK/pgid" 2>/dev/null)"
+# Against this harness's *group*, not its pid. Comparing with $$ compared a
+# group id to a process id: two numbers that differ for unrelated reasons, so
+# the check passed even with start_new_session turned off.
+MYPG="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+check "the predicate is in a group of its own" \
+    "$( [ -n "$PG" ] && [ "$PG" != "$MYPG" ] && echo yes || echo no )" "yes"
+
+fi
+
+if want "a signal during the spawn is honoured once there is a group"; then
+# The contract, stated rather than overpromised: a signal arriving during the
+# spawn is recorded by the handler and acted on as soon as Popen returns, at
+# which point the group is stopped. Not "the predicate never ran" -- that needs
+# a gate pipe, and for a check the caller wrote it is not worth the cost.
+rm -f "$WORK/spawnmark"
+( bash "$SCRIPT" --deadline 60 --interval 1 \
+    --until "echo x >> $WORK/spawnmark; sleep 20" >/dev/null 2>&1 ) &
+SPAWNER=$!
+sleep 1
+kill -TERM "$SPAWNER" 2>/dev/null
+sleep 3
+check "the waiter is gone" "$(kill -0 "$SPAWNER" 2>/dev/null && echo alive || echo gone)" "gone"
+check "and its predicate group with it" \
+    "$(pgrep -f "sleep 20" >/dev/null 2>&1 && echo alive || echo gone)" "gone"
+
 fi
 
 if want "a satisfied wait leaves nothing behind either"; then
@@ -225,9 +244,19 @@ sleep 3
 PREDPID="$(cat "$WORK/pred.pid" 2>/dev/null)"
 check "the predicate is running" \
     "$( [ -n "$PREDPID" ] && kill -0 "$PREDPID" 2>/dev/null && echo yes || echo no )" "yes"
+T0="$(date +%s)"
 kill -TERM "$LONG" 2>/dev/null
-sleep 3
+for _ in $(seq 1 10); do
+    sleep 1
+    kill -0 "$LONG" 2>/dev/null || break
+done
+STOPTIME=$(( $(date +%s) - T0 ))
 check "the waiter is gone"    "$(kill -0 "$LONG" 2>/dev/null && echo alive || echo gone)" "gone"
+# Promptly. An exited leader stays a zombie until it is reaped, and a zombie
+# still answers killpg(0) -- so a grace loop that does not reap runs its full
+# length on every stop. Measured before that was fixed: 6s to stop a predicate
+# that had already died.
+check "and promptly"          "$( [ "$STOPTIME" -le 4 ] && echo yes || echo no )" "yes"
 check "the predicate is gone" "$(kill -0 "$PREDPID" 2>/dev/null && echo alive || echo gone)" "gone"
 
 fi

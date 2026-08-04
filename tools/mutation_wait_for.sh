@@ -1,192 +1,172 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016
-#   The mutation programs are literal text handed to a Python replacement, not
-#   shell to be evaluated. Single quotes keep $VARIABLES inside them unexpanded,
-#   so the anchors reach the script's source as written.
-# Mutation testing for tools/wait_for.sh.
+#   The mutation programs are literal Python text handed to a replacement, not
+#   shell to be evaluated. Single quotes keep $ and interpolation-looking text
+#   unexpanded, so the anchors reach the source as written.
+# Mutation testing for tools/wait_for.py.
 #
-# "the tests pass" is a statement about the tests. Each mutation below removes
-# one property the tool exists for; the named test must fail. Four of them are
-# defects this tool actually shipped with: a signal handler that tidied up and
-# kept waiting, a deadline that did not bound the predicate, a kill that reached
-# only the direct child, and a sweep skipped when the leader died first.
+# "the tests pass" is a statement about the tests. Each mutation removes one
+# property the tool exists for; the named test must fail. Six of them are
+# defects this branch actually shipped -- five in the shell implementation that
+# preceded this one, one here.
 #
-# The tracked script is never modified. Mutants live in a temp directory.
+# Results are reported in three categories, not two. A "missed" that lumps a
+# surviving mutant together with one that never applied hides a broken harness
+# inside a coverage number: an earlier run reported 6 missed, of which 2 were
+# anchors that no longer matched code I had rewritten.
+#
+# The tracked file is never modified. Mutants live in a temp directory, each
+# anchor must match exactly once, and each mutant is parsed before use -- a
+# mutant that does not compile tests nothing.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ORIGINAL="$ROOT/tools/wait_for.sh"
+ORIGINAL="$ROOT/tools/wait_for.py"
 TESTS="$ROOT/tests/test_wait_for.sh"
+WRAPPER="$ROOT/tools/wait_for.sh"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"; pkill -P $$ 2>/dev/null' EXIT
+trap 'rm -rf "${WORK:?}"; pkill -P $$ 2>/dev/null' EXIT
 
-PASS=0; FAIL=0
+KILLED=0; SURVIVED=0; INVALID=0
+
+# The suite invokes the wrapper, which execs a fixed path. A mutant needs its
+# own wrapper pointing at itself.
+mutant_wrapper() {
+    printf '#!/usr/bin/env bash\nexec python3 %s "$@"\n' "$1" > "$WORK/wrapper.sh"
+    chmod +x "$WORK/wrapper.sh"
+    printf '%s' "$WORK/wrapper.sh"
+}
 
 run_suite() {
     SCRIPT_UNDER_TEST="$1" WAIT_FOR_ONLY="${2-}" bash "$TESTS" 2>&1
 }
 
 # name | section the mutation must break | assertion that must fail | program
-#
-# The section is named so the run costs seconds rather than minutes: repeating
-# the whole suite once per mutation would be ~8 minutes to answer ten yes/no
-# questions; narrowed, the run is 232s.
-# The baseline below still runs all of it -- narrowing that would leave every
-# section no mutation targets unproven.
 run_mutation() {
     local name="$1" section="$2" expect="$3" program="$4"
-    local mutant="$WORK/mutant.sh"
+    local mutant="$WORK/mutant.py"
     cp "$ORIGINAL" "$mutant"
     if ! python3 - "$mutant" "$program" <<'PY'
-import sys
+import ast, sys
 path, prog = sys.argv[1], sys.argv[2]
 old, new = prog.split("||=>||")
 s = open(path).read()
-if old not in s:
-    sys.exit("MUTATION ANCHOR NOT FOUND")
-open(path, "w").write(s.replace(old, new, 1))
+if s.count(old) != 1:
+    sys.exit("ANCHOR MATCHED %d TIMES, EXPECTED 1" % s.count(old))
+s = s.replace(old, new, 1)
+open(path, "w").write(s)
+try:
+    ast.parse(s)
+except SyntaxError as exc:
+    sys.exit("MUTANT DOES NOT PARSE: %s" % exc)
 PY
     then
-        printf '  ERROR  %-40s anchor not found — mutation never applied\n' "$name"
-        FAIL=$((FAIL+1)); return
+        printf '  invalid  %-42s mutation never applied\n' "$name"
+        INVALID=$((INVALID+1)); return
     fi
 
     # Captured, never piped. Under `set -o pipefail` the suite's non-zero exit --
-    # which is exactly what a caught mutation produces -- would become the
-    # pipeline's status and invert the verdict. That defect shipped once already,
-    # in tools/mutation_backfill_periods.sh.
-    local out
-    out="$(run_suite "$mutant" "$section")"
+    # exactly what a killed mutant produces -- would become the pipeline's
+    # status and invert the verdict. That defect shipped once already.
+    local out wrapper
+    wrapper="$(mutant_wrapper "$mutant")"
+    out="$(run_suite "$wrapper" "$section")"
     if printf '%s' "$out" | grep -q "FAIL.*$expect"; then
-        printf '  caught %-40s → "%s" failed\n' "$name" "$expect"
-        PASS=$((PASS+1))
+        printf '  killed   %-42s → "%s" failed\n' "$name" "$expect"
+        KILLED=$((KILLED+1))
     else
-        printf '  MISSED %-40s → "%s" still passed\n' "$name" "$expect"
-        FAIL=$((FAIL+1))
+        printf '  survived %-42s → "%s" still passed\n' "$name" "$expect"
+        SURVIVED=$((SURVIVED+1))
     fi
 }
 
 echo "== the unmodified tool passes its own suite =="
-BASELINE="$(run_suite "$ORIGINAL")"
+BASELINE="$(run_suite "$WRAPPER")"
 if printf '%s' "$BASELINE" | grep -q "failed: 0"; then
-    printf '  ok     baseline is green\n'
+    printf '  ok       baseline is green\n'
 else
-    printf '  FAIL   baseline is not green; nothing below means anything\n'
+    printf '  FAIL     baseline is not green; nothing below means anything\n'
     printf '%s\n' "$BASELINE" | tail -5
-    FAIL=$((FAIL+1))
+    INVALID=$((INVALID+1))
 fi
 
 echo
 echo "== each property, removed =="
 
-# The defect the suite found on its first run: the handler tidied up, returned,
-# and the loop carried on waiting while the caller believed it had stopped.
-#
-# The first version of this mutation anchored on `trap cleanup EXIT` and appended
-# TERM to it. That changed nothing: the `trap 'exit 143' TERM` four lines below
-# still ran and still overrode it, so the mutant behaved correctly and the run
-# reported MISSED. A mutation that does not do what its name says produces a
-# verdict about nothing -- the anchor was found, the file was written, and the
-# result was still meaningless.
-run_mutation "a signal is tidied up but not obeyed" \
-    "a signal stops it" \
-    "the runner is gone" \
-    "trap 'exit 143' TERM||=>||trap cleanup TERM"
-
 # A default deadline is one somebody chose for a different wait.
 run_mutation "deadline becomes optional" \
     "a deadline is required" \
     "usage error" \
-    '[ -n "$DEADLINE" ] || die "--deadline is required||=>||DEADLINE="${DEADLINE:-600}"; [ -n "$DEADLINE" ] || die "--deadline is required'
+    '    if args.deadline is None:||=>||    args.deadline = args.deadline or 600
+    if False:'
 
-# Without the guard in the gap between attempts, a 3s budget sleeps 30s, and an
-# outer timeout kills the run before it can report why it stopped.
-run_mutation "interval may overshoot the deadline" \
-    "the interval never overshoots" \
-    "stopped at the deadline" \
-    '    resume=$(( $(date +%s) + INTERVAL ))
-    while [ "$(date +%s)" -lt "$resume" ]; do
-        guard
-        sleep "$POLL"
-    done||=>||    sleep "$INTERVAL"'
-
-# The blocker review found. With the predicate unsupervised, the deadline, the
-# cancellation and the subject are all invisible until it returns of its own
-# accord -- so `--deadline 3 --until "sleep 20; false"` takes 20 seconds and
-# then reports the deadline as though it had been enforced.
+# The blocker review found in the shell version: with the predicate
+# unsupervised, the deadline is invisible until it returns of its own accord.
 run_mutation "the deadline does not bound the predicate" \
     "the deadline bounds the predicate" \
     "bounded by the deadline" \
-    '    while kill -0 "$predicate_pid" 2>/dev/null; do
-        guard
-        sleep "$POLL"
-    done||=>||    while kill -0 "$predicate_pid" 2>/dev/null; do
-        sleep "$POLL"
-    done'
+    '            while proc.poll() is None:
+                outcome = guard()
+                if outcome is not None:
+                    stop_group(proc, pgid, graceful=True)
+                    return outcome
+                time.sleep(POLL)||=>||            while proc.poll() is None:
+                time.sleep(POLL)'
 
-# A predicate that forks leaves a grandchild that killing the direct child never
-# reaches. Both signals have to be group-wide: leaving the KILL group-wide would
-# still collect the tree and hide the loss of the TERM.
-run_mutation "only the direct child is stopped" \
+# A predicate that forks leaves a grandchild that killing the leader never
+# reaches. This is what the process group is for.
+run_mutation "only the leader is stopped" \
     "the whole tree goes" \
     "and it is gone too" \
-    '    kill -TERM -- "-$predicate_pgid" 2>/dev/null
+    '            os.killpg(pgid, sig)||=>||            os.kill(pgid, sig)'
 
-    local ticks=0
-    while kill -0 -- "-$predicate_pgid" 2>/dev/null && [ "$ticks" -lt "$GRACE_TICKS" ]; do
-        sleep "$POLL"
-        ticks=$((ticks + 1))
-    done
-
-    kill -KILL -- "-$predicate_pgid" 2>/dev/null||=>||    kill -TERM "$predicate_pgid" 2>/dev/null
-
-    local ticks=0
-    while kill -0 "$predicate_pgid" 2>/dev/null && [ "$ticks" -lt "$GRACE_TICKS" ]; do
-        sleep "$POLL"
-        ticks=$((ticks + 1))
-    done
-
-    kill -KILL "$predicate_pgid" 2>/dev/null'
-
-# The leak review found after the deadline fix. Keying the sweep on the leader's
-# liveness lets a predicate that backgrounds work and exits hand back a running
-# child -- and the tree test cannot see it, because its predicate ends in `wait`
-# so the leader never dies first.
-run_mutation "a dead leader skips the group sweep" \
-    "leaves nothing behind" \
+# The leader can exit 0 having left something running, and the next attempt
+# overwrites the group id.
+run_mutation "no sweep after an attempt" \
+    "a satisfied wait leaves nothing behind" \
     "and success swept it up" \
-    '    [ -n "$predicate_pgid" ] || return 0||=>||    [ -n "$predicate_pgid" ] || return 0
-    if ! kill -0 "$predicate_pid" 2>/dev/null; then predicate_pgid=""; return 0; fi'
+    '            stop_group(proc, pgid, graceful=True)
+            proc, pgid = None, None||=>||            proc, pgid = None, None'
 
-# Without a sweep after each attempt, the next attempt overwrites the group id
-# and the previous attempt'"'"'s children become unreachable.
-run_mutation "no sweep between attempts" \
-    "does not leak into the next" \
-    "none of their children survive" \
-    '    stop_predicate
+# An exited leader stays a zombie until reaped, and a zombie answers killpg(0).
+# Without the reap the grace period runs its full length on every stop.
+run_mutation "the grace period never reaps the leader" \
+    "signal during a long predicate" \
+    "and promptly" \
+    '            if proc is not None:
+                proc.poll()
+            if not group_exists(pgid):||=>||            if not group_exists(pgid):'
 
-    [ "$predicate_status" -eq 0 ]||=>||    [ "$predicate_status" -eq 0 ]'
+# The whole point of start_new_session: without it the predicate shares the
+# waiter's group, and every group signal reaches the waiter itself.
+run_mutation "the predicate shares the caller's group" \
+    "its own process group" \
+    "the predicate is in a group of its own" \
+    '                    start_new_session=True,||=>||                    start_new_session=False,'
 
-# The tool's own precondition. Unchecked, a platform where `set -m` does not
-# give a private group turns every group signal into a no-op that matches
-# nothing, and the sweep leaks in silence rather than refusing.
-run_mutation "the private group is assumed, not checked" \
-    "without its own process group" \
-    "refused with EX_OSERR" \
-    '    if [ -n "$observed" ] && [ "$observed" != "$predicate_pid" ]; then||=>||    if false; then'
+# The gap between attempts, unguarded: a 3s budget sleeps 30s.
+run_mutation "interval may overshoot the deadline" \
+    "the interval never overshoots" \
+    "stopped at the deadline" \
+    '            resume = time.monotonic() + args.interval
+            while time.monotonic() < resume:
+                outcome = guard()
+                if outcome is not None:
+                    return outcome
+                time.sleep(POLL)||=>||            time.sleep(args.interval)'
 
 # The 13h39m loop: the process behind the predicate was already dead.
 run_mutation "a dead subject is not noticed" \
     "a subject that exits ends the wait" \
     "exit status is 2" \
-    'if [ -n "$PID" ] && ! kill -0 "$PID" 2>/dev/null; then||=>||if false; then'
+    '        if args.pid is not None:||=>||        if False:'
 
 # The five loops still polling results already obtained by another route.
 run_mutation "cancellation is ignored" \
     "a wait can be cancelled" \
     "exit status is 3" \
-    'if [ -n "$CANCEL" ] && [ -e "$CANCEL" ]; then||=>||if false; then'
+    '        if args.cancel and os.path.exists(args.cancel):||=>||        if False:'
 
 echo
-echo "  caught: $PASS   missed: $FAIL"
-[ "$FAIL" -eq 0 ]
+echo "  killed: $KILLED   survived: $SURVIVED   invalid: $INVALID"
+[ "$SURVIVED" -eq 0 ] && [ "$INVALID" -eq 0 ]
