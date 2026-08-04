@@ -178,6 +178,10 @@ def test_an_incomplete_answer_yields_no_verdict_even_with_a_candidate():
     status, year, n = classify(34536.66, HISTORY, {"incomplete": True})
     assert status == OUTSIDE_WINDOW == "outside_query_window"
     assert year is None, "a candidate from a partial answer must not be adopted"
+    # `n` was bound and never checked. A partial answer that reported
+    # `period_candidates = 1` would put a count on the row that reads as
+    # evidence -- one candidate found, in a search that did not finish.
+    assert n is None, "a partial answer must not report a candidate count"
 
     # And the same value in a complete one.
     assert classify(34536.66, HISTORY, {})[0] == RECOVERED
