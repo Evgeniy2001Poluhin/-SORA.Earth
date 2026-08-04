@@ -62,25 +62,85 @@ _provision_test_schema()
 # Create in-memory mock cache BEFORE any imports
 mock_cache = {}
 mock_lists = {}  # For Redis list operations (rpush, lrange)
+mock_expiry = {}  # key -> seconds requested at write time, for ttl()
 
 
 def mock_get(key):
     return mock_cache.get(key)
 
 
-def mock_set(key, value, ttl=None):
+def mock_set(key, value, ttl=None, ex=None, px=None, nx=False, xx=False):
+    """Redis SET, accepting the expiry keywords real callers actually pass.
+
+    This took `ttl` only, so `client.set(key, value, ex=seconds)` -- the form
+    redis-py documents and the refresh-token store uses -- raised TypeError.
+    Callers that wrap the write in `except Exception` then logged a warning and
+    carried on, so the value was never stored and nothing said so out loud.
+
+    The expiry is recorded rather than enforced. Nothing here ages entries, so a
+    test must not expect a key to vanish; but ttl() can report what was asked
+    for, which is what a caller checking "does this expire with the token"
+    actually needs to know.
+    """
     mock_cache[key] = value
+    seconds = ex if ex is not None else (px / 1000 if px is not None else ttl)
+    if seconds is not None:
+        mock_expiry[key] = int(seconds)
     return True
 
 
 def mock_delete(key):
     mock_cache.pop(key, None)
     mock_lists.pop(key, None)
+    mock_expiry.pop(key, None)
     return True
+
+
+def mock_ttl(key):
+    """Redis TTL, with its actual return values.
+
+    -2 when the key is absent and -1 when it exists without an expiry. A fake
+    returning 0 or None for those would read as "expires immediately", which is
+    the opposite of what -1 means.
+    """
+    if key not in mock_cache and key not in mock_lists:
+        return -2
+    return mock_expiry.get(key, -1)
+
+
+def mock_scan_iter(match=None, count=None):
+    """Redis SCAN_ITER over the keys this fake holds.
+
+    Unconfigured, this returned a MagicMock, and iterating one raises TypeError
+    -- which at least fails loudly. `exists` was the dangerous case: it answered
+    truthy for every key and nothing looked wrong.
+    """
+    import fnmatch
+    keys = list(mock_cache) + [k for k in mock_lists if k not in mock_cache]
+    if match is None:
+        yield from keys
+        return
+    yield from (k for k in keys if fnmatch.fnmatch(k, match))
 
 
 def mock_ping():
     return True
+
+
+def mock_exists(*keys):
+    """Redis EXISTS, backed by the same store the other operations use.
+
+    Without this the shared fake answered `exists` with an unconfigured
+    MagicMock, which is truthy -- so any code asking "is this key present?" was
+    told yes for every key it ever asked about. That is what broke the refresh
+    token store: every freshly minted token read as revoked, in the full suite
+    only, because the fake is session-scoped and a file run alone never sees it.
+
+    The failure mode is worse than a missing method, which would have raised.
+    A mock that answers questions it was never taught agrees with whatever the
+    caller hoped, and the tests it breaks look like defects in the code.
+    """
+    return sum(1 for key in keys if key in mock_cache or key in mock_lists)
 
 
 def mock_rpush(key, *values):
@@ -119,6 +179,9 @@ mock_client.set.side_effect = mock_set
 mock_client.setex.side_effect = lambda k, ttl, v: mock_set(k, v, ttl)
 mock_client.delete.side_effect = mock_delete
 mock_client.ping.side_effect = mock_ping
+mock_client.exists.side_effect = mock_exists
+mock_client.ttl.side_effect = mock_ttl
+mock_client.scan_iter.side_effect = mock_scan_iter
 mock_client.rpush.side_effect = mock_rpush
 mock_client.lrange.side_effect = mock_lrange
 mock_client.ltrim.side_effect = mock_ltrim
