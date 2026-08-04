@@ -9,6 +9,11 @@
 [Unit]
 Description=SORA.Earth encrypted off-host database backup
 Documentation=file:///opt/sora_earth_ai_platform/docs/BACKUP_AUTOMATION.md
+# Wants= as well as After=. After= orders startup and nothing more: it does not
+# wait for the network to be up. This unit uploads to S3, and a Persistent=true
+# catch-up run at boot would otherwise start while the interface is still coming
+# up and fail for a reason that looks like a broken backup rather than a race.
+Wants=network-online.target
 After=docker.service network-online.target
 Requires=docker.service
 

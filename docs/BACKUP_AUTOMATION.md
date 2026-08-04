@@ -101,7 +101,12 @@ server newer than themselves. That is why no Dockerfile ships `scripts/`.
 sudo install -m 0644 infra/systemd/sora-backup.service /etc/systemd/system/
 sudo install -m 0644 infra/systemd/sora-backup.timer   /etc/systemd/system/
 sudo install -d -m 0700 -o sora -g sora /etc/sora-earth
-sudo install -m 0600 -o sora -g sora /dev/null /etc/sora-earth/backup.env
+# Created only when absent. `install /dev/null` truncates the destination, so
+# running this a second time -- following the same documented instructions --
+# erases the S3 credentials and every setting in the file, and the next backup
+# fails with no obvious connection to what was done.
+sudo test -e /etc/sora-earth/backup.env \
+  || sudo install -m 0600 -o sora -g sora /dev/null /etc/sora-earth/backup.env
 # then write BACKUP_RECIPIENT_KEY, BACKUP_S3_* and PG_CONTAINER into that file
 sudo systemctl daemon-reload
 sudo systemctl enable --now sora-backup.timer

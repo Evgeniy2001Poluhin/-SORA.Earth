@@ -52,9 +52,21 @@ def test_the_lock_would_accept_that_directory():
     """The mode has to satisfy validate_runtime_dir's own arithmetic, not merely
     look restrictive: it rejects anything with a group or other bit set."""
     service_text = (UNITS / "sora-backup.service").read_text()
-    mode = [l for l in service_text.splitlines() if l.startswith("RuntimeDirectoryMode=")][0]
-    octal = int(mode.split("=", 1)[1], 8)
+    modes = [
+        line.split("=", 1)[1].strip()
+        for line in service_text.splitlines()
+        if line.startswith("RuntimeDirectoryMode=")
+    ]
+    assert modes, "the unit sets no RuntimeDirectoryMode"
+
+    octal = int(modes[0], 8)
+    # No group or other bits, which is what validate_runtime_dir checks --
     assert octal & 0o077 == 0, f"{oct(octal)} would be refused by validate_runtime_dir"
+    # -- and the owner must actually be able to use it. The bitmask alone
+    # accepts 0500, which passes validate_runtime_dir and then leaves the
+    # service unable to create its own lock file: refused for a reason the
+    # test was written to rule out.
+    assert octal == 0o700, f"{oct(octal)} is not 0700; the owner needs write and search"
 
 
 def test_the_service_runs_the_script_that_exists(service):
@@ -62,7 +74,12 @@ def test_the_service_runs_the_script_that_exists(service):
     script = exec_start.split()[0]
     assert script.endswith("/scripts/backup_run.sh")
     assert (REPO / "scripts" / "backup_run.sh").exists()
-    assert exec_start.split()[1:], "no database argument; backup_run.sh exits 2 without one"
+    # The exact command, not merely "some argument".
+    #
+    # `split()[1:]` is true for any non-empty tail, so backing up the wrong
+    # database would pass -- and a backup of the wrong database is worse than no
+    # backup, because it looks like one.
+    assert exec_start.split()[1:] == ["sora_earth"], exec_start
 
 
 def test_a_missed_backup_is_not_simply_lost(timer):
@@ -72,8 +89,19 @@ def test_a_missed_backup_is_not_simply_lost(timer):
 
 
 def test_the_schedule_is_spread(timer):
-    assert timer.get("Timer", "OnCalendar")
-    assert timer.get("Timer", "RandomizedDelaySec")
+    """The documented schedule, not merely the presence of the keys.
+
+    These asserted truthiness, so `OnCalendar` at any hour passed and
+    `RandomizedDelaySec=0` -- no spreading at all -- passed too. Neither
+    protected what the document promises.
+    """
+    assert timer.get("Timer", "OnCalendar") == "*-*-* 03:00:00", (
+        "the documented nightly 03:00 schedule"
+    )
+    delay = timer.get("Timer", "RandomizedDelaySec")
+    assert delay not in ("0", "0s", None), (
+        "RandomizedDelaySec=0 spreads nothing; hosts would all start together"
+    )
 
 
 def test_both_units_are_installable(service, timer):
@@ -84,6 +112,23 @@ def test_both_units_are_installable(service, timer):
 def test_no_secret_is_written_into_the_unit(service):
     """The envelope's premise is that this host holds only a public key."""
     text = (UNITS / "sora-backup.service").read_text()
-    assert "EnvironmentFile=" in text
-    for marker in ("SECRET", "PASSWORD", "AWS_SECRET", "PRIVATE KEY", "IDENTITY_KEY"):
-        assert marker not in text.upper().replace("EnvironmentFile=".upper(), ""), marker
+
+    # The policy, not a list of words that might appear in a secret.
+    #
+    # A denylist passes anything nobody thought of: `Environment=BACKUP_S3_ACCESS_KEY_ID=...`
+    # contains none of SECRET, PASSWORD, AWS_SECRET, PRIVATE KEY or IDENTITY_KEY,
+    # and would have sailed through while putting a credential in a
+    # world-readable unit file.
+    #
+    # The rule is simpler and complete: secrets arrive through EnvironmentFile,
+    # and the only inline Environment= permitted is the runtime directory, which
+    # is a path rather than a credential.
+    assert "EnvironmentFile=/etc/sora-earth/backup.env" in text
+
+    inline = [
+        line.strip() for line in text.splitlines()
+        if line.strip().startswith("Environment=")
+    ]
+    assert inline == ["Environment=BACKUP_RUNTIME_DIR=/run/sora-earth"], (
+        "an inline Environment= assignment other than the runtime directory: %r" % inline
+    )
