@@ -20,6 +20,7 @@ import logging
 import time
 import asyncio
 from datetime import datetime, timezone
+from app.ingesters.classification import classify_run
 from typing import Optional, Dict, Any
 from functools import wraps
 
@@ -158,10 +159,16 @@ def _log_job_execution(
         )
         db.add(log)
         db.commit()
-        logger.info(
-            "Job %s: %s (processed=%d, rejected=%d, duration=%.2fs)",
+        # Warning for anything short of success. A degraded run recorded at
+        # info level disappears wherever info is filtered -- which is most
+        # places -- leaving exactly the invisibility this change removes from
+        # the database while keeping it in the logs.
+        emit = logger.info if status == "success" else logger.warning
+        emit(
+            "Job %s: %s (processed=%d, rejected=%d, duration=%.2fs)%s",
             job_name, status, records_processed, records_rejected,
-            duration_sec or 0
+            duration_sec or 0,
+            " -- %s" % error_message if error_message and status != "success" else "",
         )
     except Exception as e:
         db.rollback()
@@ -217,20 +224,49 @@ def scheduled_openaq_ingestion():
         if _is_fatal_persist_error(persist_result):
             raise RuntimeError(f"persistence failed for openaq: {persist_result.errors}")
 
+        # What the run achieved, not whether it threw. This job recorded
+        # "success" on every non-exception path, which is how sixty-two openaq
+        # runs came to report success having written nothing: the source is
+        # reachable, authenticated and empty (#56, #57).
+        verdict = classify_run(
+            received=persist_result.received,
+            accepted=persist_result.accepted,
+            rejected=persist_result.rejected,
+            # No write_failed here, deliberately. _is_fatal_persist_error()
+            # above already raises on a "persist_error:" entry, so this line is
+            # unreachable with one present -- I added it anyway, following a
+            # review finding that was correct for runner.py, which has no such
+            # guard, without reading what stood four lines higher. Dead code
+            # that looks load-bearing is worse than none.
+        )
+
         # Update Prometheus metrics only after persistence has succeeded, counting
-        # accepted (persisted) records rather than fetched ones.
-        sora_environmental_ingestion_total.labels(source="openaq", status="success").inc()
+        # accepted (persisted) records rather than fetched ones. The label carries
+        # the verdict, so a degraded run stops being indistinguishable from a
+        # working one on the dashboard as well as in the table.
+        sora_environmental_ingestion_total.labels(
+            source="openaq", status=verdict.status
+        ).inc()
         for indicator, count in _accepted_indicator_counts(signals, persist_result).items():
             sora_environmental_observations_total.labels(
                 source="openaq", indicator=indicator
             ).inc(count)
 
         # Calculate data freshness (time since most recent observation)
-        if signals:
-            latest_time = max(
-                s.observed_at for s in signals
-                if isinstance(s.observed_at, datetime)
-            )
+        # Guarded on the timestamps, not on the signals.
+        #
+        # `if signals:` is not the condition this needs: the generator filters to
+        # signals whose observed_at is a datetime, and a batch where none is --
+        # a source that omitted the field, or returned it unparseable -- leaves
+        # max() with an empty sequence and raises ValueError, failing a run that
+        # had otherwise succeeded. Found by a test that passed a signal without a
+        # timestamp, which is a shape the real sources can produce.
+        observed_times = [
+            s.observed_at for s in signals
+            if isinstance(s.observed_at, datetime)
+        ]
+        if observed_times:
+            latest_time = max(observed_times)
             freshness_seconds = (datetime.now(timezone.utc) - latest_time).total_seconds()
             sora_environmental_source_freshness_seconds.labels(source="openaq").set(
                 freshness_seconds
@@ -242,10 +278,11 @@ def scheduled_openaq_ingestion():
         # persisted (PersistResult), never the fetch-time quality-flag count.
         _log_job_execution(
             job_name=job_name,
-            status="success",
+            status=verdict.status,
             duration_sec=duration,
             records_processed=persist_result.accepted,
             records_rejected=persist_result.rejected,
+            error_message=verdict.failure_reason,
             metadata={
                 "fetched_count": fetched_count,
                 "quality_valid_count": len(quality_valid_signals),
@@ -265,8 +302,12 @@ def scheduled_openaq_ingestion():
             persist_result.inserted, persist_result.updated, duration
         )
 
+        # The verdict, not a constant. Returning "success" beside a row
+        # recorded as degraded gives the same run two different answers
+        # depending on who asks, which is how the two drift apart.
         return {
-            "status": "success",
+            "status": verdict.status,
+            "failure_reason": verdict.failure_reason,
             "signals_count": fetched_count,
             "valid_count": len(quality_valid_signals),
             "rejected_count": quality_invalid_count,
@@ -339,18 +380,40 @@ def scheduled_openmeteo_ingestion():
 
         # Update Prometheus metrics only after persistence has succeeded, counting
         # accepted (persisted) records rather than fetched ones.
-        sora_environmental_ingestion_total.labels(source="openmeteo", status="success").inc()
+        verdict = classify_run(
+            received=persist_result.received,
+            accepted=persist_result.accepted,
+            rejected=persist_result.rejected,
+            # No write_failed here, deliberately. _is_fatal_persist_error()
+            # above already raises on a "persist_error:" entry, so this line is
+            # unreachable with one present -- I added it anyway, following a
+            # review finding that was correct for runner.py, which has no such
+            # guard, without reading what stood four lines higher. Dead code
+            # that looks load-bearing is worse than none.
+        )
+        sora_environmental_ingestion_total.labels(
+            source="openmeteo", status=verdict.status
+        ).inc()
         for indicator, count in _accepted_indicator_counts(signals, persist_result).items():
             sora_environmental_observations_total.labels(
                 source="openmeteo", indicator=indicator
             ).inc(count)
 
         # Calculate data freshness
-        if signals:
-            latest_time = max(
-                s.observed_at for s in signals
-                if isinstance(s.observed_at, datetime)
-            )
+        # Guarded on the timestamps, not on the signals.
+        #
+        # `if signals:` is not the condition this needs: the generator filters to
+        # signals whose observed_at is a datetime, and a batch where none is --
+        # a source that omitted the field, or returned it unparseable -- leaves
+        # max() with an empty sequence and raises ValueError, failing a run that
+        # had otherwise succeeded. Found by a test that passed a signal without a
+        # timestamp, which is a shape the real sources can produce.
+        observed_times = [
+            s.observed_at for s in signals
+            if isinstance(s.observed_at, datetime)
+        ]
+        if observed_times:
+            latest_time = max(observed_times)
             freshness_seconds = (datetime.now(timezone.utc) - latest_time).total_seconds()
             sora_environmental_source_freshness_seconds.labels(source="openmeteo").set(
                 freshness_seconds
@@ -362,10 +425,11 @@ def scheduled_openmeteo_ingestion():
         # persisted (PersistResult), never the raw fetch count.
         _log_job_execution(
             job_name=job_name,
-            status="success",
+            status=verdict.status,
             duration_sec=duration,
             records_processed=persist_result.accepted,
             records_rejected=persist_result.rejected,
+            error_message=verdict.failure_reason,
             metadata={
                 "fetched_count": fetched_count,
                 "regions_count": len(set(s.region_code for s in signals)),
@@ -384,8 +448,12 @@ def scheduled_openmeteo_ingestion():
             persist_result.inserted, persist_result.updated, duration
         )
 
+        # The verdict, not a constant. Returning "success" beside a row
+        # recorded as degraded gives the same run two different answers
+        # depending on who asks, which is how the two drift apart.
         return {
-            "status": "success",
+            "status": verdict.status,
+            "failure_reason": verdict.failure_reason,
             "signals_count": fetched_count,
             "persisted": persist_result.accepted,
             "duration_sec": duration,

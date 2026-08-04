@@ -86,8 +86,15 @@ def test_scheduled_openaq_ingestion_handles_no_signals():
         result = scheduler_jobs.scheduled_openaq_ingestion()
 
     mock_persist.assert_called_once_with([], "openaq")
-    assert result["status"] == "success"
+    # Degraded, not success.
+    #
+    # This asserted "success" for a run that fetched nothing and stored nothing,
+    # which is precisely the behaviour measured on production: 398 openaq runs,
+    # 0 records, `success` every time. The test was not wrong about what the code
+    # did -- it was pinning the defect in place.
+    assert result["status"] == "degraded"
     assert result["persisted"] == 0
+    assert "no records" in result["failure_reason"]
 
 
 def test_runner_ingesters_ownership_excludes_hourly_owned_sources():
@@ -224,8 +231,15 @@ def test_scheduled_openaq_ingestion_mixed_batch_observation_counters():
     ) as mock_log:
         result = scheduler_jobs.scheduled_openaq_ingestion()
 
-    assert result["status"] == "success"
+    # Partial, so degraded: three records arrived and one was rejected.
+    #
+    # "success" here would mean the run achieved a complete result from the
+    # source, which it did not -- and the whole point of the verdict is that
+    # "something was stored" and "what was asked for was stored" are different
+    # facts. The counters below already knew the difference; the status did not.
+    assert result["status"] == "degraded"
     assert result["persisted"] == 2
+    assert "1 of 3" in result["failure_reason"]
 
     labels_calls = mock_observations_total.labels.call_args_list
     inc_calls = mock_observations_total.labels.return_value.inc.call_args_list
