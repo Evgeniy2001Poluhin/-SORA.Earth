@@ -72,7 +72,19 @@ from datetime import datetime, timezone
 
 import psycopg2
 
-API = "https://api.worldbank.org/v2/country/{iso}/indicator/{ind}"
+# Overridable so the write path can be driven against a stub.
+#
+# The first attempt at an integration test could not run this script at all, so
+# it re-implemented the SQL and asserted against its own copy -- which passes
+# forever, including on the day the script regresses. A test that cannot execute
+# the thing it is named after is not testing it.
+#
+# This opens no door: anyone who can set an environment variable here can
+# already set DATABASE_URL, and that is the far shorter path to the data.
+API_ROOT = os.environ.get(
+    "SORA_WORLDBANK_API_BASE", "https://api.worldbank.org/v2"
+).rstrip("/")
+API = API_ROOT + "/country/{iso}/indicator/{ind}"
 
 # The whole plausible history, not a window of recent values.
 #
