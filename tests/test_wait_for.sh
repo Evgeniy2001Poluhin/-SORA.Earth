@@ -12,18 +12,19 @@ set -uo pipefail
 
 SCRIPT="${SCRIPT_UNDER_TEST:-$(cd "$(dirname "$0")/.." && pwd)/tools/wait_for.sh}"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"; pkill -P $$ 2>/dev/null' EXIT
+trap 'rm -rf "${WORK:?}"; pkill -P $$ 2>/dev/null' EXIT
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf '  ok    %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 — expected [$3], got [$2]"; fi; }
 
-# One section at a time, when asked. The suite takes 41 seconds; the mutation
-# run repeats it once per mutation, and eight full passes is five and a half
-# minutes to answer eight yes/no questions. WAIT_FOR_ONLY selects by substring,
-# and an empty value matches everything -- so the default is still the whole
-# suite, and only the mutation tool narrows it.
+# One section at a time, when asked. The suite is 41 cases and takes ~45s;
+# the mutation run repeats it once per mutation, so eleven full passes would be
+# eight minutes to answer ten yes/no questions. WAIT_FOR_ONLY selects by
+# substring, and an empty value matches everything -- so the default is still
+# the whole suite, and only the mutation tool narrows it. Measured with the
+# narrowing: 232s.
 ONLY="${WAIT_FOR_ONLY:-}"
 want() {
     case "$1" in
@@ -158,6 +159,25 @@ sleep 1
 check "and it is gone too" \
     "$(kill -0 "$GRANDCHILD" 2>/dev/null && echo alive || echo gone)" "gone"
 
+fi
+
+if want "a predicate without its own process group is refused"; then
+# The tool's own precondition, checked rather than assumed. `set -m` gives an
+# asynchronous command a private group on macOS and on Linux -- both verified --
+# but that is a platform property, not a POSIX guarantee. Unchecked it would
+# degrade in silence: a negative kill against a group the tool does not own
+# matches nothing, and the sweep goes back to leaking without saying so.
+#
+# `ps` is shadowed to report a group the predicate is not the leader of. The
+# tool must refuse rather than continue with a guarantee it cannot keep.
+mkdir -p "$WORK/bin"
+printf '#!/bin/sh\necho "  99999"\n' > "$WORK/bin/ps"
+chmod +x "$WORK/bin/ps"
+PSOUT="$(PATH="$WORK/bin:$PATH" bash "$SCRIPT" --deadline 5 --interval 1 --until 'sleep 2; true' 2>&1)"
+check "refused with EX_OSERR"   "$?" "71"
+check "and says why" \
+    "$(printf '%s' "$PSOUT" | grep -qc 'private process group' && echo yes || echo no)" "yes"
+rm -rf "${WORK:?}/bin"
 fi
 
 if want "a satisfied wait leaves nothing behind either"; then

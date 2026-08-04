@@ -5,9 +5,11 @@
 #   so the anchors reach the script's source as written.
 # Mutation testing for tools/wait_for.sh.
 #
-# "22 tests pass" is a statement about the tests. Each mutation below removes one
-# property the tool exists for; the named test must fail. Two of these are
-# defects the tool actually had before its tests were run.
+# "the tests pass" is a statement about the tests. Each mutation below removes
+# one property the tool exists for; the named test must fail. Four of them are
+# defects this tool actually shipped with: a signal handler that tidied up and
+# kept waiting, a deadline that did not bound the predicate, a kill that reached
+# only the direct child, and a sweep skipped when the leader died first.
 #
 # The tracked script is never modified. Mutants live in a temp directory.
 set -uo pipefail
@@ -26,10 +28,11 @@ run_suite() {
 
 # name | section the mutation must break | assertion that must fail | program
 #
-# The section is named so the run costs seconds rather than minutes: the suite
-# takes 41s, and repeating it whole for each of seven mutations is five and a
-# half minutes to answer seven yes/no questions. The baseline below still runs
-# all of it -- narrowing that would leave the other sections unproven.
+# The section is named so the run costs seconds rather than minutes: repeating
+# the whole suite once per mutation would be ~8 minutes to answer ten yes/no
+# questions; narrowed, the run is 232s.
+# The baseline below still runs all of it -- narrowing that would leave every
+# section no mutation targets unproven.
 run_mutation() {
     local name="$1" section="$2" expect="$3" program="$4"
     local mutant="$WORK/mutant.sh"
@@ -163,6 +166,14 @@ run_mutation "no sweep between attempts" \
     '    stop_predicate
 
     [ "$predicate_status" -eq 0 ]||=>||    [ "$predicate_status" -eq 0 ]'
+
+# The tool's own precondition. Unchecked, a platform where `set -m` does not
+# give a private group turns every group signal into a no-op that matches
+# nothing, and the sweep leaks in silence rather than refusing.
+run_mutation "the private group is assumed, not checked" \
+    "without its own process group" \
+    "refused with EX_OSERR" \
+    '    if [ -n "$observed" ] && [ "$observed" != "$predicate_pid" ]; then||=>||    if false; then'
 
 # The 13h39m loop: the process behind the predicate was already dead.
 run_mutation "a dead subject is not noticed" \

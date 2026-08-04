@@ -30,6 +30,20 @@
 # The predicate now runs in its own process group and the loop supervises it, so
 # the deadline, the cancellation and the subject stay live throughout.
 #
+# ## What the cleanup does and does not cover
+#
+# Everything left in the predicate's process group is stopped. A descendant that
+# leaves that group -- calls setsid, daemonises, is re-parented into another
+# session -- is outside what any group signal can reach, and this makes no claim
+# about it. The predicate is a check the caller wrote, and is expected to behave
+# like one.
+#
+# The deadline bounds the *wait*. Stopping what the wait started may add up to
+# GRACE_TICKS * POLL on top -- five seconds as configured -- because a process
+# that ignores TERM is given a bounded chance to exit before KILL. So
+# `--deadline 3` means "stop waiting after 3 seconds", not "this command returns
+# within 3 seconds": the tests allow 8 for exactly this reason.
+#
 # Exit codes, so a caller can tell the outcomes apart. A wait that returns
 # "failed" for a timeout, a dead subject and a cancellation alike forces the
 # caller to guess, and the guess becomes a retry around a permanent failure:
@@ -38,6 +52,7 @@
 #   2   the subject exited before it did       (--pid)
 #   3   cancelled                              (--cancel)
 #   64  usage
+#   71  the predicate got no private process group (EX_OSERR: the environment)
 #   75  the deadline passed  (EX_TEMPFAIL: retryable, unlike the rest)
 set -uo pipefail
 
@@ -102,11 +117,31 @@ start_predicate() {
     set -m
     bash -c "$UNTIL" >/dev/null 2>&1 &
     predicate_pid=$!
-    # Job control makes the group id equal the leader's pid at the moment of
-    # forking. Recorded now, because after the leader is reaped there is nothing
-    # left to derive it from.
-    predicate_pgid=$predicate_pid
     set +m
+
+    # Measured, not assumed. Everything below depends on the predicate having a
+    # private group, and `set -m` giving it one is a property of bash and of the
+    # platform -- verified on macOS and on Linux in CI, which is not the same as
+    # guaranteed everywhere this may run. Unchecked, a platform where it does not
+    # hold would turn "the group is always swept" into a negative kill that
+    # quietly matches nothing, and the tool would go back to leaking silently.
+    local observed
+    observed="$(ps -o pgid= -p "$predicate_pid" 2>/dev/null | tr -d '[:space:]')"
+    if [ -n "$observed" ] && [ "$observed" != "$predicate_pid" ]; then
+        kill -TERM "$predicate_pid" 2>/dev/null
+        wait "$predicate_pid" 2>/dev/null
+        predicate_pid=""
+        printf 'wait_for: the predicate did not get a private process group (pgid %s, pid %s); refusing to run without one\n' \
+            "$observed" "$predicate_pid" >&2
+        exit 71   # EX_OSERR: the environment, not the arguments
+    fi
+
+    # An empty reading means the leader already exited -- a fast predicate, and
+    # the common case. The group id is still its pid: either the group survives
+    # with children in it, or there is nothing to sweep and the sweep finds
+    # nothing. Both are safe; what is not safe is a live leader in someone
+    # else's group, which is what the check above refuses.
+    predicate_pgid=$predicate_pid
 }
 
 stop_predicate() {
