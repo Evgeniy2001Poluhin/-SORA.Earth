@@ -160,6 +160,42 @@ check "and it is gone too" \
 
 fi
 
+if want "a satisfied wait leaves nothing behind either"; then
+# The leak the tree test above cannot see. Its predicate ends in `wait`, so the
+# leader lives as long as the child does -- and stop_predicate's early return
+# for a dead leader is never reached. Here the leader exits immediately and the
+# child outlives it.
+#
+# Measured before the fix: waiter exited 0 after 0s, `sleep 25` still running.
+rm -f "$WORK/orphan.pid"
+run --deadline 30 --interval 1 \
+    --until "sh -c 'sleep 20 & echo \$! > $WORK/orphan.pid; exit 0'"
+check "exit status is 0"        "$STATUS" "0"
+ORPHAN="$(cat "$WORK/orphan.pid" 2>/dev/null)"
+check "a child was left running" "$( [ -n "$ORPHAN" ] && echo yes || echo no )" "yes"
+sleep 1
+check "and success swept it up" \
+    "$(kill -0 "$ORPHAN" 2>/dev/null && echo alive || echo gone)" "gone"
+kill -9 "$ORPHAN" 2>/dev/null
+fi
+
+if want "a failed attempt does not leak into the next one"; then
+# Same shape, failing. Without a sweep between attempts the group id is
+# overwritten by the next attempt and the previous one's children become
+# unreachable -- one orphan per attempt, for as long as the wait runs.
+rm -f "$WORK/orphan2.pid"
+run --deadline 3 --interval 1 \
+    --until "sh -c 'sleep 20 & echo \$! >> $WORK/orphan2.pid; exit 1'"
+check "exit status is 75"       "$STATUS" "75"
+LEAKED=0
+while read -r pid; do
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && LEAKED=$((LEAKED + 1))
+done < "$WORK/orphan2.pid"
+check "attempts were made"      "$( [ "$(wc -l < "$WORK/orphan2.pid")" -ge 1 ] && echo yes || echo no )" "yes"
+check "none of their children survive" "$LEAKED" "0"
+while read -r pid; do kill -9 "$pid" 2>/dev/null; done < "$WORK/orphan2.pid"
+fi
+
 if want "a signal during a long predicate stops both"; then
 rm -f "$WORK/pred.pid"
 bash "$SCRIPT" --deadline 120 --interval 1 \

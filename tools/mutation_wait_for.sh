@@ -127,23 +127,42 @@ run_mutation "the deadline does not bound the predicate" \
 run_mutation "only the direct child is stopped" \
     "the whole tree goes" \
     "and it is gone too" \
-    '    kill -TERM -- "-$predicate_pid" 2>/dev/null || kill -TERM "$predicate_pid" 2>/dev/null
+    '    kill -TERM -- "-$predicate_pgid" 2>/dev/null
 
     local ticks=0
-    while kill -0 "$predicate_pid" 2>/dev/null && [ "$ticks" -lt "$GRACE_TICKS" ]; do
+    while kill -0 -- "-$predicate_pgid" 2>/dev/null && [ "$ticks" -lt "$GRACE_TICKS" ]; do
         sleep "$POLL"
         ticks=$((ticks + 1))
     done
 
-    kill -KILL -- "-$predicate_pid" 2>/dev/null || kill -KILL "$predicate_pid" 2>/dev/null||=>||    kill -TERM "$predicate_pid" 2>/dev/null
+    kill -KILL -- "-$predicate_pgid" 2>/dev/null||=>||    kill -TERM "$predicate_pgid" 2>/dev/null
 
     local ticks=0
-    while kill -0 "$predicate_pid" 2>/dev/null && [ "$ticks" -lt "$GRACE_TICKS" ]; do
+    while kill -0 "$predicate_pgid" 2>/dev/null && [ "$ticks" -lt "$GRACE_TICKS" ]; do
         sleep "$POLL"
         ticks=$((ticks + 1))
     done
 
-    kill -KILL "$predicate_pid" 2>/dev/null'
+    kill -KILL "$predicate_pgid" 2>/dev/null'
+
+# The leak review found after the deadline fix. Keying the sweep on the leader's
+# liveness lets a predicate that backgrounds work and exits hand back a running
+# child -- and the tree test cannot see it, because its predicate ends in `wait`
+# so the leader never dies first.
+run_mutation "a dead leader skips the group sweep" \
+    "leaves nothing behind" \
+    "and success swept it up" \
+    '    [ -n "$predicate_pgid" ] || return 0||=>||    [ -n "$predicate_pgid" ] || return 0
+    if ! kill -0 "$predicate_pid" 2>/dev/null; then predicate_pgid=""; return 0; fi'
+
+# Without a sweep after each attempt, the next attempt overwrites the group id
+# and the previous attempt'"'"'s children become unreachable.
+run_mutation "no sweep between attempts" \
+    "does not leak into the next" \
+    "none of their children survive" \
+    '    stop_predicate
+
+    [ "$predicate_status" -eq 0 ]||=>||    [ "$predicate_status" -eq 0 ]'
 
 # The 13h39m loop: the process behind the predicate was already dead.
 run_mutation "a dead subject is not noticed" \

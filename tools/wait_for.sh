@@ -83,6 +83,12 @@ started="$(date +%s)"
 ends=$((started + DEADLINE))
 checks=0
 predicate_pid=""
+# Kept separately, and deliberately not derived from the leader's liveness. A
+# predicate that backgrounds something and exits -- `sh -c 'work & exit 0'` --
+# leaves a group that outlives its leader, and a function keyed on the leader
+# returns having sent nothing to it. Measured before this was split: the waiter
+# reported success in 0s and the child was still running.
+predicate_pgid=""
 predicate_status=1
 
 start_predicate() {
@@ -96,34 +102,43 @@ start_predicate() {
     set -m
     bash -c "$UNTIL" >/dev/null 2>&1 &
     predicate_pid=$!
+    # Job control makes the group id equal the leader's pid at the moment of
+    # forking. Recorded now, because after the leader is reaped there is nothing
+    # left to derive it from.
+    predicate_pgid=$predicate_pid
     set +m
 }
 
 stop_predicate() {
-    [ -n "$predicate_pid" ] || return 0
-    if ! kill -0 "$predicate_pid" 2>/dev/null; then
-        wait "$predicate_pid" 2>/dev/null
-        predicate_pid=""
-        return 0
-    fi
+    # Keyed on the group, never on whether the leader is still alive. The
+    # version that returned early for a dead leader let this through:
+    #
+    #   --until "sh -c 'sleep 25 & exit 0'"   → waiter exits 0 in 0s,
+    #                                           sleep 25 still running
+    #
+    # and the tree test did not catch it, because its predicate ends in `wait`
+    # -- so the leader stays alive for the whole run and the early return is
+    # never taken. A test whose shape excludes the defect proves the opposite of
+    # what it claims.
+    [ -n "$predicate_pgid" ] || return 0
 
-    # The group first, the process second. The fallback matters when the group
-    # was never created: there is still a child to stop, and skipping it would
-    # leave behind exactly what this function exists to prevent.
-    kill -TERM -- "-$predicate_pid" 2>/dev/null || kill -TERM "$predicate_pid" 2>/dev/null
+    kill -TERM -- "-$predicate_pgid" 2>/dev/null
 
     local ticks=0
-    while kill -0 "$predicate_pid" 2>/dev/null && [ "$ticks" -lt "$GRACE_TICKS" ]; do
+    while kill -0 -- "-$predicate_pgid" 2>/dev/null && [ "$ticks" -lt "$GRACE_TICKS" ]; do
         sleep "$POLL"
         ticks=$((ticks + 1))
     done
 
-    kill -KILL -- "-$predicate_pid" 2>/dev/null || kill -KILL "$predicate_pid" 2>/dev/null
-    # Reaped, not merely signalled. Without this the function returns while the
-    # child is still a zombie, and "nothing is left running" becomes a claim
-    # about timing rather than about state.
-    wait "$predicate_pid" 2>/dev/null
+    kill -KILL -- "-$predicate_pgid" 2>/dev/null
+    # Reaped, not merely signalled, when the leader is still ours to reap.
+    # Without this the function returns while the child is a zombie, and
+    # "nothing is left running" becomes a claim about timing rather than state.
+    if [ -n "$predicate_pid" ]; then
+        wait "$predicate_pid" 2>/dev/null
+    fi
     predicate_pid=""
+    predicate_pgid=""
 }
 
 cleanup() {
@@ -175,6 +190,14 @@ while :; do
     wait "$predicate_pid" 2>/dev/null
     predicate_status=$?
     predicate_pid=""
+
+    # The status is taken first and the group swept second, in that order. The
+    # sweep must happen on the successful path too: a predicate can return 0 and
+    # still have left something running, which is how a "satisfied" wait used to
+    # hand back a child nobody was going to stop. And it must happen before the
+    # next attempt, or the new group id overwrites the old one and the previous
+    # attempt's leftovers become unreachable.
+    stop_predicate
 
     [ "$predicate_status" -eq 0 ] && { report "satisfied"; exit 0; }
 
