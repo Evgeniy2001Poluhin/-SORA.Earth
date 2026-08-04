@@ -41,7 +41,84 @@ DC=(docker compose -p "$PROJECT" -f "$COMPOSE")
 
 cd "$REPO"
 
-fail() { echo "REFUSED: $*" >&2; exit 1; }
+# Which phase the run is in, so a refusal knows whether anything needs undoing.
+# `none` until the snapshot is taken, `mutating` from the moment `up` is issued.
+PHASE=none
+# Container ids of this project before mutation, so a rollback can tell what
+# this run created from what was already there. Stopping "anything unexpected"
+# would reach containers this deployment does not own.
+PRE_CIDS=""
+
+# Every refusal goes through here, and after mutation begins it does not simply
+# exit. Eight checks sit after `up` -- the port property, the nginx checksum,
+# `nginx -t`, the upstream, the certificate store, the smoke test -- and each one
+# used to abort a deployment whose containers were already running, leaving the
+# state it refused in place. The port case is the worst of them: it named an
+# off-host port accurately and left it open.
+fail() {
+    if [ "$PHASE" = mutating ]; then
+        abort_deployment "$*"
+    fi
+    echo "REFUSED: $*" >&2
+    exit 1
+}
+
+# Containers this run created, and only those. Anything that was present in the
+# snapshot is left alone: it may belong to another compose project, or have been
+# started before this deployment, and a rollback that stops it damages something
+# it was never asked to touch.
+stop_containers_created_by_this_run() {
+    local now created=""
+    now="$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null || true)"
+    while IFS= read -r cid; do
+        [ -n "$cid" ] || continue
+        case " $PRE_CIDS " in
+            *" $cid "*) ;;
+            *) created="$created $cid" ;;
+        esac
+    done <<< "$now"
+    if [ -n "${created// /}" ]; then
+        echo "  stopping containers created by this run:$created" >&2
+        # shellcheck disable=SC2086
+        #   Deliberately unquoted: a list of ids to be split.
+        docker stop $created >/dev/null 2>&1 || true
+    else
+        echo "  this run created no containers" >&2
+    fi
+}
+
+# Refused after mutation: put back what was replaced, then report.
+#
+# Exit 1 means "refused, and the previous state is running again". Exit 76 means
+# "refused, and the rollback did not complete" -- a different situation calling
+# for a different response, which a single non-zero status cannot express.
+abort_deployment() {
+    local why="$1"
+    echo "REFUSED: $why" >&2
+    echo
+    echo "== rolling back =="
+
+    if [ -z "$PREV_COMMIT" ]; then
+        # Nothing recorded to go back to -- the first deployment, or a manifest
+        # directory that was lost. There is no previous state to restore, so the
+        # only safe action is to stop what this run started.
+        echo "  no previous deployment recorded; nothing to restore" >&2
+        stop_containers_created_by_this_run
+        exit 76
+    fi
+
+    if git checkout --quiet --detach "$PREV_COMMIT" 2>/dev/null \
+        && "${DC[@]}" up -d --build --remove-orphans >/dev/null 2>&1 \
+        && "${DC[@]}" up -d --force-recreate nginx >/dev/null 2>&1; then
+        echo "  restored ${PREV_COMMIT:0:12}"
+        exit 1
+    fi
+
+    echo "  ROLLBACK FAILED: could not restore ${PREV_COMMIT:0:12}" >&2
+    stop_containers_created_by_this_run
+    exit 76
+}
+
 step() { echo; echo "== $* =="; }
 
 MODE=deploy
@@ -228,6 +305,11 @@ fi
 PREV_IMAGES="$(docker ps -a --filter "label=com.docker.compose.project=$PROJECT" \
     --format '{{.Label "com.docker.compose.service"}} {{.Image}} {{.ID}}' | sort || true)"
 
+# The ids on their own, for the rollback. Recorded here because after `up` there
+# is no way to tell which containers this run created -- and a rollback that
+# stops the wrong one damages something it does not own.
+PRE_CIDS="$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | tr '\n' ' ' || true)"
+
 # Declared services come from `docker compose config`, not from parsing the YAML
 # here: it resolves interpolation, overrides and extends, so what is checked is
 # what compose will act on rather than what the file appears to say.
@@ -332,6 +414,13 @@ echo "  only nginx 80/tcp and 443/tcp would be published off-host"
 # ------------------------------------------------------------------- deployment
 
 step "deploying"
+
+# From here a refusal has something to undo, so `fail` routes through
+# abort_deployment. Set immediately before `up` rather than earlier: a refusal
+# during the preflight has nothing to roll back, and rolling back anyway would
+# rebuild the previous state for no reason.
+PHASE=mutating
+
 "${DC[@]}" up -d --build --remove-orphans
 
 # nginx is recreated, not restarted. Its configuration is a bind-mounted single
@@ -514,6 +603,11 @@ for path in /health /api/v1/health /; do
 done
 
 # ------------------------------------------------------------------- the record
+
+# Accepted. Nothing after this point should roll back: the deployment is the
+# state that is meant to be running, and a failure while writing the record is
+# not a reason to undo it.
+PHASE=committed
 
 step "recording what was deployed"
 

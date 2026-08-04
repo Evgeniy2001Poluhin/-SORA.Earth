@@ -101,6 +101,20 @@ case "$argv" in
         awk -F'|' '{print $1"|"$3}' "$STUB_DIR/running"; exit 0 ;;
     *'{{.Names}} {{.Ports}}'*)
         awk -F'|' '{print "  "$1" "$3}' "$STUB_DIR/running"; exit 0 ;;
+    # Before the generic "ps -q": the rollback asks for ids, and a test needs to
+    # be able to say a container existed before this run started.
+    *"ps -aq"*)
+        [ -f "$STUB_DIR/pre_cids" ] && cat "$STUB_DIR/pre_cids"
+        exit 0 ;;
+    *"up -d --build"*)
+        # A rollback rebuilds, so this is called twice. `up_fails_after_first`
+        # lets a test fail the second one and nothing else -- which is what
+        # separates "refused, previous state restored" from "refused, and the
+        # rollback did not complete".
+        n=$(( $(cat "$STUB_DIR/up_calls" 2>/dev/null || echo 0) + 1 ))
+        echo "$n" > "$STUB_DIR/up_calls"
+        if [ -f "$STUB_DIR/up_fails_after_first" ] && [ "$n" -gt 1 ]; then exit 1; fi
+        exit 0 ;;
     *"ps -q nginx"*)        echo "cid-nginx"; exit 0 ;;
     *"ps -q"*)              echo "cid-x"; exit 0 ;;
     *"sha256sum /etc/nginx/nginx.conf"*)
@@ -747,6 +761,81 @@ check "the containers were started first" \
     "$(grep -qc 'up -d' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
 check "and the ports were read by compose service" \
     "$(grep -qc 'com.docker.compose.service"}}|{{.Ports' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
+echo "== a refusal after the containers are up rolls back =="
+# Eight checks sit after `up`. Each used to abort a deployment whose containers
+# were already running and leave the refused state in place -- the port case
+# named an off-host port accurately and left it open.
+with_previous_deployment() {
+    mkdir -p "$SANDBOX/manifests"
+    printf 'commit %s\n' "$FIRST" > "$SANDBOX/manifests/prev.txt"
+    ln -sf prev.txt "$SANDBOX/manifests/latest"
+}
+
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/nginx_t_fails"
+run_guard
+check "exit says the previous state is back"  "$RC" "1"
+check "it rolled back"      "$(grep -qc 'rolling back' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "to the recorded commit" \
+    "$(grep -qc "restored ${FIRST:0:12}" "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "by rebuilding, not by hoping" \
+    "$(grep -c 'up -d --build' "$STUB_DIR/calls")" "2"
+rm -rf "$SANDBOX"
+
+echo "== a refusal with nothing recorded stops only what this run created =="
+# No previous manifest: there is no state to restore, so the only safe action is
+# to stop what this run started. Anything already present may belong to another
+# project, and stopping it damages something this deployment does not own.
+new_sandbox
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+echo "cid-preexisting" > "$STUB_DIR/pre_cids"
+touch "$STUB_DIR/nginx_t_fails"
+run_guard
+check "a distinct exit for an incomplete rollback" "$RC" "76"
+check "it says nothing was recorded" \
+    "$(grep -qc 'no previous deployment recorded' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "the pre-existing container is not stopped" \
+    "$(grep -c 'stop cid-preexisting' "$STUB_DIR/calls")" "0"
+rm -rf "$SANDBOX"
+
+echo "== a failed rollback is its own outcome =="
+# Distinguished from a successful one: "refused, previous state running" and
+# "refused, and the rollback did not complete" call for opposite responses, and
+# one non-zero status cannot say which happened.
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/nginx_t_fails"
+touch "$STUB_DIR/up_fails_after_first"
+run_guard
+check "exit says the rollback did not complete" "$RC" "76"
+check "and it says so"  "$(grep -qc 'ROLLBACK FAILED' "$SANDBOX/out" && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+echo "== a refusal before the containers start does not roll back =="
+# Nothing has changed yet, so rebuilding the previous state would be work done
+# for no reason -- and would make a preflight refusal indistinguishable from a
+# post-mutation one in the record.
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+cat > "$STUB_DIR/rendered" <<'JSON'
+{"services": {
+  "nginx": {"ports": [{"target": 80, "published": "80", "protocol": "tcp"},
+                      {"target": 443, "published": "443", "protocol": "tcp"}]},
+  "app":   {"ports": [{"target": 8000, "published": "8000", "protocol": "tcp"}]}
+}}
+JSON
+run_guard
+check "refused with the plain status" "$RC" "1"
+check "and no rollback was attempted" \
+    "$(grep -qc 'rolling back' "$SANDBOX/out" && echo yes || echo no)" "no"
 rm -rf "$SANDBOX"
 
 echo
