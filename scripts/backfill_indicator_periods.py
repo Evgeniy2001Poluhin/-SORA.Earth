@@ -86,14 +86,21 @@ API_ROOT = os.environ.get(
 ).rstrip("/")
 API = API_ROOT + "/country/{iso}/indicator/{ind}"
 
-# The whole plausible history, not a window of recent values.
+# No date bound. The whole series, every time.
 #
 # The first draft asked for mrv=40 and treated a miss as evidence of revision. It
 # is not: a row can describe a year older than the window, and absence outside
-# the search says nothing at all. The range is stated explicitly and truncation
-# is detected from the response's own paging, so "we did not look there" never
-# masquerades as "it is not there".
-YEAR_FROM, YEAR_TO = 1960, 2030
+# the search says nothing at all. That was replaced by an explicit 1960-2030,
+# which is the same defect with a wider window -- a value from outside it would
+# have been recorded as `no_match_current_vintage`, which asserts the source
+# revised the figure away, when the truth is that nobody looked there.
+#
+# Measured 2026-08-04 over the whole dataset for the four indicators this touches
+# (country=all, no date filter, 17,490 records each): SP.DYN.LE00.IN 1960-2024,
+# NY.GDP.PCAP.CD 1960-2025, EG.FEC.RNEW.ZS 1990-2022, SI.POV.GINI 1963-2025.
+# Nothing fell outside. So the bound cost nothing -- and it is gone anyway,
+# because that measurement describes today's four indicators and would have to be
+# repeated, silently and by someone who knew to, for every one added later.
 PER_PAGE = 500
 
 DELAY_SECONDS = 1.5
@@ -143,8 +150,7 @@ def fetch_history(iso: str, ind: str):
     page = 1
     while True:
         url = (API.format(iso=iso, ind=ind)
-               + f"?format=json&per_page={PER_PAGE}"
-               + f"&date={YEAR_FROM}:{YEAR_TO}&page={page}")
+               + f"?format=json&per_page={PER_PAGE}&page={page}")
         raw = None
         for attempt in range(RETRIES):
             try:
@@ -192,11 +198,12 @@ def candidate_years(value: float, history: dict) -> list:
 def classify(value, history, meta):
     """(status, year, candidate_count) for one stored value.
 
-    OUTSIDE_WINDOW is now reachable only if a caller hands over an answer it
-    knows to be incomplete; fetch_history refuses to return one. The status
+    OUTSIDE_WINDOW is reachable only if a caller hands over an answer it knows
+    to be incomplete; fetch_history refuses to return one, and since the date
+    bound was removed there is no window left to fall outside of. The status
     stays in the vocabulary because the question it answers -- "did the search
-    cover the whole history?" -- is real, and the year range here is asserted
-    rather than proven for every indicator ever ingested.
+    cover the whole history?" -- is real, and a future caller working from an
+    archive or a narrowed query will need to say no.
     """
     if history is None:
         return UNAVAILABLE, None, None

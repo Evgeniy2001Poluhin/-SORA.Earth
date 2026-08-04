@@ -57,6 +57,7 @@ class Stub:
         self.pages = [[]]
         self.unobtainable_from = None
         self.requested = []
+        self.paths = []
         self.base = None
 
     def body(self, page):
@@ -76,6 +77,7 @@ def _handler_for(stub):
         def do_GET(self):  # noqa: N802  (the base class names it)
             page = int(parse_qs(urlparse(self.path).query).get("page", ["1"])[0])
             stub.requested.append(page)
+            stub.paths.append(self.path)
             if stub.unobtainable_from is not None and page >= stub.unobtainable_from:
                 self.send_error(503, "stub: this page is unobtainable")
                 return
@@ -176,6 +178,35 @@ def test_a_single_candidate_is_recovered_with_the_provenance_of_its_run(scratch_
     assert row["period_response_sha256"]
     assert row["period_run_id"]
     assert row["period_resolved_at"] is not None
+
+
+@requires_postgres
+def test_the_request_narrows_the_series_in_no_way(scratch_db, stub):
+    """No date bound, so there is no window for a value to fall outside of.
+
+    An explicit `date=1960:2030` was there, and `classify` could only report
+    `outside_query_window` when handed an answer already flagged incomplete --
+    which a fully-read bounded response never is. A value from 1959 would have
+    been recorded as `no_match_current_vintage`: an assertion that the source
+    revised the figure away, when nobody had looked.
+
+    Measured before removing it (2026-08-04, country=all, no filter, 17,490
+    records per indicator): nothing outside the bound for any of the four
+    indicators in the table. The bound cost nothing and is gone anyway -- that
+    measurement would have to be repeated for every indicator added later, by
+    someone who knew to.
+    """
+    engine, url = scratch_db
+    insert_row(engine)
+    stub.pages = [series((2025, SOURCE_FIGURE))]
+
+    run_backfill(url, stub, "--apply")
+
+    assert stub.paths, "the source was never asked"
+    for path in stub.paths:
+        query = parse_qs(urlparse(path).query)
+        assert "date" not in query, f"the request narrowed the series: {path}"
+        assert "mrv" not in query, f"the request asked for recent values only: {path}"
 
 
 @requires_postgres

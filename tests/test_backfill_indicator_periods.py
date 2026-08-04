@@ -5,9 +5,14 @@ the rule is walked over its whole space rather than sampled. A wrong date is
 worse than the NULL it replaces: a NULL is read as "unknown" and a date is
 believed.
 
-The API-facing parts are not tested here; they are network behaviour, and the
-script's own pacing and retry logic is exercised against production rather than
-against a fake that would agree with whatever it was told.
+The API-facing parts are not tested here. They are covered in
+`test_backfill_integration_postgres.py`, which runs the script itself against a
+localhost stub and a real PostgreSQL -- paging, an unobtainable page, the
+absence of any date bound on the request, and the write path.
+
+This file was previously said to leave that to production. It no longer does,
+and the claim was worth correcting rather than leaving: it is the sentence that
+justified having no test for the two defects review found.
 """
 import importlib.util
 from pathlib import Path
