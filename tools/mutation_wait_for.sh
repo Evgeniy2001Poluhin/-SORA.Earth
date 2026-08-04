@@ -21,11 +21,17 @@ trap 'rm -rf "$WORK"; pkill -P $$ 2>/dev/null' EXIT
 PASS=0; FAIL=0
 
 run_suite() {
-    SCRIPT_UNDER_TEST="$1" bash "$TESTS" 2>&1
+    SCRIPT_UNDER_TEST="$1" WAIT_FOR_ONLY="${2-}" bash "$TESTS" 2>&1
 }
 
+# name | section the mutation must break | assertion that must fail | program
+#
+# The section is named so the run costs seconds rather than minutes: the suite
+# takes 41s, and repeating it whole for each of seven mutations is five and a
+# half minutes to answer seven yes/no questions. The baseline below still runs
+# all of it -- narrowing that would leave the other sections unproven.
 run_mutation() {
-    local name="$1" expect="$2" program="$3"
+    local name="$1" section="$2" expect="$3" program="$4"
     local mutant="$WORK/mutant.sh"
     cp "$ORIGINAL" "$mutant"
     if ! python3 - "$mutant" "$program" <<'PY'
@@ -47,7 +53,7 @@ PY
     # pipeline's status and invert the verdict. That defect shipped once already,
     # in tools/mutation_backfill_periods.sh.
     local out
-    out="$(run_suite "$mutant")"
+    out="$(run_suite "$mutant" "$section")"
     if printf '%s' "$out" | grep -q "FAIL.*$expect"; then
         printf '  caught %-40s → "%s" failed\n' "$name" "$expect"
         PASS=$((PASS+1))
@@ -80,27 +86,74 @@ echo "== each property, removed =="
 # verdict about nothing -- the anchor was found, the file was written, and the
 # result was still meaningless.
 run_mutation "a signal is tidied up but not obeyed" \
+    "a signal stops it" \
     "the runner is gone" \
     "trap 'exit 143' TERM||=>||trap cleanup TERM"
 
 # A default deadline is one somebody chose for a different wait.
 run_mutation "deadline becomes optional" \
+    "a deadline is required" \
     "usage error" \
     '[ -n "$DEADLINE" ] || die "--deadline is required||=>||DEADLINE="${DEADLINE:-600}"; [ -n "$DEADLINE" ] || die "--deadline is required'
 
-# Without the clamp a 3s budget sleeps 30s, and an outer timeout kills the run
-# before it can report why it stopped.
+# Without the guard in the gap between attempts, a 3s budget sleeps 30s, and an
+# outer timeout kills the run before it can report why it stopped.
 run_mutation "interval may overshoot the deadline" \
+    "the interval never overshoots" \
     "stopped at the deadline" \
-    'if [ "$remaining" -lt "$INTERVAL" ]; then sleep "$remaining"; else sleep "$INTERVAL"; fi||=>||sleep "$INTERVAL"'
+    '    resume=$(( $(date +%s) + INTERVAL ))
+    while [ "$(date +%s)" -lt "$resume" ]; do
+        guard
+        sleep "$POLL"
+    done||=>||    sleep "$INTERVAL"'
+
+# The blocker review found. With the predicate unsupervised, the deadline, the
+# cancellation and the subject are all invisible until it returns of its own
+# accord -- so `--deadline 3 --until "sleep 20; false"` takes 20 seconds and
+# then reports the deadline as though it had been enforced.
+run_mutation "the deadline does not bound the predicate" \
+    "the deadline bounds the predicate" \
+    "bounded by the deadline" \
+    '    while kill -0 "$predicate_pid" 2>/dev/null; do
+        guard
+        sleep "$POLL"
+    done||=>||    while kill -0 "$predicate_pid" 2>/dev/null; do
+        sleep "$POLL"
+    done'
+
+# A predicate that forks leaves a grandchild that killing the direct child never
+# reaches. Both signals have to be group-wide: leaving the KILL group-wide would
+# still collect the tree and hide the loss of the TERM.
+run_mutation "only the direct child is stopped" \
+    "the whole tree goes" \
+    "and it is gone too" \
+    '    kill -TERM -- "-$predicate_pid" 2>/dev/null || kill -TERM "$predicate_pid" 2>/dev/null
+
+    local ticks=0
+    while kill -0 "$predicate_pid" 2>/dev/null && [ "$ticks" -lt "$GRACE_TICKS" ]; do
+        sleep "$POLL"
+        ticks=$((ticks + 1))
+    done
+
+    kill -KILL -- "-$predicate_pid" 2>/dev/null || kill -KILL "$predicate_pid" 2>/dev/null||=>||    kill -TERM "$predicate_pid" 2>/dev/null
+
+    local ticks=0
+    while kill -0 "$predicate_pid" 2>/dev/null && [ "$ticks" -lt "$GRACE_TICKS" ]; do
+        sleep "$POLL"
+        ticks=$((ticks + 1))
+    done
+
+    kill -KILL "$predicate_pid" 2>/dev/null'
 
 # The 13h39m loop: the process behind the predicate was already dead.
 run_mutation "a dead subject is not noticed" \
+    "a subject that exits ends the wait" \
     "exit status is 2" \
     'if [ -n "$PID" ] && ! kill -0 "$PID" 2>/dev/null; then||=>||if false; then'
 
 # The five loops still polling results already obtained by another route.
 run_mutation "cancellation is ignored" \
+    "a wait can be cancelled" \
     "exit status is 3" \
     'if [ -n "$CANCEL" ] && [ -e "$CANCEL" ]; then||=>||if false; then'
 

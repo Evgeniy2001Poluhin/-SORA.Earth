@@ -19,6 +19,19 @@ ok()  { PASS=$((PASS+1)); printf '  ok    %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 — expected [$3], got [$2]"; fi; }
 
+# One section at a time, when asked. The suite takes 41 seconds; the mutation
+# run repeats it once per mutation, and eight full passes is five and a half
+# minutes to answer eight yes/no questions. WAIT_FOR_ONLY selects by substring,
+# and an empty value matches everything -- so the default is still the whole
+# suite, and only the mutation tool narrows it.
+ONLY="${WAIT_FOR_ONLY:-}"
+want() {
+    case "$1" in
+        *"$ONLY"*) printf '\n== %s ==\n' "$1"; return 0 ;;
+    esac
+    return 1
+}
+
 # Elapsed seconds of a run, alongside its exit code.
 run() {
     local start end
@@ -29,23 +42,29 @@ run() {
     ELAPSED=$((end - start))
 }
 
-echo "== a condition already true returns at once =="
+if want "a condition already true returns at once"; then
 run --deadline 60 --interval 1 --until 'true'
 check "exit status is 0"        "$STATUS" "0"
 check "it did not sleep first"  "$( [ "$ELAPSED" -le 2 ] && echo yes || echo no )" "yes"
 
-echo "== a condition that becomes true is waited for =="
+fi
+
+if want "a condition that becomes true is waited for"; then
 ( sleep 3; : > "$WORK/appeared" ) &
 run --deadline 60 --interval 1 --until "test -e $WORK/appeared"
 check "exit status is 0"        "$STATUS" "0"
 check "it actually waited"      "$( [ "$ELAPSED" -ge 2 ] && echo yes || echo no )" "yes"
 
-echo "== a deadline is required =="
+fi
+
+if want "a deadline is required"; then
 run --interval 1 --until 'true'
 check "usage error"             "$STATUS" "64"
 check "the reason is named"     "$(grep -qc 'deadline is required' "$WORK/out" && echo yes || echo no)" "yes"
 
-echo "== a deadline that passes is its own outcome =="
+fi
+
+if want "a deadline that passes is its own outcome"; then
 run --deadline 3 --interval 1 --until 'false'
 check "exit status is 75"       "$STATUS" "75"
 # 75, not 1. A caller that cannot tell a timeout from a permanent failure either
@@ -53,14 +72,18 @@ check "exit status is 75"       "$STATUS" "75"
 check "within its own budget"   "$( [ "$ELAPSED" -le 6 ] && echo yes || echo no )" "yes"
 check "it reports the deadline" "$(grep -qc 'deadline of 3s' "$WORK/out" && echo yes || echo no)" "yes"
 
-echo "== the interval never overshoots the deadline =="
+fi
+
+if want "the interval never overshoots the deadline"; then
 # 3s budget, 30s interval: without the clamp this sleeps 30s past its own budget,
 # and an outer timeout kills it before it can say why it stopped.
 run --deadline 3 --interval 30 --until 'false'
 check "exit status is 75"       "$STATUS" "75"
 check "stopped at the deadline" "$( [ "$ELAPSED" -le 6 ] && echo yes || echo no )" "yes"
 
-echo "== a subject that exits ends the wait =="
+fi
+
+if want "a subject that exits ends the wait"; then
 # The 13h39m loop: the run behind it had been killed by its own watchdog, and the
 # wait carried on polling a file that could never appear.
 sleep 2 & SUBJECT=$!
@@ -69,7 +92,9 @@ check "exit status is 2"        "$STATUS" "2"
 check "not held to the deadline" "$( [ "$ELAPSED" -le 8 ] && echo yes || echo no )" "yes"
 check "it names the subject"    "$(grep -qc "subject $SUBJECT exited" "$WORK/out" && echo yes || echo no)" "yes"
 
-echo "== a wait can be cancelled =="
+fi
+
+if want "a wait can be cancelled"; then
 # The answer arriving by another route: five loops were left polling results
 # already obtained and already used.
 ( sleep 2; : > "$WORK/stop" ) &
@@ -77,21 +102,90 @@ run --deadline 60 --interval 1 --cancel "$WORK/stop" --until 'false'
 check "exit status is 3"        "$STATUS" "3"
 check "not held to the deadline" "$( [ "$ELAPSED" -le 8 ] && echo yes || echo no )" "yes"
 
-echo "== a predicate that can never be true is not special-cased =="
+fi
+
+if want "a predicate that can never be true is not special-cased"; then
 # A broken predicate (this session: a jq expression with unbalanced quotes) is
 # indistinguishable from one that is merely false, so the deadline is what has to
 # catch it -- which is why the deadline is mandatory.
 run --deadline 3 --interval 1 --until 'this-command-does-not-exist'
 check "exit status is 75"       "$STATUS" "75"
 
-echo "== nothing is left running =="
+fi
+
+if want "the deadline bounds the predicate, not just the gap between attempts"; then
+# 20s, not 60. The correct tool leaves after ~2s either way, but a mutant with
+# the guard removed runs the predicate to completion -- so this number is the
+# price of every mutation that has to hang to prove the defect is real. 60
+# turned the mutation run into four and a half minutes.
+# The defect review found. The first version ran the predicate in the foreground
+# and looked at the clock only after it returned, so this took 20s at a 3s
+# deadline and then reported the deadline as though it had been enforced.
+#
+# Every case above uses a predicate that returns immediately -- which is exactly
+# the shape where the defect cannot appear. That is why the suite was green
+# while the tool's main contract was broken.
+run --deadline 2 --interval 1 --until 'sleep 20; false'
+check "exit status is 75"       "$STATUS" "75"
+check "bounded by the deadline" "$( [ "$ELAPSED" -le 8 ] && echo yes || echo no )" "yes"
+
+fi
+
+if want "a running predicate does not block cancellation or the subject"; then
+( sleep 2; : > "$WORK/stop2" ) &
+run --deadline 60 --interval 1 --cancel "$WORK/stop2" --until 'sleep 20; false'
+check "cancelled mid-predicate"  "$STATUS" "3"
+check "not held by the predicate" "$( [ "$ELAPSED" -le 8 ] && echo yes || echo no )" "yes"
+
+fi
+
+if want "a slow predicate that does finish in time still succeeds"; then
+# The deadline must bound the wait without truncating work that fits inside it.
+run --deadline 20 --interval 1 --until 'sleep 2; true'
+check "exit status is 0"        "$STATUS" "0"
+
+fi
+
+if want "the whole tree goes, not only the direct child"; then
+# A predicate that forks leaves a grandchild that killing the child never
+# reaches. This is what the process group is for.
+rm -f "$WORK/grandchild"
+run --deadline 2 --interval 1 --until "sh -c 'sleep 20 & echo \$! > $WORK/grandchild; wait'"
+check "exit status is 75"       "$STATUS" "75"
+GRANDCHILD="$(cat "$WORK/grandchild" 2>/dev/null)"
+check "a grandchild was created" "$( [ -n "$GRANDCHILD" ] && echo yes || echo no )" "yes"
+sleep 1
+check "and it is gone too" \
+    "$(kill -0 "$GRANDCHILD" 2>/dev/null && echo alive || echo gone)" "gone"
+
+fi
+
+if want "a signal during a long predicate stops both"; then
+rm -f "$WORK/pred.pid"
+bash "$SCRIPT" --deadline 120 --interval 1 \
+    --until "echo \$\$ > $WORK/pred.pid; sleep 20" >/dev/null 2>&1 &
+LONG=$!
+sleep 3
+PREDPID="$(cat "$WORK/pred.pid" 2>/dev/null)"
+check "the predicate is running" \
+    "$( [ -n "$PREDPID" ] && kill -0 "$PREDPID" 2>/dev/null && echo yes || echo no )" "yes"
+kill -TERM "$LONG" 2>/dev/null
+sleep 3
+check "the waiter is gone"    "$(kill -0 "$LONG" 2>/dev/null && echo alive || echo gone)" "gone"
+check "the predicate is gone" "$(kill -0 "$PREDPID" 2>/dev/null && echo alive || echo gone)" "gone"
+
+fi
+
+if want "nothing is left running"; then
 BEFORE="$(pgrep -P $$ 2>/dev/null | wc -l | tr -d ' ')"
 run --deadline 3 --interval 1 --until 'false'
 sleep 1
 AFTER="$(pgrep -P $$ 2>/dev/null | wc -l | tr -d ' ')"
 check "no children survive the run" "$AFTER" "$BEFORE"
 
-echo "== a signal stops it, rather than being tidied up and ignored =="
+fi
+
+if want "a signal stops it, rather than being tidied up and ignored"; then
 # SIGTERM, not SIGINT. Bash sets SIGINT to SIG_IGN for asynchronous commands
 # started without job control, and a trap cannot be installed on a signal
 # inherited as ignored -- so a SIGINT case here would be testing the harness's
@@ -112,7 +206,9 @@ kill -TERM "$RUNNER" 2>/dev/null
 sleep 2
 check "the runner is gone" "$(kill -0 "$RUNNER" 2>/dev/null && echo alive || echo gone)" "gone"
 
-echo "== bad arguments are refused, not defaulted =="
+fi
+
+if want "bad arguments are refused, not defaulted"; then
 run --deadline abc --until 'true'
 check "a non-numeric deadline"  "$STATUS" "64"
 run --deadline 10 --interval 0 --until 'true'
@@ -120,6 +216,7 @@ check "a zero interval"         "$STATUS" "64"
 run --deadline 10
 check "no predicate"            "$STATUS" "64"
 
+fi
 echo
 echo "  passed: $PASS   failed: $FAIL"
 [ "$FAIL" -eq 0 ]
