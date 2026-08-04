@@ -1,33 +1,42 @@
-"""record why an indicator period is absent
+"""record how an indicator period was established, or why it was not
 
 `country_indicator_history.as_of_date` is NULL in 90,403 of 93,447 rows. The
-NULL carries two entirely different facts and nothing distinguishes them:
+ingester discarded the year the World Bank stated alongside every figure (#58).
 
-  58,657 rows from world_bank    -- the source stated a year and the ingester
-                                    discarded it (#58, fixed for new rows in #59)
-  31,746 rows from benchmark and
-         global_avg              -- the source states no period at all, and
-                                    never did
+A single NULL currently carries facts that call for different responses, and
+nothing distinguishes them. Worse, the obvious repair -- match the stored value
+against the source's series and write the year back -- produces a *fourth* kind
+of fact that must not be confused with the first: a period **inferred from a
+later response**, not the period the original response stated.
 
-A third case appears the moment a backfill runs: rows whose period the source
-once stated and can no longer be recovered, because the figures have been
-revised since and the stored value matches no year the API still returns.
-
-Reading a NULL, nobody can tell "we lost it", "there was never one" and "it is
-gone for good" apart -- and the three call for different responses. The first is
-a defect to fix, the second is a property of the source to document, the third is
-a loss to record so nobody spends an afternoon rediscovering it.
+That distinction is the point of this table's vocabulary. The original response
+is gone. Whatever a backfill recovers is an inference about it, and calling that
+"the source said so" would put an unearned claim on 45,000 rows.
 
     period_status
-      stated         as_of_date holds the period the source gave
-      source_has_none  the source publishes no period for this value
-      unrecoverable  a period existed and cannot now be established
-      NULL           not yet examined
+      recovered_inferred     exactly one candidate year under a named,
+                             versioned rule -- an inference, not a quotation
+      ambiguous              several candidate years; the value alone does
+                             not identify one
+      no_match_current_vintage
+                             the source's current data contains no candidate.
+                             Revision is one explanation; a changed dataset,
+                             identifier, unit or geography are others, and this
+                             status does not choose between them
+      outside_query_window   the search did not cover the whole possible
+                             history, so absence proves nothing
+      source_unavailable     no conclusive answer was obtained; retry
+      period_not_applicable  a derived value -- a benchmark, a global average --
+                             for which the source publishes no period
+      unchecked              nothing has looked at this row yet
 
-NULL remains meaningful on purpose: until the backfill has looked at a row, the
-honest answer is that nobody has checked. Filling every row with a guess at
-migration time would be the same error this whole issue is about, committed
-against 90,000 rows at once.
+`unrecoverable` is deliberately absent. It would mean every archive and vintage
+had been exhausted, and none has been consulted.
+
+The provenance columns exist so that a verdict can be re-examined rather than
+merely trusted: which run made it, under which rule, against which response.
+Without them a later correction cannot tell its own earlier work from anyone
+else's, and "idempotent" means only "resumable", never "fixable".
 
 Revision ID: e7b3c9d15f04
 Revises: c4d1f8a26b93
@@ -42,44 +51,121 @@ branch_labels = None
 depends_on = None
 
 
+STATUSES = (
+    "recovered_inferred",
+    "ambiguous",
+    "no_match_current_vintage",
+    "outside_query_window",
+    "source_unavailable",
+    "period_not_applicable",
+    "unchecked",
+)
+
+COLUMNS = [
+    ("period_status", "TEXT"),
+    # Which run, under which rule, against which answer. A free-text tag naming
+    # only the script cannot distinguish one run from the next, so a bad run
+    # cannot be undone without touching the good ones.
+    ("period_run_id", "TEXT"),
+    ("period_method", "TEXT"),
+    ("period_rule_version", "TEXT"),
+    ("period_candidates", "INTEGER"),
+    ("period_source_vintage", "TEXT"),
+    ("period_response_sha256", "TEXT"),
+    ("period_resolved_at", "TIMESTAMPTZ"),
+]
+
+
 def upgrade() -> None:
+    for name, type_ in COLUMNS:
+        op.execute(
+            sa.text(
+                f"ALTER TABLE country_indicator_history "
+                f"ADD COLUMN IF NOT EXISTS {name} {type_}"
+            )
+        )
+
+    # The vocabulary is closed. Free TEXT admits a typo as a new state, and a
+    # status nobody defined reads as data rather than as a mistake.
     op.execute(
         sa.text(
             "ALTER TABLE country_indicator_history "
-            "ADD COLUMN IF NOT EXISTS period_status TEXT"
+            "DROP CONSTRAINT IF EXISTS ck_cih_period_status"
         )
     )
-    # Records which run established a row's status, so a backfill that goes
-    # wrong can be told from one that went right, and re-run against only its
-    # own work.
+    values = ", ".join(f"'{s}'" for s in STATUSES)
+    op.execute(
+        sa.text(
+            f"ALTER TABLE country_indicator_history "
+            f"ADD CONSTRAINT ck_cih_period_status CHECK ("
+            f"period_status IS NULL OR period_status IN ({values}))"
+        )
+    )
+
+    # A date is only meaningful for a row that has one, and only these two
+    # statuses have one. Without this, `ambiguous` with a date and
+    # `recovered_inferred` without one are both storable, and both would be read
+    # as facts.
     op.execute(
         sa.text(
             "ALTER TABLE country_indicator_history "
-            "ADD COLUMN IF NOT EXISTS period_source TEXT"
+            "DROP CONSTRAINT IF EXISTS ck_cih_period_date_agrees"
         )
     )
-    # "Which rows still have no verdict" is the question a backfill asks on
-    # every pass, over ninety thousand rows.
+    op.execute(
+        sa.text(
+            "ALTER TABLE country_indicator_history "
+            "ADD CONSTRAINT ck_cih_period_date_agrees CHECK ("
+            # A verdict of "recovered" without a date says nothing was
+            # recovered, and any other verdict *with* a date says the opposite
+            # of what it names. Both are storable without this and both would be
+            # read as facts.
+            #
+            # period_status IS NULL covers rows the ingester dated itself
+            # (post-#59): those carry a date and no verdict, which is correct --
+            # nothing inferred them.
+            "  period_status IS NULL"
+            "  OR (period_status = 'recovered_inferred' AND as_of_date IS NOT NULL)"
+            "  OR (period_status <> 'recovered_inferred' AND as_of_date IS NULL)"
+            ")"
+        )
+    )
+
+    # "Which rows still have no verdict" is asked on every pass, over ninety
+    # thousand rows.
     op.execute(
         sa.text(
             "CREATE INDEX IF NOT EXISTS ix_cih_period_status "
-            "ON country_indicator_history (period_status) "
-            "WHERE period_status IS NULL"
+            "ON country_indicator_history (period_status)"
+        )
+    )
+    # And "what did that run do", which is how a bad run is undone.
+    op.execute(
+        sa.text(
+            "CREATE INDEX IF NOT EXISTS ix_cih_period_run "
+            "ON country_indicator_history (period_run_id)"
         )
     )
 
 
 def downgrade() -> None:
+    op.execute(sa.text("DROP INDEX IF EXISTS ix_cih_period_run"))
     op.execute(sa.text("DROP INDEX IF EXISTS ix_cih_period_status"))
     op.execute(
         sa.text(
             "ALTER TABLE country_indicator_history "
-            "DROP COLUMN IF EXISTS period_source"
+            "DROP CONSTRAINT IF EXISTS ck_cih_period_date_agrees"
         )
     )
     op.execute(
         sa.text(
             "ALTER TABLE country_indicator_history "
-            "DROP COLUMN IF EXISTS period_status"
+            "DROP CONSTRAINT IF EXISTS ck_cih_period_status"
         )
     )
+    for name, _ in reversed(COLUMNS):
+        op.execute(
+            sa.text(
+                f"ALTER TABLE country_indicator_history DROP COLUMN IF EXISTS {name}"
+            )
+        )

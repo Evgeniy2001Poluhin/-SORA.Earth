@@ -1,78 +1,108 @@
-"""Establish, where it can be established, when each indicator value applies.
+"""Infer, where it can be inferred, when each indicator value applies.
 
 country_indicator_history holds 90,403 rows with no observation period. The
-ingester dropped the year the World Bank stated alongside every figure (#58);
+ingester discarded the year the World Bank stated alongside every figure (#58);
 that is fixed for new rows (#59), and these are what was written before.
 
-The three outcomes are recorded rather than collapsed:
+## What this can and cannot claim
 
-  stated           the source's own year, recovered and written to as_of_date
-  source_has_none  benchmarks and global averages carry no period, and never did
-  unrecoverable    a period existed and cannot now be established
+The original API response is gone. Whatever is established here is an
+**inference from a later response**, not the year the source stated at the time.
+Those are different claims and the status says which one it is:
+`recovered_inferred`, never "stated".
 
-Nothing is guessed. A row whose period cannot be recovered is marked as such,
-because a NULL that means "we lost it" and a NULL that means "there was never
-one" call for different responses, and until this runs they are the same NULL.
+An earlier draft of this script called it `stated`. That would have put an
+unearned claim on forty-five thousand rows, and the claim would then have been
+read back as fact by everything downstream.
 
-## How a period is recovered
+## How the inference works, and where it stops
 
 The API returns each indicator as a series of (year, value). A stored figure is
-matched against that series: exactly one year with the same value identifies it.
+matched against that series by reproducing the ingester's own rounding --
+`round(float(v), 2)`, app/external_data.py:123,159,196 -- rather than by a
+tolerance. A tolerance is not the inverse of a rounding: the first draft used
+`max(abs(value) * 1e-6, 0.005)`, which at the largest stored value (114769.01)
+admits 0.115, twenty-three times what the rounding can hide, and wide enough to
+take a neighbouring year.
 
-This is weaker than it looks and the weakness is recorded, not hidden:
+Every outcome short of a single candidate is recorded as itself:
 
-  * the World Bank revises figures. SAU/NY.GDP.PCAP.CD holds 35121.66, which
-    appears against no year the API offers today -- the value is real, its year
-    is simply no longer discoverable from the source.
-  * one value can occur in several years, and then the match identifies nothing.
+  ambiguous                  several years hold this value
+  no_match_current_vintage   the current data has no candidate. Revision is one
+                             explanation; a changed dataset, indicator, unit or
+                             geography are others, and this does not choose
+  outside_query_window       the answer was truncated, so absence proves nothing
+  source_unavailable         no conclusive answer; retry
+  period_not_applicable      a derived value with no period to have
 
-Both cases end as `unrecoverable`. That is the honest answer, and pretending
-otherwise would put a fabricated date on a real measurement -- worse than the
-NULL it replaces, because a date is believed.
+`unrecoverable` is deliberately not among them. It would mean the archives and
+older vintages had been exhausted, and none has been consulted.
 
 ## Safety
 
-Idempotent: only rows with period_status IS NULL are considered, so a re-run
-resumes and never revisits a verdict. Refused fetches leave their rows untouched
-rather than marking them unrecoverable, so a rate limit cannot be mistaken for a
-loss -- the next run picks them up.
+**Row identities are materialised before any write.** Selecting by
+(country, indicator, value) and then updating by the same triple would let an
+ingester writing concurrently be caught by an UPDATE whose evidence never
+covered it.
 
-Dry by default. `--apply` writes.
+Every verdict records the run that made it, the rule version, the number of
+candidates, the source vintage and a hash of the response it was made from --
+so a wrong run can be found and undone without touching anyone else's work.
+Re-running with a newer rule revisits what older rules decided; without that,
+"idempotent" would mean only "resumable", never "fixable".
 
-    python scripts/backfill_indicator_periods.py            # report only
+Dry by default.
+
+    python scripts/backfill_indicator_periods.py                  # report only
     python scripts/backfill_indicator_periods.py --apply
+    python scripts/backfill_indicator_periods.py --recheck-rule value-match/1
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 import time
 import urllib.request
+import uuid
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 import psycopg2
 
 API = "https://api.worldbank.org/v2/country/{iso}/indicator/{ind}"
-RUN_TAG = "backfill_indicator_periods"
 
-# The first measurement fired 118 requests without pausing and the API refused
-# 56 of them. Counted as failures to match, that read as "40% recoverable" --
-# a statement about the rate limiter rather than about the data. Paced now.
+# The whole plausible history, not a window of recent values.
+#
+# The first draft asked for mrv=40 and treated a miss as evidence of revision. It
+# is not: a row can describe a year older than the window, and absence outside
+# the search says nothing at all. The range is stated explicitly and truncation
+# is detected from the response's own paging, so "we did not look there" never
+# masquerades as "it is not there".
+YEAR_FROM, YEAR_TO = 1960, 2030
+PER_PAGE = 500
+
 DELAY_SECONDS = 1.5
 RETRIES = 3
-# Enough history to cover anything this table holds; the oldest rows are from
-# 2026 and the indicators are annual.
-MRV = 40
 
-STATED = "stated"
-SOURCE_HAS_NONE = "source_has_none"
-UNRECOVERABLE = "unrecoverable"
+RECOVERED = "recovered_inferred"
+AMBIGUOUS = "ambiguous"
+NO_MATCH = "no_match_current_vintage"
+OUTSIDE_WINDOW = "outside_query_window"
+UNAVAILABLE = "source_unavailable"
+NOT_APPLICABLE = "period_not_applicable"
 
-# Sources that publish no period. Not a guess: app/external_data.py returns None
-# for their period explicitly, and the comment there says why.
+METHOD = "value_match"
+# Bumped whenever the rule changes. --recheck-rule revisits what an older one
+# decided.
+RULE_VERSION = "value-match/2"
+
+# Sources that publish no period: app/external_data.py returns None for their
+# period explicitly. Note this is a statement about the *source*, not about
+# whether a derived period could be constructed -- an end-of-window or a
+# calculation date might be meaningful, and neither is invented here.
 PERIODLESS_SOURCES = ("benchmark", "global_avg")
 
 
@@ -84,121 +114,162 @@ def connect():
 
 
 def fetch_history(iso: str, ind: str):
-    """(year -> value) for one indicator, or None if the source would not say.
+    """Everything the source will say about one indicator.
 
-    None is distinct from an empty history: one means "ask again later", the
-    other means "the source has nothing", and only the second is evidence.
+    Returns (history, meta) or (None, None) when no conclusive answer was
+    obtained. None is not an empty history: one means "ask again", the other
+    means "the source has nothing right now", and only the second is evidence.
     """
-    url = API.format(iso=iso, ind=ind) + f"?format=json&per_page=60&mrv={MRV}"
+    url = (API.format(iso=iso, ind=ind)
+           + f"?format=json&per_page={PER_PAGE}&date={YEAR_FROM}:{YEAR_TO}")
     for attempt in range(RETRIES):
         try:
-            payload = json.loads(urllib.request.urlopen(url, timeout=30).read().decode())
+            raw = urllib.request.urlopen(url, timeout=30).read()
+            payload = json.loads(raw.decode())
+            header = payload[0] if payload else {}
             rows = payload[1] if len(payload) > 1 and payload[1] else []
-            return {r["date"]: r["value"] for r in rows if r.get("value") is not None}
+            meta = {
+                # More than one page means the answer was cut short, and a miss
+                # against a truncated answer is not a miss.
+                "truncated": int(header.get("pages", 1) or 1) > 1,
+                # The vintage the verdict was made against, so a later revision
+                # can be told from a mistake.
+                "vintage": header.get("lastupdated"),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            }
+            return {r["date"]: r["value"] for r in rows if r.get("value") is not None}, meta
         except Exception:
             if attempt == RETRIES - 1:
-                return None
+                return None, None
             time.sleep(2 ** attempt * 2)
-    return None
+    return None, None
 
 
-def match_year(value: float, history: dict) -> str | None:
-    """The single year holding this value, or None when that is not one year.
+def candidate_years(value: float, history: dict) -> list:
+    """Every year whose source figure, rounded as the ingester rounded it, is
+    this value.
 
-    The tolerance covers the rounding the ingester applied on the way in; it is
-    relative, because these indicators span dollars to percentages.
+    The original operation is reproduced rather than approximated, so the
+    boundary cases are the ingester's own and not a second set introduced here.
     """
-    tolerance = max(abs(value) * 1e-6, 0.005)
-    years = [y for y, v in history.items() if abs(v - value) <= tolerance]
-    return years[0] if len(years) == 1 else None
+    return sorted(y for y, v in history.items() if round(float(v), 2) == value)
+
+
+def classify(value, history, meta):
+    """(status, year, candidate_count) for one stored value."""
+    if history is None:
+        return UNAVAILABLE, None, None
+    years = candidate_years(value, history)
+    if len(years) == 1:
+        return RECOVERED, years[0], 1
+    if len(years) > 1:
+        return AMBIGUOUS, None, len(years)
+    if meta.get("truncated"):
+        return OUTSIDE_WINDOW, None, 0
+    return NO_MATCH, None, 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true",
-                        help="write the results; without it nothing is changed")
+                        help="write the results; without it nothing changes")
     parser.add_argument("--limit-pairs", type=int, default=0,
                         help="stop after this many country/indicator pairs")
+    parser.add_argument("--recheck-rule", metavar="VERSION",
+                        help="also revisit rows decided by this rule version")
     args = parser.parse_args()
+
+    run_id = str(uuid.uuid4())
+    print(f"  run {run_id}   rule {RULE_VERSION}   {'APPLY' if args.apply else 'dry'}")
 
     con = connect()
     cur = con.cursor()
 
-    # --- the sources that never had a period -------------------------------
-    cur.execute(
-        """SELECT count(*) FROM country_indicator_history
-           WHERE period_status IS NULL AND source = ANY(%s)""",
-        (list(PERIODLESS_SOURCES),),
-    )
-    periodless = cur.fetchone()[0]
+    # Rows this run may touch: never decided, or decided by a rule being
+    # rechecked. Without the second clause a corrected rule could never reach
+    # what the old one got wrong.
+    eligible = "(period_status IS NULL"
+    params: list = []
+    if args.recheck_rule:
+        eligible += " OR period_rule_version = %s"
+        params.append(args.recheck_rule)
+    eligible += ")"
 
-    if args.apply and periodless:
+    # --- values whose source publishes no period ---------------------------
+    cur.execute(
+        f"""SELECT id FROM country_indicator_history
+            WHERE {eligible} AND source = ANY(%s)""",
+        (*params, list(PERIODLESS_SOURCES)),
+    )
+    periodless_ids = [r[0] for r in cur.fetchall()]
+
+    if args.apply and periodless_ids:
         cur.execute(
             """UPDATE country_indicator_history
-               SET period_status = %s, period_source = %s
-               WHERE period_status IS NULL AND source = ANY(%s)""",
-            (SOURCE_HAS_NONE, RUN_TAG, list(PERIODLESS_SOURCES)),
+               SET period_status = %s, period_run_id = %s, period_method = %s,
+                   period_rule_version = %s, period_resolved_at = %s
+               WHERE id = ANY(%s)""",
+            (NOT_APPLICABLE, run_id, "source_publishes_none", RULE_VERSION,
+             datetime.now(timezone.utc), periodless_ids),
         )
         con.commit()
 
-    # --- the rows whose period the source stated ---------------------------
+    # --- values the source dates -------------------------------------------
+    #
+    # Identities are fixed here. Updating by (country, indicator, value) would
+    # reach rows the ingester wrote after this read, which no evidence in this
+    # run covers.
     cur.execute(
-        """SELECT country_iso3, indicator_code, value, count(*)
-           FROM country_indicator_history
-           WHERE period_status IS NULL
-             AND as_of_date IS NULL
-             AND source NOT IN %s
-           GROUP BY 1, 2, 3""",
-        (PERIODLESS_SOURCES,),
+        f"""SELECT id, country_iso3, indicator_code, value
+            FROM country_indicator_history
+            WHERE {eligible}
+              AND as_of_date IS NULL
+              AND source <> ALL(%s)""",
+        (*params, list(PERIODLESS_SOURCES)),
     )
-    by_pair: dict[tuple[str, str], list[tuple[float, int]]] = defaultdict(list)
-    for iso, ind, value, count in cur.fetchall():
-        by_pair[(iso, ind)].append((value, count))
+    by_pair: dict = defaultdict(lambda: defaultdict(list))
+    for row_id, iso, ind, value in cur.fetchall():
+        by_pair[(iso, ind)][value].append(row_id)
 
     pairs = sorted(by_pair)
     if args.limit_pairs:
         pairs = pairs[: args.limit_pairs]
 
-    stated = unrecoverable = deferred = 0
-    refused_pairs = 0
+    tally: dict = defaultdict(int)
 
     for i, key in enumerate(pairs, 1):
         iso, ind = key
-        history = fetch_history(iso, ind)
+        history, meta = fetch_history(iso, ind)
         time.sleep(DELAY_SECONDS)
 
-        if history is None:
-            # Untouched on purpose. Marking these unrecoverable would record a
-            # rate limit as a permanent loss, and the row would never be looked
-            # at again.
-            refused_pairs += 1
-            deferred += sum(n for _, n in by_pair[key])
-            continue
+        for value, row_ids in by_pair[key].items():
+            status, year, candidates = classify(value, history, meta or {})
+            tally[status] += len(row_ids)
 
-        for value, count in by_pair[key]:
-            year = match_year(value, history)
-            if year:
-                stated += count
-                if args.apply:
-                    cur.execute(
-                        """UPDATE country_indicator_history
-                           SET as_of_date = %s, period_status = %s, period_source = %s
-                           WHERE period_status IS NULL AND as_of_date IS NULL
-                             AND country_iso3 = %s AND indicator_code = %s
-                             AND value = %s""",
-                        (datetime(int(year), 1, 1), STATED, RUN_TAG, iso, ind, value),
-                    )
-            else:
-                unrecoverable += count
-                if args.apply:
-                    cur.execute(
-                        """UPDATE country_indicator_history
-                           SET period_status = %s, period_source = %s
-                           WHERE period_status IS NULL AND as_of_date IS NULL
-                             AND country_iso3 = %s AND indicator_code = %s
-                             AND value = %s""",
-                        (UNRECOVERABLE, RUN_TAG, iso, ind, value),
-                    )
+            if status == UNAVAILABLE:
+                # Left untouched, not marked. Recording a refusal as a verdict
+                # would retire the row from every future attempt.
+                continue
+            if not args.apply:
+                continue
+
+            cur.execute(
+                """UPDATE country_indicator_history
+                   SET as_of_date = COALESCE(%s, as_of_date),
+                       period_status = %s,
+                       period_run_id = %s,
+                       period_method = %s,
+                       period_rule_version = %s,
+                       period_candidates = %s,
+                       period_source_vintage = %s,
+                       period_response_sha256 = %s,
+                       period_resolved_at = %s
+                   WHERE id = ANY(%s)""",
+                (datetime(int(year), 1, 1) if year else None,
+                 status, run_id, METHOD, RULE_VERSION, candidates,
+                 (meta or {}).get("vintage"), (meta or {}).get("sha256"),
+                 datetime.now(timezone.utc), row_ids),
+            )
 
         if args.apply:
             con.commit()
@@ -209,13 +280,11 @@ def main() -> int:
 
     verb = "set" if args.apply else "would set"
     print()
-    print(f"  {verb} {SOURCE_HAS_NONE:16} {periodless:>7}  "
-          f"(benchmark and global averages, which publish no period)")
-    print(f"  {verb} {STATED:16} {stated:>7}  (the source's own year, recovered)")
-    print(f"  {verb} {UNRECOVERABLE:16} {unrecoverable:>7}  "
-          f"(revised figures, or a value occurring in several years)")
-    print(f"  left for a later run   {deferred:>7}  "
-          f"({refused_pairs} pairs the API refused; a rate limit is not a loss)")
+    print(f"  {verb} {NOT_APPLICABLE:26} {len(periodless_ids):>7}")
+    for status in (RECOVERED, AMBIGUOUS, NO_MATCH, OUTSIDE_WINDOW):
+        print(f"  {verb} {status:26} {tally[status]:>7}")
+    print(f"  left for a later run       {tally[UNAVAILABLE]:>7}  "
+          f"(no conclusive answer; a refusal is not a verdict)")
     if not args.apply:
         print()
         print("  nothing was written. Re-run with --apply.")

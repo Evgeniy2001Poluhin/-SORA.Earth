@@ -21,7 +21,14 @@ _spec = importlib.util.spec_from_file_location(
 backfill = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(backfill)
 
-match_year = backfill.match_year
+candidate_years = backfill.candidate_years
+classify = backfill.classify
+
+
+def match_year(value, history):
+    """The single candidate, or None -- the shape the earlier tests assumed."""
+    years = candidate_years(value, history)
+    return years[0] if len(years) == 1 else None
 
 
 # A real series, from SAU/NY.GDP.PCAP.CD as the API returns it today.
@@ -68,55 +75,36 @@ def test_an_empty_history_matches_nothing():
 
 
 @pytest.mark.parametrize("value,expected", [
-    (34536.6555456551, "2025"),   # exact
-    (34536.66, "2025"),           # as stored, rounded to two places
-    (34536.6, None),              # rounded further than the ingester ever did
-    (34537.0, None),              # a different figure entirely
+    (34536.6555456551, None),     # the unrounded figure was never what we stored
+    (34536.66, "2025"),           # as stored: round(34536.6555456551, 2)
+    (34536.6, None),              # a different stored value entirely
+    (34537.0, None),
 ])
-def test_the_tolerance_admits_the_stored_rounding_and_no_more(value, expected):
-    """The boundary matters in both directions.
+def test_matching_reproduces_the_rounding_rather_than_tolerating_it(value, expected):
+    """The ingester stored `round(float(v), 2)`, so the inverse is to round each
+    candidate the same way -- not to allow a margin.
 
-    Too tight and every row is unrecoverable; too loose and neighbouring years
-    collide, which is how one measurement acquires another's date.
+    A tolerance is not the inverse of a rounding. The first version used
+    `max(abs(value) * 1e-6, 0.005)`, which at the largest stored value
+    (114769.01) admits 0.115 -- twenty-three times what two decimal places can
+    hide, and wide enough to take a neighbouring year with it.
     """
     assert match_year(value, HISTORY) == expected
 
 
-@pytest.mark.parametrize("value,history,expected", [
-    # Percentages, where the absolute floor governs.
-    (0.1, {"2024": 0.1, "2023": 0.2}, "2024"),
-    # 0.104 rounds to 0.10, so a stored 0.1 is genuinely consistent with it.
-    # I first wrote None here and the code was right: the tolerance must admit
-    # every source value the stored figure could have come from, and two
-    # decimal places cannot distinguish 0.100 from 0.104.
-    (0.1, {"2024": 0.104, "2023": 0.2}, "2024"),
-    # 0.106 rounds to 0.11, so it cannot be the origin of a stored 0.1.
-    (0.1, {"2024": 0.106, "2023": 0.2}, None),
-    # Large figures, where the relative part governs.
-    (1_000_000.0, {"2024": 1_000_000.0004, "2023": 2.0}, "2024"),
-    (1_000_000.0, {"2024": 1_000_100.0, "2023": 2.0}, None),
-])
-def test_the_tolerance_covers_what_the_stored_rounding_could_have_hidden(
-    value, history, expected
-):
-    """These indicators span dollars per capita and percentages of a whole, so
-    the tolerance is relative with an absolute floor.
+def test_the_old_tolerance_would_have_admitted_a_neighbouring_year():
+    """The concrete failure the rewrite removes.
 
-    The floor is the rounding the ingester applied -- two decimal places, so
-    half a hundredth. It has to be at least that or genuine matches are missed;
-    it must not be more or neighbouring years collide, which is how one
-    measurement acquires another's date.
+    Two years half a unit apart at a magnitude where the old relative term was
+    0.115: the tolerance matched both, so the value was called ambiguous when it
+    is not, and at other magnitudes it would have matched the wrong one alone.
     """
-    assert match_year(value, history) == expected
+    history = {"2024": 114769.01, "2023": 114769.06}
+    assert candidate_years(114769.01, history) == ["2024"]
 
-
-def test_two_source_values_that_both_round_to_the_stored_one_identify_neither():
-    """The other side of the tolerance above.
-
-    When rounding has genuinely destroyed the distinction, the answer is that
-    the year is not recoverable -- not the nearer of the two.
-    """
-    assert match_year(0.1, {"2024": 0.098, "2023": 0.103}) is None
+    old_tolerance = max(abs(114769.01) * 1e-6, 0.005)
+    admitted = [y for y, v in history.items() if abs(v - 114769.01) <= old_tolerance]
+    assert sorted(admitted) == ["2023", "2024"], "the old rule took both"
 
 
 def test_zero_is_matched_rather_than_treated_as_missing():
@@ -130,3 +118,64 @@ def test_a_negative_value_is_matched_on_magnitude():
     """Net balances go negative, and a tolerance derived from a signed value
     would be negative too, matching nothing at all."""
     assert match_year(-1234.56, {"2024": -1234.5612, "2023": 8.0}) == "2024"
+
+
+# --- the verdicts, enumerated ------------------------------------------------
+#
+# The point of the rewrite is that every outcome short of a single candidate is
+# recorded as itself. Collapsing them was the original defect at one remove: a
+# rate limit, a truncated search and a genuine absence all became "lost".
+
+RECOVERED = backfill.RECOVERED
+AMBIGUOUS = backfill.AMBIGUOUS
+NO_MATCH = backfill.NO_MATCH
+OUTSIDE_WINDOW = backfill.OUTSIDE_WINDOW
+UNAVAILABLE = backfill.UNAVAILABLE
+
+
+def test_one_candidate_is_an_inference_not_a_quotation():
+    """The status names what it is. The original response is gone, so this is
+    inferred from a later one -- and an earlier draft called it `stated`, which
+    would have put an unearned claim on forty-five thousand rows."""
+    status, year, n = classify(34536.66, HISTORY, {})
+    assert status == RECOVERED == "recovered_inferred"
+    assert year == "2025"
+    assert n == 1
+
+
+def test_several_candidates_are_ambiguous_and_carry_their_count():
+    status, year, n = classify(100.0, {"2024": 100.0, "2023": 100.0}, {})
+    assert status == AMBIGUOUS
+    assert year is None
+    assert n == 2
+
+
+def test_no_candidate_in_a_complete_answer_names_the_vintage():
+    """Revision is one explanation and this does not choose between it and a
+    changed dataset, indicator, unit or geography."""
+    status, year, n = classify(35121.66, HISTORY, {"truncated": False})
+    assert status == NO_MATCH == "no_match_current_vintage"
+    assert (year, n) == (None, 0)
+
+
+def test_no_candidate_in_a_truncated_answer_proves_nothing():
+    """The distinction the first draft lacked: it asked for a window of recent
+    values and read a miss as evidence of loss."""
+    status, _, _ = classify(35121.66, HISTORY, {"truncated": True})
+    assert status == OUTSIDE_WINDOW == "outside_query_window"
+
+
+def test_no_answer_at_all_is_not_a_verdict():
+    """A refusal recorded as a verdict retires the row from every future
+    attempt. The first measurement of this data read 40.5% recoverable for
+    exactly that reason -- 56 refused pairs counted as losses."""
+    status, year, n = classify(1.0, None, {})
+    assert status == UNAVAILABLE == "source_unavailable"
+    assert (year, n) == (None, None)
+
+
+def test_an_empty_but_successful_answer_is_not_confused_with_no_answer():
+    """The source having nothing to say is evidence; the source not answering is
+    not. They differ by one `is None`."""
+    assert classify(1.0, {}, {"truncated": False})[0] == NO_MATCH
+    assert classify(1.0, None, {})[0] == UNAVAILABLE
