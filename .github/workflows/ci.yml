@@ -223,6 +223,17 @@ jobs:
         env:
           DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
 
+      # "Eight tests pass" is a statement about the tests. This restores each
+      # defect review found, one at a time, on a temporary copy, and fails if any
+      # of them survives -- so the claim that these tests discriminate is made
+      # here rather than in a review comment about a run nobody else made.
+      # The baseline runs first: without it, "caught" cannot be told from a test
+      # that fails against everything, including the unmodified script.
+      - name: Mutation testing for the backfill
+        run: bash tools/mutation_backfill_periods.sh
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
       # Five of its six cases need a real PostgreSQL: the session TimeZone
       # behaviour they pin down is PostgreSQL's, and on SQLite they skip. A
       # skipped test proves nothing, so it needs a job where it runs.
@@ -385,7 +396,8 @@ jobs:
             tests/test_backup_local_integration.sh \
             tools/mutation_backup_local.sh \
             scripts/deploy_production.sh \
-            tests/test_deploy_production.sh
+            tests/test_deploy_production.sh \
+            tools/mutation_backfill_periods.sh
 
       # These skip on macOS -- flock does not exist there -- so this Linux job is
       # the only place they actually execute.

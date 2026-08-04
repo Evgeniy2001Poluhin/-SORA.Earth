@@ -35,7 +35,12 @@ from tests.postgres_scratch import (  # noqa: F401  (scratch_db is a fixture)
     scratch_db,
 )
 
-SCRIPT = os.path.join(REPO_ROOT, "scripts", "backfill_indicator_periods.py")
+# The tracked script, unless tools/mutation_backfill_periods.sh points this at a
+# deliberately broken copy. Same convention as tests/test_backup_local_daily.sh.
+SCRIPT = os.environ.get(
+    "SCRIPT_UNDER_TEST",
+    os.path.join(REPO_ROOT, "scripts", "backfill_indicator_periods.py"),
+)
 
 ISO, INDICATOR = "SAU", "NY.GDP.PCAP.CD"
 # Stored rounded, as app/external_data.py writes it. The source figure it came
