@@ -78,10 +78,21 @@ new_sandbox() {
     cat > "$STUB_DIR/bin/docker" <<'STUB'
 #!/usr/bin/env bash
 argv="$*"
+# Every invocation is recorded. "Refused before anything started" is otherwise
+# unfalsifiable: the guard exits non-zero either way, and only the absence of an
+# `up` tells prevention from detection.
+printf '%s\n' "$argv" >> "$STUB_DIR/calls"
 case "$argv" in
+    # Before "config --services", which would otherwise not match this at all --
+    # kept adjacent so the two cannot drift apart.
+    *"config --format json"*)  cat "$STUB_DIR/rendered"; exit 0 ;;
     *"config --services"*)  cat "$STUB_DIR/services"; exit 0 ;;
     *"ps --format {{.Service}}"*)
         cut -d'|' -f2 "$STUB_DIR/running"; exit 0 ;;
+    *'{{.Label "com.docker.compose.service"}}|{{.Ports}}'*)
+        # Before the label-only branch, which would otherwise swallow this.
+        # Field 2 is the compose service, field 3 the ports.
+        awk -F'|' '{print $2"|"$3}' "$STUB_DIR/running"; exit 0 ;;
     *'{{.Label "com.docker.compose.service"}} {{.Image}} {{.ID}}'*)
         awk -F'|' '{print $2" image-"$2" id-"$2}' "$STUB_DIR/running"; exit 0 ;;
     *'{{.Label "com.docker.compose.service"}}'*)
@@ -107,6 +118,18 @@ STUB
     # runs out. That is what tells a transient failure from a permanent one --
     # with a single fixed status the retry loop cannot be observed at all, and a
     # broken retry would pass.
+    # The rendered compose configuration, as `config --format json` returns it.
+    # Production's actual shape: nginx off-host on 80 and 443, everything else
+    # on loopback. A test that needs a different one overwrites this file.
+    cat > "$STUB_DIR/rendered" <<'JSON'
+{"services": {
+  "nginx":    {"ports": [{"target": 80,  "published": "80",  "protocol": "tcp", "mode": "ingress"},
+                         {"target": 443, "published": "443", "protocol": "tcp", "mode": "ingress"}]},
+  "app":      {"ports": [{"host_ip": "127.0.0.1", "target": 8000, "published": "8000", "protocol": "tcp", "mode": "ingress"}]},
+  "postgres": {"ports": [{"host_ip": "127.0.0.1", "target": 5432, "published": "5432", "protocol": "tcp", "mode": "ingress"}]}
+}}
+JSON
+
     cat > "$STUB_DIR/bin/curl" <<'STUB'
 #!/usr/bin/env bash
 seq_file="$STUB_DIR/http_code"
@@ -267,10 +290,14 @@ for form in "0.0.0.0:8000->8000/tcp" "0.0.0.0:9000->8000/tcp" ":::8000->8000/tcp
     refused_because "published off-host: $form" "reachable off-host"
     rm -rf "$SANDBOX"
 done
+# Each of these states a form that must be *accepted*. The published 80 and 443
+# come alongside it, because the guard now also requires them: a state where
+# neither is published is not "a deployment with an extra loopback port", it is
+# a deployment serving nothing, and it must be refused for that reason instead.
 for form in "127.0.0.1:9090->9090/tcp" "0.0.0.0:80->80/tcp" "0.0.0.0:443->443/tcp" "8000/tcp"; do
     new_sandbox
     echo "nginx" > "$STUB_DIR/services"
-    echo "p-nginx-1|nginx|$form" > "$STUB_DIR/running"
+    echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp, $form" > "$STUB_DIR/running"
     run_guard
     check "accepted: $form" "$([ "$RC" = 0 ] && echo ok || echo "refused: $(grep -m1 REFUSED "$SANDBOX/out")")" "ok"
     rm -rf "$SANDBOX"
@@ -603,6 +630,123 @@ check "it records the mode"             "$(grep -c '^mode           rollback' "$
 # Taken from the previous manifest. Read from the checkout it would have been
 # FIRST, because the rollback checkout has already happened by that point.
 check "and names the commit it replaced" "$(awk '/^previous_commit /{print $2}' "$MANR")" "$SECOND"
+rm -rf "$SANDBOX"
+
+
+echo "== a configuration that would publish off-host is refused before it starts =="
+# Prevention, not detection. The runtime check below it sees the port only after
+# `up`, and refusing then leaves it open -- see #71.
+new_sandbox
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+cat > "$STUB_DIR/rendered" <<'JSON'
+{"services": {
+  "nginx": {"ports": [{"target": 80, "published": "80", "protocol": "tcp"},
+                      {"target": 443, "published": "443", "protocol": "tcp"}]},
+  "app":   {"ports": [{"target": 8000, "published": "8000", "protocol": "tcp"}]}
+}}
+JSON
+run_guard
+refused_because "a declared off-host 8000" "would publish"
+check "and nothing was started" \
+    "$(grep -qc 'up -d' "$STUB_DIR/calls" && echo started || echo no)" "no"
+rm -rf "$SANDBOX"
+
+echo "== the whole tuple decides, not the port number =="
+# Each of these begins with an allowed number or looks close to one.
+declared_refused() {
+    local label="$1" spec="$2"
+    new_sandbox
+    echo "nginx" > "$STUB_DIR/services"
+    echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+    printf '{"services": {"nginx": {"ports": [{"target": 80, "published": "80", "protocol": "tcp"}, {"target": 443, "published": "443", "protocol": "tcp"}, %s]}}}\n' \
+        "$spec" > "$STUB_DIR/rendered"
+    run_guard
+    refused_because "$label" "would publish"
+    rm -rf "$SANDBOX"
+}
+declared_refused "a range beginning at an allowed port" \
+    '{"target": 80, "published": "80-81", "protocol": "tcp"}'
+declared_refused "an allowed number over udp" \
+    '{"target": 80, "published": "80", "protocol": "udp"}'
+declared_refused "an allowed published with a different target" \
+    '{"target": 8080, "published": "80", "protocol": "tcp"}'
+declared_refused "a host address that is neither loopback nor all" \
+    '{"host_ip": "10.0.0.5", "target": 80, "published": "80", "protocol": "tcp"}'
+declared_refused "an unexpected publication mode" \
+    '{"target": 80, "published": "80", "protocol": "tcp", "mode": "gateway"}'
+
+echo "== loopback is allowed on both families =="
+for ip in 127.0.0.1 ::1; do
+    new_sandbox
+    echo "nginx" > "$STUB_DIR/services"
+    echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+    printf '{"services": {"nginx": {"ports": [{"target": 80, "published": "80", "protocol": "tcp"}, {"target": 443, "published": "443", "protocol": "tcp"}]}, "app": {"ports": [{"host_ip": "%s", "target": 8000, "published": "8000", "protocol": "tcp"}]}}}\n' \
+        "$ip" > "$STUB_DIR/rendered"
+    run_guard
+    check "loopback $ip is accepted" \
+        "$([ "$RC" = 0 ] && echo ok || echo "refused: $(grep -m1 REFUSED "$SANDBOX/out")")" "ok"
+    rm -rf "$SANDBOX"
+done
+
+echo "== publishing nothing is not the same as publishing nothing forbidden =="
+# The safety property is universally quantified, so an empty list satisfies it
+# completely. Losing 80 costs every http:// caller, and the smoke test only
+# exercises https://, so nothing else would notice.
+# The runtime is made *correct* here on purpose: 80 and 443 are both published.
+# Only the declaration is missing 80. Written the other way round the runtime
+# check fires instead, the test passes, and the declared-side check it names is
+# never exercised — removing that check failed nothing at all until this was
+# split.
+new_sandbox
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+printf '{"services": {"nginx": {"ports": [{"target": 443, "published": "443", "protocol": "tcp"}]}}}\n' \
+    > "$STUB_DIR/rendered"
+run_guard
+refused_because "a configuration publishing no 80" "configuration publishes no off-host 80/tcp"
+check "and it was refused before anything started" \
+    "$(grep -qc 'up -d' "$STUB_DIR/calls" && echo started || echo no)" "no"
+rm -rf "$SANDBOX"
+
+new_sandbox
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|" > "$STUB_DIR/running"
+run_guard
+refused_because "a runtime publishing nothing at all" "no off-host 80/tcp"
+rm -rf "$SANDBOX"
+
+
+echo "== a decoy service cannot satisfy the completeness check =="
+# `case "$name" in *nginx*)` matched any container whose name contained the
+# substring. With nginx publishing nothing and a helper publishing 80 and 443,
+# the gate reported the site as served while the service meant to serve it was
+# not listening.
+new_sandbox
+printf 'nginx\nnginx-helper\n' > "$STUB_DIR/services"
+{
+    echo "p-nginx-1|nginx|"
+    echo "p-nginx-helper-1|nginx-helper|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"
+} > "$STUB_DIR/running"
+# Complete tuples, `mode` included, so the declaration passes the preflight
+# cleanly and the refusal can only come from the runtime check.
+cat > "$STUB_DIR/rendered" <<'JSON'
+{"services": {
+  "nginx":        {"ports": [{"target": 80, "published": "80", "protocol": "tcp", "mode": "ingress"},
+                             {"target": 443, "published": "443", "protocol": "tcp", "mode": "ingress"}]},
+  "nginx-helper": {"ports": []}
+}}
+JSON
+run_guard
+# The runtime wording, not the preflight's. Both say "no off-host 80/tcp", so
+# matching that alone would pass on a preflight refusal and prove nothing about
+# which containers the runtime check looked at.
+refused_because "a helper publishing 80/443 does not stand in for nginx" \
+    "nginx publishes no off-host 80/tcp"
+check "the containers were started first" \
+    "$(grep -qc 'up -d' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
+check "and the ports were read by compose service" \
+    "$(grep -qc 'com.docker.compose.service"}}|{{.Ports' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
 
 echo
