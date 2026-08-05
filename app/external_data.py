@@ -31,6 +31,30 @@ logger = logging.getLogger("sora")
 
 WB_BASE = "https://api.worldbank.org/v2"
 
+# What one (country, indicator) fetch ended as. Row counters cannot answer
+# "was this pair handled?" -- 9,900 fetched rows says nothing about which of
+# the 210 pairs contributed none and why. These do, and they distinguish the
+# three ways a pair yields nothing:
+#
+#   OK          every page was fetched and the series is complete
+#   EMPTY       a proper envelope with no rows: the source has nothing here,
+#               which is a fact about the world, not a fault
+#   REFUSED     an error envelope: the indicator is unknown or archived, so
+#               every future run will fail identically until it is fixed
+#   TRANSIENT   timeouts, 429s and 5xx that outlived the retry budget, and
+#               any pair whose pagination stopped part-way -- likely to
+#               succeed next time, and the only one that makes a run degraded
+#
+# A pair that fetched page 1 and lost page 2 is NOT ok. The rows it did get
+# are kept, because partial data beats none, but the series is incomplete and
+# a run containing one has not done what it set out to do. Counting it as ok
+# because "some observations arrived" would hide exactly the gap these
+# counters exist to expose.
+FETCH_OK = "ok"
+FETCH_EMPTY = "empty"
+FETCH_REFUSED = "refused"
+FETCH_TRANSIENT = "transient"
+
 # Retry budget for the series fetch. Deliberately small: this runs 210 times in
 # a row, so a generous budget turns one bad afternoon at the source into a
 # refresh that never finishes.
@@ -201,7 +225,7 @@ def _fetch_wb_indicator_dated(
 
 def _fetch_wb_series(
     iso3: str, indicator_code: str, per_page: int = 500
-) -> List[Tuple[Optional[str], Optional[float]]]:
+) -> Tuple[List[Tuple[Optional[str], Optional[float]]], str]:
     """Every annual observation the World Bank publishes, newest first.
 
     `_fetch_wb_indicator_dated` asks for three (`mrv=3`) and returns the first
@@ -219,7 +243,7 @@ def _fetch_wb_series(
     otherwise be silently truncated at exactly the point nobody is looking.
     """
     if os.getenv("SORA_OFFLINE", "0") == "1":
-        return []
+        return [], FETCH_EMPTY
 
     out: List[Tuple[Optional[str], Optional[float]]] = []
     page = 1
@@ -237,7 +261,10 @@ def _fetch_wb_series(
         for attempt in range(_WB_RETRIES):
             retryable = None
             try:
-                resp = httpx.get(url, timeout=10.0)
+                # follow_redirects is False by default in httpx, so a moved
+                # path would surface as a 3xx rather than being followed. The
+                # policy is stated here rather than left to the default.
+                resp = httpx.get(url, timeout=10.0, follow_redirects=True)
                 if resp.status_code == 429 or resp.status_code >= 500:
                     retryable = f"status {resp.status_code}"
                 else:
@@ -252,10 +279,35 @@ def _fetch_wb_series(
             # than 429.
             except (httpx.TimeoutException, httpx.TransportError) as e:
                 retryable = type(e).__name__
+            # A 4xx that is not 429 is the source saying no, permanently: a
+            # wrong or withdrawn path answers identically on every future run.
+            # It reached the generic handler below and was reported transient,
+            # which would have degraded every run forever over something no
+            # retry can fix -- the opposite of the distinction this change
+            # exists to draw. 429 and 5xx never arrive here: they are caught
+            # above by status before raise_for_status is reached.
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code if e.response is not None else 0
+                # Only 4xx is a refusal. `raise_for_status` fires on anything
+                # outside 2xx, so 1xx and 3xx arrived here too and were called
+                # permanent -- meaning a moved path would have been recorded as
+                # a dead indicator and never retried. Redirects are followed
+                # below, so a 3xx reaching this point is something unusual
+                # (a redirect loop, or a hop the client refused) and is worth
+                # retrying rather than writing off.
+                if 400 <= status < 500:
+                    logger.warning(
+                        "World Bank refused %s/%s page %d: HTTP %s",
+                        iso3, indicator_code, page, status)
+                    return out, FETCH_REFUSED
+                logger.warning(
+                    "World Bank returned HTTP %s for %s/%s page %d, treating "
+                    "as transient", status, iso3, indicator_code, page)
+                retryable = f"status {status}"
             except Exception as e:
                 logger.warning("World Bank series error for %s/%s page %d: %s",
                                iso3, indicator_code, page, e)
-                return out
+                return out, FETCH_TRANSIENT
 
             if retryable is not None:
                 if attempt == _WB_RETRIES - 1:
@@ -263,11 +315,11 @@ def _fetch_wb_series(
                         "World Bank series gave up for %s/%s page %d after "
                         "%d attempts (%s)",
                         iso3, indicator_code, page, _WB_RETRIES, retryable)
-                    return out
+                    return out, FETCH_TRANSIENT
                 time.sleep(_WB_BACKOFF * (2 ** attempt))
 
         if data is None:
-            return out
+            return out, FETCH_TRANSIENT
 
         # A 200 carrying no rows is two different things, and returning
         # silently made them one. Measured during the rehearsal: 5 of 30
@@ -289,12 +341,12 @@ def _fetch_wb_series(
                 "World Bank returned no data envelope for %s/%s page %d%s",
                 iso3, indicator_code, page,
                 f": {detail}" if detail else " (no message given)")
-            return out
+            return out, FETCH_REFUSED
 
         if not data[1]:
             logger.info("World Bank has no observations for %s/%s",
                         iso3, indicator_code)
-            return out
+            return out, FETCH_OK if out else FETCH_EMPTY
 
         header, rows = data[0], data[1]
         for entry in rows:
@@ -308,7 +360,7 @@ def _fetch_wb_series(
 
         pages = header.get("pages") if isinstance(header, dict) else 1
         if not isinstance(pages, int) or page >= pages:
-            return out
+            return out, FETCH_OK if out else FETCH_EMPTY
         page += 1
 
 
@@ -350,6 +402,21 @@ def refresh_indicator_history(
         no_value    years the source published as null -- expected padding
         no_period   observations carrying no year -- zero unless something is wrong
 
+    and the same run described by *pair* rather than by row, because row
+    counts cannot answer "was each of the 210 pairs handled?":
+
+        pairs_attempted        pairs the run reached
+        pairs_succeeded        the source returned observations
+        pairs_empty            a proper envelope with no rows -- the source
+                               has nothing for that pair
+        pairs_refused          an error envelope: unknown or archived
+                               indicator, identical on every future run
+        pairs_failed_transient timeouts and 5xx that outlived the retries
+
+    `pairs_failed_transient > 0` means the run is **degraded**: some pair may
+    have data that this run did not collect, and a caller that reports success
+    makes that indistinguishable from a pair the source has nothing for.
+
     The last two were one counter called `rejected`, which made them
     indistinguishable. They are not the same thing: the World Bank pads a
     series with null years (30 of 66 for RUS/NY.GDP.MKTP.KD.ZG, the pre-1990
@@ -370,7 +437,9 @@ def refresh_indicator_history(
         db = SessionLocal()
 
     stats = {"fetched": 0, "inserted": 0, "unchanged": 0, "revised": 0,
-             "no_value": 0, "no_period": 0}
+             "no_value": 0, "no_period": 0,
+             "pairs_attempted": 0, "pairs_succeeded": 0, "pairs_empty": 0,
+             "pairs_refused": 0, "pairs_failed_transient": 0}
 
     try:
         fetched_at = datetime.utcnow()
@@ -395,8 +464,15 @@ def refresh_indicator_history(
                 # Outside the lock on purpose: this is seconds of network, and
                 # holding a lock across it would serialise the slow part rather
                 # than the part that needs serialising.
-                series = _fetch_wb_series(iso3, code)
+                stats["pairs_attempted"] += 1
+                series, outcome = _fetch_wb_series(iso3, code)
                 stats["fetched"] += len(series)
+                stats[{
+                    FETCH_OK: "pairs_succeeded",
+                    FETCH_EMPTY: "pairs_empty",
+                    FETCH_REFUSED: "pairs_refused",
+                    FETCH_TRANSIENT: "pairs_failed_transient",
+                }[outcome]] += 1
 
                 # The one that matters: everything after this point writes.
                 _check("during the fetch")
@@ -480,9 +556,13 @@ def refresh_indicator_history(
         if owns_session:
             db.close()
 
-    logger.info(
-        "indicator history: fetched=%d inserted=%d unchanged=%d revised=%d "
+    log = logger.warning if stats["pairs_failed_transient"] else logger.info
+    log(
+        "indicator history: pairs %d/%d ok, %d empty, %d refused, %d transient "
+        "| rows fetched=%d inserted=%d unchanged=%d revised=%d "
         "no_value=%d no_period=%d",
+        stats["pairs_succeeded"], stats["pairs_attempted"], stats["pairs_empty"],
+        stats["pairs_refused"], stats["pairs_failed_transient"],
         stats["fetched"], stats["inserted"], stats["unchanged"],
         stats["revised"], stats["no_value"], stats["no_period"],
     )
@@ -726,6 +806,7 @@ def refresh_live_data(trigger_source: str = "manual") -> Dict:
         # effect of a deployment. See history_refresh_enabled().
         history = None
         history_skipped = None
+        history_lost_lock = False
         if not history_refresh_enabled():
             history_skipped = "disabled by SORA_HISTORY_REFRESH"
         else:
@@ -748,7 +829,11 @@ def refresh_live_data(trigger_source: str = "manual") -> Dict:
                         # Degraded, not success: pairs were written, the run
                         # did not finish, and the ones never reached must not
                         # be mistaken for pairs the source had nothing for.
+                        # The comment said this before the status did -- with
+                        # `history` left as None, the verdict below fell
+                        # through to success.
                         history_skipped = f"lock lost mid-run: {e}"
+                        history_lost_lock = True
                         logger.error("history refresh lost its lock: %s", e)
                 elif state == HELD:
                     history_skipped = "another history refresh holds the lock"
@@ -764,16 +849,28 @@ def refresh_live_data(trigger_source: str = "manual") -> Dict:
 
         _refresh_status["last_refresh"] = datetime.utcnow().isoformat()
         _refresh_status["countries_refreshed"] = result["fetched"]
-        log.status = "success"
+        # A transient failure means some pair may hold data this run did not
+        # collect, and `success` would make that indistinguishable from a pair
+        # the source has nothing for. It belongs in the status, not only in a
+        # warning a human has to read -- see #74.
+        degraded = history_lost_lock or bool(
+            history and history.get("pairs_failed_transient"))
+        log.status = "degraded" if degraded else "success"
         log.countries_fetched = result["fetched"]
         log.total_countries = result["total"]
-        log.message = (
-            f"OK; history skipped: {history_skipped}" if history is None else
-            "OK; history fetched=%(fetched)d inserted=%(inserted)d "
-            "unchanged=%(unchanged)d revised=%(revised)d "
-            "no_value=%(no_value)d no_period=%(no_period)d"
-            % history
-        )
+        if history is None:
+            verdict = "DEGRADED" if degraded else "OK"
+            log.message = f"{verdict}; history skipped: {history_skipped}"
+        else:
+            log.message = (
+                "%(verdict)s; history pairs %(pairs_succeeded)d/"
+                "%(pairs_attempted)d ok, %(pairs_empty)d empty, "
+                "%(pairs_refused)d refused, %(pairs_failed_transient)d "
+                "transient; rows inserted=%(inserted)d revised=%(revised)d "
+                "unchanged=%(unchanged)d no_period=%(no_period)d"
+                % {**history,
+                   "verdict": "DEGRADED" if degraded else "OK"}
+            )
     except Exception as e:
         exc = e
         log.status = "error"

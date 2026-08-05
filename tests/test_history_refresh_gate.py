@@ -55,6 +55,8 @@ def _stub_refresh(monkeypatch, calls):
         lambda **kw: calls.append(kw) or {
             "fetched": 0, "inserted": 0, "unchanged": 0,
             "revised": 0, "no_value": 0, "no_period": 0,
+            "pairs_attempted": 0, "pairs_succeeded": 0, "pairs_empty": 0,
+            "pairs_refused": 0, "pairs_failed_transient": 0,
         },
     )
 
