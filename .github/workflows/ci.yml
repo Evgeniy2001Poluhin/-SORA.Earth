@@ -397,7 +397,10 @@ jobs:
             tools/mutation_backup_local.sh \
             scripts/deploy_production.sh \
             tests/test_deploy_production.sh \
-            tools/mutation_backfill_periods.sh
+            tools/mutation_backfill_periods.sh \
+            tools/wait_for.sh \
+            tests/test_wait_for.sh \
+            tools/mutation_wait_for.sh
 
       # These skip on macOS -- flock does not exist there -- so this Linux job is
       # the only place they actually execute.
@@ -416,6 +419,26 @@ jobs:
       # it was the untested one that shipped.
       - name: Behavioural tests for the deployment guard
         run: bash tests/test_deploy_production.sh
+
+      # Waiting is the long-running operation that never got the discipline the
+      # backups and the deployment guard have: a deadline, an owner, cleanup on
+      # every exit path. Six abandoned polling loops in one session -- one of
+      # them waiting on a process its own watchdog had killed hours earlier --
+      # are what this replaces. Almost all of its tests are refusals.
+      # The waiter is Python behind a thin shell wrapper. Compiled before it is
+      # run, so a syntax error is reported as one rather than as every
+      # behavioural case failing at once.
+      - name: The managed-wait implementation compiles
+        run: python3 -m py_compile tools/wait_for.py
+
+      - name: Behavioural tests for managed waits
+        run: bash tests/test_wait_for.sh
+
+      # And the run that says those tests discriminate. It found a defect in its
+      # own first mutation: the anchor matched, the file was written, and the
+      # mutant still behaved correctly, so MISSED meant nothing about the test.
+      - name: Mutation testing for managed waits
+        run: bash tools/mutation_wait_for.sh
 
       - name: Behavioural tests for the deployment guard (as root)
         run: sudo -E bash tests/test_deploy_production.sh
