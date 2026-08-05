@@ -255,7 +255,10 @@ def _fetch_wb_series(
         for attempt in range(_WB_RETRIES):
             retryable = None
             try:
-                resp = httpx.get(url, timeout=10.0)
+                # follow_redirects is False by default in httpx, so a moved
+                # path would surface as a 3xx rather than being followed. The
+                # policy is stated here rather than left to the default.
+                resp = httpx.get(url, timeout=10.0, follow_redirects=True)
                 if resp.status_code == 429 or resp.status_code >= 500:
                     retryable = f"status {resp.status_code}"
                 else:
@@ -278,11 +281,23 @@ def _fetch_wb_series(
             # exists to draw. 429 and 5xx never arrive here: they are caught
             # above by status before raise_for_status is reached.
             except httpx.HTTPStatusError as e:
+                status = e.response.status_code if e.response is not None else 0
+                # Only 4xx is a refusal. `raise_for_status` fires on anything
+                # outside 2xx, so 1xx and 3xx arrived here too and were called
+                # permanent -- meaning a moved path would have been recorded as
+                # a dead indicator and never retried. Redirects are followed
+                # below, so a 3xx reaching this point is something unusual
+                # (a redirect loop, or a hop the client refused) and is worth
+                # retrying rather than writing off.
+                if 400 <= status < 500:
+                    logger.warning(
+                        "World Bank refused %s/%s page %d: HTTP %s",
+                        iso3, indicator_code, page, status)
+                    return out, FETCH_OK if out else FETCH_REFUSED
                 logger.warning(
-                    "World Bank refused %s/%s page %d: HTTP %s",
-                    iso3, indicator_code, page,
-                    e.response.status_code if e.response is not None else "?")
-                return out, FETCH_OK if out else FETCH_REFUSED
+                    "World Bank returned HTTP %s for %s/%s page %d, treating "
+                    "as transient", status, iso3, indicator_code, page)
+                retryable = f"status {status}"
             except Exception as e:
                 logger.warning("World Bank series error for %s/%s page %d: %s",
                                iso3, indicator_code, page, e)

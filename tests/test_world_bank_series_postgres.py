@@ -497,7 +497,7 @@ def test_an_error_envelope_is_reported_not_swallowed(caplog):
                                   "value": "The indicator was not found."}]}]
 
     original = ed.httpx.get
-    ed.httpx.get = lambda url, timeout=None: _Resp()
+    ed.httpx.get = lambda url, timeout=None, follow_redirects=None: _Resp()
     try:
         with caplog.at_level(logging.WARNING, logger="sora"):
             rows, outcome = ed._fetch_wb_series("RUS", "DEAD.CODE")
@@ -539,7 +539,7 @@ def test_an_empty_series_is_not_an_error(caplog):
             return [{"page": 1, "pages": 1, "total": 0}, []]
 
     original = ed.httpx.get
-    ed.httpx.get = lambda url, timeout=None: _Resp()
+    ed.httpx.get = lambda url, timeout=None, follow_redirects=None: _Resp()
     try:
         with caplog.at_level(logging.WARNING, logger="sora"):
             rows, outcome = ed._fetch_wb_series("RUS", "X")

@@ -35,7 +35,11 @@ class _Resp:
         self.request = None
 
     def raise_for_status(self):
-        if self.status_code >= 400:
+        # httpx raises for anything outside 2xx, not just 4xx and 5xx. An
+        # earlier version of this fake raised only at >= 400, so a 3xx slipped
+        # past it into the envelope parser and the test that meant to exercise
+        # the status branch was exercising something else.
+        if not 200 <= self.status_code < 300:
             raise httpx.HTTPStatusError(
                 "error", request=None, response=self)
 
@@ -59,7 +63,8 @@ def offline_off(monkeypatch):
 
 
 def _serve(monkeypatch, responder):
-    monkeypatch.setattr(ed.httpx, "get", lambda url, timeout=None: responder(url))
+    monkeypatch.setattr(ed.httpx, "get",
+                        lambda url, timeout=None, follow_redirects=None: responder(url))
 
 
 def test_observations_are_ok(monkeypatch):
@@ -307,3 +312,40 @@ def test_losing_the_lock_degrades_the_run(monkeypatch):
         "a run that lost its lock partway recorded success"
     )
     assert "lock lost" in captured["message"]
+
+
+def test_a_302_is_transient_not_refused(monkeypatch):
+    """A moved path is not a dead indicator.
+
+    `raise_for_status` fires on anything outside 2xx, so a 3xx reached the
+    refusal branch and would have been recorded as permanent -- the source
+    moving a URL would have looked exactly like the indicator ceasing to
+    exist, and no retry would ever have been made.
+
+    Redirects are followed now, so a 3xx arriving here at all is unusual
+    (a loop, or a hop the client declined) and is worth retrying.
+    """
+    _serve(monkeypatch, lambda url: _Resp([], status=302))
+    assert ed._fetch_wb_series("RUS", "X")[1] == ed.FETCH_TRANSIENT
+
+
+def test_redirects_are_followed_by_policy(monkeypatch):
+    """Stated on the request rather than left to httpx's default of False."""
+    seen = {}
+
+    def record(url, timeout=None, follow_redirects=None):
+        seen["follow_redirects"] = follow_redirects
+        return _Resp(_envelope([_row("2024", 1.0)]))
+
+    monkeypatch.setattr(ed.httpx, "get", record)
+    ed._fetch_wb_series("RUS", "X")
+
+    assert seen["follow_redirects"] is True, (
+        "a moved path would surface as a 3xx instead of being followed"
+    )
+
+
+def test_a_418_is_still_refused(monkeypatch):
+    """The 4xx boundary holds from the other side."""
+    _serve(monkeypatch, lambda url: _Resp([], status=418))
+    assert ed._fetch_wb_series("RUS", "X")[1] == ed.FETCH_REFUSED
