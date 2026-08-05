@@ -771,13 +771,30 @@ echo "  certificates come from /etc/letsencrypt"
 # Report the certificate's own remaining life first. It is the fact that
 # decides whether anyone needs to act, and unlike the renewal mechanism it can
 # be read straight off disk without interrogating systemd.
+# Every step below is guarded, because this block only *reports*. Under
+# `set -euo pipefail` an unguarded `x="$(openssl ... | cut ...)"` ends the whole
+# script when openssl is missing or the certificate is malformed: pipefail makes
+# the pipeline fail even though `cut` succeeds, and set -e exits on the
+# assignment before the next line can skip it. Measured, not assumed -- a status
+# line has no business failing a deployment that is otherwise sound.
+#
+# The pipeline is gone entirely: `${_end#*=}` does what `cut -d= -f2` did, with
+# no second command whose status could propagate.
 CERT_MIN_DAYS=""
 for _live in /etc/letsencrypt/live/*/; do
     [ -f "${_live}cert.pem" ] || continue
-    _end="$(openssl x509 -enddate -noout -in "${_live}cert.pem" 2>/dev/null | cut -d= -f2)"
-    [ -n "$_end" ] || continue
-    _days=$(( ( $(date -d "$_end" +%s) - $(date +%s) ) / 86400 ))
-    echo "  $(basename "$_live") expires in ${_days} day(s)"
+    _name="$(basename "$_live")"
+    if ! _end="$(openssl x509 -enddate -noout -in "${_live}cert.pem" 2>/dev/null)"; then
+        echo "  WARNING: could not read the certificate for ${_name}"
+        continue
+    fi
+    _end="${_end#*=}"
+    if [ -z "$_end" ] || ! _epoch="$(date -d "$_end" +%s 2>/dev/null)"; then
+        echo "  WARNING: could not parse the expiry of ${_name} (${_end:-empty})"
+        continue
+    fi
+    _days=$(( (_epoch - $(date +%s)) / 86400 ))
+    echo "  ${_name} expires in ${_days} day(s)"
     if [ -z "$CERT_MIN_DAYS" ] || [ "$_days" -lt "$CERT_MIN_DAYS" ]; then
         CERT_MIN_DAYS="$_days"
     fi
