@@ -70,9 +70,14 @@ def test_add_external_regressors(sample_timeseries):
     engineer = FeatureEngineer()
     df_external = engineer.add_external_regressors(sample_timeseries)
 
-    assert "carbon_price" in df_external.columns
+    # One regressor, not three. air_quality and carbon_price were removed in
+    # #95: both read a table that has never held their metric, so both were
+    # zero in every forecast the platform produced. Zero is economically
+    # meaningful for each -- clean air, no carbon price -- so a model could
+    # not tell "no data" from "the figure is zero".
     assert "gdp_growth" in df_external.columns
-    assert "air_quality" in df_external.columns
+    assert "air_quality" not in df_external.columns
+    assert "carbon_price" not in df_external.columns
 
 
 def test_engineer_all(sample_timeseries):
@@ -84,7 +89,7 @@ def test_engineer_all(sample_timeseries):
     assert "y_lag1" in df_engineered.columns
     assert "y_ma7" in df_engineered.columns
     assert "dow" in df_engineered.columns
-    assert "carbon_price" in df_engineered.columns
+    assert "gdp_growth" in df_engineered.columns
 
     # Check that NaN rows from lags are dropped
     assert not df_engineered["y"].isna().any()
