@@ -728,15 +728,25 @@ printf 'nginx\nnginx-helper\n' > "$STUB_DIR/services"
     echo "p-nginx-1|nginx|"
     echo "p-nginx-helper-1|nginx-helper|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"
 } > "$STUB_DIR/running"
+# Complete tuples, `mode` included, so the declaration passes the preflight
+# cleanly and the refusal can only come from the runtime check.
 cat > "$STUB_DIR/rendered" <<'JSON'
 {"services": {
-  "nginx":        {"ports": [{"target": 80, "published": "80", "protocol": "tcp"},
-                             {"target": 443, "published": "443", "protocol": "tcp"}]},
+  "nginx":        {"ports": [{"target": 80, "published": "80", "protocol": "tcp", "mode": "ingress"},
+                             {"target": 443, "published": "443", "protocol": "tcp", "mode": "ingress"}]},
   "nginx-helper": {"ports": []}
 }}
 JSON
 run_guard
-refused_because "a helper publishing 80/443 does not stand in for nginx" "no off-host 80/tcp"
+# The runtime wording, not the preflight's. Both say "no off-host 80/tcp", so
+# matching that alone would pass on a preflight refusal and prove nothing about
+# which containers the runtime check looked at.
+refused_because "a helper publishing 80/443 does not stand in for nginx" \
+    "nginx publishes no off-host 80/tcp"
+check "the containers were started first" \
+    "$(grep -qc 'up -d' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
+check "and the ports were read by compose service" \
+    "$(grep -qc 'com.docker.compose.service"}}|{{.Ports' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
 
 echo
