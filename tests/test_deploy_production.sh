@@ -106,7 +106,16 @@ case "$argv" in
     *"ps -aq"*)
         [ -f "$STUB_DIR/pre_cids" ] && cat "$STUB_DIR/pre_cids"
         exit 0 ;;
+    *"up -d --no-build"*)
+        # The exact-image restore. Recorded so a test can tell it from a
+        # rebuild, which is a different operation with a different verdict.
+        touch "$STUB_DIR/rolled_back"
+        [ -f "$STUB_DIR/no_build_fails" ] && exit 1
+        exit 0 ;;
     *"up -d --build"*)
+        # `slow_up` holds the mutation open so a test can interrupt it. Without
+        # it the window between `up` and the postflight is too short to hit.
+        [ -f "$STUB_DIR/slow_up" ] && sleep 6
         # A rollback rebuilds, so this is called twice. `up_fails_after_first`
         # lets a test fail the second one and nothing else -- which is what
         # separates "refused, previous state restored" from "refused, and the
@@ -124,7 +133,20 @@ case "$argv" in
         exit 0 ;;
     *"upstream sora_backend"*)  cat "$STUB_DIR/upstream_line"; exit 0 ;;
     *"inspect"*"Destination"*)  cat "$STUB_DIR/cert_source"; exit 0 ;;
-    *"inspect -f {{.Image}}"*)  echo "sha256:image"; exit 0 ;;
+    # Before the generic image branch: the snapshot reads the compose service
+    # off each container, and without this it comes back empty and the rollback
+    # silently degrades to a rebuild.
+    *"inspect -f {{index .Config.Labels"*)
+        echo "${STUB_SERVICE:-nginx}"; exit 0 ;;
+    *"inspect -f {{.Image}}"*)
+        # `restored_image` lets a test say the image after the rollback is not
+        # the one recorded -- the case the verification exists for.
+        if [ -f "$STUB_DIR/rolled_back" ] && [ -f "$STUB_DIR/restored_image" ]; then
+            cat "$STUB_DIR/restored_image"
+        else
+            echo "sha256:image"
+        fi
+        exit 0 ;;
     *) exit 0 ;;
 esac
 STUB
@@ -779,10 +801,10 @@ touch "$STUB_DIR/nginx_t_fails"
 run_guard
 check "exit says the previous state is back"  "$RC" "1"
 check "it rolled back"      "$(grep -qc 'rolling back' "$SANDBOX/out" && echo yes || echo no)" "yes"
-check "to the recorded commit" \
-    "$(grep -qc "restored ${FIRST:0:12}" "$SANDBOX/out" && echo yes || echo no)" "yes"
-check "by rebuilding, not by hoping" \
-    "$(grep -c 'up -d --build' "$STUB_DIR/calls")" "2"
+check "the recorded images were restored" \
+    "$(grep -qc 'restored the images that were running' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "without building" \
+    "$(grep -qc 'up -d --no-build' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
 
 echo "== a refusal with nothing recorded stops only what this run created =="
@@ -811,6 +833,10 @@ with_previous_deployment
 echo "nginx" > "$STUB_DIR/services"
 echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
 touch "$STUB_DIR/nginx_t_fails"
+# Both routes broken: the exact restore and the rebuild it falls back to.
+# Breaking only the rebuild no longer says anything, because the rollback no
+# longer goes that way first.
+touch "$STUB_DIR/no_build_fails"
 touch "$STUB_DIR/up_fails_after_first"
 run_guard
 check "exit says the rollback did not complete" "$RC" "76"
@@ -836,6 +862,114 @@ run_guard
 check "refused with the plain status" "$RC" "1"
 check "and no rollback was attempted" \
     "$(grep -qc 'rolling back' "$SANDBOX/out" && echo yes || echo no)" "no"
+rm -rf "$SANDBOX"
+
+
+echo "== a rebuild is reported as an incomplete rollback, not a restore =="
+# Rebuilding the previous commit usually produces a working deployment, and it
+# is not the runtime state that was replaced: a base image can have moved, a
+# dependency resolved differently. Reporting it as "restored" would hand the
+# operator a claim nobody checked.
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/nginx_t_fails"
+touch "$STUB_DIR/no_build_fails"
+run_guard
+check "a rebuild does not count as a restore" "$RC" "76"
+check "and it says which one happened" \
+    "$(grep -qc 'ROLLBACK INCOMPLETE' "$SANDBOX/out" && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+echo "== an image that does not match the snapshot is not a restore =="
+# The `up` can succeed having started something else. Verified afterwards
+# against the recorded ids rather than inferred from the exit status.
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+echo "sha256:something-else" > "$STUB_DIR/restored_image"
+touch "$STUB_DIR/nginx_t_fails"
+run_guard
+check "a different image is not a restore" "$RC" "76"
+check "and the mismatch is named" \
+    "$(grep -qc 'do not match the snapshot' "$SANDBOX/out" && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+echo "== an unfinished journal stops the next run =="
+# After a kill between `up` and the verdict, what is running is whatever that
+# run left. Deploying on top of it would build on a state nobody accepted.
+new_sandbox
+mkdir -p "$SANDBOX/manifests"
+printf 'run x\nstate mutating\n' > "$SANDBOX/manifests/in-progress"
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+run_guard
+refused_because "an interrupted previous run" "did not finish"
+check "and nothing was started" \
+    "$(grep -qc 'up -d' "$STUB_DIR/calls" && echo started || echo no)" "no"
+rm -rf "$SANDBOX"
+
+echo "== a successful deployment leaves no journal behind =="
+new_sandbox
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+run_guard
+check "the deployment succeeded" "$RC" "0"
+check "and the journal is closed" \
+    "$( [ -f "$SANDBOX/manifests/in-progress" ] && echo left || echo closed )" "closed"
+rm -rf "$SANDBOX"
+
+
+echo "== a signal during the mutation rolls back =="
+# Only `fail()` routed through the rollback, so a SIGTERM -- Ctrl-C, a dropped
+# session, an orchestrator killing the run -- left the new containers running
+# with nothing to undo them.
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/slow_up"
+( export PATH="$STUB_DIR/bin:$PATH"
+  DEPLOY_REPO="$REPO" COMPOSE_FILE="$REPO/compose.yml" COMPOSE_PROJECT_NAME=p \
+  SITE_URL="http://stand.invalid" MANIFEST_DIR="$SANDBOX/manifests" \
+  DEPLOY_LOCK_DIR="$SANDBOX/lockdir" HEALTH_ATTEMPTS=3 HEALTH_DELAY=0 \
+    bash "$SCRIPT" ) > "$SANDBOX/out" 2>&1 &
+GUARD=$!
+sleep 3
+kill -TERM "$GUARD" 2>/dev/null
+wait "$GUARD" 2>/dev/null
+RC=$?
+check "it reports the interruption" \
+    "$(grep -qc 'interrupted by SIGTERM' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "and rolled back rather than leaving it running" \
+    "$(grep -qc 'up -d --no-build' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+echo "== a run killed outright leaves its journal behind =="
+# SIGKILL cannot be trapped, which is the case the journal exists for: what is
+# running afterwards is whatever the interrupted run left, and the next run has
+# to be able to see that.
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/slow_up"
+( export PATH="$STUB_DIR/bin:$PATH"
+  DEPLOY_REPO="$REPO" COMPOSE_FILE="$REPO/compose.yml" COMPOSE_PROJECT_NAME=p \
+  SITE_URL="http://stand.invalid" MANIFEST_DIR="$SANDBOX/manifests" \
+  DEPLOY_LOCK_DIR="$SANDBOX/lockdir" HEALTH_ATTEMPTS=3 HEALTH_DELAY=0 \
+    bash "$SCRIPT" ) > "$SANDBOX/out" 2>&1 &
+GUARD=$!
+sleep 3
+kill -9 "$GUARD" 2>/dev/null
+wait "$GUARD" 2>/dev/null
+sleep 1
+check "the journal survives the kill" \
+    "$( [ -f "$SANDBOX/manifests/in-progress" ] && echo present || echo missing )" "present"
+check "and records the phase it reached" \
+    "$(grep -qc 'state          mutating' "$SANDBOX/manifests/in-progress" 2>/dev/null && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
 
 echo
