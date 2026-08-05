@@ -107,11 +107,9 @@ run_mutation "the deadline does not bound the predicate" \
     "bounded by the deadline" \
     '            while proc.poll() is None:
                 outcome = guard()
-                if outcome is not None:
-                    stop_group(proc, pgid, graceful=True)
-                    return outcome
-                time.sleep(POLL)||=>||            while proc.poll() is None:
-                time.sleep(POLL)'
+                if outcome is not None:||=>||            while proc.poll() is None:
+                outcome = None
+                if outcome is not None:'
 
 # A predicate that forks leaves a grandchild that killing the leader never
 # reaches. This is what the process group is for.

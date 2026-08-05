@@ -147,8 +147,12 @@ def group_exists(pgid: int) -> bool:
     return True
 
 
-def stop_group(proc, pgid, graceful: bool) -> None:
+def stop_group(proc, pgid, graceful: bool) -> bool:
     """TERM, a bounded grace, KILL, then reap.
+
+    Returns whether the group is gone. False means something survives that this
+    process is not allowed to signal, which the caller must not report as a
+    clean stop.
 
     `graceful=False` is for the paths where the predicate was never meant to
     have run: KILL only, no TERM and no SIGCONT. SIGCONT would be needed to
@@ -156,17 +160,27 @@ def stop_group(proc, pgid, graceful: bool) -> None:
     there -- it would let the process start. SIGKILL needs neither.
     """
     if pgid is None:
-        return
+        return True
+
+    # Whether the group could actually be signalled. PermissionError means
+    # something is still there and is not ours to stop -- a descendant that
+    # changed uid, say. Swallowed, that turned "nothing is left running" into a
+    # claim with no evidence behind it, and the caller was told the wait ended
+    # cleanly while a process it started kept going.
+    lost_control = False
 
     # One place that signals the group, so "the group, not the leader" is a
     # single decision rather than repeated at each call. Mutating one of two
     # copies proved nothing: TERM to the group already collected the tree, so
     # replacing only the KILL left every test green.
     def signal_group(sig):
+        nonlocal lost_control
         try:
             os.killpg(pgid, sig)
-        except (ProcessLookupError, PermissionError):
+        except ProcessLookupError:
             pass
+        except PermissionError:
+            lost_control = True
 
     if graceful:
         signal_group(signal.SIGTERM)
@@ -191,6 +205,10 @@ def stop_group(proc, pgid, graceful: bool) -> None:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+
+    # Asked, not inferred: the group may have exited on its own between the
+    # PermissionError and now.
+    return not (lost_control and group_exists(pgid))
 
 
 def main(argv=None) -> int:
@@ -264,7 +282,16 @@ def main(argv=None) -> int:
             while proc.poll() is None:
                 outcome = guard()
                 if outcome is not None:
-                    stop_group(proc, pgid, graceful=True)
+                    # Cleared before returning, so the `finally` below does not
+                    # sweep a group that is already gone -- a second pass that
+                    # cost another grace period and could report a stale
+                    # failure from a pgid nobody owns any more.
+                    swept = stop_group(proc, pgid, graceful=True)
+                    proc, pgid = None, None
+                    if not swept:
+                        print("wait_for: could not stop the predicate's group",
+                              file=sys.stderr)
+                        return EX_OSERR
                     return outcome
                 time.sleep(POLL)
 

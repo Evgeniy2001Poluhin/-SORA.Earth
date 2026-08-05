@@ -158,6 +158,10 @@ check "a grandchild was created" "$( [ -n "$GRANDCHILD" ] && echo yes || echo no
 sleep 1
 check "and it is gone too" \
     "$(kill -0 "$GRANDCHILD" 2>/dev/null && echo alive || echo gone)" "gone"
+# Under a mutant that stops only the leader, the grandchild survives -- and
+# being reparented, `pkill -P $$` in the exit trap cannot reach it. Left behind,
+# it outlives the suite on the developer's machine and in CI.
+[ -n "$GRANDCHILD" ] && kill -9 "$GRANDCHILD" 2>/dev/null
 
 fi
 
