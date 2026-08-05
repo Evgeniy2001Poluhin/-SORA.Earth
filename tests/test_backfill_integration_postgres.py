@@ -61,6 +61,8 @@ class Stub:
     def __init__(self):
         self.pages = [[]]
         self.unobtainable_from = None
+        # A 200 whose body is not the shape the World Bank returns.
+        self.malformed = False
         self.requested = []
         self.paths = []
         self.base = None
@@ -86,7 +88,8 @@ def _handler_for(stub):
             if stub.unobtainable_from is not None and page >= stub.unobtainable_from:
                 self.send_error(503, "stub: this page is unobtainable")
                 return
-            body = stub.body(page)
+            body = b'{"message": "service temporarily unavailable"}' if stub.malformed \
+                else stub.body(page)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -339,6 +342,50 @@ def test_a_source_that_publishes_no_period_is_recorded_as_such(scratch_db, stub)
     assert row["as_of_date"] is None
     assert row["period_method"] == "source_publishes_none"
     assert stub.requested == [], "a derived value was looked up at the source"
+
+
+@requires_postgres
+def test_a_row_from_another_source_is_left_alone(scratch_db, stub):
+    """The rule matches against the World Bank's own series, so it means nothing
+    for a row the World Bank did not produce.
+
+    Selected by exclusion, any source added later -- rosstat, the Sber/VEB
+    baseline, anything labelled `unknown` -- would have been matched against
+    World Bank data and could have been given a year from it. Production holds
+    only world_bank, benchmark and global_avg today, so the defect had no
+    victims yet; the fix is about the source nobody has added.
+    """
+    engine, url = scratch_db
+    foreign = insert_row(engine, source="rosstat")
+    mine = insert_row(engine)
+    stub.pages = [series((2025, SOURCE_FIGURE))]
+
+    run_backfill(url, stub, "--apply")
+
+    assert read_row(engine, mine)["period_status"] == "recovered_inferred"
+    row = read_row(engine, foreign)
+    assert row["period_status"] is None, "a foreign source was given a World Bank year"
+    assert row["as_of_date"] is None
+
+
+@requires_postgres
+def test_a_malformed_answer_defers_rather_than_ending_the_run(scratch_db, stub):
+    """A 200 that is not the expected shape used to raise out of the whole run.
+
+    `payload[0]` and `int(header["pages"])` both throw on a JSON error page or
+    an empty list, and outside a guard that cost every remaining pair -- while
+    the totals printed at the end would have described a pass that never
+    finished.
+    """
+    engine, url = scratch_db
+    row_id = insert_row(engine)
+    stub.malformed = True
+
+    run_backfill(url, stub, "--apply")
+
+    row = read_row(engine, row_id)
+    assert row["period_status"] is None, "an unusable answer produced a verdict"
+    assert row["as_of_date"] is None
 
 
 @requires_postgres

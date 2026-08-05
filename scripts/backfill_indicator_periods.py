@@ -135,6 +135,18 @@ RULE_VERSION = "value-match/2"
 # calculation date might be meaningful, and neither is invented here.
 PERIODLESS_SOURCES = ("benchmark", "global_avg")
 
+# Named, not "everything else". The rule here matches a stored figure against
+# the World Bank's own series, so it is only meaningful for rows the World Bank
+# produced. Selecting by exclusion meant any source added later -- rosstat, the
+# Sber/VEB baseline, anything labelled `unknown` -- would silently be matched
+# against World Bank data and could be given a year from it.
+#
+# Production holds world_bank (61,937), benchmark (31,842) and global_avg (20),
+# so today the two forms select the same rows. The difference is what happens
+# to the source nobody has added yet: an allowlist leaves it undecided, which is
+# the truth, and a denylist gives it a wrong answer confidently.
+WORLD_BANK_SOURCES = ("world_bank",)
+
 
 def connect():
     url = os.environ.get("DATABASE_URL")
@@ -176,13 +188,25 @@ def fetch_history(iso: str, ind: str):
                     return None, None
                 time.sleep(2 ** attempt * 2)
 
-        payload = json.loads(raw.decode())
-        header = payload[0] if payload else {}
-        rows = payload[1] if len(payload) > 1 and payload[1] else []
-        history.update({r["date"]: r["value"] for r in rows if r.get("value") is not None})
+        # Parsed inside a guard, and a failure here defers rather than aborts.
+        #
+        # These four lines all raise on a 200 that is not the shape expected --
+        # a JSON error page, an empty list, a `pages` field that is not a
+        # number. Outside a guard that exception left the whole run, so one
+        # malformed page for one country cost every remaining pair, and the
+        # counts printed at the end would have described a pass that never
+        # finished. `source_unavailable` is exactly the verdict for "no
+        # conclusive answer; ask again", and it leaves the rows for a later run.
+        try:
+            payload = json.loads(raw.decode())
+            header = payload[0] if payload else {}
+            rows = payload[1] if len(payload) > 1 and payload[1] else []
+            history.update({r["date"]: r["value"] for r in rows if r.get("value") is not None})
+            pages = int(header.get("pages", 1) or 1)
+        except Exception as e:
+            print(f"    {iso}/{ind} page {page}: unusable response ({e}); deferred")
+            return None, None
         hashes.append(hashlib.sha256(raw).hexdigest())
-
-        pages = int(header.get("pages", 1) or 1)
         if page >= pages:
             meta = {
                 "vintage": header.get("lastupdated"),
@@ -292,8 +316,8 @@ def main() -> int:
             FROM country_indicator_history
             WHERE {eligible}
               AND (period_status IS NOT NULL OR as_of_date IS NULL)
-              AND source <> ALL(%s)""",
-        (*params, list(PERIODLESS_SOURCES)),
+              AND source = ANY(%s)""",
+        (*params, list(WORLD_BANK_SOURCES)),
     )
     by_pair: dict = defaultdict(lambda: defaultdict(list))
     for row_id, iso, ind, value in cur.fetchall():
