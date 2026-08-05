@@ -1,7 +1,12 @@
 # SORA.Earth Maximum — Roadmap
 
-**Updated:** 2026-07-31 · **main:** `531822b` · supersedes the M0-only plan in
-`M0_EXECUTION_PLAN.md`, which stays as the historical record of that milestone.
+**Updated:** 2026-08-05 · **main:** `a3f7f4c` · **production:** `5987547` ·
+supersedes the M0-only plan in `M0_EXECUTION_PLAN.md`, which stays as the
+historical record of that milestone.
+
+Production is several merges behind main. That gap is stated wherever it changes
+what is true, because "merged" and "running" are different claims and this
+document has confused them before.
 
 Every claim below is either marked as verified with the evidence that verified it,
 or marked as unverified. Nothing here is asserted from memory. Where a fact could
@@ -11,6 +16,18 @@ Production access is withheld by default after a registered incident on
 permission directly in chat. Documentation is still not permission.
 
 ---
+
+## Landed since this document was last written (2026-07-31 → 2026-08-04)
+
+| | |
+|---|---|
+| #63, #66, #67 | The daily local backup is covered by behavioural tests and mutation testing, and a deployment guard refuses a non-main, dirty or out-of-sync tree. The guard's rollback path has never been exercised on production |
+| #64, #65 | Public traffic was being served by a 16-day-old dev container with `SORA_OFFLINE=1`. nginx now routes to the production backend, and the dev compose file no longer publishes the API to the internet |
+| #68 | A run is a success only when it produced something. Production shows it working: `openaq_ingestion \| degraded \| processed=0` where the same run used to record `success` |
+| #45–#48 | The four security fixes, merged after their branches were brought up to date. All four had shown `CLEAN` on CI that ran five days earlier against a base 55–58 commits stale; updating each turned it `UNSTABLE` or `BLOCKED` immediately |
+| #72 | The aggregation recorded nothing about what it aggregated |
+| #73 | **Merged.** Records, per row, why an indicator has no period — and whether it can be inferred, which is a weaker claim than the source stating it. Capability only: #58 stays open, and the 90,461 production rows are untouched until a separate controlled operation |
+| #74, #75, #76 | Filed 2026-08-04 from external review: operator-actionable ingestion status, point-in-time provenance, and an owned lifecycle for long waits |
 
 ## Where the project actually is
 
@@ -30,11 +47,13 @@ permission directly in chat. Documentation is still not permission.
 
 | | state |
 |---|---|
-| Observations actually persisting in production | **No.** Verified 2026-07-31: 0 rows. Persistence code and tests have landed and pass in CI, but production still runs `0b0ff6d1594e` — none of it is deployed |
-| Production running current migrations | **No.** `alembic_version` = `0b0ff6d1594e`, head = `f2c9a1d47b30` |
-| Backup on a schedule | Scripts exist (`scripts/backup_*.sh`). No schedule is installed. RPO is undefined — not poor, undefined |
+| Observations actually persisting in production | **Now yes.** 24,230 rows, verified 2026-08-04. This was 0 on 2026-07-31 and was the one open M1 prerequisite |
+| Production running current migrations | **Yes for the code it runs.** `alembic_version` = `c4d1f8a26b93`, which is head on `main`. The *code* is `5987547`, so #45–#48 and #72 are merged and not deployed |
+| Disaster-recovery backup on a schedule | **No.** `sora-backup.timer` shipped in #47 and is not installed — production predates that merge. The unit is not on the host at all |
+| Operational daily dump | **Yes.** `sora-backup-local.timer` enabled and active; last run 2026-08-04 03:30:07 UTC, exit 0. Three dumps on disk with checksums, 1.4M → 1.5M → 1.7M. Not disaster recovery: same host |
 | Restore drill against production | Done locally against PostgreSQL 16. Never against production |
-| Security P0 | Three private advisories with matching fix branches. PRs #46, #47, #48 open; #45 draft |
+| Security P0 | **Merged**, not deployed. #45, #46, #47, #48 are all in `main`; production runs code from before them |
+| Deployment is atomic | **No.** #71. Worse than first recorded: eight checks run *after* `up`, and `fail` only exits — so a forbidden port is named accurately and left open, and the deployment stops in a state worse than the one it began in. PRs #79 (refuse before `up`) and #80 (roll back after it) are open |
 | Issue #51 remainder | Reverse direction of the schema check with an allowlist; stray tolerated objects; a cold-start race that did **not** reproduce in five attempts and is recorded as unreproduced rather than dropped |
 
 ### Verified stale, closed
@@ -47,18 +66,30 @@ found by checking, not by reading the list.
 
 ## M1 — Data Trust
 
-**Prerequisite:** M0 complete *and* observations persisting. The first is done.
-**The second is not met** — verified, 0 rows. M1 does not open until ingestion
-writes and production runs current migrations. The query that established it:
+**Prerequisite:** M0 complete *and* observations persisting. **Both are now met**,
+as of 2026-08-04:
 
 ```sql
-SELECT count(*) FROM environmental_observations;   -- 0
-SELECT version_num FROM alembic_version;           -- 0b0ff6d1594e
+SELECT count(*) FROM environmental_observations;   -- 24,230   (was 0 on 07-31)
+SELECT version_num FROM alembic_version;           -- c4d1f8a26b93  (was 0b0ff6d1594e)
 ```
 
 The column is `event_time`, not `observed_at` — the first version of this query
 used the wrong name and failed, which is how the schema below came to be read
 properly rather than assumed.
+
+Persisting is not the same as trustworthy, which is what M1 is for. Two things
+are already known to be wrong with what is being written:
+
+* **90,461 of 93,623 `country_indicator_history` rows carry no observation
+  period** (#58). #59 stopped the loss for new rows; #73 is merged and records,
+  per row, whether the missing period can be inferred and under which rule. The
+  proportion has not moved: merging the capability changes no data, and the
+  backfill has deliberately not been run against production.
+* **A run recorded `success` while producing nothing**, 333 times in a row
+  (#56). #68 made a run a success only when it produced something, and
+  production confirms it. #74 is the rest of that: a status an operator can act
+  on rather than read.
 
 ### Sources, as they exist in the code today
 
@@ -75,17 +106,47 @@ Both of the last two need their provenance established before a contract can be
 written for them: a source with no endpoint in the code is either a file drop, a
 manual load, or dead. That is the first task, not an assumption to carry forward.
 
-### Verified against production, 2026-07-31
+### Verified against production, 2026-08-04
 
 Read-only, with the owner's explicit permission given in chat.
 
-**Observations are not persisting.** `environmental_observations` holds **0 rows**.
-The M1 prerequisite is therefore **not met**, and repairing ingestion is the first
-task of M1, not a side item.
+| | |
+|---|---|
+| deployed code | `5987547` — four merges behind `main` |
+| `alembic_version` | `c4d1f8a26b93` |
+| `environmental_observations` | 24,230 rows |
+| `country_indicator_history` | 93,623 rows, 90,461 with no `as_of_date` |
+| `sora-backup-local.timer` | enabled, active; last run 2026-08-04 03:30:07 UTC, exit 0 |
+| `sora-backup.timer` | not installed on the host |
 
-**Production is behind on migrations.** `alembic_version` reads `0b0ff6d1594e`;
-head is `f2c9a1d47b30`. None of the M0 work has been deployed, which also means
-`assert_schema_ready()` has never run against this database.
+The queries, so the figures above can be re-derived rather than taken on trust.
+Unqualified: this database keeps these tables in the default search path, and
+naming a schema that does not exist here would make the check fail in a way that
+looks like missing data.
+
+```sql
+SELECT count(*) FROM environmental_observations;                  -- 24230
+SELECT version_num FROM alembic_version;                          -- c4d1f8a26b93
+SELECT count(*) FILTER (WHERE as_of_date IS NULL), count(*)
+  FROM country_indicator_history;                                 -- 90461 | 93623
+```
+
+```bash
+systemctl list-timers --all | grep -i sora   # sora-backup-local.timer, next 08-05 03:30
+ls -lh /var/backups/sora/                    # three dumps, each with a .sha256
+```
+
+**A wrong reading, corrected before it was written down.** The first query asked
+for `sora-backup.timer`, got "inactive" and "0 timers listed", and would have
+supported the claim that nothing backs this system up. The unit that runs is
+`sora-backup-local.timer`; asking for the wrong name produced an answer that
+looked like evidence of absence. The dumps on disk — 2026-08-02, -03 and -04,
+each with a checksum, growing 1.4M → 1.5M → 1.7M — are what settles it.
+
+**Superseded from 2026-07-31.** That check found 0 observations and
+`alembic_version` = `0b0ff6d1594e`, and concluded the M1 prerequisite was not
+met. Both facts changed when the deployment on 2026-08-03 landed. Kept here
+because the conclusion drawn from them shaped the plan.
 
 **A claim in the first draft of this document was wrong.** It stated that
 `published_at` was missing and that only three of the four required timestamps
@@ -133,12 +194,19 @@ its prerequisite is met — writing it earlier is how a roadmap becomes fiction.
 
 | | prerequisite |
 |---|---|
-| **M2 Forecasting Lab** | M1 complete. Baselines first (naive, seasonal naive, moving average); rolling-origin backtesting, never a random split; ≥ 15% improvement over seasonal naive or the model does not ship |
+| **M2 Forecasting Lab** | M1 complete **and #75**. Baselines first (naive, seasonal naive, moving average); rolling-origin backtesting, never a random split; ≥ 15% improvement over seasonal naive or the model does not ship |
 | **M3 Crisis Intelligence** | M2 complete, event-labelled benchmark with confirmed dates. Recall, precision, false-alarm rate and lead time on real events — not thresholds asserted to work |
 | **M4 Safe MLOps** | M3 complete. Champion/challenger, shadow, rollback. A retrain succeeding is not grounds for promotion |
 | **M5 Specialist Workspace** | M4 complete. UAT with 5–10 specialists on real tasks |
 | **M6 SORA Copilot** | M5 complete. Numbers come from tools, never from the model. Citation precision ≥ 95% |
 | **M7 Validation Pack** | M6 complete. Model cards, dataset cards, security and DR evidence tied to a release tag |
+
+**A correction this document was carrying.** It has been said here and in chat
+that closing #58 unblocks leakage-free backtesting. It does not. #58 and #73
+establish *when a figure describes*; leakage is governed by *when it became
+knowable*, and `published_at` and `superseded_at` do not exist for indicator
+history — the row is overwritten on refresh, so "what did we know on date D"
+has no answer. #75 is that work, and M2's prerequisite now names it.
 
 ---
 
@@ -165,13 +233,39 @@ Earned during M0, each after being got wrong at least once:
    milestone's worst findings were exceptions that turned a break into silence.
 7. **Do not raise a timeout to make a failure go away.** Twice it hid the cause.
    Raise the budget only when the work legitimately grew, and say which.
+8. **A test must execute the thing it is named after.** The first write-path test
+   for #73 spoke to a real PostgreSQL and never invoked the script: it re-typed
+   the corrected SQL and checked the database obeyed. That passes forever,
+   including on the day the script regresses, because the correct version lives
+   in the test. It also ran `alembic upgrade head >/dev/null 2>&1` in a job with
+   no Python installed, so ten assertions failed for a reason unrelated to
+   anything they tested.
+9. **Prove a test can fail.** Every guard added since #63 is checked by
+   reintroducing the defect and watching the suite go red. Three mutations were
+   run against #73's integration test; each fails exactly one case.
+10. **The published state is the claim.** Local edits are not a fix, and a pull
+    request whose body describes an abandoned design wastes the whole review.
+    Push, then state the SHA.
+11. **A refusal is not evidence of absence.** A rate limiter refusing 56 of 118
+    requests produced a "40.5% recoverable" measurement that described the rate
+    limiter. Paced, it was 76.8%. The same shape appeared again on 2026-08-04:
+    querying the wrong systemd unit name returned "0 timers listed", which is
+    not the same fact as "nothing is scheduled".
 
 ---
 
 ## What this agent will not do
 
-Production SSH, production database access, production migrations, deployment,
-force-push, rebasing published branches, changing branch protection, rotating
-secrets, or declaring a milestone complete. These are owner actions. The one
-open M1 prerequisite falls in that set, which is why it is stated as a question
-rather than an answer.
+Force-push, rebasing published branches, changing branch protection, rotating
+secrets, or declaring a milestone complete. These are owner actions.
+
+**Production access changed and this section says so rather than quietly
+lapsing.** It was withheld by default after the 2026-07-27 incident, in which
+`CLAUDE.md`'s deployment section was treated as permission. The owner has since
+granted access directly in chat, and the deployment on 2026-08-03 and the
+read-only checks above were made under it. The rule that produced the incident
+is unchanged: **documentation is never permission.**
+
+**Writes to production data remain a separate decision, per operation.** The #73
+backfill would rewrite up to 90,461 rows and has not been run there. Access to a
+database is not authorisation to change it.
