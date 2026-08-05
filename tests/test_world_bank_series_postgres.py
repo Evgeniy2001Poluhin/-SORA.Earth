@@ -260,6 +260,117 @@ def test_an_observation_without_a_period_is_rejected_not_stored(db, wb_stub):
     assert len(_stored(db)) == 1
 
 
+def _concurrent_refresh(engine, barrier, results, index):
+    """One refresh in its own session, released together with the others."""
+    from app.external_data import refresh_indicator_history
+
+    with Session(engine) as session:
+        barrier.wait(timeout=30)
+        try:
+            results[index] = refresh_indicator_history(
+                db=session, countries={ISO3: ISO3},
+                indicators={"gdp_growth": CODE})
+        except Exception as e:  # recorded, so the assertion can name it
+            results[index] = e
+
+
+def test_two_concurrent_runs_insert_one_row_each_period(scratch_db, wb_stub):
+    """Read -> classify -> insert is a check-then-act.
+
+    Without serialisation both processes find the period absent and both
+    insert it, so the same observation is stored twice and the table gains a
+    duplicate that no constraint forbids. The Redis lock does not help here:
+    it says who may *start*, and these two both started.
+
+    A transaction-scoped advisory lock on (country_iso3, indicator_code) is
+    what makes the second one see the first one's rows.
+    """
+    engine, _ = scratch_db
+    barrier = threading.Barrier(2)
+    results = [None, None]
+
+    threads = [
+        threading.Thread(target=_concurrent_refresh,
+                         args=(engine, barrier, results, i))
+        for i in range(2)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+
+    for r in results:
+        assert not isinstance(r, Exception), f"a run raised: {r!r}"
+
+    inserted = sorted(r["inserted"] for r in results)
+    unchanged = sorted(r["unchanged"] for r in results)
+    assert inserted == [0, 3], f"expected one run to insert all three: {inserted}"
+    assert unchanged == [0, 3], f"expected the other to see them: {unchanged}"
+
+    with Session(engine) as check:
+        rows = check.execute(text(
+            "SELECT as_of_date, count(*) FROM country_indicator_history "
+            " WHERE country_iso3 = :iso3 AND indicator_code = :code "
+            " GROUP BY 1 ORDER BY 1"
+        ), {"iso3": ISO3, "code": CODE}).all()
+
+    assert [r[1] for r in rows] == [1, 1, 1], (
+        f"a period was stored more than once: {rows}"
+    )
+
+
+def test_two_concurrent_runs_record_one_revision(scratch_db, wb_stub):
+    """The same invariant on the revision path: one new version, not two.
+
+    Weaker than the test above, and worth saying so. Removing the advisory
+    lock makes that one fail deterministically ([3, 3] instead of [0, 3]);
+    this one still passed without it, because the two threads happened not to
+    overlap -- each finished its pair before the other read. So it is a
+    regression guard on the end state, not a demonstration of the mechanism.
+
+    Kept because the end state is what matters -- two identical revisions
+    would make `series_as_of` resolve between duplicates and the history claim
+    the source restated a year twice -- but the mechanism is proven by
+    test_two_concurrent_runs_insert_one_row_each_period, not by this.
+    """
+    from app.external_data import refresh_indicator_history
+
+    engine, _ = scratch_db
+    with Session(engine) as setup:
+        refresh_indicator_history(db=setup, countries={ISO3: ISO3},
+                                  indicators={"gdp_growth": CODE})
+
+    wb_stub.series = [("2025", 1.00), ("2024", 5.30), ("2023", 3.65)]
+
+    barrier = threading.Barrier(2)
+    results = [None, None]
+    threads = [
+        threading.Thread(target=_concurrent_refresh,
+                         args=(engine, barrier, results, i))
+        for i in range(2)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+
+    for r in results:
+        assert not isinstance(r, Exception), f"a run raised: {r!r}"
+
+    assert sorted(r["revised"] for r in results) == [0, 1], (
+        f"the revision was recorded twice: {[r['revised'] for r in results]}"
+    )
+
+    with Session(engine) as check:
+        count = check.execute(text(
+            "SELECT count(*) FROM country_indicator_history "
+            " WHERE country_iso3 = :iso3 AND indicator_code = :code "
+            "   AND as_of_date = '2024-01-01'"
+        ), {"iso3": ISO3, "code": CODE}).scalar()
+
+    assert count == 2, f"expected the original and one revision, got {count}"
+
+
 def test_an_error_envelope_is_reported_not_swallowed(caplog):
     """A 200 with no data is two different things, and it used to be one.
 

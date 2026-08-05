@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 
 import httpx
+from sqlalchemy import text
 
 from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 from app.database import SessionLocal, DataRefreshLog, CountryIndicatorHistory
@@ -35,6 +36,10 @@ WB_BASE = "https://api.worldbank.org/v2"
 # refresh that never finishes.
 _WB_RETRIES = 3
 _WB_BACKOFF = 1.0  # seconds, doubled per attempt
+
+# One key for both the scheduled refresh and the manual one-shot: two keys
+# would let them run at once, which is the thing the lock exists to prevent.
+HISTORY_LOCK_KEY = "sora:lock:external_refresh"
 
 
 def history_refresh_enabled() -> bool:
@@ -357,13 +362,41 @@ def refresh_indicator_history(
 
     try:
         fetched_at = datetime.utcnow()
+        is_postgres = db.get_bind().dialect.name == "postgresql"
+
         for name, iso3 in countries.items():
             for key, code in indicators.items():
+                # Outside the lock on purpose: this is seconds of network, and
+                # holding a lock across it would serialise the slow part rather
+                # than the part that needs serialising.
                 series = _fetch_wb_series(iso3, code)
                 stats["fetched"] += len(series)
 
+                # Everything below is one transaction per pair, opened by the
+                # advisory lock and closed by the commit at the end of the
+                # loop body. Per pair rather than per run: a single
+                # transaction over 210 pairs would hold every lock for the
+                # ten minutes the run takes, so a second process would block
+                # on the first pair until the first process finished.
+                #
+                # The lock is transaction-scoped, so it is released by the
+                # commit or by a rollback -- there is no path that leaks it.
+                #
+                # This is needed even with the Redis lock in front, and not as
+                # belt and braces: read -> classify -> insert is a
+                # check-then-act, so two processes can both find a period
+                # absent and both insert it. Redis says who may start; this
+                # says who may decide.
+                if is_postgres:
+                    db.execute(
+                        text("SELECT pg_advisory_xact_lock(hashtext(:a), hashtext(:b))"),
+                        {"a": iso3, "b": code},
+                    )
+
                 # What is on record now, per period: the most recently fetched
                 # row wins, which is the same rule the point-in-time read uses.
+                # Read *after* taking the lock, or the classification is made
+                # from a snapshot the lock does not cover.
                 current: Dict[datetime, float] = {}
                 for as_of, value in db.query(
                     CountryIndicatorHistory.as_of_date,
@@ -406,7 +439,11 @@ def refresh_indicator_history(
                     current[as_of] = value
                     stats["revised" if known is not None else "inserted"] += 1
 
-        db.commit()
+                # Ends this pair's transaction and releases its advisory lock.
+                # Also makes the run resumable: a failure at country 20 keeps
+                # the first 19, rather than discarding ten minutes of work.
+                db.commit()
+
     except Exception:
         db.rollback()
         raise
@@ -658,13 +695,35 @@ def refresh_live_data(trigger_source: str = "manual") -> Dict:
         # Gated, because this job runs immediately when the scheduler starts:
         # enabling it by default would make the first mass ingestion a side
         # effect of a deployment. See history_refresh_enabled().
-        if history_refresh_enabled():
-            history = refresh_indicator_history(job_name="external_data_refresh")
+        history = None
+        history_skipped = None
+        if not history_refresh_enabled():
+            history_skipped = "disabled by SORA_HISTORY_REFRESH"
         else:
-            history = None
-            logger.info(
-                "indicator history refresh is off (SORA_HISTORY_REFRESH); "
-                "the live cache was refreshed, the series was not")
+            # The same key the manual one-shot takes, so the two cannot both
+            # run. `held` and `unavailable` are told apart and both skip: a
+            # scheduled run has another one along in six hours, and starting a
+            # mass write path while unable to tell whether one is already
+            # running is not a trade worth making.
+            from app.locks import ACQUIRED, HELD, StrictLock
+
+            lock = StrictLock(key=HISTORY_LOCK_KEY, timeout=3600)
+            state = lock.acquire()
+            try:
+                if state == ACQUIRED:
+                    history = refresh_indicator_history(
+                        job_name="external_data_refresh")
+                elif state == HELD:
+                    history_skipped = "another history refresh holds the lock"
+                else:
+                    history_skipped = (
+                        "lock unavailable (Redis unreachable); skipped rather "
+                        "than risking a concurrent mass write")
+            finally:
+                lock.release()
+
+        if history_skipped:
+            logger.info("indicator history refresh skipped: %s", history_skipped)
 
         _refresh_status["last_refresh"] = datetime.utcnow().isoformat()
         _refresh_status["countries_refreshed"] = result["fetched"]
@@ -672,7 +731,7 @@ def refresh_live_data(trigger_source: str = "manual") -> Dict:
         log.countries_fetched = result["fetched"]
         log.total_countries = result["total"]
         log.message = (
-            "OK; history refresh disabled" if history is None else
+            f"OK; history skipped: {history_skipped}" if history is None else
             "OK; history fetched=%(fetched)d inserted=%(inserted)d "
             "unchanged=%(unchanged)d revised=%(revised)d "
             "no_value=%(no_value)d no_period=%(no_period)d"

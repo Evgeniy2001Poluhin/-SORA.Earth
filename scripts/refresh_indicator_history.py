@@ -15,15 +15,26 @@ The intended sequence:
     python3 scripts/refresh_indicator_history.py        # inserted must be 0
     turn SORA_HISTORY_REFRESH on
 
-It takes the same Redis lock the scheduled job takes, so a manual run and a
-scheduled one cannot both be the first writer. If the lock is held, this
-refuses rather than proceeding: two concurrent first runs against an empty
-history is exactly the case worth refusing.
+It takes the same key the scheduled job takes, and it is strict about it. An
+earlier version of this text claimed a manual and a scheduled run "cannot both
+be the first writer"; that was not true. `RedisLock.acquire()` returns True
+both when it took the lock and when Redis is unreachable, so with Redis down
+both runs would have proceeded believing they were alone.
+
+StrictLock reports which of three things happened, and this refuses on two of
+them: a mass write path is not worth starting while unable to tell whether one
+is already running.
+
+The database is the last line regardless: refresh_indicator_history takes a
+transaction-scoped advisory lock per (country, indicator), so even two
+processes that got past the Redis lock cannot both classify the same period as
+new.
 
 Exit codes
     0   the run completed
-    2   the lock is held by someone else
-    3   the refresh raised
+    2   the lock is held by another run
+    3   the refresh raised, or arguments were wrong
+    4   the lock could not be reached, so exclusivity cannot be assured
 """
 
 import argparse
@@ -78,20 +89,25 @@ def main() -> int:
     lock = None
     if not args.no_lock:
         try:
-            from app.locks import RedisLock
+            from app.locks import ACQUIRED, HELD, StrictLock
+        except ImportError as e:
+            print(f"lock unavailable ({e}); re-run with --no-lock only if "
+                  "nothing else can write to this database", file=sys.stderr)
+            return 4
 
-            lock = RedisLock(key=LOCK_KEY, timeout=3600)
-            if not lock.acquire():
-                print(
-                    f"{LOCK_KEY} is held -- a refresh is already running. "
-                    "Refusing rather than starting a second one.",
-                    file=sys.stderr,
-                )
-                return 2
-        except ImportError:
-            print("redis lock unavailable; re-run with --no-lock if that is "
-                  "acceptable for this database", file=sys.stderr)
-            return 3
+        lock = StrictLock(key=LOCK_KEY, timeout=3600)
+        state = lock.acquire()
+        if state == HELD:
+            print(f"{LOCK_KEY} is held -- a refresh is already running. "
+                  "Refusing rather than starting a second one.",
+                  file=sys.stderr)
+            return 2
+        if state != ACQUIRED:
+            print(f"{LOCK_KEY} could not be reached ({state}). Exclusivity "
+                  "cannot be assured, so this will not start a mass write. "
+                  "Re-run with --no-lock only if nothing else can write to "
+                  "this database.", file=sys.stderr)
+            return 4
 
     started = time.time()
     print(f"start   {datetime.now(timezone.utc).isoformat(timespec='seconds')}")
