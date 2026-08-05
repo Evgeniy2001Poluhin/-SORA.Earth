@@ -12,10 +12,12 @@ import csv
 import io
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 
 import httpx
+from sqlalchemy import text
 
 from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 from app.database import SessionLocal, DataRefreshLog, CountryIndicatorHistory
@@ -28,6 +30,36 @@ logger = logging.getLogger("sora")
 # ---------------------------------------------------------------------------
 
 WB_BASE = "https://api.worldbank.org/v2"
+
+# Retry budget for the series fetch. Deliberately small: this runs 210 times in
+# a row, so a generous budget turns one bad afternoon at the source into a
+# refresh that never finishes.
+_WB_RETRIES = 3
+_WB_BACKOFF = 1.0  # seconds, doubled per attempt
+
+# One key for both the scheduled refresh and the manual one-shot: two keys
+# would let them run at once, which is the thing the lock exists to prevent.
+HISTORY_LOCK_KEY = "sora:lock:external_refresh"
+
+
+def history_refresh_enabled() -> bool:
+    """Whether the scheduled refresh may write indicator history.
+
+    Off by default, and that is the point. `auto_refresh_external_data` is in
+    the scheduler's immediate-run set, so deploying the series write path with
+    it enabled would start a first mass ingestion during the deployment itself
+    -- unobserved, and racing anyone trying to run it by hand.
+
+    The sequence this exists to allow: deploy with it off, run
+    scripts/refresh_indicator_history.py once with the counters in view, check
+    the database, then turn it on.
+
+    Read at call time so the flag can be flipped by restarting one container
+    rather than rebuilding.
+    """
+    return os.getenv("SORA_HISTORY_REFRESH", "off").strip().lower() in {
+        "1", "true", "on", "yes",
+    }
 
 INDICATORS: Dict[str, str] = {
     "co2_per_capita":    "EN.ATM.CO2E.PC",
@@ -165,6 +197,296 @@ def _fetch_wb_indicator_dated(
     except Exception as e:
         logger.warning("World Bank API error for %s/%s: %s", iso3, indicator_code, e)
     return None, None
+
+
+def _fetch_wb_series(
+    iso3: str, indicator_code: str, per_page: int = 500
+) -> List[Tuple[Optional[str], Optional[float]]]:
+    """Every annual observation the World Bank publishes, newest first.
+
+    `_fetch_wb_indicator_dated` asks for three (`mrv=3`) and returns the first
+    non-null, discarding the rest -- so the refresh could only ever store one
+    point per country and did, ~450 times over (#86, #95). The API serves the
+    whole series without `mrv`; for these indicators that is 66 annual rows.
+
+    Rows are returned as the source gave them, including nulls and missing
+    dates. Deciding what is storable belongs to the caller, which counts what
+    it refused; discarding here would make a padded year and a rejected one
+    indistinguishable.
+
+    Pagination is followed rather than assumed away: `per_page=500` covers
+    every indicator in INDICATORS today, and a series that outgrows it would
+    otherwise be silently truncated at exactly the point nobody is looking.
+    """
+    if os.getenv("SORA_OFFLINE", "0") == "1":
+        return []
+
+    out: List[Tuple[Optional[str], Optional[float]]] = []
+    page = 1
+    while True:
+        url = (
+            f"{WB_BASE}/country/{iso3}/indicator/{indicator_code}"
+            f"?format=json&per_page={per_page}&page={page}"
+        )
+        # A full-series refresh is ~210 sequential requests where the old one
+        # was ~210 cheap ones, so a single 429 or a transient 5xx used to cost
+        # one stale value and now costs a whole country's history. Retried with
+        # backoff; anything else (4xx that is not 429, malformed payload) is
+        # not worth retrying and returns what was gathered.
+        data = None
+        for attempt in range(_WB_RETRIES):
+            retryable = None
+            try:
+                resp = httpx.get(url, timeout=10.0)
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    retryable = f"status {resp.status_code}"
+                else:
+                    resp.raise_for_status()
+                    data = resp.json()
+                    break
+            # Timeouts and transport errors are retried too. Measured: a real
+            # full-series request takes 0.3-1.1s against a 10s budget, so a
+            # timeout here is transient -- and the first version treated it as
+            # fatal, giving up on a country's whole history for one slow
+            # connection. Across 210 sequential requests these are likelier
+            # than 429.
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                retryable = type(e).__name__
+            except Exception as e:
+                logger.warning("World Bank series error for %s/%s page %d: %s",
+                               iso3, indicator_code, page, e)
+                return out
+
+            if retryable is not None:
+                if attempt == _WB_RETRIES - 1:
+                    logger.warning(
+                        "World Bank series gave up for %s/%s page %d after "
+                        "%d attempts (%s)",
+                        iso3, indicator_code, page, _WB_RETRIES, retryable)
+                    return out
+                time.sleep(_WB_BACKOFF * (2 ** attempt))
+
+        if data is None:
+            return out
+
+        # A 200 carrying no rows is two different things, and returning
+        # silently made them one. Measured during the rehearsal: 5 of 30
+        # countries lost their whole GDP-growth series with no message at all,
+        # while the same request served 66 observations minutes later.
+        #
+        # The World Bank signals an error as a ONE-element list whose only
+        # member holds `message` -- e.g. "The indicator was not found. It may
+        # have been deleted or archived" -- with HTTP 200, so raise_for_status
+        # never sees it. A genuinely empty series is a two-element envelope
+        # with an empty second element. Those are told apart here.
+        if not isinstance(data, list) or len(data) < 2:
+            detail = ""
+            if isinstance(data, list) and data and isinstance(data[0], dict):
+                messages = data[0].get("message")
+                if messages:
+                    detail = str(messages)[:200]
+            logger.warning(
+                "World Bank returned no data envelope for %s/%s page %d%s",
+                iso3, indicator_code, page,
+                f": {detail}" if detail else " (no message given)")
+            return out
+
+        if not data[1]:
+            logger.info("World Bank has no observations for %s/%s",
+                        iso3, indicator_code)
+            return out
+
+        header, rows = data[0], data[1]
+        for entry in rows:
+            if not isinstance(entry, dict):
+                continue
+            value = entry.get("value")
+            out.append((
+                entry.get("date"),
+                None if value is None else round(float(value), 2),
+            ))
+
+        pages = header.get("pages") if isinstance(header, dict) else 1
+        if not isinstance(pages, int) or page >= pages:
+            return out
+        page += 1
+
+
+class HistoryRefreshLockLost(RuntimeError):
+    """The exclusivity the refresh depends on went away mid-run.
+
+    Raised rather than returning short counters, because a partial run that
+    looks like a complete one is the failure mode worth avoiding: the caller
+    would record success, and the pairs never fetched would look like pairs
+    the source had nothing for. Whatever was committed before the loss stays
+    committed -- it was written while the lock was held.
+    """
+
+
+def refresh_indicator_history(
+    db=None,
+    countries: Optional[Dict[str, str]] = None,
+    indicators: Optional[Dict[str, str]] = None,
+    job_name: str = "external_data_refresh",
+    still_ours=None,
+) -> Dict[str, int]:
+    """Store the full World Bank series for each (country, indicator).
+
+    Separate from `refresh_all_countries`, which exists to fill the live cache
+    the API serves and legitimately wants one current value per indicator. The
+    history is a different question -- what the source has published over time
+    -- and conflating them is why the table holds one point per country.
+
+    Append-only, and not by convention: the trigger from #90 refuses any UPDATE
+    of `value` or `fetched_at`, so a revision can only be a new row. The
+    point-in-time read then resolves which value was in force when.
+
+    Returns counts that each mean one thing:
+
+        fetched     observations the API returned
+        inserted    periods stored for the first time
+        unchanged   periods already stored with the same value
+        revised     periods the source restated, stored as a further row
+        no_value    years the source published as null -- expected padding
+        no_period   observations carrying no year -- zero unless something is wrong
+
+    The last two were one counter called `rejected`, which made them
+    indistinguishable. They are not the same thing: the World Bank pads a
+    series with null years (30 of 66 for RUS/NY.GDP.MKTP.KD.ZG, the pre-1990
+    ones), and counting those as rejections makes "rejected = 0" an acceptance
+    criterion that can never pass. An observation with no year is a real
+    defect, and it now has a counter that stays at zero when nothing is wrong.
+
+    A run that reports only success is how 408 empty OpenAQ runs passed for
+    healthy (#56), so every observation lands in exactly one of these.
+    """
+    from app.database import CountryIndicatorHistory
+
+    countries = COUNTRY_ISO3 if countries is None else countries
+    indicators = INDICATORS if indicators is None else indicators
+
+    owns_session = db is None
+    if owns_session:
+        db = SessionLocal()
+
+    stats = {"fetched": 0, "inserted": 0, "unchanged": 0, "revised": 0,
+             "no_value": 0, "no_period": 0}
+
+    try:
+        fetched_at = datetime.utcnow()
+        is_postgres = db.get_bind().dialect.name == "postgresql"
+
+        def _check(when: str) -> None:
+            """Refuse to keep going once the lease is somebody else's."""
+            if still_ours is not None and not still_ours():
+                raise HistoryRefreshLockLost(
+                    f"the refresh lock was lost {when} "
+                    f"({iso3}/{code}); stopping with "
+                    f"{stats['inserted']} inserted, {stats['revised']} revised")
+
+        for name, iso3 in countries.items():
+            for key, code in indicators.items():
+                # Twice, not once. A single check between pairs is not enough:
+                # the fetch below runs outside the lock and takes seconds, so
+                # the lease can lapse while it is in flight and the write would
+                # then happen without exclusivity.
+                _check("before starting a pair")
+
+                # Outside the lock on purpose: this is seconds of network, and
+                # holding a lock across it would serialise the slow part rather
+                # than the part that needs serialising.
+                series = _fetch_wb_series(iso3, code)
+                stats["fetched"] += len(series)
+
+                # The one that matters: everything after this point writes.
+                _check("during the fetch")
+
+                # Everything below is one transaction per pair, opened by the
+                # advisory lock and closed by the commit at the end of the
+                # loop body. Per pair rather than per run: a single
+                # transaction over 210 pairs would hold every lock for the
+                # ten minutes the run takes, so a second process would block
+                # on the first pair until the first process finished.
+                #
+                # The lock is transaction-scoped, so it is released by the
+                # commit or by a rollback -- there is no path that leaks it.
+                #
+                # This is needed even with the Redis lock in front, and not as
+                # belt and braces: read -> classify -> insert is a
+                # check-then-act, so two processes can both find a period
+                # absent and both insert it. Redis says who may start; this
+                # says who may decide.
+                if is_postgres:
+                    db.execute(
+                        text("SELECT pg_advisory_xact_lock(hashtext(:a), hashtext(:b))"),
+                        {"a": iso3, "b": code},
+                    )
+
+                # What is on record now, per period: the most recently fetched
+                # row wins, which is the same rule the point-in-time read uses.
+                # Read *after* taking the lock, or the classification is made
+                # from a snapshot the lock does not cover.
+                current: Dict[datetime, float] = {}
+                for as_of, value in db.query(
+                    CountryIndicatorHistory.as_of_date,
+                    CountryIndicatorHistory.value,
+                ).filter(
+                    CountryIndicatorHistory.country_iso3 == iso3,
+                    CountryIndicatorHistory.indicator_code == code,
+                    CountryIndicatorHistory.as_of_date.isnot(None),
+                ).order_by(
+                    CountryIndicatorHistory.fetched_at.asc(),
+                    CountryIndicatorHistory.id.asc(),
+                ):
+                    current[as_of] = value
+
+                for period, value in series:
+                    as_of = _period_to_date(period)
+                    if as_of is None:
+                        stats["no_period"] += 1
+                        continue
+                    if value is None:
+                        stats["no_value"] += 1
+                        continue
+
+                    known = current.get(as_of)
+                    if known is not None and abs(known - value) < 1e-9:
+                        stats["unchanged"] += 1
+                        continue
+
+                    db.add(CountryIndicatorHistory(
+                        country_iso3=iso3,
+                        country_name=name,
+                        indicator_code=code,
+                        indicator_name=key,
+                        value=value,
+                        source="world_bank",
+                        as_of_date=as_of,
+                        fetched_at=fetched_at,
+                        refresh_job_name=job_name,
+                    ))
+                    current[as_of] = value
+                    stats["revised" if known is not None else "inserted"] += 1
+
+                # Ends this pair's transaction and releases its advisory lock.
+                # Also makes the run resumable: a failure at country 20 keeps
+                # the first 19, rather than discarding ten minutes of work.
+                db.commit()
+
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        if owns_session:
+            db.close()
+
+    logger.info(
+        "indicator history: fetched=%d inserted=%d unchanged=%d revised=%d "
+        "no_value=%d no_period=%d",
+        stats["fetched"], stats["inserted"], stats["unchanged"],
+        stats["revised"], stats["no_value"], stats["no_period"],
+    )
+    return stats
 
 
 def _fetch_oecd_indicator(iso3: str, key: str) -> Optional[float]:
@@ -353,40 +675,27 @@ def _period_to_date(period: Optional[str]) -> Optional[datetime]:
 
 
 def refresh_all_countries() -> Dict:
-    """Full refresh: invalidate cache, fetch live data, persist history."""
-    db = SessionLocal()
-    results: Dict[str, dict] = {}
-    try:
-        fetched_at = datetime.utcnow()
-        for name, iso3 in COUNTRY_ISO3.items():
-            invalidate_cache(name)
-            data = get_country_esg_realtime(name)
-            if not data:
-                continue
-            results[name] = data
+    """Refresh the live cache: one current figure per country and indicator.
 
-            # Persist indicator history (versioning)
-            for key, value in data.get("indicators", {}).items():
-                hist = CountryIndicatorHistory(
-                    country_iso3=iso3,
-                    country_name=name,
-                    indicator_code=INDICATORS.get(key, key),
-                    indicator_name=key,
-                    value=value,
-                    source=data.get("indicator_sources", {}).get(key, "unknown"),
-                    as_of_date=_period_to_date(
-                        data.get("indicator_periods", {}).get(key)),
-                    fetched_at=fetched_at,
-                    refresh_job_name="external_data_refresh",
-                )
-                db.add(hist)
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        logger.exception("Error during refresh_all_countries: %s", e)
-        raise
-    finally:
-        db.close()
+    It used to persist history here as well, writing whatever the fallback
+    chain currently resolved to on every run. That is how the table came to
+    hold ~450 identical copies per key and exactly one dated point per country
+    (#86, #95).
+
+    The two are different questions. This one -- what is the figure now --
+    is what the API serves. What the source has published over time is
+    answered by refresh_indicator_history(), from the full series, and no
+    longer as a side effect of filling a cache.
+
+    The database session went with the history writing; nothing here touches
+    the database now.
+    """
+    results: Dict[str, dict] = {}
+    for name in COUNTRY_ISO3:
+        invalidate_cache(name)
+        data = get_country_esg_realtime(name)
+        if data:
+            results[name] = data
 
     return {"fetched": len(results), "total": len(COUNTRY_ISO3), "countries": results}
 
@@ -406,12 +715,65 @@ def refresh_live_data(trigger_source: str = "manual") -> Dict:
     try:
         _refresh_status["status"] = "running"
         result = refresh_all_countries()
+
+        # The history is a separate pass over the same sources, storing the
+        # full published series rather than the one figure the cache needs.
+        # Its counts go into the log message: a run that says only "OK" is how
+        # 408 empty OpenAQ runs passed for healthy (#56).
+        #
+        # Gated, because this job runs immediately when the scheduler starts:
+        # enabling it by default would make the first mass ingestion a side
+        # effect of a deployment. See history_refresh_enabled().
+        history = None
+        history_skipped = None
+        if not history_refresh_enabled():
+            history_skipped = "disabled by SORA_HISTORY_REFRESH"
+        else:
+            # The same key the manual one-shot takes, so the two cannot both
+            # run. `held` and `unavailable` are told apart and both skip: a
+            # scheduled run has another one along in six hours, and starting a
+            # mass write path while unable to tell whether one is already
+            # running is not a trade worth making.
+            from app.locks import ACQUIRED, HELD, StrictLock
+
+            lock = StrictLock(key=HISTORY_LOCK_KEY, timeout=3600, renew=True)
+            state = lock.acquire()
+            try:
+                if state == ACQUIRED:
+                    try:
+                        history = refresh_indicator_history(
+                            job_name="external_data_refresh",
+                            still_ours=lambda: not lock.lost.is_set())
+                    except HistoryRefreshLockLost as e:
+                        # Degraded, not success: pairs were written, the run
+                        # did not finish, and the ones never reached must not
+                        # be mistaken for pairs the source had nothing for.
+                        history_skipped = f"lock lost mid-run: {e}"
+                        logger.error("history refresh lost its lock: %s", e)
+                elif state == HELD:
+                    history_skipped = "another history refresh holds the lock"
+                else:
+                    history_skipped = (
+                        "lock unavailable (Redis unreachable); skipped rather "
+                        "than risking a concurrent mass write")
+            finally:
+                lock.release()
+
+        if history_skipped:
+            logger.info("indicator history refresh skipped: %s", history_skipped)
+
         _refresh_status["last_refresh"] = datetime.utcnow().isoformat()
         _refresh_status["countries_refreshed"] = result["fetched"]
         log.status = "success"
         log.countries_fetched = result["fetched"]
         log.total_countries = result["total"]
-        log.message = "OK"
+        log.message = (
+            f"OK; history skipped: {history_skipped}" if history is None else
+            "OK; history fetched=%(fetched)d inserted=%(inserted)d "
+            "unchanged=%(unchanged)d revised=%(revised)d "
+            "no_value=%(no_value)d no_period=%(no_period)d"
+            % history
+        )
     except Exception as e:
         exc = e
         log.status = "error"
