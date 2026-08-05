@@ -35,6 +35,10 @@ services:
     environment:
       - SORA_ADMIN_TOKEN=${SORA_ADMIN_TOKEN}
       - RUN_SCHEDULER=true
+      # The backend service is `app` here and `backend` in the production
+      # file, so this is set in both rather than left to a default that can
+      # only be right in one of them (#91).
+      - SORA_BACKEND_URL=http://app:8000
     volumes:
       - ./data:/app/data
       - ./models:/app/models
