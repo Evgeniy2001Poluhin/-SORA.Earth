@@ -270,6 +270,19 @@ def _fetch_wb_series(
             # than 429.
             except (httpx.TimeoutException, httpx.TransportError) as e:
                 retryable = type(e).__name__
+            # A 4xx that is not 429 is the source saying no, permanently: a
+            # wrong or withdrawn path answers identically on every future run.
+            # It reached the generic handler below and was reported transient,
+            # which would have degraded every run forever over something no
+            # retry can fix -- the opposite of the distinction this change
+            # exists to draw. 429 and 5xx never arrive here: they are caught
+            # above by status before raise_for_status is reached.
+            except httpx.HTTPStatusError as e:
+                logger.warning(
+                    "World Bank refused %s/%s page %d: HTTP %s",
+                    iso3, indicator_code, page,
+                    e.response.status_code if e.response is not None else "?")
+                return out, FETCH_OK if out else FETCH_REFUSED
             except Exception as e:
                 logger.warning("World Bank series error for %s/%s page %d: %s",
                                iso3, indicator_code, page, e)
@@ -772,6 +785,7 @@ def refresh_live_data(trigger_source: str = "manual") -> Dict:
         # effect of a deployment. See history_refresh_enabled().
         history = None
         history_skipped = None
+        history_lost_lock = False
         if not history_refresh_enabled():
             history_skipped = "disabled by SORA_HISTORY_REFRESH"
         else:
@@ -794,7 +808,11 @@ def refresh_live_data(trigger_source: str = "manual") -> Dict:
                         # Degraded, not success: pairs were written, the run
                         # did not finish, and the ones never reached must not
                         # be mistaken for pairs the source had nothing for.
+                        # The comment said this before the status did -- with
+                        # `history` left as None, the verdict below fell
+                        # through to success.
                         history_skipped = f"lock lost mid-run: {e}"
+                        history_lost_lock = True
                         logger.error("history refresh lost its lock: %s", e)
                 elif state == HELD:
                     history_skipped = "another history refresh holds the lock"
@@ -814,12 +832,14 @@ def refresh_live_data(trigger_source: str = "manual") -> Dict:
         # collect, and `success` would make that indistinguishable from a pair
         # the source has nothing for. It belongs in the status, not only in a
         # warning a human has to read -- see #74.
-        degraded = bool(history and history.get("pairs_failed_transient"))
+        degraded = history_lost_lock or bool(
+            history and history.get("pairs_failed_transient"))
         log.status = "degraded" if degraded else "success"
         log.countries_fetched = result["fetched"]
         log.total_countries = result["total"]
         if history is None:
-            log.message = f"OK; history skipped: {history_skipped}"
+            verdict = "DEGRADED" if degraded else "OK"
+            log.message = f"{verdict}; history skipped: {history_skipped}"
         else:
             log.message = (
                 "%(verdict)s; history pairs %(pairs_succeeded)d/"

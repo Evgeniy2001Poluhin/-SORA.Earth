@@ -238,3 +238,72 @@ def test_the_message_reports_pairs_not_only_rows(monkeypatch):
 
     assert "pairs 7/10 ok" in captured["message"]
     assert "2 empty" in captured["message"]
+
+
+def test_a_404_is_refused_not_transient(monkeypatch):
+    """A 4xx that is not 429 is the source saying no, permanently.
+
+    It reached the generic handler and was reported transient, which would
+    have degraded every run forever over something no retry can fix -- the
+    opposite of the distinction this module exists to draw.
+    """
+    def not_found(url):
+        return _Resp([], status=404)
+
+    _serve(monkeypatch, not_found)
+    rows, outcome = ed._fetch_wb_series("RUS", "X")
+
+    assert outcome == ed.FETCH_REFUSED
+    assert rows == []
+
+
+def test_a_429_is_still_transient(monkeypatch):
+    """The neighbour it must not be confused with: rate limiting passes."""
+    _serve(monkeypatch, lambda url: _Resp([], status=429))
+    assert ed._fetch_wb_series("RUS", "X")[1] == ed.FETCH_TRANSIENT
+
+
+def test_a_500_is_still_transient(monkeypatch):
+    _serve(monkeypatch, lambda url: _Resp([], status=503))
+    assert ed._fetch_wb_series("RUS", "X")[1] == ed.FETCH_TRANSIENT
+
+
+def test_losing_the_lock_degrades_the_run(monkeypatch):
+    """A run that stopped early must not record success.
+
+    The pairs it never reached would otherwise be indistinguishable from
+    pairs the source has nothing for -- which is the whole argument for these
+    counters, applied to the case where there are no counters at all.
+    """
+    from unittest.mock import MagicMock
+
+    captured = {}
+
+    class _Log:
+        def __setattr__(self, k, v):
+            captured[k] = v
+
+    def raise_lock_lost(**kw):
+        raise ed.HistoryRefreshLockLost("the refresh lock was lost mid-run")
+
+    monkeypatch.setattr(ed, "SessionLocal", lambda: MagicMock())
+    monkeypatch.setattr(ed, "DataRefreshLog", lambda **kw: _Log())
+    monkeypatch.setattr(ed, "refresh_all_countries",
+                        lambda: {"fetched": 1, "total": 1, "countries": {}})
+    monkeypatch.setattr(ed, "refresh_indicator_history", raise_lock_lost)
+    monkeypatch.setenv("SORA_HISTORY_REFRESH", "on")
+
+    import sys
+    import types
+    module = types.ModuleType("app.redis_cache")
+    module.REDIS_AVAILABLE = True
+    module.redis_client = MagicMock()
+    module.redis_client.set.return_value = True
+    monkeypatch.setitem(sys.modules, "app.redis_cache", module)
+
+    ed.refresh_live_data(trigger_source="test")
+
+    assert captured["status"] == "degraded", (
+        "a run that lost its lock partway recorded success"
+    )
+    assert "lock lost" in captured["message"]
