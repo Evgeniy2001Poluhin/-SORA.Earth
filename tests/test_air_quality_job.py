@@ -82,6 +82,24 @@ def test_a_source_that_returns_nothing_is_not_a_success():
     assert logged.call_args.kwargs["status"] == "degraded"
 
 
+def test_it_runs_immediately_on_startup():
+    """Otherwise the first rows arrive an hour after a deployment, and a restart
+    to check the source is working shows nothing for an hour."""
+    import inspect
+    from app import scheduler as scheduler_module
+
+    src = inspect.getsource(scheduler_module)
+    # The tuple itself, delimited by the loop that consumes it. Slicing from the
+    # first occurrence of a job id instead picked up the add_job() calls further
+    # up, where every id appears -- so the assertion held with the job absent
+    # from the immediate-run set entirely.
+    start = src.index("for _jid in (")
+    immediate = src[start:src.index("):", start)]
+    assert '"auto_openmeteo_air_quality_ingestion"' in immediate, \
+        "the air-quality job is not in the immediate-run set"
+    assert '"auto_openaq_ingestion"' in immediate
+
+
 def test_a_write_failure_fails_the_job():
     from app.services.environmental import scheduler_jobs
 
@@ -89,6 +107,7 @@ def test_a_write_failure_fails_the_job():
         received=6, inserted=0, updated=0, rejected=0, duplicates=0,
         accepted=0, errors=["persist_error: connection refused"],
     )
+    import pytest
     with patch(
         "app.ingesters.openmeteo_air_quality.OpenMeteoAirQualityIngester.fetch",
         new_callable=AsyncMock, return_value=[_signal()],
@@ -97,12 +116,18 @@ def test_a_write_failure_fails_the_job():
         return_value=broken,
     ), patch.object(
         scheduler_jobs, "_log_job_execution"
-    ), patch("app.locks.RedisLock", MagicMock()):
-        result = scheduler_jobs.scheduled_openmeteo_air_quality_ingestion()
+    ) as logged, patch("app.locks.RedisLock", MagicMock()):
+        with pytest.raises(RuntimeError):
+            scheduler_jobs.scheduled_openmeteo_air_quality_ingestion()
 
-    # A broken database must not be classified as an empty source: one calls for
-    # a retry, the other for someone to look at the source.
-    assert result["status"] == "error"
+    # Recorded before it is re-raised, so each attempt leaves a row.
+    assert logged.call_args.kwargs["status"] == "failed"
+
+    # Raised, not returned. `@with_retry` retries what raises, so a job that
+    # hands back {"status": "error"} makes the decorator inert -- one attempt
+    # while the annotation promises three. A broken database must also not be
+    # classified as an empty source: one calls for a retry, the other for
+    # someone to look at the source.
 
 
 def test_signals_without_a_timestamp_do_not_fail_the_run():

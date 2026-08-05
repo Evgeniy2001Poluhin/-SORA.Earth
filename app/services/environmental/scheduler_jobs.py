@@ -583,7 +583,13 @@ def _run_ingestion(job_name: str, source: str, make_ingester, metric_key: str):
         _log_job_execution(
             job_name=job_name, status="failed", duration_sec=duration, error_message=str(e)
         )
-        return {"status": "error", "error": str(e)}
+        # Re-raised, not returned. `@with_retry` retries what raises; a job that
+        # swallows the failure and hands back {"status": "error"} makes the
+        # decorator inert, so a transient fetch or write failure got one attempt
+        # while the annotation said three. The row above is written first, so
+        # each attempt is recorded -- three rows for three tries is the truth,
+        # and one row for a decorator that never fired was not.
+        raise
 
     finally:
         lock.release()

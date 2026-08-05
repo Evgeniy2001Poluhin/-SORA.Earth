@@ -872,6 +872,10 @@ def init_scheduler(start: bool = True):
         "refresh_forecast_metrics",
         "auto_openaq_ingestion",
         "auto_openmeteo_ingestion",
+        # Without this the first air-quality rows arrive an hour after a
+        # deployment, and a restart to check the source is working produces
+        # nothing to look at for an hour.
+        "auto_openmeteo_air_quality_ingestion",
     ):
         try:
             scheduler.modify_job(_jid, next_run_time=_now)
