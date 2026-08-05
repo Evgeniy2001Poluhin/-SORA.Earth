@@ -203,8 +203,18 @@ def fetch_history(iso: str, ind: str):
             rows = payload[1] if len(payload) > 1 and payload[1] else []
             history.update({r["date"]: r["value"] for r in rows if r.get("value") is not None})
             pages = int(header.get("pages", 1) or 1)
-        except Exception as e:
-            print(f"    {iso}/{ind} page {page}: unusable response ({e}); deferred")
+        except (ValueError, TypeError, KeyError, IndexError) as e:
+            # Narrow on purpose. `except Exception` would also swallow a
+            # NameError or an AttributeError from a mistake in this file, and
+            # report it as "the World Bank sent something unusable" -- a defect
+            # here would then look like a defect there, and be deferred and
+            # retried for ever instead of being fixed.
+            #
+            # These four are what a well-formed-but-wrong response actually
+            # raises: JSONDecodeError (a ValueError) from a JSON error page,
+            # IndexError from an empty list, KeyError or TypeError from a row
+            # or header that is not the expected shape.
+            print(f"    {iso}/{ind} page {page}: malformed_response ({type(e).__name__}); deferred")
             return None, None
         hashes.append(hashlib.sha256(raw).hexdigest())
         if page >= pages:

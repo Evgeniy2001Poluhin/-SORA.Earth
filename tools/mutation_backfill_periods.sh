@@ -25,7 +25,7 @@ TESTS="$ROOT/tests/test_backfill_integration_postgres.py"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-PASS=0; FAIL=0
+KILLED=0; SURVIVED=0; INVALID=0
 
 case "${DATABASE_URL:-}" in
     postgresql*) ;;
@@ -60,8 +60,8 @@ import ast
 ast.parse(open(path).read())
 PY
     then
-        printf '  ERROR  %-34s anchor not found or mutant does not parse\n' "$name"
-        FAIL=$((FAIL+1)); return
+        printf '  invalid  %-34s anchor not found or mutant does not parse\n' "$name"
+        INVALID=$((INVALID+1)); return
     fi
 
     # Captured, not piped. `set -o pipefail` reports the pipeline's rightmost
@@ -71,15 +71,30 @@ PY
     # all four as MISSED while every one of them was being caught: a harness
     # whose verdict had nothing to do with what it measured, which is the defect
     # class this whole tool exists to catch.
-    local out
+    # Status and output together, because neither alone is enough.
+    #
+    # Output only: a run that ends "1 passed, 1 error" contains no "1 failed",
+    # so a mutant that broke collection is scored as surviving. Status only: a
+    # mutant that fails to import also exits non-zero, and would be scored as
+    # caught while testing nothing at all.
+    #
+    # So: exit zero is survival, and a non-zero exit counts only when the named
+    # test is the one that failed. Anything else is invalid -- the harness did
+    # not measure what it claims, and saying so is the point of the third
+    # category.
+    local out status
     out="$(run_case "$mutant" "$node")"
-    if printf '%s' "$out" | grep -q "1 failed"; then
-        printf '  caught %-34s → %s failed\n' "$name" "$node"
-        PASS=$((PASS+1))
+    status=$?
+    if [ "$status" -eq 0 ]; then
+        printf '  survived %-34s → %s still passed\n' "$name" "$node"
+        SURVIVED=$((SURVIVED+1))
+    elif printf '%s' "$out" | grep -q "FAILED.*$node"; then
+        printf '  killed   %-34s → %s failed\n' "$name" "$node"
+        KILLED=$((KILLED+1))
     else
-        printf '  MISSED %-34s → %s still passed\n' "$name" "$node"
+        printf '  invalid  %-34s → non-zero exit, but %s did not fail\n' "$name" "$node"
         printf '%s\n' "$out" | tail -3
-        FAIL=$((FAIL+1))
+        INVALID=$((INVALID+1))
     fi
 }
 
@@ -90,13 +105,14 @@ echo "== the unmodified script passes =="
 for node in test_a_matching_value_on_a_later_page_makes_it_ambiguous \
             test_a_newer_rule_withdraws_an_older_verdict_and_the_date_goes_with_it \
             test_the_request_narrows_the_series_in_no_way; do
-    baseline="$(run_case "$ORIGINAL" "$node")"
-    if printf '%s' "$baseline" | grep -q "1 passed"; then
-        printf '  ok     %s\n' "$node"
+    # The status, not the wording. "1 passed, 1 error" contains "1 passed" and
+    # is not a green baseline; pytest's exit code says so unambiguously.
+    if baseline="$(run_case "$ORIGINAL" "$node")"; then
+        printf '  ok       %s\n' "$node"
     else
-        printf '  FAIL   %s does not pass unmutated; nothing below means anything\n' "$node"
+        printf '  FAIL     %s does not pass unmutated; nothing below means anything\n' "$node"
         printf '%s\n' "$baseline" | tail -3
-        FAIL=$((FAIL+1))
+        INVALID=$((INVALID+1))
     fi
 done
 
@@ -108,9 +124,7 @@ echo "== each defect review found, restored =="
 # was recorded as recovered while a second match sat unread on page two.
 run_mutation "reads only the first page" \
     "test_a_matching_value_on_a_later_page_makes_it_ambiguous" \
-    'pages = int(header.get("pages", 1) or 1)
-        if page >= pages:||=>||pages = int(header.get("pages", 1) or 1)
-        if True:'
+    '        if page >= pages:||=>||        if True:'
 
 # A recovered row carries a date by definition, so this excluded exactly the
 # rows a recheck exists for: a corrected rule could not reach what the old one
@@ -133,5 +147,5 @@ run_mutation "narrows the series with a date bound" \
     '+ f"?format=json&per_page={PER_PAGE}&page={page}")||=>||+ f"?format=json&per_page={PER_PAGE}&date=1960:2030&page={page}")'
 
 echo
-echo "  caught: $PASS   missed: $FAIL"
-[ "$FAIL" -eq 0 ]
+echo "  killed: $KILLED   survived: $SURVIVED   invalid: $INVALID"
+[ "$SURVIVED" -eq 0 ] && [ "$INVALID" -eq 0 ]
