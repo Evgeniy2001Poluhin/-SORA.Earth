@@ -931,6 +931,9 @@ with_previous_deployment
 echo "nginx" > "$STUB_DIR/services"
 echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
 touch "$STUB_DIR/slow_up"
+# shellcheck disable=SC2030,SC2031
+#   The subshell is the point, as in run_guard: the stubbed PATH must reach the
+#   guard and nothing else, and losing the change on the way out is the intent.
 ( export PATH="$STUB_DIR/bin:$PATH"
   DEPLOY_REPO="$REPO" COMPOSE_FILE="$REPO/compose.yml" COMPOSE_PROJECT_NAME=p \
   SITE_URL="http://stand.invalid" MANIFEST_DIR="$SANDBOX/manifests" \
@@ -956,6 +959,9 @@ with_previous_deployment
 echo "nginx" > "$STUB_DIR/services"
 echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
 touch "$STUB_DIR/slow_up"
+# shellcheck disable=SC2030,SC2031
+#   The subshell is the point, as in run_guard: the stubbed PATH must reach the
+#   guard and nothing else, and losing the change on the way out is the intent.
 ( export PATH="$STUB_DIR/bin:$PATH"
   DEPLOY_REPO="$REPO" COMPOSE_FILE="$REPO/compose.yml" COMPOSE_PROJECT_NAME=p \
   SITE_URL="http://stand.invalid" MANIFEST_DIR="$SANDBOX/manifests" \
