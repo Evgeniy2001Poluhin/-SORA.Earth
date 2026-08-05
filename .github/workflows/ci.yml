@@ -196,6 +196,44 @@ jobs:
         env:
           DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
 
+      # Here rather than in shell-scripts, where the first version of this lived.
+      # That job installs no Python, so `alembic upgrade head` failed, the table
+      # never existed, and all ten assertions failed for a reason unrelated to
+      # anything they tested. This job has alembic, a postgres service, and the
+      # test asserts the migration's exit status rather than silencing it.
+      - name: Period provenance constraints against PostgreSQL
+        run: |
+          python -m pytest \
+            tests/test_period_constraints_postgres.py \
+            -v --tb=short --timeout=300
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
+      # Runs scripts/backfill_indicator_periods.py itself -- real argument
+      # parsing, real HTTP against a localhost stub, real UPDATE -- because the
+      # two defects review found (a recheck that could not reach the rows it
+      # exists to correct, and a date left behind when a verdict was withdrawn)
+      # both live inside main() and are invisible to anything that only asserts
+      # against its own copy of the SQL.
+      - name: The backfill write path, executed, against PostgreSQL
+        run: |
+          python -m pytest \
+            tests/test_backfill_integration_postgres.py \
+            -v --tb=short --timeout=600
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
+      # "Eight tests pass" is a statement about the tests. This restores each
+      # defect review found, one at a time, on a temporary copy, and fails if any
+      # of them survives -- so the claim that these tests discriminate is made
+      # here rather than in a review comment about a run nobody else made.
+      # The baseline runs first: without it, "caught" cannot be told from a test
+      # that fails against everything, including the unmodified script.
+      - name: Mutation testing for the backfill
+        run: bash tools/mutation_backfill_periods.sh
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
       # Five of its six cases need a real PostgreSQL: the session TimeZone
       # behaviour they pin down is PostgreSQL's, and on SQLite they skip. A
       # skipped test proves nothing, so it needs a job where it runs.
@@ -358,7 +396,8 @@ jobs:
             tests/test_backup_local_integration.sh \
             tools/mutation_backup_local.sh \
             scripts/deploy_production.sh \
-            tests/test_deploy_production.sh
+            tests/test_deploy_production.sh \
+            tools/mutation_backfill_periods.sh
 
       # These skip on macOS -- flock does not exist there -- so this Linux job is
       # the only place they actually execute.
@@ -659,11 +698,37 @@ jobs:
                          (region_code, env_score, social_score, gov_score, total_score, confidence)
                   SELECT 'RU-' || lpad(g::text, 3, '0'), 50+g*0.1, 60+g*0.1, 55+g*0.1, 58+g*0.1, 0.8
                     FROM generate_series(1, 85) g"""))
+              # 963bec0d1503 is an ancestor of the recorded revision, so any real
+              # database stamped at 0b0ff6d1594e has this table -- it either ran
+              # that migration or create_all() made it. Staging it absent
+              # describes a database that cannot exist, and e7b3c9d15f04 was the
+              # first revision above the stamp to touch it: `ALTER TABLE
+              # country_indicator_history` then failed with "relation does not
+              # exist" on a database whose real counterpart holds 90,403 rows.
+              conn.execute(text("""
+                  CREATE TABLE country_indicator_history (
+                      id             SERIAL PRIMARY KEY,
+                      country_iso3   VARCHAR(10) NOT NULL,
+                      country_name   VARCHAR(100),
+                      indicator_code VARCHAR(100) NOT NULL,
+                      indicator_name VARCHAR(150),
+                      value          DOUBLE PRECISION,
+                      source         VARCHAR(50) NOT NULL DEFAULT 'unknown',
+                      as_of_date     TIMESTAMP,
+                      fetched_at     TIMESTAMP NOT NULL DEFAULT now(),
+                      refresh_job_name VARCHAR(100)
+                  )"""))
+              conn.execute(text("""
+                  INSERT INTO country_indicator_history
+                         (country_iso3, indicator_code, source, value)
+                  SELECT 'SAU', 'NY.GDP.PCAP.CD', 'world_bank', 30000 + g
+                    FROM generate_series(1, 40) g"""))
               conn.execute(text("CREATE TABLE alembic_version "
                                 "(version_num varchar(32) NOT NULL PRIMARY KEY)"))
               conn.execute(text("INSERT INTO alembic_version VALUES ('0b0ff6d1594e')"))
           engine.dispose()
-          print("legacy database staged at 0b0ff6d1594e with 85 rows")
+          print("legacy database staged at 0b0ff6d1594e with 85 region rows "
+                "and 40 undated indicator rows")
           PY
 
           DATABASE_URL="$CATCHUP_URL" alembic upgrade head
@@ -688,6 +753,19 @@ jobs:
               rows = conn.execute(text("SELECT count(*) FROM region_esg_scores")).scalar()
               view_rows = conn.execute(text("SELECT count(*) FROM regional_esg_snapshot")).scalar()
 
+              # The catch-up has to reach the newest revision too, not merely the
+              # one this step was written for. Asserting only region_esg_scores
+              # would let every revision added above it converge untested.
+              period_columns = {r[0] for r in conn.execute(text("""
+                  SELECT attname FROM pg_attribute
+                   WHERE attrelid = 'country_indicator_history'::regclass
+                     AND attnum > 0 AND NOT attisdropped"""))}
+              indicator_rows = conn.execute(text(
+                  "SELECT count(*) FROM country_indicator_history")).scalar()
+
+          assert {"period_status", "period_run_id", "period_rule_version"} <= period_columns, \
+              f"the period columns did not reach a caught-up database: {sorted(period_columns)}"
+          assert indicator_rows == 40, f"indicator rows were lost: {indicator_rows}"
           assert pk == ["id"], f"primary key was not moved to id: {pk}"
           assert columns["region_code"] == "character varying(10)", columns["region_code"]
           for score in ("env_score", "social_score", "gov_score", "total_score", "confidence"):
