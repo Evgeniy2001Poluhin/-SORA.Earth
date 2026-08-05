@@ -122,6 +122,11 @@ class CountryIndicatorHistory(Base):
     __table_args__ = (
         Index("ix_cih_period_status", "period_status"),
         Index("ix_cih_period_run", "period_run_id"),
+        # The point-in-time lookup itself (#75): greatest fetched_at <= D for a
+        # country and indicator. The single-column indexes leave the planner
+        # filtering and then sorting.
+        Index("ix_cih_point_in_time",
+              "country_iso3", "indicator_code", fetched_at.desc()),
     )
 
 
