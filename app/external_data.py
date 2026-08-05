@@ -12,6 +12,7 @@ import csv
 import io
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 
@@ -28,6 +29,32 @@ logger = logging.getLogger("sora")
 # ---------------------------------------------------------------------------
 
 WB_BASE = "https://api.worldbank.org/v2"
+
+# Retry budget for the series fetch. Deliberately small: this runs 210 times in
+# a row, so a generous budget turns one bad afternoon at the source into a
+# refresh that never finishes.
+_WB_RETRIES = 3
+_WB_BACKOFF = 1.0  # seconds, doubled per attempt
+
+
+def history_refresh_enabled() -> bool:
+    """Whether the scheduled refresh may write indicator history.
+
+    Off by default, and that is the point. `auto_refresh_external_data` is in
+    the scheduler's immediate-run set, so deploying the series write path with
+    it enabled would start a first mass ingestion during the deployment itself
+    -- unobserved, and racing anyone trying to run it by hand.
+
+    The sequence this exists to allow: deploy with it off, run
+    scripts/refresh_indicator_history.py once with the counters in view, check
+    the database, then turn it on.
+
+    Read at call time so the flag can be flipped by restarting one container
+    rather than rebuilding.
+    """
+    return os.getenv("SORA_HISTORY_REFRESH", "off").strip().lower() in {
+        "1", "true", "on", "yes",
+    }
 
 INDICATORS: Dict[str, str] = {
     "co2_per_capita":    "EN.ATM.CO2E.PC",
@@ -196,13 +223,45 @@ def _fetch_wb_series(
             f"{WB_BASE}/country/{iso3}/indicator/{indicator_code}"
             f"?format=json&per_page={per_page}&page={page}"
         )
-        try:
-            resp = httpx.get(url, timeout=10.0)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            logger.warning("World Bank series error for %s/%s page %d: %s",
-                           iso3, indicator_code, page, e)
+        # A full-series refresh is ~210 sequential requests where the old one
+        # was ~210 cheap ones, so a single 429 or a transient 5xx used to cost
+        # one stale value and now costs a whole country's history. Retried with
+        # backoff; anything else (4xx that is not 429, malformed payload) is
+        # not worth retrying and returns what was gathered.
+        data = None
+        for attempt in range(_WB_RETRIES):
+            retryable = None
+            try:
+                resp = httpx.get(url, timeout=10.0)
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    retryable = f"status {resp.status_code}"
+                else:
+                    resp.raise_for_status()
+                    data = resp.json()
+                    break
+            # Timeouts and transport errors are retried too. Measured: a real
+            # full-series request takes 0.3-1.1s against a 10s budget, so a
+            # timeout here is transient -- and the first version treated it as
+            # fatal, giving up on a country's whole history for one slow
+            # connection. Across 210 sequential requests these are likelier
+            # than 429.
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                retryable = type(e).__name__
+            except Exception as e:
+                logger.warning("World Bank series error for %s/%s page %d: %s",
+                               iso3, indicator_code, page, e)
+                return out
+
+            if retryable is not None:
+                if attempt == _WB_RETRIES - 1:
+                    logger.warning(
+                        "World Bank series gave up for %s/%s page %d after "
+                        "%d attempts (%s)",
+                        iso3, indicator_code, page, _WB_RETRIES, retryable)
+                    return out
+                time.sleep(_WB_BACKOFF * (2 ** attempt))
+
+        if data is None:
             return out
 
         if not isinstance(data, list) or len(data) < 2 or not data[1]:
@@ -247,7 +306,15 @@ def refresh_indicator_history(
         inserted    periods stored for the first time
         unchanged   periods already stored with the same value
         revised     periods the source restated, stored as a further row
-        rejected    observations with no period or no value
+        no_value    years the source published as null -- expected padding
+        no_period   observations carrying no year -- zero unless something is wrong
+
+    The last two were one counter called `rejected`, which made them
+    indistinguishable. They are not the same thing: the World Bank pads a
+    series with null years (30 of 66 for RUS/NY.GDP.MKTP.KD.ZG, the pre-1990
+    ones), and counting those as rejections makes "rejected = 0" an acceptance
+    criterion that can never pass. An observation with no year is a real
+    defect, and it now has a counter that stays at zero when nothing is wrong.
 
     A run that reports only success is how 408 empty OpenAQ runs passed for
     healthy (#56), so every observation lands in exactly one of these.
@@ -261,7 +328,8 @@ def refresh_indicator_history(
     if owns_session:
         db = SessionLocal()
 
-    stats = {"fetched": 0, "inserted": 0, "unchanged": 0, "revised": 0, "rejected": 0}
+    stats = {"fetched": 0, "inserted": 0, "unchanged": 0, "revised": 0,
+             "no_value": 0, "no_period": 0}
 
     try:
         fetched_at = datetime.utcnow()
@@ -288,8 +356,11 @@ def refresh_indicator_history(
 
                 for period, value in series:
                     as_of = _period_to_date(period)
-                    if as_of is None or value is None:
-                        stats["rejected"] += 1
+                    if as_of is None:
+                        stats["no_period"] += 1
+                        continue
+                    if value is None:
+                        stats["no_value"] += 1
                         continue
 
                     known = current.get(as_of)
@@ -320,9 +391,10 @@ def refresh_indicator_history(
             db.close()
 
     logger.info(
-        "indicator history: fetched=%d inserted=%d unchanged=%d revised=%d rejected=%d",
+        "indicator history: fetched=%d inserted=%d unchanged=%d revised=%d "
+        "no_value=%d no_period=%d",
         stats["fetched"], stats["inserted"], stats["unchanged"],
-        stats["revised"], stats["rejected"],
+        stats["revised"], stats["no_value"], stats["no_period"],
     )
     return stats
 
@@ -558,7 +630,17 @@ def refresh_live_data(trigger_source: str = "manual") -> Dict:
         # full published series rather than the one figure the cache needs.
         # Its counts go into the log message: a run that says only "OK" is how
         # 408 empty OpenAQ runs passed for healthy (#56).
-        history = refresh_indicator_history(job_name="external_data_refresh")
+        #
+        # Gated, because this job runs immediately when the scheduler starts:
+        # enabling it by default would make the first mass ingestion a side
+        # effect of a deployment. See history_refresh_enabled().
+        if history_refresh_enabled():
+            history = refresh_indicator_history(job_name="external_data_refresh")
+        else:
+            history = None
+            logger.info(
+                "indicator history refresh is off (SORA_HISTORY_REFRESH); "
+                "the live cache was refreshed, the series was not")
 
         _refresh_status["last_refresh"] = datetime.utcnow().isoformat()
         _refresh_status["countries_refreshed"] = result["fetched"]
@@ -566,8 +648,10 @@ def refresh_live_data(trigger_source: str = "manual") -> Dict:
         log.countries_fetched = result["fetched"]
         log.total_countries = result["total"]
         log.message = (
+            "OK; history refresh disabled" if history is None else
             "OK; history fetched=%(fetched)d inserted=%(inserted)d "
-            "unchanged=%(unchanged)d revised=%(revised)d rejected=%(rejected)d"
+            "unchanged=%(unchanged)d revised=%(revised)d "
+            "no_value=%(no_value)d no_period=%(no_period)d"
             % history
         )
     except Exception as e:

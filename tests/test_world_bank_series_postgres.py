@@ -233,12 +233,14 @@ def test_the_run_reports_what_it_did(db, wb_stub):
     stats = refresh_indicator_history(db=db, countries={ISO3: ISO3},
                                       indicators={"gdp_growth": CODE})
 
-    assert set(stats) >= {"fetched", "inserted", "unchanged", "revised", "rejected"}
+    assert set(stats) >= {"fetched", "inserted", "unchanged", "revised",
+                          "no_value", "no_period"}
     assert stats["fetched"] == 3
     assert stats["inserted"] == 3
     assert stats["unchanged"] == 0
     assert stats["revised"] == 0
-    assert stats["rejected"] == 0
+    assert stats["no_value"] == 0
+    assert stats["no_period"] == 0
 
 
 def test_an_observation_without_a_period_is_rejected_not_stored(db, wb_stub):
@@ -253,7 +255,7 @@ def test_an_observation_without_a_period_is_rejected_not_stored(db, wb_stub):
     stats = refresh_indicator_history(db=db, countries={ISO3: ISO3},
                                       indicators={"gdp_growth": CODE})
 
-    assert stats["rejected"] == 1
+    assert stats["no_period"] == 1
     assert stats["inserted"] == 1
     assert len(_stored(db)) == 1
 
@@ -326,6 +328,7 @@ def test_a_null_value_is_rejected(db, wb_stub):
     stats = refresh_indicator_history(db=db, countries={ISO3: ISO3},
                                       indicators={"gdp_growth": CODE})
 
-    assert stats["rejected"] == 1
+    assert stats["no_value"] == 1
+    assert stats["no_period"] == 0, "a null value is not a missing period"
     assert stats["inserted"] == 1
     assert len(_stored(db)) == 1

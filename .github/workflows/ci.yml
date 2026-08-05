@@ -245,6 +245,21 @@ jobs:
         env:
           DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
 
+      # Named here because this job lists its files explicitly: a new
+      # *_postgres.py file is skipped by backend-tests (SQLite, so the marker
+      # skips it) and not picked up here unless it is added, which means nine
+      # tests that pass locally and never execute in CI. SORA_OFFLINE stays
+      # unset for this step alone -- the fetch is stubbed by a localhost HTTP
+      # server, and the offline gate would short-circuit it before the stub is
+      # reached.
+      - name: World Bank series ingestion against PostgreSQL
+        run: |
+          python -m pytest \
+            tests/test_world_bank_series_postgres.py \
+            -v --tb=short --timeout=300
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
       - name: Run environmental persistence tests against PostgreSQL
         run: |
           python -m pytest \
