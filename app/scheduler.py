@@ -63,6 +63,26 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 logger = logging.getLogger(__name__)
 
+
+def backend_base_url() -> str:
+    """Where the backend answers on the internal network.
+
+    The service has different names in the two compose files -- `app` in
+    docker-compose.yml, `backend` in docker-compose.prod.yml -- so any
+    hardcoded host is wrong in one of them. It was hardcoded to `app` on
+    2026-07-17, and refresh_forecast_metrics has raised on every run in
+    production since, twice a minute (#91). nginx was moved back to `backend`
+    in the same commit; the scheduler was not.
+
+    The default is production's name, because that is the environment where
+    being wrong is expensive and unobserved. Both compose files set the
+    variable explicitly so neither relies on this.
+
+    Read at call time rather than at import so a test can set it without
+    reloading the module.
+    """
+    return os.getenv("SORA_BACKEND_URL", "http://backend:8000").rstrip("/")
+
 # From app.prom_metrics, where these actually live, and without a try/except.
 #
 # This read `from app.main import ...` for six counters that are not defined
@@ -677,9 +697,8 @@ def refresh_forecast_metrics():
     import requests
 
     try:
-        # Call backend LSTM status endpoint (triggers metric export)
-        # Use internal Docker network hostname
-        response = requests.get("http://app:8000/api/v1/lstm-status", timeout=10)
+        response = requests.get(
+            f"{backend_base_url()}/api/v1/lstm-status", timeout=10)
 
         if response.status_code == 200:
             data = response.json()
@@ -692,6 +711,14 @@ def refresh_forecast_metrics():
         else:
             logger.warning(f"LSTM status endpoint returned {response.status_code}")
 
+    # A backend that is restarting, or a name that does not resolve, is not a
+    # programming error, and a full traceback every 30 seconds is how a log
+    # stops being read. Named separately so an unexpected failure still gets
+    # its stack.
+    except requests.exceptions.RequestException as e:
+        logger.warning(
+            "Forecast metrics refresh could not reach %s: %s",
+            backend_base_url(), e)
     except Exception as e:
         logger.error(f"Failed to refresh forecast metrics: {e}", exc_info=True)
 
