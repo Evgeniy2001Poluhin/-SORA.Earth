@@ -74,6 +74,12 @@ COPY --chown=app:app data/        ./data/
 COPY --chown=app:app run_scheduler.py ./
 COPY --chown=app:app alembic.ini  ./
 COPY --chown=app:app alembic/     ./alembic/
+# Operational entry points. Their absence was not noticed until someone tried
+# to run one on production: scripts/refresh_indicator_history.py is documented
+# in its own module as *the* way to perform the first history refresh, and it
+# was in the repository and not in the image (#99). Nothing else references
+# scripts/ at runtime, so nothing failed until it was needed.
+COPY --chown=app:app scripts/     ./scripts/
 COPY --chown=app:app entrypoint.sh ./
 RUN chmod +x ./entrypoint.sh
 
