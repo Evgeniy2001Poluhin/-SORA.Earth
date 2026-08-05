@@ -264,7 +264,31 @@ def _fetch_wb_series(
         if data is None:
             return out
 
-        if not isinstance(data, list) or len(data) < 2 or not data[1]:
+        # A 200 carrying no rows is two different things, and returning
+        # silently made them one. Measured during the rehearsal: 5 of 30
+        # countries lost their whole GDP-growth series with no message at all,
+        # while the same request served 66 observations minutes later.
+        #
+        # The World Bank signals an error as a ONE-element list whose only
+        # member holds `message` -- e.g. "The indicator was not found. It may
+        # have been deleted or archived" -- with HTTP 200, so raise_for_status
+        # never sees it. A genuinely empty series is a two-element envelope
+        # with an empty second element. Those are told apart here.
+        if not isinstance(data, list) or len(data) < 2:
+            detail = ""
+            if isinstance(data, list) and data and isinstance(data[0], dict):
+                messages = data[0].get("message")
+                if messages:
+                    detail = str(messages)[:200]
+            logger.warning(
+                "World Bank returned no data envelope for %s/%s page %d%s",
+                iso3, indicator_code, page,
+                f": {detail}" if detail else " (no message given)")
+            return out
+
+        if not data[1]:
+            logger.info("World Bank has no observations for %s/%s",
+                        iso3, indicator_code)
             return out
 
         header, rows = data[0], data[1]

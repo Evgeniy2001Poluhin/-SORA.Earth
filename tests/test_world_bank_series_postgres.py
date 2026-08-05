@@ -260,6 +260,77 @@ def test_an_observation_without_a_period_is_rejected_not_stored(db, wb_stub):
     assert len(_stored(db)) == 1
 
 
+def test_an_error_envelope_is_reported_not_swallowed(caplog):
+    """A 200 with no data is two different things, and it used to be one.
+
+    Found in rehearsal: 5 of 30 countries lost their whole GDP-growth series
+    with no message at all, while the same request served 66 observations
+    minutes later. The World Bank signals an error as a ONE-element list whose
+    member holds `message` -- with HTTP 200, so raise_for_status never sees it.
+    """
+    import logging
+
+    import app.external_data as ed
+
+    class _Resp:
+        status_code = 200
+        request = None
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [{"message": [{"id": "175", "key": "Invalid format",
+                                  "value": "The indicator was not found."}]}]
+
+    original = ed.httpx.get
+    ed.httpx.get = lambda url, timeout=None: _Resp()
+    try:
+        with caplog.at_level(logging.WARNING, logger="sora"):
+            assert ed._fetch_wb_series("RUS", "DEAD.CODE") == []
+    finally:
+        ed.httpx.get = original
+
+    # caplog.text, not record.message: the latter only exists once the record
+    # has been formatted, so building the assertion from it fails on a record
+    # that was logged perfectly well.
+    assert "no data envelope" in caplog.text, (
+        "the source said the indicator does not exist and nothing was logged"
+    )
+    assert "not found" in caplog.text, "the source's own message was dropped"
+
+
+def test_an_empty_series_is_not_an_error(caplog):
+    """And the other half: a real two-element envelope with no rows.
+
+    A country the source simply has no observations for must not raise the
+    alarm that a dead indicator code does, or the warning becomes noise.
+    """
+    import logging
+
+    import app.external_data as ed
+
+    class _Resp:
+        status_code = 200
+        request = None
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [{"page": 1, "pages": 1, "total": 0}, []]
+
+    original = ed.httpx.get
+    ed.httpx.get = lambda url, timeout=None: _Resp()
+    try:
+        with caplog.at_level(logging.WARNING, logger="sora"):
+            assert ed._fetch_wb_series("RUS", "X") == []
+    finally:
+        ed.httpx.get = original
+
+    assert "no data envelope" not in caplog.text
+
+
 def test_the_feature_frame_actually_varies(db, wb_stub, monkeypatch):
     """The acceptance case: coverage, distinct values and variance, not row counts.
 
