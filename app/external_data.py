@@ -36,14 +36,20 @@ WB_BASE = "https://api.worldbank.org/v2"
 # the 210 pairs contributed none and why. These do, and they distinguish the
 # three ways a pair yields nothing:
 #
-#   OK          the source returned observations
+#   OK          every page was fetched and the series is complete
 #   EMPTY       a proper envelope with no rows: the source has nothing here,
 #               which is a fact about the world, not a fault
 #   REFUSED     an error envelope: the indicator is unknown or archived, so
 #               every future run will fail identically until it is fixed
-#   TRANSIENT   timeouts, 429s and 5xx that outlived the retry budget --
-#               likely to succeed next time, and the only one that should
-#               make a run degraded
+#   TRANSIENT   timeouts, 429s and 5xx that outlived the retry budget, and
+#               any pair whose pagination stopped part-way -- likely to
+#               succeed next time, and the only one that makes a run degraded
+#
+# A pair that fetched page 1 and lost page 2 is NOT ok. The rows it did get
+# are kept, because partial data beats none, but the series is incomplete and
+# a run containing one has not done what it set out to do. Counting it as ok
+# because "some observations arrived" would hide exactly the gap these
+# counters exist to expose.
 FETCH_OK = "ok"
 FETCH_EMPTY = "empty"
 FETCH_REFUSED = "refused"
@@ -293,7 +299,7 @@ def _fetch_wb_series(
                     logger.warning(
                         "World Bank refused %s/%s page %d: HTTP %s",
                         iso3, indicator_code, page, status)
-                    return out, FETCH_OK if out else FETCH_REFUSED
+                    return out, FETCH_REFUSED
                 logger.warning(
                     "World Bank returned HTTP %s for %s/%s page %d, treating "
                     "as transient", status, iso3, indicator_code, page)
@@ -301,7 +307,7 @@ def _fetch_wb_series(
             except Exception as e:
                 logger.warning("World Bank series error for %s/%s page %d: %s",
                                iso3, indicator_code, page, e)
-                return out, FETCH_OK if out else FETCH_TRANSIENT
+                return out, FETCH_TRANSIENT
 
             if retryable is not None:
                 if attempt == _WB_RETRIES - 1:
@@ -309,11 +315,11 @@ def _fetch_wb_series(
                         "World Bank series gave up for %s/%s page %d after "
                         "%d attempts (%s)",
                         iso3, indicator_code, page, _WB_RETRIES, retryable)
-                    return out, FETCH_OK if out else FETCH_TRANSIENT
+                    return out, FETCH_TRANSIENT
                 time.sleep(_WB_BACKOFF * (2 ** attempt))
 
         if data is None:
-            return out, FETCH_OK if out else FETCH_TRANSIENT
+            return out, FETCH_TRANSIENT
 
         # A 200 carrying no rows is two different things, and returning
         # silently made them one. Measured during the rehearsal: 5 of 30
@@ -335,7 +341,7 @@ def _fetch_wb_series(
                 "World Bank returned no data envelope for %s/%s page %d%s",
                 iso3, indicator_code, page,
                 f": {detail}" if detail else " (no message given)")
-            return out, FETCH_OK if out else FETCH_REFUSED
+            return out, FETCH_REFUSED
 
         if not data[1]:
             logger.info("World Bank has no observations for %s/%s",

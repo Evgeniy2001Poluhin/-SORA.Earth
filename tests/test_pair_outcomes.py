@@ -105,12 +105,15 @@ def test_an_exhausted_retry_budget_is_transient(monkeypatch):
     assert rows == []
 
 
-def test_a_partial_page_failure_keeps_what_it_got(monkeypatch):
+def test_a_partial_page_failure_keeps_rows_but_is_not_ok(monkeypatch):
     """Page 1 arrived, page 2 timed out.
 
-    The pair produced observations, so it is not a failure to collect
-    *anything* -- and the rows already gathered are stored rather than
-    discarded. Reported as ok, with the give-up logged.
+    The rows already gathered are kept -- partial data beats none -- but the
+    series is incomplete, so the pair is transient and the run containing it
+    is degraded. An earlier version called this ok because observations
+    arrived, which hid exactly the gap these counters exist to expose: a pair
+    missing half its history would have been indistinguishable from one that
+    fetched everything.
     """
     calls = {"n": 0}
 
@@ -122,8 +125,10 @@ def test_a_partial_page_failure_keeps_what_it_got(monkeypatch):
 
     _serve(monkeypatch, flaky)
     rows, outcome = ed._fetch_wb_series("RUS", "X")
-    assert rows == [("2024", 4.9)]
-    assert outcome == ed.FETCH_OK
+    assert rows == [("2024", 4.9)], "the rows that did arrive were discarded"
+    assert outcome == ed.FETCH_TRANSIENT, (
+        "an incomplete series was reported as a complete one"
+    )
 
 
 def test_every_pair_lands_in_exactly_one_counter(monkeypatch):
@@ -349,3 +354,34 @@ def test_a_418_is_still_refused(monkeypatch):
     """The 4xx boundary holds from the other side."""
     _serve(monkeypatch, lambda url: _Resp([], status=418))
     assert ed._fetch_wb_series("RUS", "X")[1] == ed.FETCH_REFUSED
+
+
+def test_a_partial_pair_degrades_the_run(monkeypatch):
+    """The consequence, asserted end to end rather than inferred.
+
+    A pair that lost half its pages must not leave the run reporting success:
+    the missing half is not distinguishable afterwards from history the source
+    never had.
+    """
+    from unittest.mock import MagicMock
+
+    calls = {"n": 0}
+
+    def flaky(url):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _Resp(_envelope([_row("2024", 4.9)], pages=2, page=1))
+        raise httpx.ReadTimeout("slow")
+
+    _serve(monkeypatch, flaky)
+
+    db = MagicMock()
+    db.get_bind.return_value.dialect.name = "sqlite"
+    db.query.return_value.filter.return_value.order_by.return_value = []
+
+    stats = ed.refresh_indicator_history(
+        db=db, countries={"RUS": "RUS"}, indicators={"a": "AAA"})
+
+    assert stats["pairs_succeeded"] == 0
+    assert stats["pairs_failed_transient"] == 1
+    assert stats["fetched"] == 1, "the row that did arrive was not kept"
