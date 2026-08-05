@@ -20,6 +20,13 @@ issue names, and every one of those differences is pinned below:
     That last one decides how many rows a failure writes -- one, or one per
     `@with_retry` attempt -- so it is a job-log contract, not a style question.
 
+The five differences above describe the runner *as it was when these tests were
+written*. #81 made each of them per-source configuration rather than a diverging
+implementation: `describe` decides the metadata keys and the ordering of the
+metric list, `result_extra` carries what only one job returns, and `reraise`
+decides the exception behaviour. The contract these tests pin is unchanged --
+what moved is where the difference is expressed.
+
 `parameters` and `variables` are compared as sorted lists rather than by
 identity. `list(set(...))` is not order-stable across processes -- str hashing
 is seeded per interpreter -- so the *stored order* is already arbitrary today
