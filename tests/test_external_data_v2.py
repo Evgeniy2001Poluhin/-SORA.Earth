@@ -23,18 +23,43 @@ class TestExpandedIndicators:
         together now is tests/test_gdp_growth_regressor.py.
         """
         assert set(INDICATORS.values()) == {
-            "EN.ATM.CO2E.PC",     # co2_per_capita
             "EG.FEC.RNEW.ZS",     # renewable_share
             "SP.DYN.LE00.IN",     # life_expectancy
             "NY.GDP.PCAP.CD",     # gdp_per_capita (a level, in dollars)
             "SI.POV.GINI",        # gini_index
-            "GE.EST",             # gov_effectiveness
             "NY.GDP.MKTP.KD.ZG",  # gdp_growth (annual %) -- forecasting
         }
 
+    def test_no_indicator_claims_a_source_that_refuses_it(self):
+        """EN.ATM.CO2E.PC and GE.EST are not published by the World Bank.
+
+        Both returned "The indicator was not found. It may have been deleted
+        or archived" for every country, so every value ever stored under them
+        came from the static benchmark fallback -- 15,316 rows each, none
+        dated, wearing a World Bank code they never came from (#97).
+        """
+        from app.external_data import BENCHMARK_ONLY_INDICATORS
+
+        assert "EN.ATM.CO2E.PC" not in INDICATORS.values()
+        assert "GE.EST" not in INDICATORS.values()
+
+        # Still offered by the platform, still available to the API -- just no
+        # longer attributed to a source that does not publish them.
+        assert set(BENCHMARK_ONLY_INDICATORS) == {
+            "co2_per_capita", "gov_effectiveness"}
+        for identifier in BENCHMARK_ONLY_INDICATORS.values():
+            assert identifier.startswith("benchmark:"), (
+                f"{identifier!r} still looks like a source's own code"
+            )
+
     def test_new_indicators_present(self):
+        from app.external_data import BENCHMARK_ONLY_INDICATORS
+
+        # gov_effectiveness moved to the benchmark-only map (#97): the
+        # platform still offers it, the World Bank never published it.
+        offered = {**INDICATORS, **BENCHMARK_ONLY_INDICATORS}
         for key in ["gdp_per_capita", "gini_index", "gov_effectiveness"]:
-            assert key in INDICATORS
+            assert key in offered
 
     def test_benchmarks_have_new_fields(self):
         for country, data in BENCHMARKS.items():

@@ -61,8 +61,19 @@ def history_refresh_enabled() -> bool:
         "1", "true", "on", "yes",
     }
 
+# Codes the World Bank actually publishes. Two were removed (#97) because they
+# do not exist at the source: EN.ATM.CO2E.PC returns "The indicator was not
+# found. It may have been deleted or archived", and GE.EST is archived under
+# source 57 (WDI Database Archives) along with every sibling -- GE.PER.RNK,
+# CC.EST, RL.EST, RQ.EST all refuse identically, and `source=3` is rejected
+# outright.
+#
+# Nothing had ever been fetched for either. Every value stored under those
+# codes came from the static benchmark fallback: 15,316 rows each, none dated,
+# labelled with a World Bank indicator code they never came from. Keeping the
+# codes here made each run issue 60 requests that could not succeed and 60
+# warnings nobody could act on.
 INDICATORS: Dict[str, str] = {
-    "co2_per_capita":    "EN.ATM.CO2E.PC",
     "renewable_share":   "EG.FEC.RNEW.ZS",
     "life_expectancy":   "SP.DYN.LE00.IN",
     "gdp_per_capita":    "NY.GDP.PCAP.CD",
@@ -72,7 +83,20 @@ INDICATORS: Dict[str, str] = {
     # not a rate, and cannot stand in for it.
     "gdp_growth":        "NY.GDP.MKTP.KD.ZG",
     "gini_index":        "SI.POV.GINI",
-    "gov_effectiveness": "GE.EST",
+}
+
+# Served from the static benchmarks, and only from there. These keys stay in
+# the API because the platform genuinely offers them -- what it must not do is
+# claim they came from the World Bank. The identifier is internal for exactly
+# that reason: a row saying `benchmark:co2_per_capita` cannot be mistaken for
+# an observation the source published.
+#
+# A replacement for CO2 does exist -- EN.GHG.CO2.PC.CE.AR5, 66 rows -- but it
+# excludes LULUCF, which is a different measurement rather than a renamed one.
+# Adopting it is a data decision, recorded in #97, not a rename to make here.
+BENCHMARK_ONLY_INDICATORS: Dict[str, str] = {
+    "co2_per_capita":    "benchmark:co2_per_capita",
+    "gov_effectiveness": "benchmark:gov_effectiveness",
 }
 
 COUNTRY_ISO3: Dict[str, str] = {
@@ -592,7 +616,10 @@ def get_country_esg_realtime(country_name: str) -> Optional[Dict]:
         "indicator_periods": {},
     }
 
-    for key, indicator_code in INDICATORS.items():
+    # Benchmark-only keys go through the same chain, but their "code" is an
+    # internal identifier, so the World Bank leg finds nothing and the value
+    # arrives from BENCHMARKS -- which is where it always came from.
+    for key, indicator_code in {**INDICATORS, **BENCHMARK_ONLY_INDICATORS}.items():
         val, src, period = _fetch_with_fallback_impl(iso3, key, indicator_code, country_name)
         if val is not None:
             result["indicators"][key] = val
