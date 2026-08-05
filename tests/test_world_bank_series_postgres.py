@@ -500,9 +500,14 @@ def test_an_error_envelope_is_reported_not_swallowed(caplog):
     ed.httpx.get = lambda url, timeout=None: _Resp()
     try:
         with caplog.at_level(logging.WARNING, logger="sora"):
-            assert ed._fetch_wb_series("RUS", "DEAD.CODE") == []
+            rows, outcome = ed._fetch_wb_series("RUS", "DEAD.CODE")
     finally:
         ed.httpx.get = original
+
+    assert rows == []
+    assert outcome == ed.FETCH_REFUSED, (
+        "an archived indicator is permanent, not a transient failure"
+    )
 
     # caplog.text, not record.message: the latter only exists once the record
     # has been formatted, so building the assertion from it fails on a record
@@ -537,9 +542,14 @@ def test_an_empty_series_is_not_an_error(caplog):
     ed.httpx.get = lambda url, timeout=None: _Resp()
     try:
         with caplog.at_level(logging.WARNING, logger="sora"):
-            assert ed._fetch_wb_series("RUS", "X") == []
+            rows, outcome = ed._fetch_wb_series("RUS", "X")
     finally:
         ed.httpx.get = original
+
+    assert rows == []
+    assert outcome == ed.FETCH_EMPTY, (
+        "a source with no observations is not a refusal"
+    )
 
     assert "no data envelope" not in caplog.text
 
