@@ -180,3 +180,56 @@ class TestEdgeCases:
         assert COUNTRY_ISO3["Indonesia"] == "IDN"
         assert COUNTRY_ISO3["Saudi Arabia"] == "SAU"
         assert COUNTRY_ISO3["Turkey"] == "TUR"
+
+
+class TestBenchmarkOnlyIndicators:
+    """Retired codes must not keep reaching the source that refuses them."""
+
+    def test_they_never_touch_the_network(self, monkeypatch):
+        """The point of retiring them, and it was nearly missed.
+
+        Routing them through the normal chain looked harmless -- the World
+        Bank refuses an internal identifier and BENCHMARKS supplies the value
+        anyway -- but the request would still go out on every cache miss.
+        Removing the codes was meant to stop exactly that.
+        """
+        import app.external_data as ed
+
+        wb, oecd = [], []
+        monkeypatch.setattr(ed, "_fetch_wb_indicator_dated",
+                            lambda i, c, **k: wb.append(c) or (None, None))
+        monkeypatch.setattr(ed, "_fetch_oecd_indicator",
+                            lambda i, k: oecd.append(k) or None)
+        ed.invalidate_cache()
+
+        ed.get_country_esg_realtime("Germany")
+
+        assert not [c for c in wb if str(c).startswith("benchmark:")], (
+            f"a retired indicator was still requested from the World Bank: {wb}"
+        )
+        assert not [k for k in oecd if k in ed.BENCHMARK_ONLY_INDICATORS], (
+            f"a retired indicator was still requested from OECD: {oecd}"
+        )
+
+    def test_they_are_still_served_to_the_api(self, monkeypatch):
+        """Withdrawn from a source, not from the platform.
+
+        Both keys are consumed by app/api/evaluate.py, app/api/map_data.py and
+        the frontend's types; losing them would break those.
+        """
+        import app.external_data as ed
+
+        monkeypatch.setattr(ed, "_fetch_wb_indicator_dated",
+                            lambda i, c, **k: (None, None))
+        ed.invalidate_cache()
+
+        result = ed.get_country_esg_realtime("Germany")
+
+        for key in ed.BENCHMARK_ONLY_INDICATORS:
+            assert result["indicators"].get(key) is not None, f"{key} lost"
+            assert result["indicator_sources"][key] == "benchmark", (
+                f"{key} claims source {result['indicator_sources'][key]!r}"
+            )
+            assert result["indicator_periods"][key] is None, (
+                f"{key} carries a period the benchmark never stated"
+            )

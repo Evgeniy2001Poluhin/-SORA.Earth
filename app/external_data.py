@@ -616,11 +616,20 @@ def get_country_esg_realtime(country_name: str) -> Optional[Dict]:
         "indicator_periods": {},
     }
 
-    # Benchmark-only keys go through the same chain, but their "code" is an
-    # internal identifier, so the World Bank leg finds nothing and the value
-    # arrives from BENCHMARKS -- which is where it always came from.
-    for key, indicator_code in {**INDICATORS, **BENCHMARK_ONLY_INDICATORS}.items():
-        val, src, period = _fetch_with_fallback_impl(iso3, key, indicator_code, country_name)
+    # Benchmark-only keys never touch the network. Sending them through the
+    # normal chain looked harmless -- the World Bank would refuse an internal
+    # identifier and the value would arrive from BENCHMARKS anyway -- but it
+    # would still issue the request on every cache miss, which is half of what
+    # removing the codes was meant to stop.
+    resolved = [
+        (key, _fetch_with_fallback_impl(iso3, key, code, country_name))
+        for key, code in INDICATORS.items()
+    ] + [
+        (key, (BENCHMARKS.get(country_name, {}).get(key), "benchmark", None))
+        for key in BENCHMARK_ONLY_INDICATORS
+    ]
+
+    for key, (val, src, period) in resolved:
         if val is not None:
             result["indicators"][key] = val
             result["indicator_sources"][key] = src
