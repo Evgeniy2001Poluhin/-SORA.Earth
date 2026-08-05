@@ -7,6 +7,12 @@ import logging
 
 log = logging.getLogger(__name__)
 
+# The indicator the gdp_growth regressor is built from. INDICATORS in
+# app/external_data.py -- the only writer of country_indicator_history -- must
+# collect this code, or the column silently stays at its 0.0 default. See #86;
+# tests/test_gdp_growth_regressor.py binds the two together.
+GDP_GROWTH_INDICATOR = "NY.GDP.MKTP.KD.ZG"  # GDP growth (annual %)
+
 
 class FeatureEngineer:
     """Comprehensive feature engineering pipeline for time series forecasting.
@@ -128,12 +134,20 @@ class FeatureEngineer:
         except Exception as e:
             log.warning(f"External regressor fetch failed: {e}. Using zeros.")
 
-        regressors_active = sum([
-            int((df["gdp_growth"] != 0.0).any()),
-            int((df["air_quality"] != 0.0).any()),
-            int((df["carbon_price"] != 0.0).any())
-        ])
-        log.debug(f"External regressors: {regressors_active}/3 active for country={country}")
+        # This count existed before #86 and was logged at debug, so a regressor
+        # that had never once carried a value looked exactly like one that was
+        # working. A column left entirely at its default contributes nothing to
+        # the forecast, and that is worth saying out loud.
+        dead = [name for name in ("gdp_growth", "air_quality", "carbon_price")
+                if not (df[name] != 0.0).any()]
+        if dead:
+            log.warning(
+                "External regressors carrying no data for country=%s: %s. "
+                "These columns are all zeros and contribute nothing.",
+                country, ", ".join(dead),
+            )
+        log.debug("External regressors: %d/3 active for country=%s",
+                  3 - len(dead), country)
         return df
 
     @staticmethod
@@ -146,18 +160,33 @@ class FeatureEngineer:
 
         db = SessionLocal()
         try:
+            # One indicator, not two. Both annual growth series share a date,
+            # and the series is built as a dict keyed by date, so a second code
+            # would overwrite the first -- leaving the column as GDP growth or
+            # per-capita growth depending on row order. They are different
+            # quantities; only the one this regressor is named after belongs.
+            #
+            # Undated rows are excluded rather than kept: as_of_date is
+            # nullable and much of the table carries no period (#58), and
+            # pd.to_datetime(None) is NaT, so every undated row would collapse
+            # onto a single NaT key and merge against nothing.
             rows = db.query(CountryIndicatorHistory).filter(
                 CountryIndicatorHistory.country_iso3 == country.upper(),
-                CountryIndicatorHistory.indicator_code.in_([
-                    "NY.GDP.MKTP.KD.ZG",  # GDP growth (annual %)
-                    "NY.GDP.PCAP.KD.ZG",  # GDP per capita growth
-                ])
-            ).order_by(CountryIndicatorHistory.as_of_date.asc()).all()
+                CountryIndicatorHistory.indicator_code == GDP_GROWTH_INDICATOR,
+                CountryIndicatorHistory.as_of_date.isnot(None),
+                CountryIndicatorHistory.value.isnot(None),
+            ).order_by(
+                CountryIndicatorHistory.as_of_date.asc(),
+                CountryIndicatorHistory.fetched_at.asc(),
+            ).all()
 
             if not rows:
                 return pd.Series(dtype=float)
 
-            data = {pd.to_datetime(r.as_of_date): r.value for r in rows if r.value is not None}
+            # Same date twice means the value was revised; ordering by
+            # fetched_at above makes the most recently fetched one win, rather
+            # than whichever row the database happened to return last.
+            data = {pd.to_datetime(r.as_of_date): r.value for r in rows}
             return pd.Series(data, name="gdp_growth").sort_index()
         finally:
             db.close()
