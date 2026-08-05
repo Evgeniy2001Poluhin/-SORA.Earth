@@ -177,318 +177,101 @@ def _log_job_execution(
         db.close()
 
 
-@with_retry(max_attempts=3, base_delay=2.0)
-def scheduled_openaq_ingestion():
-    """Ingest OpenAQ air quality data (runs hourly).
+def _openaq_quality_split(signals):
+    """The fetch-time quality flag, split into (valid, invalid).
 
-    Fetches latest measurements from OpenAQ API and stores in database.
-    Implements Redis locking for idempotency.
+    Informational only. NOT the authoritative persisted-rejection count -- that
+    comes from PersistResult, and the two answer different questions: a signal
+    can pass the source's own quality flag and still be rejected by validation,
+    or carry `quality: invalid` and still be stored. The row keeps both.
     """
-    from app.locks import RedisLock
-    from app.ingesters.openaq import OpenAQIngester
-    from app.ingesters.persist import persist_environmental_observations
-    from app.prom_metrics import (
-        sora_environmental_ingestion_total,
-        sora_environmental_ingestion_errors_total,
-        sora_environmental_source_freshness_seconds,
-        sora_environmental_observations_total,
-    )
-
-    job_name = "openaq_ingestion"
-    lock = RedisLock(key=f"sora:lock:{job_name}", timeout=300)  # 5 min timeout
-
-    if not lock.acquire():
-        logger.warning("OpenAQ ingestion skipped: lock held by another instance")
-        _log_job_execution(job_name, status="skipped", metadata={"reason": "lock_held"})
-        return {"status": "skipped", "reason": "lock_held"}
-
-    start_time = time.time()
-    try:
-        logger.info("Starting OpenAQ ingestion job")
-
-        # Run async ingester
-        ingester = OpenAQIngester()
-        signals = _run_async_job(ingester.fetch())
-        fetched_count = len(signals)
-
-        # Fetch-time quality flag: informational only. NOT the authoritative
-        # persisted-rejection count — that comes from PersistResult below.
-        quality_valid_signals = [s for s in signals if s.metadata.get("quality") != "invalid"]
-        quality_invalid_count = fetched_count - len(quality_valid_signals)
-
-        # Persist signals to environmental_observations (upsert on source, source_record_id).
-        # This is the single source of truth for accepted/rejected counts; success is
-        # only declared below once this has actually completed without a fatal error.
-        persist_result = persist_environmental_observations(signals, "openaq")
-
-        if _is_fatal_persist_error(persist_result):
-            raise RuntimeError(f"persistence failed for openaq: {persist_result.errors}")
-
-        # What the run achieved, not whether it threw. This job recorded
-        # "success" on every non-exception path, which is how sixty-two openaq
-        # runs came to report success having written nothing: the source is
-        # reachable, authenticated and empty (#56, #57).
-        verdict = classify_run(
-            received=persist_result.received,
-            accepted=persist_result.accepted,
-            rejected=persist_result.rejected,
-            # No write_failed here, deliberately. _is_fatal_persist_error()
-            # above already raises on a "persist_error:" entry, so this line is
-            # unreachable with one present -- I added it anyway, following a
-            # review finding that was correct for runner.py, which has no such
-            # guard, without reading what stood four lines higher. Dead code
-            # that looks load-bearing is worse than none.
-        )
-
-        # Update Prometheus metrics only after persistence has succeeded, counting
-        # accepted (persisted) records rather than fetched ones. The label carries
-        # the verdict, so a degraded run stops being indistinguishable from a
-        # working one on the dashboard as well as in the table.
-        sora_environmental_ingestion_total.labels(
-            source="openaq", status=verdict.status
-        ).inc()
-        for indicator, count in _accepted_indicator_counts(signals, persist_result).items():
-            sora_environmental_observations_total.labels(
-                source="openaq", indicator=indicator
-            ).inc(count)
-
-        # Calculate data freshness (time since most recent observation)
-        # Guarded on the timestamps, not on the signals.
-        #
-        # `if signals:` is not the condition this needs: the generator filters to
-        # signals whose observed_at is a datetime, and a batch where none is --
-        # a source that omitted the field, or returned it unparseable -- leaves
-        # max() with an empty sequence and raises ValueError, failing a run that
-        # had otherwise succeeded. Found by a test that passed a signal without a
-        # timestamp, which is a shape the real sources can produce.
-        observed_times = [
-            s.observed_at for s in signals
-            if isinstance(s.observed_at, datetime)
-        ]
-        if observed_times:
-            latest_time = max(observed_times)
-            freshness_seconds = (datetime.now(timezone.utc) - latest_time).total_seconds()
-            sora_environmental_source_freshness_seconds.labels(source="openaq").set(
-                freshness_seconds
-            )
-
-        duration = time.time() - start_time
-
-        # Log to database: records_processed/rejected reflect what was actually
-        # persisted (PersistResult), never the fetch-time quality-flag count.
-        _log_job_execution(
-            job_name=job_name,
-            status=verdict.status,
-            duration_sec=duration,
-            records_processed=persist_result.accepted,
-            records_rejected=persist_result.rejected,
-            error_message=verdict.failure_reason,
-            metadata={
-                "fetched_count": fetched_count,
-                "quality_valid_count": len(quality_valid_signals),
-                "quality_invalid_count": quality_invalid_count,
-                "parameters": list(set(s.metric for s in signals)),
-                "persist_inserted": persist_result.inserted,
-                "persist_updated": persist_result.updated,
-                "persist_duplicates": persist_result.duplicates,
-                "persist_errors": persist_result.errors[:5] if persist_result.errors else [],
-            }
-        )
-
-        logger.info(
-            "OpenAQ ingestion completed: fetched %d signals, persisted %d accepted / "
-            "%d rejected (%d inserted, %d updated) in %.2fs",
-            fetched_count, persist_result.accepted, persist_result.rejected,
-            persist_result.inserted, persist_result.updated, duration
-        )
-
-        # The verdict, not a constant. Returning "success" beside a row
-        # recorded as degraded gives the same run two different answers
-        # depending on who asks, which is how the two drift apart.
-        return {
-            "status": verdict.status,
-            "failure_reason": verdict.failure_reason,
-            "signals_count": fetched_count,
-            "valid_count": len(quality_valid_signals),
-            "rejected_count": quality_invalid_count,
-            "persisted": persist_result.accepted,
-            "duration_sec": duration,
-        }
-
-    except Exception as e:
-        duration = time.time() - start_time
-        logger.exception("OpenAQ ingestion failed: %s", e)
-
-        # Update error metrics
-        sora_environmental_ingestion_errors_total.labels(source="openaq").inc()
-
-        # Log failure
-        _log_job_execution(
-            job_name=job_name,
-            status="failed",
-            duration_sec=duration,
-            error_message=str(e),
-        )
-
-        return {"status": "error", "error": str(e)}
-
-    finally:
-        lock.release()
+    valid = [s for s in signals if s.metadata.get("quality") != "invalid"]
+    return len(valid), len(signals) - len(valid)
 
 
-@with_retry(max_attempts=3, base_delay=2.0)
-def scheduled_openmeteo_ingestion():
-    """Ingest Open-Meteo weather data (runs hourly).
+def _openaq_metadata(signals) -> Dict[str, Any]:
+    """openaq's half of the metadata block.
 
-    Fetches current weather and forecast for environmental regions.
-    Implements Redis locking for idempotency.
+    No `regions_count`: this job has never written one, and a metadata key that
+    appears part-way through a table's history is indistinguishable, later, from
+    one that was always there and sometimes null.
     """
-    from app.locks import RedisLock
-    from app.ingesters.openmeteo import OpenMeteoIngester
-    from app.ingesters.persist import persist_environmental_observations
-    from app.prom_metrics import (
-        sora_environmental_ingestion_total,
-        sora_environmental_ingestion_errors_total,
-        sora_environmental_source_freshness_seconds,
-        sora_environmental_observations_total,
-    )
-
-    job_name = "openmeteo_ingestion"
-    lock = RedisLock(key=f"sora:lock:{job_name}", timeout=300)
-
-    if not lock.acquire():
-        logger.warning("Open-Meteo ingestion skipped: lock held")
-        _log_job_execution(job_name, status="skipped", metadata={"reason": "lock_held"})
-        return {"status": "skipped", "reason": "lock_held"}
-
-    start_time = time.time()
-    try:
-        logger.info("Starting Open-Meteo ingestion job")
-
-        # Run async ingester
-        ingester = OpenMeteoIngester()
-        signals = _run_async_job(ingester.fetch())
-        fetched_count = len(signals)
-
-        # Persist signals to environmental_observations (upsert on source, source_record_id).
-        # Single source of truth for accepted/rejected counts; success is only
-        # declared below once this has actually completed without a fatal error.
-        persist_result = persist_environmental_observations(signals, "openmeteo")
-
-        if _is_fatal_persist_error(persist_result):
-            raise RuntimeError(f"persistence failed for openmeteo: {persist_result.errors}")
-
-        # Update Prometheus metrics only after persistence has succeeded, counting
-        # accepted (persisted) records rather than fetched ones.
-        verdict = classify_run(
-            received=persist_result.received,
-            accepted=persist_result.accepted,
-            rejected=persist_result.rejected,
-            # No write_failed here, deliberately. _is_fatal_persist_error()
-            # above already raises on a "persist_error:" entry, so this line is
-            # unreachable with one present -- I added it anyway, following a
-            # review finding that was correct for runner.py, which has no such
-            # guard, without reading what stood four lines higher. Dead code
-            # that looks load-bearing is worse than none.
-        )
-        sora_environmental_ingestion_total.labels(
-            source="openmeteo", status=verdict.status
-        ).inc()
-        for indicator, count in _accepted_indicator_counts(signals, persist_result).items():
-            sora_environmental_observations_total.labels(
-                source="openmeteo", indicator=indicator
-            ).inc(count)
-
-        # Calculate data freshness
-        # Guarded on the timestamps, not on the signals.
-        #
-        # `if signals:` is not the condition this needs: the generator filters to
-        # signals whose observed_at is a datetime, and a batch where none is --
-        # a source that omitted the field, or returned it unparseable -- leaves
-        # max() with an empty sequence and raises ValueError, failing a run that
-        # had otherwise succeeded. Found by a test that passed a signal without a
-        # timestamp, which is a shape the real sources can produce.
-        observed_times = [
-            s.observed_at for s in signals
-            if isinstance(s.observed_at, datetime)
-        ]
-        if observed_times:
-            latest_time = max(observed_times)
-            freshness_seconds = (datetime.now(timezone.utc) - latest_time).total_seconds()
-            sora_environmental_source_freshness_seconds.labels(source="openmeteo").set(
-                freshness_seconds
-            )
-
-        duration = time.time() - start_time
-
-        # Log to database: records_processed/rejected reflect what was actually
-        # persisted (PersistResult), never the raw fetch count.
-        _log_job_execution(
-            job_name=job_name,
-            status=verdict.status,
-            duration_sec=duration,
-            records_processed=persist_result.accepted,
-            records_rejected=persist_result.rejected,
-            error_message=verdict.failure_reason,
-            metadata={
-                "fetched_count": fetched_count,
-                "regions_count": len(set(s.region_code for s in signals)),
-                "variables": list(set(s.metric for s in signals)),
-                "persist_inserted": persist_result.inserted,
-                "persist_updated": persist_result.updated,
-                "persist_duplicates": persist_result.duplicates,
-                "persist_errors": persist_result.errors[:5] if persist_result.errors else [],
-            }
-        )
-
-        logger.info(
-            "Open-Meteo ingestion completed: fetched %d signals, persisted %d accepted / "
-            "%d rejected (%d inserted, %d updated) in %.2fs",
-            fetched_count, persist_result.accepted, persist_result.rejected,
-            persist_result.inserted, persist_result.updated, duration
-        )
-
-        # The verdict, not a constant. Returning "success" beside a row
-        # recorded as degraded gives the same run two different answers
-        # depending on who asks, which is how the two drift apart.
-        return {
-            "status": verdict.status,
-            "failure_reason": verdict.failure_reason,
-            "signals_count": fetched_count,
-            "persisted": persist_result.accepted,
-            "duration_sec": duration,
-        }
-
-    except Exception as e:
-        duration = time.time() - start_time
-        logger.exception("Open-Meteo ingestion failed: %s", e)
-
-        sora_environmental_ingestion_errors_total.labels(source="openmeteo").inc()
-
-        _log_job_execution(
-            job_name=job_name,
-            status="failed",
-            duration_sec=duration,
-            error_message=str(e),
-        )
-
-        return {"status": "error", "error": str(e)}
-
-    finally:
-        lock.release()
+    valid_count, invalid_count = _openaq_quality_split(signals)
+    return {
+        "quality_valid_count": valid_count,
+        "quality_invalid_count": invalid_count,
+        # list(set(...)) rather than sorted(...), because that is what this job
+        # has always stored. The order is arbitrary and not stable across
+        # processes -- str hashing is seeded per interpreter -- so these arrays
+        # already vary run to run. Sorting them would be an improvement and is
+        # deliberately not made here: #81 is a de-duplication, and changing a
+        # recorded value while claiming to move code is the failure it exists to
+        # avoid. Tracked separately.
+        "parameters": list({s.metric for s in signals}),
+    }
 
 
-def _run_ingestion(job_name: str, source: str, make_ingester, metric_key: str):
+def _openaq_result_extra(signals) -> Dict[str, Any]:
+    """The two return-value keys openaq has that the others do not."""
+    valid_count, invalid_count = _openaq_quality_split(signals)
+    return {"valid_count": valid_count, "rejected_count": invalid_count}
+
+
+def _openmeteo_metadata(signals) -> Dict[str, Any]:
+    return {
+        "regions_count": len({s.region_code for s in signals}),
+        # list(set(...)): see _openaq_metadata.
+        "variables": list({s.metric for s in signals}),
+    }
+
+
+def _air_quality_metadata(signals) -> Dict[str, Any]:
+    return {
+        "regions_count": len({s.region_code for s in signals}),
+        "pollutants": sorted({s.metric for s in signals}),
+    }
+
+
+def _run_ingestion(
+    job_name: str,
+    source: str,
+    make_ingester,
+    describe,
+    *,
+    result_extra=None,
+    reraise: bool = True,
+):
     """One ingestion run: fetch, persist, classify, record.
 
-    Written once and used by the air-quality job. `scheduled_openaq_ingestion`
-    and `scheduled_openmeteo_ingestion` are the same shape and are deliberately
-    left alone here: they are the paths currently writing to production, and
-    rewriting them belongs in a change about that rather than in one about
-    adding a source. Moving them onto this is #81.
+    This shape was written three times. Every correction to it had to be applied
+    in each copy and was missed in one each time -- the freshness guard, the
+    constant `"success"` that should have been `classify_run`, the dead
+    `write_failed` argument. It is now written once (#81).
 
-    The two differ from each other only in two metadata keys, which is what made
-    a third copy the wrong thing to write.
+    What genuinely differs between the sources is passed in, so that a
+    difference has to be stated rather than drifted into:
+
+    `describe(signals)`
+        The source-specific half of the metadata block, spliced between
+        `fetched_count` and the `persist_*` fields. Which keys exist, what the
+        metric key is called, and how its list is ordered are all decided here,
+        because all three differ between the sources and all three are recorded.
+
+    `result_extra(signals)`
+        Extra keys for the returned dict. openaq alone carries the quality
+        counters out to its caller.
+
+    `reraise`
+        What an exception does. True re-raises, so `@with_retry` actually
+        retries and each attempt leaves its own row. False records the failure
+        and returns `{"status": "error"}`, which makes the decorator inert.
+
+        False is what openaq and openmeteo have always done, and it is kept
+        rather than fixed here: flipping it changes a failed run from one row to
+        three, and that is a change to what this table means. It is a real
+        defect -- the retry those two jobs advertise has never fired -- and it
+        wants its own change, where the row count moving is the point rather
+        than a side effect. The air-quality job re-raises today and continues to.
     """
     from app.locks import RedisLock
     from app.ingesters.persist import persist_environmental_observations
@@ -525,6 +308,12 @@ def _run_ingestion(job_name: str, source: str, make_ingester, metric_key: str):
             received=persist_result.received,
             accepted=persist_result.accepted,
             rejected=persist_result.rejected,
+            # No write_failed here, deliberately. _is_fatal_persist_error()
+            # above already raises on a "persist_error:" entry, so it would be
+            # unreachable with one present. It was added to all three copies
+            # anyway, following a review finding that was correct for runner.py,
+            # which has no such guard. Dead code that looks load-bearing is
+            # worse than none.
         )
 
         sora_environmental_ingestion_total.labels(source=source, status=verdict.status).inc()
@@ -551,8 +340,7 @@ def _run_ingestion(job_name: str, source: str, make_ingester, metric_key: str):
             error_message=verdict.failure_reason,
             metadata={
                 "fetched_count": fetched_count,
-                "regions_count": len({s.region_code for s in signals}),
-                metric_key: sorted({s.metric for s in signals}),
+                **describe(signals),
                 "persist_inserted": persist_result.inserted,
                 "persist_updated": persist_result.updated,
                 "persist_duplicates": persist_result.duplicates,
@@ -572,6 +360,7 @@ def _run_ingestion(job_name: str, source: str, make_ingester, metric_key: str):
             "status": verdict.status,
             "failure_reason": verdict.failure_reason,
             "signals_count": fetched_count,
+            **(result_extra(signals) if result_extra else {}),
             "persisted": persist_result.accepted,
             "duration_sec": duration,
         }
@@ -583,16 +372,59 @@ def _run_ingestion(job_name: str, source: str, make_ingester, metric_key: str):
         _log_job_execution(
             job_name=job_name, status="failed", duration_sec=duration, error_message=str(e)
         )
-        # Re-raised, not returned. `@with_retry` retries what raises; a job that
-        # swallows the failure and hands back {"status": "error"} makes the
-        # decorator inert, so a transient fetch or write failure got one attempt
-        # while the annotation said three. The row above is written first, so
-        # each attempt is recorded -- three rows for three tries is the truth,
-        # and one row for a decorator that never fired was not.
-        raise
+        # See `reraise` in the docstring: this decides whether a failed run
+        # leaves one row or one per attempt, so it is a property of the record
+        # rather than of the control flow.
+        if reraise:
+            raise
+        return {"status": "error", "error": str(e)}
 
     finally:
         lock.release()
+
+
+@with_retry(max_attempts=3, base_delay=2.0)
+def scheduled_openaq_ingestion():
+    """Ingest OpenAQ air quality data (runs hourly).
+
+    Fetches latest measurements from OpenAQ API and stores in database.
+    Implements Redis locking for idempotency.
+
+    `@with_retry` is inert while `reraise=False` -- this job returns its
+    failures rather than raising them. Kept rather than removed, because the
+    decorator is what should end up firing once that is fixed; see
+    `_run_ingestion`.
+    """
+    from app.ingesters.openaq import OpenAQIngester
+
+    return _run_ingestion(
+        job_name="openaq_ingestion",
+        source="openaq",
+        make_ingester=OpenAQIngester,
+        describe=_openaq_metadata,
+        result_extra=_openaq_result_extra,
+        reraise=False,
+    )
+
+
+@with_retry(max_attempts=3, base_delay=2.0)
+def scheduled_openmeteo_ingestion():
+    """Ingest Open-Meteo weather data (runs hourly).
+
+    Fetches current weather and forecast for environmental regions.
+    Implements Redis locking for idempotency.
+
+    `@with_retry` is inert here too -- see `scheduled_openaq_ingestion`.
+    """
+    from app.ingesters.openmeteo import OpenMeteoIngester
+
+    return _run_ingestion(
+        job_name="openmeteo_ingestion",
+        source="openmeteo",
+        make_ingester=OpenMeteoIngester,
+        describe=_openmeteo_metadata,
+        reraise=False,
+    )
 
 
 @with_retry(max_attempts=3, base_delay=2.0)
@@ -614,7 +446,7 @@ def scheduled_openmeteo_air_quality_ingestion():
         job_name="openmeteo_air_quality_ingestion",
         source="openmeteo_air_quality",
         make_ingester=OpenMeteoAirQualityIngester,
-        metric_key="pollutants",
+        describe=_air_quality_metadata,
     )
 
 
