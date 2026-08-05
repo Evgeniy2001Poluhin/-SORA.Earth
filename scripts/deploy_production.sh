@@ -253,6 +253,29 @@ trap 'on_signal INT' INT
 trap 'on_signal TERM' TERM
 trap 'on_signal HUP' HUP
 
+# And an unexpected exit, which is neither a signal nor a `fail`.
+#
+# Found by running the rollback against a real Docker daemon rather than
+# against stubs: `UPSTREAM="$(... | grep server)"` returns non-zero when the
+# pattern is absent, and under `set -e` that ended the script on the spot --
+# past `up`, before any verdict. No REFUSED was printed, the journal stayed at
+# `mutating`, the new version kept serving, and the exit code was 1: the code
+# that means "the previous state is running again".
+#
+# Eighteen post-mutation commands can fail that way. Routing the exit trap
+# through the rollback covers all of them, including the ones nobody has
+# thought of.
+on_unexpected_exit() {
+    local rc=$?
+    # Success, or a phase where nothing has been changed yet: nothing to undo.
+    [ "$rc" -eq 0 ] && exit 0
+    [ "$PHASE" = mutating ] || exit "$rc"
+    # Already unwinding: abort_deployment exits, and that exit lands here.
+    [ "$ABORTING" = 0 ] || exit "$rc"
+    abort_deployment "unexpected failure (exit $rc)"
+}
+trap on_unexpected_exit EXIT
+
 MODE=deploy
 TARGET=""
 # This run's identity, used by the journal. Generated before the arguments are

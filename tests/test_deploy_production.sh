@@ -131,7 +131,12 @@ case "$argv" in
     *"nginx -t"*)
         [ -f "$STUB_DIR/nginx_t_fails" ] && exit 1
         exit 0 ;;
-    *"upstream sora_backend"*)  cat "$STUB_DIR/upstream_line"; exit 0 ;;
+    *"upstream sora_backend"*)
+        # `upstream_cmd_fails` reproduces what a real daemon did: the command
+        # exits non-zero with no output -- `grep` finding nothing -- which under
+        # `set -e` ends the script outside any `fail`.
+        [ -f "$STUB_DIR/upstream_cmd_fails" ] && exit 1
+        cat "$STUB_DIR/upstream_line"; exit 0 ;;
     *"inspect"*"Destination"*)  cat "$STUB_DIR/cert_source"; exit 0 ;;
     # Before the generic image branch: the snapshot reads the compose service
     # off each container, and without this it comes back empty and the rollback
@@ -976,6 +981,31 @@ check "the journal survives the kill" \
     "$( [ -f "$SANDBOX/manifests/in-progress" ] && echo present || echo missing )" "present"
 check "and records the phase it reached" \
     "$(grep -qc 'state          mutating' "$SANDBOX/manifests/in-progress" 2>/dev/null && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+
+echo "== a post-mutation command that fails outside `fail` still rolls back =="
+# Found by running the rollback against a real Docker daemon, not by these
+# stubs: `UPSTREAM="$(... | grep server)"` returns non-zero when the pattern is
+# absent, and `set -e` ended the script on the spot -- past `up`, before any
+# verdict. No REFUSED was printed, the journal stayed at `mutating`, the new
+# version kept serving, and the exit code was 1: the code that means "the
+# previous state is running again".
+#
+# Eighteen commands after the mutation can fail that way. The exit trap covers
+# all of them, including the ones nobody has thought of.
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/upstream_cmd_fails"
+run_guard
+check "it says what happened"  \
+    "$(grep -q 'unexpected failure' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "and rolled back rather than leaving the new version serving" \
+    "$(grep -q 'up -d --no-build' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
+check "the journal records the outcome" \
+    "$(grep -q 'rolled-back' "$SANDBOX/manifests/in-progress" 2>/dev/null && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
 
 echo
