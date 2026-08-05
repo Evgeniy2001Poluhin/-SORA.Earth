@@ -65,6 +65,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
 import uuid
 from collections import defaultdict
@@ -155,7 +156,57 @@ def connect():
     return psycopg2.connect(url.replace("postgresql+psycopg://", "postgresql://"))
 
 
-def fetch_history(iso: str, ind: str):
+class MalformedResponse(ValueError):
+    """A response that arrived intact and is not what the API documents.
+
+    Its own type, so `fetch_history` can catch exactly this and nothing else.
+    Catching AttributeError there instead would have been unresolvable: a row
+    that is a string rather than an object raises it from `r.get("value")`, and
+    so does a mistake in this file. Validating the shape explicitly means a
+    programming error keeps raising out of the run, where it belongs.
+    """
+
+
+def parse_page(raw: bytes):
+    """(header, history, pages) for one page, or MalformedResponse saying why.
+
+    Every check is a stated expectation rather than an exception caught after
+    the fact, and each failure carries a short machine-readable reason -- so a
+    run report can tell "the source sent nonsense" from "the network was down",
+    which call for different responses.
+    """
+    try:
+        payload = json.loads(raw.decode())
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise MalformedResponse("invalid_json") from exc
+
+    if not isinstance(payload, list) or len(payload) < 2:
+        raise MalformedResponse("payload_not_two_items")
+
+    header, rows = payload[0], payload[1]
+    if not isinstance(header, dict):
+        raise MalformedResponse("header_not_object")
+    if rows is not None and not isinstance(rows, list):
+        raise MalformedResponse("rows_not_array")
+
+    try:
+        pages = int(header.get("pages", 1) or 1)
+    except (TypeError, ValueError) as exc:
+        raise MalformedResponse("pages_not_integer") from exc
+
+    history = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            raise MalformedResponse("row_not_object")
+        if "date" not in row:
+            raise MalformedResponse("row_has_no_date")
+        if row.get("value") is not None:
+            history[row["date"]] = row["value"]
+
+    return header, history, pages
+
+
+def fetch_history(iso: str, ind: str, deferred=None):
     """Everything the source will say about one indicator, across every page.
 
     Returns (history, meta) or (None, None) when no conclusive answer was
@@ -167,6 +218,10 @@ def fetch_history(iso: str, ind: str):
     only when it had found no candidate. A unique match on page one was
     therefore recorded as recovered while a second match sat unread on page two:
     a check that existed, and could not fire in the case that needed it.
+
+    `deferred` collects why a pair was left alone, by reason. Without it every
+    refusal was reported as `source_unavailable`, and a source sending nonsense
+    was indistinguishable in the totals from one that was unreachable.
     """
     history: dict = {}
     hashes = []
@@ -175,48 +230,42 @@ def fetch_history(iso: str, ind: str):
         url = (API.format(iso=iso, ind=ind)
                + f"?format=json&per_page={PER_PAGE}&page={page}")
         raw = None
+        header = None
+        page_history = None
+        pages = None
+        reason = None
+
         for attempt in range(RETRIES):
             try:
                 raw = urllib.request.urlopen(url, timeout=30).read()
+                header, page_history, pages = parse_page(raw)
+                reason = None
                 break
-            except Exception:
-                if attempt == RETRIES - 1:
-                    # One unobtainable page makes the whole answer inconclusive.
-                    # Returning what arrived so far would let a partial read
-                    # produce a verdict, which is the defect above wearing a
-                    # different hat.
-                    return None, None
-                time.sleep(2 ** attempt * 2)
+            except (urllib.error.HTTPError, urllib.error.URLError,
+                    TimeoutError, OSError) as exc:
+                # Named, not `except Exception`. The catch-all here hid every
+                # mistake in this file behind "the source is unavailable".
+                reason = f"source_unavailable:{type(exc).__name__}"
+            except MalformedResponse as exc:
+                # Retried on the same budget as a network failure: a body that
+                # arrived corrupt is a transient source failure too, and the
+                # first version gave up on it immediately while retrying a
+                # refused connection three times.
+                reason = f"malformed_response:{exc}"
 
-        # Parsed inside a guard, and a failure here defers rather than aborts.
-        #
-        # These four lines all raise on a 200 that is not the shape expected --
-        # a JSON error page, an empty list, a `pages` field that is not a
-        # number. Outside a guard that exception left the whole run, so one
-        # malformed page for one country cost every remaining pair, and the
-        # counts printed at the end would have described a pass that never
-        # finished. `source_unavailable` is exactly the verdict for "no
-        # conclusive answer; ask again", and it leaves the rows for a later run.
-        try:
-            payload = json.loads(raw.decode())
-            header = payload[0] if payload else {}
-            rows = payload[1] if len(payload) > 1 and payload[1] else []
-            history.update({r["date"]: r["value"] for r in rows if r.get("value") is not None})
-            pages = int(header.get("pages", 1) or 1)
-        except (ValueError, TypeError, KeyError, IndexError) as e:
-            # Narrow on purpose. `except Exception` would also swallow a
-            # NameError or an AttributeError from a mistake in this file, and
-            # report it as "the World Bank sent something unusable" -- a defect
-            # here would then look like a defect there, and be deferred and
-            # retried for ever instead of being fixed.
-            #
-            # These four are what a well-formed-but-wrong response actually
-            # raises: JSONDecodeError (a ValueError) from a JSON error page,
-            # IndexError from an empty list, KeyError or TypeError from a row
-            # or header that is not the expected shape.
-            print(f"    {iso}/{ind} page {page}: malformed_response ({type(e).__name__}); deferred")
-            return None, None
+            if attempt == RETRIES - 1:
+                # One page that cannot be read makes the whole answer
+                # inconclusive. Returning what arrived so far would let a
+                # partial read produce a verdict.
+                if deferred is not None:
+                    deferred[reason] = deferred.get(reason, 0) + 1
+                print(f"    {iso}/{ind} page {page}: {reason}; deferred")
+                return None, None
+            time.sleep(2 ** attempt * 2)
+
+        history.update(page_history)
         hashes.append(hashlib.sha256(raw).hexdigest())
+
         if page >= pages:
             meta = {
                 "vintage": header.get("lastupdated"),
@@ -338,10 +387,15 @@ def main() -> int:
         pairs = pairs[: args.limit_pairs]
 
     tally: dict = defaultdict(int)
+    # Why pairs were left alone, by reason. Reported separately from the
+    # verdicts: "the source sent nonsense" and "the source was unreachable" are
+    # different facts calling for different responses, and both used to appear
+    # in the totals as the same `source_unavailable`.
+    deferred: dict = {}
 
     for i, key in enumerate(pairs, 1):
         iso, ind = key
-        history, meta = fetch_history(iso, ind)
+        history, meta = fetch_history(iso, ind, deferred)
         time.sleep(DELAY_SECONDS)
 
         for value, row_ids in by_pair[key].items():
@@ -394,6 +448,8 @@ def main() -> int:
         print(f"  {verb} {status:26} {tally[status]:>7}")
     print(f"  left for a later run       {tally[UNAVAILABLE]:>7}  "
           f"(no conclusive answer; a refusal is not a verdict)")
+    for reason, count in sorted(deferred.items()):
+        print(f"      {reason:36} {count:>5} page(s)")
     if not args.apply:
         print()
         print("  nothing was written. Re-run with --apply.")

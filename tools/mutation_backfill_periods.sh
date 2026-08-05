@@ -53,9 +53,16 @@ import sys
 path, prog = sys.argv[1], sys.argv[2]
 old, new = prog.split("||=>||")
 s = open(path).read()
-if old not in s:
-    sys.exit("MUTATION ANCHOR NOT FOUND")
-open(path, "w").write(s.replace(old, new, 1))
+n = s.count(old)
+if n != 1:
+    # Not "is it present". `replace(..., 1)` would edit whichever copy comes
+    # first, so an anchor matching twice mutates a place nobody chose and the
+    # verdict describes a change that was never intended.
+    sys.exit("EXPECTED ONE ANCHOR, FOUND %d" % n)
+mutated = s.replace(old, new, 1)
+if mutated == s:
+    sys.exit("REPLACEMENT CHANGED NOTHING")
+open(path, "w").write(mutated)
 import ast
 ast.parse(open(path).read())
 PY
@@ -104,7 +111,9 @@ PY
 echo "== the unmodified script passes =="
 for node in test_a_matching_value_on_a_later_page_makes_it_ambiguous \
             test_a_newer_rule_withdraws_an_older_verdict_and_the_date_goes_with_it \
-            test_the_request_narrows_the_series_in_no_way; do
+            test_the_request_narrows_the_series_in_no_way \
+            test_a_row_from_another_source_is_left_alone \
+            test_a_malformed_answer_defers_rather_than_ending_the_run; do
     # The status, not the wording. "1 passed, 1 error" contains "1 passed" and
     # is not a green baseline; pytest's exit code says so unambiguously.
     if baseline="$(run_case "$ORIGINAL" "$node")"; then
@@ -145,6 +154,23 @@ run_mutation "withdrawn verdict keeps its date" \
 run_mutation "narrows the series with a date bound" \
     "test_the_request_narrows_the_series_in_no_way" \
     '+ f"?format=json&per_page={PER_PAGE}&page={page}")||=>||+ f"?format=json&per_page={PER_PAGE}&date=1960:2030&page={page}")'
+
+
+# Selecting by exclusion would match any source added later -- rosstat, the
+# Sber/VEB baseline, anything labelled `unknown` -- against World Bank data and
+# could give it a year from there.
+run_mutation "sources selected by exclusion" \
+    "test_a_row_from_another_source_is_left_alone" \
+    '              AND source = ANY(%s)""",
+        (*params, list(WORLD_BANK_SOURCES)),||=>||              AND source <> ALL(%s)""",
+        (*params, list(PERIODLESS_SOURCES)),'
+
+# A response that arrived intact and is not what the API documents used to raise
+# out of the whole run, so one bad page for one country cost every remaining
+# pair.
+run_mutation "a malformed body is not handled" \
+    "test_a_malformed_answer_defers_rather_than_ending_the_run" \
+    '            except MalformedResponse as exc:||=>||            except FileNotFoundError as exc:'
 
 echo
 echo "  killed: $KILLED   survived: $SURVIVED   invalid: $INVALID"

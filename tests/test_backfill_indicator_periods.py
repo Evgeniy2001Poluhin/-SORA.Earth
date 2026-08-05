@@ -201,3 +201,70 @@ def test_an_empty_but_successful_answer_is_not_confused_with_no_answer():
     not. They differ by one `is None`."""
     assert classify(1.0, {}, {"truncated": False})[0] == NO_MATCH
     assert classify(1.0, None, {})[0] == UNAVAILABLE
+
+
+# --- the page parser, over the shapes a 200 can actually carry ---------------
+#
+# Explicit validation rather than exceptions caught after the fact. The version
+# before this caught (ValueError, TypeError, KeyError, IndexError) around the
+# parse, which left a real hole: a row that is a string rather than an object
+# raises AttributeError from `r.get("value")`, so a malformed body still ended
+# the whole run. Adding AttributeError to that list would have swallowed the
+# same error coming from a mistake in the file, which is why the shape is
+# checked instead of the failure caught.
+
+MalformedResponse = backfill.MalformedResponse
+parse_page = backfill.parse_page
+
+
+def _page(rows, pages=1):
+    import json
+    return json.dumps([{"pages": pages, "lastupdated": "2026-07-01"}, rows]).encode()
+
+
+def test_a_well_formed_page_parses():
+    header, history, pages = parse_page(_page([{"date": "2025", "value": 34536.66}], pages=2))
+    assert history == {"2025": 34536.66}
+    assert pages == 2
+    assert header["lastupdated"] == "2026-07-01"
+
+
+def test_rows_with_no_value_are_skipped_not_refused():
+    """The API returns a row per country-year whether or not it holds a figure,
+    so absent values are the normal case, not a malformed response."""
+    _, history, _ = parse_page(_page([{"date": "2025", "value": None},
+                                      {"date": "2024", "value": 1.0}]))
+    assert history == {"2024": 1.0}
+
+
+@pytest.mark.parametrize("body,reason", [
+    (b"<html>502 Bad Gateway</html>", "invalid_json"),
+    (b"[]", "payload_not_two_items"),
+    (b'{"message": "unavailable"}', "payload_not_two_items"),
+    (b'["header-not-an-object", []]', "header_not_object"),
+    (b'[{"pages": 1}, "rows-not-an-array"]', "rows_not_array"),
+    (b'[{"pages": "many"}, []]', "pages_not_integer"),
+    # The case that motivated the parser: a string where an object belongs.
+    (b'[{"pages": 1}, ["not-a-dict"]]', "row_not_object"),
+    (b'[{"pages": 1}, [{"value": 1.0}]]', "row_has_no_date"),
+])
+def test_a_response_that_is_not_what_the_api_documents_is_named(body, reason):
+    with pytest.raises(MalformedResponse) as exc:
+        parse_page(body)
+    # The reason is machine-readable on purpose: a run report has to tell "the
+    # source sent nonsense" from "the network was down", and those call for
+    # different responses.
+    assert str(exc.value) == reason
+
+
+def test_a_programming_error_is_not_disguised_as_a_bad_response():
+    """`except Exception` around the parse would have reported a mistake in this
+    file as "the World Bank sent something unusable" -- deferred and retried for
+    ever rather than fixed."""
+    class Exploding:
+        def decode(self):
+            raise AttributeError("a mistake in this file")
+
+    with pytest.raises(AttributeError):
+        parse_page(Exploding())
+
