@@ -104,7 +104,14 @@ case "$argv" in
     # Before the generic "ps -q": the rollback asks for ids, and a test needs to
     # be able to say a container existed before this run started.
     *"ps -aq"*)
+        # A superset once the mutation has run: the ids that existed plus the
+        # one this run created. Returning the same list both times left the
+        # `created` set empty, so `docker stop` never ran and the ownership
+        # assertion held for the wrong reason -- an unconditional
+        # `docker stop $now` would have passed it too.
         [ -f "$STUB_DIR/pre_cids" ] && cat "$STUB_DIR/pre_cids"
+        [ -f "$STUB_DIR/calls" ] && grep -q 'up -d --build' "$STUB_DIR/calls" \
+            && echo "cid-created-by-this-run"
         exit 0 ;;
     *"up -d --no-build"*)
         # The exact-image restore. Recorded so a test can tell it from a
@@ -827,6 +834,10 @@ check "it says nothing was recorded" \
     "$(grep -qc 'no previous deployment recorded' "$SANDBOX/out" && echo yes || echo no)" "yes"
 check "the pre-existing container is not stopped" \
     "$(grep -c 'stop cid-preexisting' "$STUB_DIR/calls")" "0"
+# And the other half: the container this run created *is* stopped. Without it
+# the case cannot tell "correctly excluded" from "the stop path never ran".
+check "the container this run created is stopped" \
+    "$(grep -q 'stop cid-created-by-this-run' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
 
 echo "== a failed rollback is its own outcome =="
@@ -940,6 +951,11 @@ touch "$STUB_DIR/slow_up"
 #   The subshell is the point, as in run_guard: the stubbed PATH must reach the
 #   guard and nothing else, and losing the change on the way out is the intent.
 ( export PATH="$STUB_DIR/bin:$PATH"
+  # Exported here, not inherited. These blocks passed only because run_guard
+  # had exported STUB_DIR earlier in the file; run either one alone, or under a
+  # name filter, and every stub resolved it to the empty string and wrote to
+  # paths like /calls.
+  export STUB_DIR
   DEPLOY_REPO="$REPO" COMPOSE_FILE="$REPO/compose.yml" COMPOSE_PROJECT_NAME=p \
   SITE_URL="http://stand.invalid" MANIFEST_DIR="$SANDBOX/manifests" \
   DEPLOY_LOCK_DIR="$SANDBOX/lockdir" HEALTH_ATTEMPTS=3 HEALTH_DELAY=0 \
@@ -968,6 +984,11 @@ touch "$STUB_DIR/slow_up"
 #   The subshell is the point, as in run_guard: the stubbed PATH must reach the
 #   guard and nothing else, and losing the change on the way out is the intent.
 ( export PATH="$STUB_DIR/bin:$PATH"
+  # Exported here, not inherited. These blocks passed only because run_guard
+  # had exported STUB_DIR earlier in the file; run either one alone, or under a
+  # name filter, and every stub resolved it to the empty string and wrote to
+  # paths like /calls.
+  export STUB_DIR
   DEPLOY_REPO="$REPO" COMPOSE_FILE="$REPO/compose.yml" COMPOSE_PROJECT_NAME=p \
   SITE_URL="http://stand.invalid" MANIFEST_DIR="$SANDBOX/manifests" \
   DEPLOY_LOCK_DIR="$SANDBOX/lockdir" HEALTH_ATTEMPTS=3 HEALTH_DELAY=0 \
@@ -984,7 +1005,7 @@ check "and records the phase it reached" \
 rm -rf "$SANDBOX"
 
 
-echo "== a post-mutation command that fails outside `fail` still rolls back =="
+echo "== a post-mutation command failing outside fail() still rolls back =="
 # Found by running the rollback against a real Docker daemon, not by these
 # stubs: `UPSTREAM="$(... | grep server)"` returns non-zero when the pattern is
 # absent, and `set -e` ended the script on the spot -- past `up`, before any
@@ -1004,8 +1025,33 @@ check "it says what happened"  \
     "$(grep -q 'unexpected failure' "$SANDBOX/out" && echo yes || echo no)" "yes"
 check "and rolled back rather than leaving the new version serving" \
     "$(grep -q 'up -d --no-build' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
-check "the journal records the outcome" \
-    "$(grep -q 'rolled-back' "$SANDBOX/manifests/in-progress" 2>/dev/null && echo yes || echo no)" "yes"
+# Cleared, not left. A verified rollback puts the previous state back, so
+# there is nothing for an operator to reconcile -- and a journal left behind
+# would refuse the next deployment, making exit 1 and exit 76 the same thing in
+# practice.
+check "and leaves no journal to block the next run" \
+    "$( [ -f "$SANDBOX/manifests/in-progress" ] && echo left || echo cleared )" "cleared"
+rm -rf "$SANDBOX"
+
+
+echo "== a rollback that cannot check out records why =="
+# The manifest can name a commit this checkout no longer has -- a force-push, a
+# pruned branch, a repository restored from elsewhere. Every other terminal path
+# writes its outcome; this one left the journal reading `mutating`, which names
+# the wrong phase and hides that the checkout is what broke.
+new_sandbox
+mkdir -p "$SANDBOX/manifests"
+printf 'commit %s\n' "0000000000000000000000000000000000000000" > "$SANDBOX/manifests/prev.txt"
+ln -sf prev.txt "$SANDBOX/manifests/latest"
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/nginx_t_fails"
+run_guard
+check "the rollback did not complete" "$RC" "76"
+check "and it names the checkout" \
+    "$(grep -q 'cannot check out' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "the journal says rollback-failed, not mutating" \
+    "$(grep -q '^state          rollback-failed' "$SANDBOX/manifests/in-progress" 2>/dev/null && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
 
 echo

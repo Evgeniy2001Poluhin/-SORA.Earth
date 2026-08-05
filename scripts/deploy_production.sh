@@ -187,8 +187,12 @@ abort_deployment() {
         exit 76
     fi
 
-    git checkout --quiet --detach "$PREV_COMMIT" 2>/dev/null \
+    git --no-pager checkout --quiet --detach "$PREV_COMMIT" 2>/dev/null \
         || { echo "  ROLLBACK FAILED: cannot check out ${PREV_COMMIT:0:12}" >&2
+             # Every other terminal path records its outcome; this one left the
+             # journal reading `mutating`, which names the wrong phase and hides
+             # that the checkout is what broke.
+             journal_write rollback-failed "cannot check out ${PREV_COMMIT:0:12}"
              stop_containers_created_by_this_run
              exit 76; }
 
@@ -200,7 +204,15 @@ abort_deployment() {
     # succeeded", a claim about the command rather than about the state.
     if restore_recorded_images && verify_restored_images; then
         echo "  restored the images that were running at ${PREV_COMMIT:0:12}"
+        # Written, then cleared. The record exists for anyone watching the file
+        # during the rollback, and the run leaves nothing behind: the previous
+        # state is verified back, so there is nothing for an operator to
+        # reconcile and the next deployment must not be refused.
+        #
+        # Leaving it made exit 1 and exit 76 the same thing in practice -- both
+        # required the same manual step -- which defeats having two codes.
         journal_write rolled-back "restored recorded images at ${PREV_COMMIT:0:12}"
+        journal_clear
         exit 1
     fi
 
