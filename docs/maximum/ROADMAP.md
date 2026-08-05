@@ -1,10 +1,11 @@
 # SORA.Earth Maximum — Roadmap
 
-**Updated:** 2026-08-05 · **main:** `a3f7f4c` · **production:** `5987547` ·
+**Updated:** 2026-08-05 (вечер) · **main:** `6708f2b` · **production:** `65c7503` ·
 supersedes the M0-only plan in `M0_EXECUTION_PLAN.md`, which stays as the
 historical record of that milestone.
 
-Production is several merges behind main. That gap is stated wherever it changes
+Production runs `65c7503`, deployed 2026-08-05 11:37 UTC. `main` is one
+commit ahead (#83, an internal refactor needing no deployment). That gap is stated wherever it changes
 what is true, because "merged" and "running" are different claims and this
 document has confused them before.
 
@@ -16,6 +17,54 @@ Production access is withheld by default after a registered incident on
 permission directly in chat. Documentation is still not permission.
 
 ---
+
+## Deployed to production, 2026-08-05 11:37 UTC
+
+First deployment through the rebuilt guard, and the first one where the guard
+itself was the thing being replaced. The order mattered: the working tree was
+updated by hand first (containers untouched), so the deployment ran under the
+**new** script -- preflight, journal and rollback protected the very first
+`up`. The old guard was never used for it.
+
+| | |
+|---|---|
+| result | exit 0, no rollback needed |
+| migration | `c4d1f8a26b93` → `e7b3c9d15f04` (provenance columns) |
+| scheduler | recreated, `RestartCount` 0, unchanged across two cycles |
+| site | `/health` and `/api/v1/health` both 200 |
+| artifacts | manifest, 892-line event log, cutoff, health, deploy log — kept off-host |
+
+**Air quality is now collected.** Two hourly cycles verified: 126 rows each
+(21 regions × 6 pollutants), every row `measurement_kind: modelled` with the
+model named, no duplicates, observation time advancing 11:00 → 12:00. OpenAQ
+ran both times and recorded `degraded` with zero rows — the #56 defect does not
+return.
+
+### Two findings that change what can be claimed
+
+**The observations are write-only (#84).** `environmental_observations` holds
+29,702 rows and **nothing reads them**: no `SELECT` outside the write path, and
+160 live API endpoints, none of them related. The provenance labelling works and
+there is nobody to show it to. So the platform cannot be said to use current air
+quality in its ESG analysis — and equally, nobody can mistake a model for a
+measurement, because nobody sees either.
+
+**The model is not a substitute for the instrument (#57).** Measured, not
+assumed: OpenAQ serves historical hourly readings, Open-Meteo serves an archive
+for the same dates, so the model can be checked against the period when the
+instruments still worked. Kozhukhovsky proezd, Moscow, June 2017, 100 hours each:
+
+| | instrument | model | relative error |
+|---|---:|---:|---:|
+| NO₂ | 65.6 | 49.4 | 36 % |
+| CO | 470.5 | 60.2 | 87 % |
+| SO₂ | 2.9 | 0.4 | 77 % |
+
+The model understates all three, CO eightfold. Not necessarily a bad model —
+CAMS averages over a grid cell of tens of kilometres while the station stands by
+a road — but it does mean these values cannot be dropped in where a measurement
+is expected. Retiring OpenAQ in favour of the model, which is what #57
+originally proposed, is therefore not available.
 
 ## Landed since this document was last written (2026-07-31 → 2026-08-04)
 
@@ -49,11 +98,11 @@ permission directly in chat. Documentation is still not permission.
 |---|---|
 | Observations actually persisting in production | **Now yes.** 24,230 rows, verified 2026-08-04. This was 0 on 2026-07-31 and was the one open M1 prerequisite |
 | Production running current migrations | **Yes for the code it runs.** `alembic_version` = `c4d1f8a26b93`, which is head on `main`. The *code* is `5987547`, so #45–#48 and #72 are merged and not deployed |
-| Disaster-recovery backup on a schedule | **No.** `sora-backup.timer` shipped in #47 and is not installed — production predates that merge. The unit is not on the host at all |
+| Disaster-recovery backup on a schedule | Still no timer, but a restore point now exists: a post-migration dump copied off-host, checksum matched, restored into a scratch PostgreSQL and compared field by field with the live database — identical on all five counters. Encrypted; the key sits beside the ciphertext, which protects a transfer and not the loss of the machine |
 | Operational daily dump | **Yes.** `sora-backup-local.timer` enabled and active; last run 2026-08-04 03:30:07 UTC, exit 0. Three dumps on disk with checksums, 1.4M → 1.5M → 1.7M. Not disaster recovery: same host |
 | Restore drill against production | Done locally against PostgreSQL 16. Never against production |
 | Security P0 | **Merged**, not deployed. #45, #46, #47, #48 are all in `main`; production runs code from before them |
-| Deployment is atomic | **No.** #71. Worse than first recorded: eight checks run *after* `up`, and `fail` only exits — so a forbidden port is named accurately and left open, and the deployment stops in a state worse than the one it began in. PRs #79 (refuse before `up`) and #80 (roll back after it) are open |
+| Deployment is atomic | **Yes**, #71 closed by #79 and #80. A forbidden port is refused before `up`; every refusal after it rolls back to the recorded images by id, verified against the snapshot. Exercised on a real Docker daemon, 22 of 22 — which found a defect 118 stubbed cases could not: `set -e` ended the run past `up` with no refusal printed and exit code 1, the code meaning "the previous state is back". The rollback has still never run on production |
 | Issue #51 remainder | Reverse direction of the schema check with an allowlist; stray tolerated objects; a cold-start race that did **not** reproduce in five attempts and is recorded as unreproduced rather than dropped |
 
 ### Verified stale, closed
