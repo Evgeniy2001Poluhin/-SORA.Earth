@@ -1,10 +1,10 @@
 # SORA.Earth Maximum — Roadmap
 
-**Updated:** 2026-08-04 · **main:** `665d4cf` · **production:** `5987547` ·
+**Updated:** 2026-08-05 · **main:** `a3f7f4c` · **production:** `5987547` ·
 supersedes the M0-only plan in `M0_EXECUTION_PLAN.md`, which stays as the
 historical record of that milestone.
 
-Production is four merges behind main. That gap is stated wherever it changes
+Production is several merges behind main. That gap is stated wherever it changes
 what is true, because "merged" and "running" are different claims and this
 document has confused them before.
 
@@ -26,7 +26,7 @@ permission directly in chat. Documentation is still not permission.
 | #68 | A run is a success only when it produced something. Production shows it working: `openaq_ingestion \| degraded \| processed=0` where the same run used to record `success` |
 | #45–#48 | The four security fixes, merged after their branches were brought up to date. All four had shown `CLEAN` on CI that ran five days earlier against a base 55–58 commits stale; updating each turned it `UNSTABLE` or `BLOCKED` immediately |
 | #72 | The aggregation recorded nothing about what it aggregated |
-| #73 | Open. Records, per row, why an indicator has no period — and whether it can be inferred, which is a weaker claim than the source stating it |
+| #73 | **Merged.** Records, per row, why an indicator has no period — and whether it can be inferred, which is a weaker claim than the source stating it. Capability only: #58 stays open, and the 90,461 production rows are untouched until a separate controlled operation |
 | #74, #75, #76 | Filed 2026-08-04 from external review: operator-actionable ingestion status, point-in-time provenance, and an owned lifecycle for long waits |
 
 ## Where the project actually is
@@ -53,7 +53,7 @@ permission directly in chat. Documentation is still not permission.
 | Operational daily dump | **Yes.** `sora-backup-local.timer` enabled and active; last run 2026-08-04 03:30:07 UTC, exit 0. Three dumps on disk with checksums, 1.4M → 1.5M → 1.7M. Not disaster recovery: same host |
 | Restore drill against production | Done locally against PostgreSQL 16. Never against production |
 | Security P0 | **Merged**, not deployed. #45, #46, #47, #48 are all in `main`; production runs code from before them |
-| Deployment is atomic | **No.** #71: the checkout moves before the guard runs, so a failed deploy leaves the tree ahead of the running container |
+| Deployment is atomic | **No.** #71. Worse than first recorded: eight checks run *after* `up`, and `fail` only exits — so a forbidden port is named accurately and left open, and the deployment stops in a state worse than the one it began in. PRs #79 (refuse before `up`) and #80 (roll back after it) are open |
 | Issue #51 remainder | Reverse direction of the schema check with an allowlist; stray tolerated objects; a cold-start race that did **not** reproduce in five attempts and is recorded as unreproduced rather than dropped |
 
 ### Verified stale, closed
@@ -82,10 +82,10 @@ Persisting is not the same as trustworthy, which is what M1 is for. Two things
 are already known to be wrong with what is being written:
 
 * **90,461 of 93,623 `country_indicator_history` rows carry no observation
-  period** (#58). #59 stopped the loss for new rows; PR #73 records, per row,
-  whether the missing period can be inferred and under which rule. The
-  proportion has barely moved because the backfill has deliberately not been run
-  against production.
+  period** (#58). #59 stopped the loss for new rows; #73 is merged and records,
+  per row, whether the missing period can be inferred and under which rule. The
+  proportion has not moved: merging the capability changes no data, and the
+  backfill has deliberately not been run against production.
 * **A run recorded `success` while producing nothing**, 333 times in a row
   (#56). #68 made a run a success only when it produced something, and
   production confirms it. #74 is the rest of that: a status an operator can act
