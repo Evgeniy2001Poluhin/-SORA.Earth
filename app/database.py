@@ -2,7 +2,10 @@ from datetime import datetime
 import os
 
 import sqlalchemy as sa
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, JSON, create_engine, func
+from sqlalchemy import (
+    BigInteger, Boolean, Column, DateTime, Float, Index, Integer, String, Text,
+    JSON, create_engine, func,
+)
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv(
@@ -102,6 +105,57 @@ class CountryIndicatorHistory(Base):
     as_of_date = Column(DateTime, nullable=True, index=True)
     fetched_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     refresh_job_name = Column(String(100), nullable=True)
+
+    # Added by migration e7b3c9d15f04 and written by the #58 backfill. They
+    # were absent from this model, so autogenerate read them as removed and
+    # emitted drop_column for all eight -- see #88. They record why a period
+    # was assigned or refused, and cannot be reconstructed if dropped.
+    period_status = Column(Text, nullable=True)
+    period_run_id = Column(Text, nullable=True)
+    period_method = Column(Text, nullable=True)
+    period_rule_version = Column(Text, nullable=True)
+    period_candidates = Column(Integer, nullable=True)
+    period_source_vintage = Column(Text, nullable=True)
+    period_response_sha256 = Column(Text, nullable=True)
+    period_resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_cih_period_status", "period_status"),
+        Index("ix_cih_period_run", "period_run_id"),
+    )
+
+
+class IngesterRun(Base):
+    """One run of an ingester.
+
+    Written only through raw SQL in app/ingesters/runner.py, which is why the
+    table existed with no model at all and autogenerate proposed dropping it
+    (#88). Declared here so the metadata describes the database; the runner is
+    left as it is.
+    """
+
+    __tablename__ = "ingester_runs"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    source = Column(Text, nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False,
+                        server_default=func.now())
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(Text, nullable=True)
+    rows_written = Column(Integer, nullable=True)
+    error = Column(Text, nullable=True)
+    execution_status = Column(Text, nullable=True)
+    primary_source_status = Column(Text, nullable=True)
+    data_outcome = Column(Text, nullable=True)
+    records_received = Column(Integer, nullable=True)
+    records_accepted = Column(Integer, nullable=True)
+    records_rejected = Column(Integer, nullable=True)
+    failure_reason = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_ingester_runs_source_status",
+              "source", "status", started_at.desc()),
+    )
 
 
 class RetrainLog(Base):
@@ -208,7 +262,10 @@ class RegionSignal(Base):
 class RegionESGScore(Base):
     __tablename__ = "region_esg_scores"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    # BIGINT GENERATED ALWAYS AS IDENTITY in the database; the model said
+    # Integer/autoincrement, so autogenerate proposed narrowing the column and
+    # dropping the identity (#88).
+    id = Column(BigInteger, sa.Identity(always=True), primary_key=True)
     region_code = Column(String(10), index=True, unique=True, nullable=False)
     env_score = Column(Float, nullable=True)
     social_score = Column(Float, nullable=True)
@@ -219,6 +276,11 @@ class RegionESGScore(Base):
     signals_used = Column(Integer, nullable=True)
     updated_at = Column(DateTime(timezone=True), default=func.now(),
                         onupdate=func.now(), nullable=False)
+
+    # Declared only in a migration until #88; autogenerate read it as removed.
+    __table_args__ = (
+        Index("ix_region_esg_scores_id", "id", unique=True),
+    )
 
 
 
@@ -306,10 +368,23 @@ class EnvironmentalObservation(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
 
-    # Indexes and constraints defined in Alembic migration:
-    # - UNIQUE (source, source_record_id) WHERE source_record_id IS NOT NULL
-    # - INDEX (region_id, indicator, event_time) for time-series queries
-    # - INDEX (source, ingested_at) for source health monitoring
+    # These were deliberately left to the migration and noted here as a
+    # comment. The consequence was not noted: autogenerate diffs metadata
+    # against the live schema, so an index the model does not declare reads as
+    # removed, and the next generated migration dropped all three -- including
+    # the partial unique index that is the only thing preventing duplicate
+    # ingestion. See #88. Declaring them here changes no DDL; it makes the
+    # metadata describe what the database already has.
+    __table_args__ = (
+        Index("ix_environmental_observations_source_record_unique",
+              "source", "source_record_id",
+              unique=True,
+              postgresql_where=sa.text("source_record_id IS NOT NULL")),
+        Index("ix_environmental_observations_region_indicator_time",
+              "region_id", "indicator", "event_time"),
+        Index("ix_environmental_observations_source_ingested",
+              "source", "ingested_at"),
+    )
 
 
 class EnvironmentalJobLog(Base):

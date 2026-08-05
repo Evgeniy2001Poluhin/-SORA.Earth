@@ -340,6 +340,25 @@ jobs:
           SORA_OFFLINE: "1"
           RUN_SCHEDULER: "false"
 
+      # The other direction. assert_schema_ready checks that every model table
+      # and column exists in the database -- model within schema. It cannot see
+      # a column the *database* has and the model does not, which is how eight
+      # period_* columns, a whole table and four indexes came to be invisible
+      # to the ORM while autogenerate proposed dropping them (#88). Needs a
+      # migrated PostgreSQL, so it sits beside the startup check rather than in
+      # backend-tests.
+      - name: Schema drift — the models must describe the database
+        run: |
+          python -m pytest tests/test_schema_drift_postgres.py \
+            -v --tb=short --timeout=180
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+          REDIS_URL: "redis://localhost:6379/0"
+          SECRET_KEY: "ci-test-secret"
+          SORA_ADMIN_TOKEN: "ci-test-admin"
+          SORA_OFFLINE: "1"
+          RUN_SCHEDULER: "false"
+
       - name: Run integration tests
         run: |
           python -m pytest tests/test_api.py \
