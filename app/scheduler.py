@@ -802,6 +802,7 @@ def init_scheduler(start: bool = True):
         from app.services.environmental.scheduler_jobs import (
             scheduled_openaq_ingestion,
             scheduled_openmeteo_ingestion,
+            scheduled_openmeteo_air_quality_ingestion,
             scheduled_source_health_check,
             scheduled_data_quality_aggregation,
         )
@@ -821,6 +822,23 @@ def init_scheduler(start: bool = True):
             IntervalTrigger(hours=1),
             id="auto_openmeteo_ingestion",
             name="Ingest Open-Meteo weather data every 1h",
+            replace_existing=True,
+        )
+
+        # Open-Meteo air quality (every 1 hour), alongside OpenAQ rather than
+        # instead of it. OpenAQ's stations for these regions stopped reporting in
+        # September 2017, so it has produced nothing across hundreds of runs
+        # (#56, #57) -- but retiring it before the two have been compared on real
+        # production data swaps one gap for another that nobody has looked at.
+        #
+        # These values are modelled (CAMS reanalysis), not measured, and every
+        # row says so. That is the honest cost of having data where the
+        # instruments are dead.
+        scheduler.add_job(
+            scheduled_openmeteo_air_quality_ingestion,
+            IntervalTrigger(hours=1),
+            id="auto_openmeteo_air_quality_ingestion",
+            name="Ingest Open-Meteo air quality data every 1h",
             replace_existing=True,
         )
 
@@ -854,6 +872,10 @@ def init_scheduler(start: bool = True):
         "refresh_forecast_metrics",
         "auto_openaq_ingestion",
         "auto_openmeteo_ingestion",
+        # Without this the first air-quality rows arrive an hour after a
+        # deployment, and a restart to check the source is working produces
+        # nothing to look at for an hour.
+        "auto_openmeteo_air_quality_ingestion",
     ):
         try:
             scheduler.modify_job(_jid, next_run_time=_now)

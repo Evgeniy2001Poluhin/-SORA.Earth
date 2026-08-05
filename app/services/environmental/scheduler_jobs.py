@@ -478,6 +478,146 @@ def scheduled_openmeteo_ingestion():
         lock.release()
 
 
+def _run_ingestion(job_name: str, source: str, make_ingester, metric_key: str):
+    """One ingestion run: fetch, persist, classify, record.
+
+    Written once and used by the air-quality job. `scheduled_openaq_ingestion`
+    and `scheduled_openmeteo_ingestion` are the same shape and are deliberately
+    left alone here: they are the paths currently writing to production, and
+    rewriting them belongs in a change about that rather than in one about
+    adding a source. Moving them onto this is #81.
+
+    The two differ from each other only in two metadata keys, which is what made
+    a third copy the wrong thing to write.
+    """
+    from app.locks import RedisLock
+    from app.ingesters.persist import persist_environmental_observations
+    from app.prom_metrics import (
+        sora_environmental_ingestion_total,
+        sora_environmental_ingestion_errors_total,
+        sora_environmental_source_freshness_seconds,
+        sora_environmental_observations_total,
+    )
+
+    lock = RedisLock(key=f"sora:lock:{job_name}", timeout=300)
+    if not lock.acquire():
+        logger.warning("%s skipped: lock held by another instance", job_name)
+        _log_job_execution(job_name, status="skipped", metadata={"reason": "lock_held"})
+        return {"status": "skipped", "reason": "lock_held"}
+
+    start_time = time.time()
+    try:
+        logger.info("Starting %s", job_name)
+
+        signals = _run_async_job(make_ingester().fetch())
+        fetched_count = len(signals)
+
+        # The single source of truth for accepted/rejected. Success is declared
+        # only after this has completed without a fatal error.
+        persist_result = persist_environmental_observations(signals, source)
+        if _is_fatal_persist_error(persist_result):
+            raise RuntimeError(f"persistence failed for {source}: {persist_result.errors}")
+
+        # What the run achieved, not whether it threw. Recording "success" on
+        # every non-exception path is how 333 openaq runs reported success
+        # having written nothing (#56).
+        verdict = classify_run(
+            received=persist_result.received,
+            accepted=persist_result.accepted,
+            rejected=persist_result.rejected,
+        )
+
+        sora_environmental_ingestion_total.labels(source=source, status=verdict.status).inc()
+        for indicator, count in _accepted_indicator_counts(signals, persist_result).items():
+            sora_environmental_observations_total.labels(
+                source=source, indicator=indicator
+            ).inc(count)
+
+        # Guarded on the timestamps, not on the signals: a batch where none is a
+        # datetime leaves max() with an empty sequence and fails a run that had
+        # otherwise succeeded.
+        observed_times = [s.observed_at for s in signals if isinstance(s.observed_at, datetime)]
+        if observed_times:
+            freshness = (datetime.now(timezone.utc) - max(observed_times)).total_seconds()
+            sora_environmental_source_freshness_seconds.labels(source=source).set(freshness)
+
+        duration = time.time() - start_time
+        _log_job_execution(
+            job_name=job_name,
+            status=verdict.status,
+            duration_sec=duration,
+            records_processed=persist_result.accepted,
+            records_rejected=persist_result.rejected,
+            error_message=verdict.failure_reason,
+            metadata={
+                "fetched_count": fetched_count,
+                "regions_count": len({s.region_code for s in signals}),
+                metric_key: sorted({s.metric for s in signals}),
+                "persist_inserted": persist_result.inserted,
+                "persist_updated": persist_result.updated,
+                "persist_duplicates": persist_result.duplicates,
+                "persist_errors": persist_result.errors[:5] if persist_result.errors else [],
+            },
+        )
+
+        logger.info(
+            "%s completed: fetched %d, persisted %d accepted / %d rejected in %.2fs",
+            job_name, fetched_count, persist_result.accepted,
+            persist_result.rejected, duration,
+        )
+
+        # The verdict, not a constant: returning "success" beside a row recorded
+        # as degraded gives one run two answers depending on who asks.
+        return {
+            "status": verdict.status,
+            "failure_reason": verdict.failure_reason,
+            "signals_count": fetched_count,
+            "persisted": persist_result.accepted,
+            "duration_sec": duration,
+        }
+
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.exception("%s failed: %s", job_name, e)
+        sora_environmental_ingestion_errors_total.labels(source=source).inc()
+        _log_job_execution(
+            job_name=job_name, status="failed", duration_sec=duration, error_message=str(e)
+        )
+        # Re-raised, not returned. `@with_retry` retries what raises; a job that
+        # swallows the failure and hands back {"status": "error"} makes the
+        # decorator inert, so a transient fetch or write failure got one attempt
+        # while the annotation said three. The row above is written first, so
+        # each attempt is recorded -- three rows for three tries is the truth,
+        # and one row for a decorator that never fired was not.
+        raise
+
+    finally:
+        lock.release()
+
+
+@with_retry(max_attempts=3, base_delay=2.0)
+def scheduled_openmeteo_air_quality_ingestion():
+    """Air quality for the regions where OpenAQ has been silent since 2017.
+
+    Runs **beside** openaq, not instead of it. Retiring a source because a
+    replacement looks better is how a gap gets swapped for a different one --
+    the two run in parallel until the new one has been compared against the old
+    on real production data, and #57 stays open until that comparison exists.
+
+    Every value carries `measurement_kind: modelled`: these come from a
+    reanalysis, not from an instrument. That distinction is why this source has
+    data where the stations are dead, and it must stay visible on the row.
+    """
+    from app.ingesters.openmeteo_air_quality import OpenMeteoAirQualityIngester
+
+    return _run_ingestion(
+        job_name="openmeteo_air_quality_ingestion",
+        source="openmeteo_air_quality",
+        make_ingester=OpenMeteoAirQualityIngester,
+        metric_key="pollutants",
+    )
+
+
 def scheduled_source_health_check():
     """Check health of environmental data sources (runs every 15 minutes).
 
