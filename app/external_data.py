@@ -34,6 +34,11 @@ INDICATORS: Dict[str, str] = {
     "renewable_share":   "EG.FEC.RNEW.ZS",
     "life_expectancy":   "SP.DYN.LE00.IN",
     "gdp_per_capita":    "NY.GDP.PCAP.CD",
+    # Consumed by the gdp_growth forecasting regressor, which asked for this
+    # code while nothing collected it -- so the column was 0.0 in every
+    # forecast ever made (#86). NY.GDP.PCAP.CD above is a level in dollars,
+    # not a rate, and cannot stand in for it.
+    "gdp_growth":        "NY.GDP.MKTP.KD.ZG",
     "gini_index":        "SI.POV.GINI",
     "gov_effectiveness": "GE.EST",
 }

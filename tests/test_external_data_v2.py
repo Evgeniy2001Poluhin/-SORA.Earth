@@ -13,8 +13,24 @@ from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 
 
 class TestExpandedIndicators:
-    def test_indicators_count(self):
-        assert len(INDICATORS) == 6
+    def test_indicators_collected(self):
+        """The exact set collected, named rather than counted.
+
+        This was `len(INDICATORS) == 6`: it failed on any change without saying
+        which, and a count cannot notice the failure that mattered -- a
+        consumer asking for a code nothing collects, which left the gdp_growth
+        regressor at zero in every forecast (#86). What binds the two lists
+        together now is tests/test_gdp_growth_regressor.py.
+        """
+        assert set(INDICATORS.values()) == {
+            "EN.ATM.CO2E.PC",     # co2_per_capita
+            "EG.FEC.RNEW.ZS",     # renewable_share
+            "SP.DYN.LE00.IN",     # life_expectancy
+            "NY.GDP.PCAP.CD",     # gdp_per_capita (a level, in dollars)
+            "SI.POV.GINI",        # gini_index
+            "GE.EST",             # gov_effectiveness
+            "NY.GDP.MKTP.KD.ZG",  # gdp_growth (annual %) -- forecasting
+        }
 
     def test_new_indicators_present(self):
         for key in ["gdp_per_capita", "gini_index", "gov_effectiveness"]:
