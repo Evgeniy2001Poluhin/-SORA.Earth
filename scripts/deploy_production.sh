@@ -41,11 +41,259 @@ DC=(docker compose -p "$PROJECT" -f "$COMPOSE")
 
 cd "$REPO"
 
-fail() { echo "REFUSED: $*" >&2; exit 1; }
+# Which phase the run is in, so a refusal knows whether anything needs undoing.
+# `none` until the snapshot is taken, `mutating` from the moment `up` is issued.
+PHASE=none
+# Guards against re-entering the rollback from a signal raised while the
+# rollback itself is running -- it issues `up`, which takes time, and a second
+# INT during it would otherwise start a second rollback on top of the first.
+ABORTING=0
+# Container ids of this project before mutation, so a rollback can tell what
+# this run created from what was already there. Stopping "anything unexpected"
+# would reach containers this deployment does not own.
+PRE_CIDS=""
+
+# Every refusal goes through here, and after mutation begins it does not simply
+# exit. Eight checks sit after `up` -- the port property, the nginx checksum,
+# `nginx -t`, the upstream, the certificate store, the smoke test -- and each one
+# used to abort a deployment whose containers were already running, leaving the
+# state it refused in place. The port case is the worst of them: it named an
+# off-host port accurately and left it open.
+fail() {
+    if [ "$PHASE" = mutating ]; then
+        abort_deployment "$*"
+    fi
+    echo "REFUSED: $*" >&2
+    exit 1
+}
+
+# Containers this run created, and only those. Anything that was present in the
+# snapshot is left alone: it may belong to another compose project, or have been
+# started before this deployment, and a rollback that stops it damages something
+# it was never asked to touch.
+stop_containers_created_by_this_run() {
+    local now created=""
+    now="$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null || true)"
+    while IFS= read -r cid; do
+        [ -n "$cid" ] || continue
+        case " $PRE_CIDS " in
+            *" $cid "*) ;;
+            *) created="$created $cid" ;;
+        esac
+    done <<< "$now"
+    if [ -n "${created// /}" ]; then
+        echo "  stopping containers created by this run:$created" >&2
+        # shellcheck disable=SC2086
+        #   Deliberately unquoted: a list of ids to be split.
+        docker stop $created >/dev/null 2>&1 || true
+    else
+        echo "  this run created no containers" >&2
+    fi
+}
+
+# A record of the operation itself, written before it starts.
+#
+# The manifest says what was deployed *successfully*; nothing said that a run
+# had begun. After a `kill -9` between `up` and the postflight there was no way
+# to tell whether a deployment had been interrupted, which phase it reached, or
+# which snapshot the next run should trust -- the tree looked deployed and the
+# containers were whatever the interrupted run had left.
+#
+# Written atomically: a journal torn in half by the same kill it exists to
+# survive would be worse than none, because it would be read.
+JOURNAL="$MANIFEST_DIR/in-progress"
+
+journal_write() {
+    local state="$1" detail="${2-}"
+    local tmp="$JOURNAL.$$"
+    {
+        echo "run            $RUN_ID"
+        echo "state          $state"
+        echo "started        $STARTED_AT"
+        echo "updated        $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "mode           $MODE"
+        echo "target         ${TARGET:-unset}"
+        echo "previous       ${PREV_COMMIT:-none}"
+        echo "pre_containers ${PRE_CIDS:-none}"
+        [ -n "$detail" ] && echo "detail         $detail"
+        echo "images"
+        printf '%s\n' "${PREV_IMAGE_IDS:-}" | sed 's/^/  /'
+    } > "$tmp" && mv -f "$tmp" "$JOURNAL"
+}
+
+journal_clear() { rm -f "$JOURNAL"; }
+
+# The images that were running, by id, started without a build.
+#
+# compose accepts an id where a tag goes, so a generated override pins each
+# service to exactly what it was running. `--no-build` is the point: a build
+# would defeat the whole exercise.
+restore_recorded_images() {
+    [ -n "$PREV_IMAGE_IDS" ] || return 1
+    local ovr
+    ovr="$(mktemp)" || return 1
+    {
+        echo "services:"
+        while IFS="$(printf '\t')" read -r svc img; do
+            [ -n "$svc" ] || continue
+            printf '  %s:\n    image: "%s"\n' "$svc" "$img"
+        done <<< "$PREV_IMAGE_IDS"
+    } > "$ovr"
+    local rc=0
+    "${DC[@]}" -f "$ovr" up -d --no-build --remove-orphans >/dev/null 2>&1 || rc=1
+    rm -f "$ovr"
+    return "$rc"
+}
+
+# Asked afterwards, not assumed from the exit status of the command above. An
+# `up` that returns 0 having started something else is exactly the failure this
+# is here to catch.
+verify_restored_images() {
+    [ -n "$PREV_IMAGE_IDS" ] || return 1
+    local mismatch=""
+    while IFS="$(printf '\t')" read -r svc want; do
+        [ -n "$svc" ] || continue
+        local cid got
+        cid="$("${DC[@]}" ps -q "$svc" 2>/dev/null | head -1)"
+        got="$(docker inspect -f '{{.Image}}' "$cid" 2>/dev/null)"
+        [ "$got" = "$want" ] || mismatch="$mismatch $svc"
+    done <<< "$PREV_IMAGE_IDS"
+    if [ -n "${mismatch// /}" ]; then
+        echo "  images do not match the snapshot for:$mismatch" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Refused after mutation: put back what was replaced, then report.
+#
+# Exit 1 means "refused, and the previous state is running again". Exit 76 means
+# "refused, and the rollback did not complete" -- a different situation calling
+# for a different response, which a single non-zero status cannot express.
+abort_deployment() {
+    local why="$1"
+    ABORTING=1
+    echo "REFUSED: $why" >&2
+    echo
+    echo "== rolling back =="
+
+    if [ -z "$PREV_COMMIT" ]; then
+        # Nothing recorded to go back to -- the first deployment, or a manifest
+        # directory that was lost. There is no previous state to restore, so the
+        # only safe action is to stop what this run started.
+        echo "  no previous deployment recorded; nothing to restore" >&2
+        journal_write rollback-impossible "no previous manifest"
+        stop_containers_created_by_this_run
+        exit 76
+    fi
+
+    git --no-pager checkout --quiet --detach "$PREV_COMMIT" 2>/dev/null \
+        || { echo "  ROLLBACK FAILED: cannot check out ${PREV_COMMIT:0:12}" >&2
+             # Every other terminal path records its outcome; this one left the
+             # journal reading `mutating`, which names the wrong phase and hides
+             # that the checkout is what broke.
+             journal_write rollback-failed "cannot check out ${PREV_COMMIT:0:12}"
+             stop_containers_created_by_this_run
+             exit 76; }
+
+    # The recorded images, by id, without building.
+    #
+    # Rebuilding the commit was what this did before, and it is a different
+    # operation: it produces whatever the source builds today, which is not
+    # necessarily what was running. "restored <commit>" then meant "an `up`
+    # succeeded", a claim about the command rather than about the state.
+    if restore_recorded_images && verify_restored_images; then
+        echo "  restored the images that were running at ${PREV_COMMIT:0:12}"
+        # Written, then cleared. The record exists for anyone watching the file
+        # during the rollback, and the run leaves nothing behind: the previous
+        # state is verified back, so there is nothing for an operator to
+        # reconcile and the next deployment must not be refused.
+        #
+        # Leaving it made exit 1 and exit 76 the same thing in practice -- both
+        # required the same manual step -- which defeats having two codes.
+        journal_write rolled-back "restored recorded images at ${PREV_COMMIT:0:12}"
+        journal_clear
+        exit 1
+    fi
+
+    # Falling back to a rebuild, and saying so. It usually produces a working
+    # deployment and is not a restoration, so the exit code is the one that
+    # means "the rollback did not complete" -- an operator has to look, rather
+    # than read "restored" and move on.
+    echo "  the recorded images could not be restored; rebuilding instead" >&2
+    if "${DC[@]}" up -d --build --remove-orphans >/dev/null 2>&1 \
+        && "${DC[@]}" up -d --force-recreate nginx >/dev/null 2>&1; then
+        journal_write rollback-incomplete "rebuilt ${PREV_COMMIT:0:12}; images not verified"
+        echo "  ROLLBACK INCOMPLETE: re-deployed the source of ${PREV_COMMIT:0:12};" >&2
+        echo "  this is not the runtime state that was replaced -- verify before trusting it" >&2
+        exit 76
+    fi
+
+    echo "  ROLLBACK FAILED: could not restore ${PREV_COMMIT:0:12}" >&2
+    journal_write rollback-failed "could not restore ${PREV_COMMIT:0:12}"
+    stop_containers_created_by_this_run
+    exit 76
+}
+
 step() { echo; echo "== $* =="; }
+
+# A signal during mutation must undo what the mutation started.
+#
+# Only `fail()` routed through the rollback, so a SIGTERM -- an operator's
+# Ctrl-C, a session that dropped, an orchestrator killing the run -- left the
+# new containers running with nothing left to undo them. That is the same
+# fail-open shape as the port check: the deployment stops, and the state it
+# stops in is the one nobody accepted.
+#
+# `exit` inside the handler rather than a bare return: trapping a signal
+# replaces its default action, so a handler that tidies up and returns leaves
+# the script running while the caller believes it stopped.
+on_signal() {
+    local sig="$1"
+    if [ "$ABORTING" = 1 ]; then
+        # Already unwinding. A second signal must not start a second rollback.
+        echo "  received SIG$sig during rollback; ignoring" >&2
+        return
+    fi
+    if [ "$PHASE" = mutating ]; then
+        abort_deployment "interrupted by SIG$sig"
+    fi
+    echo "REFUSED: interrupted by SIG$sig" >&2
+    exit $((128 + $(kill -l "$sig" 2>/dev/null || echo 15)))
+}
+trap 'on_signal INT' INT
+trap 'on_signal TERM' TERM
+trap 'on_signal HUP' HUP
+
+# And an unexpected exit, which is neither a signal nor a `fail`.
+#
+# Found by running the rollback against a real Docker daemon rather than
+# against stubs: `UPSTREAM="$(... | grep server)"` returns non-zero when the
+# pattern is absent, and under `set -e` that ended the script on the spot --
+# past `up`, before any verdict. No REFUSED was printed, the journal stayed at
+# `mutating`, the new version kept serving, and the exit code was 1: the code
+# that means "the previous state is running again".
+#
+# Eighteen post-mutation commands can fail that way. Routing the exit trap
+# through the rollback covers all of them, including the ones nobody has
+# thought of.
+on_unexpected_exit() {
+    local rc=$?
+    # Success, or a phase where nothing has been changed yet: nothing to undo.
+    [ "$rc" -eq 0 ] && exit 0
+    [ "$PHASE" = mutating ] || exit "$rc"
+    # Already unwinding: abort_deployment exits, and that exit lands here.
+    [ "$ABORTING" = 0 ] || exit "$rc"
+    abort_deployment "unexpected failure (exit $rc)"
+}
+trap on_unexpected_exit EXIT
 
 MODE=deploy
 TARGET=""
+# This run's identity, used by the journal. Generated before the arguments are
+# parsed so a refusal there is still attributable.
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 while [ $# -gt 0 ]; do
     case "$1" in
         --rollback)
@@ -142,6 +390,16 @@ esac
 
 step "what may be deployed"
 
+# An unfinished journal means a previous run was interrupted between `up` and
+# its verdict. What is running then is whatever that run left, and this one
+# cannot know whether it is safe to build on -- so it refuses and names the
+# operator's next move rather than deploying on top of an unknown state.
+if [ -f "$JOURNAL" ]; then
+    echo "  an unfinished deployment is recorded:" >&2
+    sed 's/^/    /' "$JOURNAL" >&2
+    fail "a previous run did not finish; inspect the state, then remove $JOURNAL to proceed"
+fi
+
 # A local edit is exactly how the nginx upstream came to differ from the
 # repository for weeks with nobody able to tell. Required in both modes.
 DIRTY="$(git status --porcelain)"
@@ -227,6 +485,41 @@ fi
 
 PREV_IMAGES="$(docker ps -a --filter "label=com.docker.compose.project=$PROJECT" \
     --format '{{.Label "com.docker.compose.service"}} {{.Image}} {{.ID}}' | sort || true)"
+
+# The ids on their own, for the rollback. Recorded here because after `up` there
+# is no way to tell which containers this run created -- and a rollback that
+# stops the wrong one damages something it does not own.
+PRE_CIDS="$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | tr '\n' ' ' || true)"
+
+# service<TAB>image-id for what is *running*, from `docker inspect`, not from
+# `docker ps --format {{.Image}}`.
+#
+# That format prints the tag -- `sora-backend:latest` -- and a tag is a pointer.
+# Rebuilding the same commit moves it: a base image can have been updated, a
+# dependency resolved differently, a download returned something else. Restoring
+# "the tag it had" therefore restores whatever that name means now, which is the
+# question, not the answer.
+#
+# The id is the image. Verified that compose accepts one in place of a tag and
+# starts the container without building.
+PREV_IMAGE_IDS="$(
+    for _cid in $(docker ps -q --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null); do
+        _svc="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$_cid" 2>/dev/null)"
+        _img="$(docker inspect -f '{{.Image}}' "$_cid" 2>/dev/null)"
+        if [ -n "$_svc" ] && [ -n "$_img" ]; then
+            printf '%s\t%s\n' "$_svc" "$_img"
+        fi
+    done | sort -u
+)"
+# `if`, not `[ ... ] && [ ... ] && printf`. Under `set -e` that chain returns 1
+# whenever the guard is false -- which is every container the inspect could not
+# read -- and the whole command substitution then fails the script, silently,
+# before it has printed a reason.
+if [ -n "$PREV_IMAGE_IDS" ]; then
+    echo "  recorded $(printf '%s\n' "$PREV_IMAGE_IDS" | wc -l | tr -d ' ') running image id(s) for rollback"
+else
+    echo "  no running image ids recorded; a rollback will have to rebuild"
+fi
 
 # Declared services come from `docker compose config`, not from parsing the YAML
 # here: it resolves interpolation, overrides and extends, so what is checked is
@@ -332,6 +625,16 @@ echo "  only nginx 80/tcp and 443/tcp would be published off-host"
 # ------------------------------------------------------------------- deployment
 
 step "deploying"
+
+# From here a refusal has something to undo, so `fail` routes through
+# abort_deployment. Set immediately before `up` rather than earlier: a refusal
+# during the preflight has nothing to roll back, and rolling back anyway would
+# rebuild the previous state for no reason.
+PHASE=mutating
+# Written before the first change, not after: a journal that appears only once
+# the mutation succeeded records nothing about the case it exists for.
+journal_write mutating
+
 "${DC[@]}" up -d --build --remove-orphans
 
 # nginx is recreated, not restarted. Its configuration is a bind-mounted single
@@ -514,6 +817,14 @@ for path in /health /api/v1/health /; do
 done
 
 # ------------------------------------------------------------------- the record
+
+# Accepted. Nothing after this point should roll back: the deployment is the
+# state that is meant to be running, and a failure while writing the record is
+# not a reason to undo it.
+PHASE=committed
+# Closed only here. Everything above this line is a state somebody has to look
+# at; past it, the deployment is the one that is meant to be running.
+journal_clear
 
 step "recording what was deployed"
 

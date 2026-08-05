@@ -101,6 +101,36 @@ case "$argv" in
         awk -F'|' '{print $1"|"$3}' "$STUB_DIR/running"; exit 0 ;;
     *'{{.Names}} {{.Ports}}'*)
         awk -F'|' '{print "  "$1" "$3}' "$STUB_DIR/running"; exit 0 ;;
+    # Before the generic "ps -q": the rollback asks for ids, and a test needs to
+    # be able to say a container existed before this run started.
+    *"ps -aq"*)
+        # A superset once the mutation has run: the ids that existed plus the
+        # one this run created. Returning the same list both times left the
+        # `created` set empty, so `docker stop` never ran and the ownership
+        # assertion held for the wrong reason -- an unconditional
+        # `docker stop $now` would have passed it too.
+        [ -f "$STUB_DIR/pre_cids" ] && cat "$STUB_DIR/pre_cids"
+        [ -f "$STUB_DIR/calls" ] && grep -q 'up -d --build' "$STUB_DIR/calls" \
+            && echo "cid-created-by-this-run"
+        exit 0 ;;
+    *"up -d --no-build"*)
+        # The exact-image restore. Recorded so a test can tell it from a
+        # rebuild, which is a different operation with a different verdict.
+        touch "$STUB_DIR/rolled_back"
+        [ -f "$STUB_DIR/no_build_fails" ] && exit 1
+        exit 0 ;;
+    *"up -d --build"*)
+        # `slow_up` holds the mutation open so a test can interrupt it. Without
+        # it the window between `up` and the postflight is too short to hit.
+        [ -f "$STUB_DIR/slow_up" ] && sleep 6
+        # A rollback rebuilds, so this is called twice. `up_fails_after_first`
+        # lets a test fail the second one and nothing else -- which is what
+        # separates "refused, previous state restored" from "refused, and the
+        # rollback did not complete".
+        n=$(( $(cat "$STUB_DIR/up_calls" 2>/dev/null || echo 0) + 1 ))
+        echo "$n" > "$STUB_DIR/up_calls"
+        if [ -f "$STUB_DIR/up_fails_after_first" ] && [ "$n" -gt 1 ]; then exit 1; fi
+        exit 0 ;;
     *"ps -q nginx"*)        echo "cid-nginx"; exit 0 ;;
     *"ps -q"*)              echo "cid-x"; exit 0 ;;
     *"sha256sum /etc/nginx/nginx.conf"*)
@@ -108,9 +138,27 @@ case "$argv" in
     *"nginx -t"*)
         [ -f "$STUB_DIR/nginx_t_fails" ] && exit 1
         exit 0 ;;
-    *"upstream sora_backend"*)  cat "$STUB_DIR/upstream_line"; exit 0 ;;
+    *"upstream sora_backend"*)
+        # `upstream_cmd_fails` reproduces what a real daemon did: the command
+        # exits non-zero with no output -- `grep` finding nothing -- which under
+        # `set -e` ends the script outside any `fail`.
+        [ -f "$STUB_DIR/upstream_cmd_fails" ] && exit 1
+        cat "$STUB_DIR/upstream_line"; exit 0 ;;
     *"inspect"*"Destination"*)  cat "$STUB_DIR/cert_source"; exit 0 ;;
-    *"inspect -f {{.Image}}"*)  echo "sha256:image"; exit 0 ;;
+    # Before the generic image branch: the snapshot reads the compose service
+    # off each container, and without this it comes back empty and the rollback
+    # silently degrades to a rebuild.
+    *"inspect -f {{index .Config.Labels"*)
+        echo "${STUB_SERVICE:-nginx}"; exit 0 ;;
+    *"inspect -f {{.Image}}"*)
+        # `restored_image` lets a test say the image after the rollback is not
+        # the one recorded -- the case the verification exists for.
+        if [ -f "$STUB_DIR/rolled_back" ] && [ -f "$STUB_DIR/restored_image" ]; then
+            cat "$STUB_DIR/restored_image"
+        else
+            echo "sha256:image"
+        fi
+        exit 0 ;;
     *) exit 0 ;;
 esac
 STUB
@@ -747,6 +795,263 @@ check "the containers were started first" \
     "$(grep -qc 'up -d' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
 check "and the ports were read by compose service" \
     "$(grep -qc 'com.docker.compose.service"}}|{{.Ports' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
+echo "== a refusal after the containers are up rolls back =="
+# Eight checks sit after `up`. Each used to abort a deployment whose containers
+# were already running and leave the refused state in place -- the port case
+# named an off-host port accurately and left it open.
+with_previous_deployment() {
+    mkdir -p "$SANDBOX/manifests"
+    printf 'commit %s\n' "$FIRST" > "$SANDBOX/manifests/prev.txt"
+    ln -sf prev.txt "$SANDBOX/manifests/latest"
+}
+
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/nginx_t_fails"
+run_guard
+check "exit says the previous state is back"  "$RC" "1"
+check "it rolled back"      "$(grep -qc 'rolling back' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "the recorded images were restored" \
+    "$(grep -qc 'restored the images that were running' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "without building" \
+    "$(grep -qc 'up -d --no-build' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+echo "== a refusal with nothing recorded stops only what this run created =="
+# No previous manifest: there is no state to restore, so the only safe action is
+# to stop what this run started. Anything already present may belong to another
+# project, and stopping it damages something this deployment does not own.
+new_sandbox
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+echo "cid-preexisting" > "$STUB_DIR/pre_cids"
+touch "$STUB_DIR/nginx_t_fails"
+run_guard
+check "a distinct exit for an incomplete rollback" "$RC" "76"
+check "it says nothing was recorded" \
+    "$(grep -qc 'no previous deployment recorded' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "the pre-existing container is not stopped" \
+    "$(grep -c 'stop cid-preexisting' "$STUB_DIR/calls")" "0"
+# And the other half: the container this run created *is* stopped. Without it
+# the case cannot tell "correctly excluded" from "the stop path never ran".
+check "the container this run created is stopped" \
+    "$(grep -q 'stop cid-created-by-this-run' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+echo "== a failed rollback is its own outcome =="
+# Distinguished from a successful one: "refused, previous state running" and
+# "refused, and the rollback did not complete" call for opposite responses, and
+# one non-zero status cannot say which happened.
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/nginx_t_fails"
+# Both routes broken: the exact restore and the rebuild it falls back to.
+# Breaking only the rebuild no longer says anything, because the rollback no
+# longer goes that way first.
+touch "$STUB_DIR/no_build_fails"
+touch "$STUB_DIR/up_fails_after_first"
+run_guard
+check "exit says the rollback did not complete" "$RC" "76"
+check "and it says so"  "$(grep -qc 'ROLLBACK FAILED' "$SANDBOX/out" && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+echo "== a refusal before the containers start does not roll back =="
+# Nothing has changed yet, so rebuilding the previous state would be work done
+# for no reason -- and would make a preflight refusal indistinguishable from a
+# post-mutation one in the record.
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+cat > "$STUB_DIR/rendered" <<'JSON'
+{"services": {
+  "nginx": {"ports": [{"target": 80, "published": "80", "protocol": "tcp"},
+                      {"target": 443, "published": "443", "protocol": "tcp"}]},
+  "app":   {"ports": [{"target": 8000, "published": "8000", "protocol": "tcp"}]}
+}}
+JSON
+run_guard
+check "refused with the plain status" "$RC" "1"
+check "and no rollback was attempted" \
+    "$(grep -qc 'rolling back' "$SANDBOX/out" && echo yes || echo no)" "no"
+rm -rf "$SANDBOX"
+
+
+echo "== a rebuild is reported as an incomplete rollback, not a restore =="
+# Rebuilding the previous commit usually produces a working deployment, and it
+# is not the runtime state that was replaced: a base image can have moved, a
+# dependency resolved differently. Reporting it as "restored" would hand the
+# operator a claim nobody checked.
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/nginx_t_fails"
+touch "$STUB_DIR/no_build_fails"
+run_guard
+check "a rebuild does not count as a restore" "$RC" "76"
+check "and it says which one happened" \
+    "$(grep -qc 'ROLLBACK INCOMPLETE' "$SANDBOX/out" && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+echo "== an image that does not match the snapshot is not a restore =="
+# The `up` can succeed having started something else. Verified afterwards
+# against the recorded ids rather than inferred from the exit status.
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+echo "sha256:something-else" > "$STUB_DIR/restored_image"
+touch "$STUB_DIR/nginx_t_fails"
+run_guard
+check "a different image is not a restore" "$RC" "76"
+check "and the mismatch is named" \
+    "$(grep -qc 'do not match the snapshot' "$SANDBOX/out" && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+echo "== an unfinished journal stops the next run =="
+# After a kill between `up` and the verdict, what is running is whatever that
+# run left. Deploying on top of it would build on a state nobody accepted.
+new_sandbox
+mkdir -p "$SANDBOX/manifests"
+printf 'run x\nstate mutating\n' > "$SANDBOX/manifests/in-progress"
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+run_guard
+refused_because "an interrupted previous run" "did not finish"
+check "and nothing was started" \
+    "$(grep -qc 'up -d' "$STUB_DIR/calls" && echo started || echo no)" "no"
+rm -rf "$SANDBOX"
+
+echo "== a successful deployment leaves no journal behind =="
+new_sandbox
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+run_guard
+check "the deployment succeeded" "$RC" "0"
+check "and the journal is closed" \
+    "$( [ -f "$SANDBOX/manifests/in-progress" ] && echo left || echo closed )" "closed"
+rm -rf "$SANDBOX"
+
+
+echo "== a signal during the mutation rolls back =="
+# Only `fail()` routed through the rollback, so a SIGTERM -- Ctrl-C, a dropped
+# session, an orchestrator killing the run -- left the new containers running
+# with nothing to undo them.
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/slow_up"
+# shellcheck disable=SC2030,SC2031
+#   The subshell is the point, as in run_guard: the stubbed PATH must reach the
+#   guard and nothing else, and losing the change on the way out is the intent.
+( export PATH="$STUB_DIR/bin:$PATH"
+  # Exported here, not inherited. These blocks passed only because run_guard
+  # had exported STUB_DIR earlier in the file; run either one alone, or under a
+  # name filter, and every stub resolved it to the empty string and wrote to
+  # paths like /calls.
+  export STUB_DIR
+  DEPLOY_REPO="$REPO" COMPOSE_FILE="$REPO/compose.yml" COMPOSE_PROJECT_NAME=p \
+  SITE_URL="http://stand.invalid" MANIFEST_DIR="$SANDBOX/manifests" \
+  DEPLOY_LOCK_DIR="$SANDBOX/lockdir" HEALTH_ATTEMPTS=3 HEALTH_DELAY=0 \
+    bash "$SCRIPT" ) > "$SANDBOX/out" 2>&1 &
+GUARD=$!
+sleep 3
+kill -TERM "$GUARD" 2>/dev/null
+wait "$GUARD" 2>/dev/null
+RC=$?
+check "it reports the interruption" \
+    "$(grep -qc 'interrupted by SIGTERM' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "and rolled back rather than leaving it running" \
+    "$(grep -qc 'up -d --no-build' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+echo "== a run killed outright leaves its journal behind =="
+# SIGKILL cannot be trapped, which is the case the journal exists for: what is
+# running afterwards is whatever the interrupted run left, and the next run has
+# to be able to see that.
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/slow_up"
+# shellcheck disable=SC2030,SC2031
+#   The subshell is the point, as in run_guard: the stubbed PATH must reach the
+#   guard and nothing else, and losing the change on the way out is the intent.
+( export PATH="$STUB_DIR/bin:$PATH"
+  # Exported here, not inherited. These blocks passed only because run_guard
+  # had exported STUB_DIR earlier in the file; run either one alone, or under a
+  # name filter, and every stub resolved it to the empty string and wrote to
+  # paths like /calls.
+  export STUB_DIR
+  DEPLOY_REPO="$REPO" COMPOSE_FILE="$REPO/compose.yml" COMPOSE_PROJECT_NAME=p \
+  SITE_URL="http://stand.invalid" MANIFEST_DIR="$SANDBOX/manifests" \
+  DEPLOY_LOCK_DIR="$SANDBOX/lockdir" HEALTH_ATTEMPTS=3 HEALTH_DELAY=0 \
+    bash "$SCRIPT" ) > "$SANDBOX/out" 2>&1 &
+GUARD=$!
+sleep 3
+kill -9 "$GUARD" 2>/dev/null
+wait "$GUARD" 2>/dev/null
+sleep 1
+check "the journal survives the kill" \
+    "$( [ -f "$SANDBOX/manifests/in-progress" ] && echo present || echo missing )" "present"
+check "and records the phase it reached" \
+    "$(grep -qc 'state          mutating' "$SANDBOX/manifests/in-progress" 2>/dev/null && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+
+echo "== a post-mutation command failing outside fail() still rolls back =="
+# Found by running the rollback against a real Docker daemon, not by these
+# stubs: `UPSTREAM="$(... | grep server)"` returns non-zero when the pattern is
+# absent, and `set -e` ended the script on the spot -- past `up`, before any
+# verdict. No REFUSED was printed, the journal stayed at `mutating`, the new
+# version kept serving, and the exit code was 1: the code that means "the
+# previous state is running again".
+#
+# Eighteen commands after the mutation can fail that way. The exit trap covers
+# all of them, including the ones nobody has thought of.
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/upstream_cmd_fails"
+run_guard
+check "it says what happened"  \
+    "$(grep -q 'unexpected failure' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "and rolled back rather than leaving the new version serving" \
+    "$(grep -q 'up -d --no-build' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
+# Cleared, not left. A verified rollback puts the previous state back, so
+# there is nothing for an operator to reconcile -- and a journal left behind
+# would refuse the next deployment, making exit 1 and exit 76 the same thing in
+# practice.
+check "and leaves no journal to block the next run" \
+    "$( [ -f "$SANDBOX/manifests/in-progress" ] && echo left || echo cleared )" "cleared"
+rm -rf "$SANDBOX"
+
+
+echo "== a rollback that cannot check out records why =="
+# The manifest can name a commit this checkout no longer has -- a force-push, a
+# pruned branch, a repository restored from elsewhere. Every other terminal path
+# writes its outcome; this one left the journal reading `mutating`, which names
+# the wrong phase and hides that the checkout is what broke.
+new_sandbox
+mkdir -p "$SANDBOX/manifests"
+printf 'commit %s\n' "0000000000000000000000000000000000000000" > "$SANDBOX/manifests/prev.txt"
+ln -sf prev.txt "$SANDBOX/manifests/latest"
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/nginx_t_fails"
+run_guard
+check "the rollback did not complete" "$RC" "76"
+check "and it names the checkout" \
+    "$(grep -q 'cannot check out' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "the journal says rollback-failed, not mutating" \
+    "$(grep -q '^state          rollback-failed' "$SANDBOX/manifests/in-progress" 2>/dev/null && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
 
 echo
