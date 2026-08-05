@@ -61,8 +61,10 @@ class Stub:
     def __init__(self):
         self.pages = [[]]
         self.unobtainable_from = None
-        # A 200 whose body is not the shape the World Bank returns.
-        self.malformed = False
+        # Indicators for which a 200 carries a body that is not the shape the
+        # World Bank returns. Selective, so a run can contain both a page that
+        # cannot be read and a page that can.
+        self.malformed_indicators = set()
         self.requested = []
         self.paths = []
         self.base = None
@@ -88,7 +90,8 @@ def _handler_for(stub):
             if stub.unobtainable_from is not None and page >= stub.unobtainable_from:
                 self.send_error(503, "stub: this page is unobtainable")
                 return
-            body = b'{"message": "service temporarily unavailable"}' if stub.malformed \
+            malformed = any(ind in self.path for ind in stub.malformed_indicators)
+            body = b'{"message": "service temporarily unavailable"}' if malformed \
                 else stub.body(page)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -122,7 +125,7 @@ def series(*pairs):
     return [{"date": str(y), "value": v} for y, v in pairs]
 
 
-def insert_row(engine, value=STORED_VALUE, source="world_bank"):
+def insert_row(engine, value=STORED_VALUE, source="world_bank", indicator=INDICATOR):
     with engine.begin() as conn:
         return conn.execute(
             text(
@@ -130,7 +133,7 @@ def insert_row(engine, value=STORED_VALUE, source="world_bank"):
                 "  (country_iso3, indicator_code, source, value, fetched_at) "
                 "VALUES (:iso, :ind, :src, :val, now()) RETURNING id"
             ),
-            {"iso": ISO, "ind": INDICATOR, "src": source, "val": value},
+            {"iso": ISO, "ind": indicator, "src": source, "val": value},
         ).scalar()
 
 
@@ -364,8 +367,12 @@ def test_a_row_from_another_source_is_left_alone(scratch_db, stub):
 
     assert read_row(engine, mine)["period_status"] == "recovered_inferred"
     row = read_row(engine, foreign)
-    assert row["period_status"] is None, "a foreign source was given a World Bank year"
-    assert row["as_of_date"] is None
+    # Every field this script owns, not the two most obvious. A regression that
+    # wrote the run id or the rule version onto a foreign row while leaving the
+    # status alone would be a provenance record claiming this run examined data
+    # it never looked at -- and a two-field check would pass.
+    for field, value in row.items():
+        assert value is None, f"the backfill wrote {field}={value!r} to a rosstat row"
 
 
 @requires_postgres
@@ -378,14 +385,21 @@ def test_a_malformed_answer_defers_rather_than_ending_the_run(scratch_db, stub):
     finished.
     """
     engine, url = scratch_db
-    row_id = insert_row(engine)
-    stub.malformed = True
+    # Two pairs, so the test can tell "deferred and carried on" from "died after
+    # the first one". With a single row and a stub malformed for every request,
+    # both outcomes look identical -- the row is untouched either way.
+    bad = insert_row(engine, indicator="BAD.INDICATOR")
+    good = insert_row(engine)
+    stub.malformed_indicators = {"BAD.INDICATOR"}
+    stub.pages = [series((2025, SOURCE_FIGURE))]
 
     run_backfill(url, stub, "--apply")
 
-    row = read_row(engine, row_id)
-    assert row["period_status"] is None, "an unusable answer produced a verdict"
-    assert row["as_of_date"] is None
+    assert read_row(engine, bad)["period_status"] is None, "an unusable answer produced a verdict"
+    assert read_row(engine, bad)["as_of_date"] is None
+    # The point of deferring rather than aborting.
+    assert read_row(engine, good)["period_status"] == "recovered_inferred", \
+        "the run stopped at the malformed answer instead of carrying on"
 
 
 @requires_postgres
