@@ -401,14 +401,21 @@ fi
 # completely. Every off-host row is evaluated, and the result is then checked
 # for what has to be present.
 #
-# One declaration can surface as more than one binding: on the host measured on
-# 2026-08-05 a single entry with no host_ip produced 0.0.0.0 and [::]. How many
+# One declaration can surface as more than one binding: on the host measured
+# here a single entry with no host_ip produced 0.0.0.0 and [::]. How many
 # appear depends on the daemon and the network configuration, so this asks
 # whether the endpoint is published at all, not how many rows carry it.
 SEEN_80=0
 SEEN_443=0
-while IFS='|' read -r name ports; do
-    case "$name" in *nginx*) ;; *) continue ;; esac
+# Keyed on the compose service, not on the container name.
+#
+# `case "$name" in *nginx*)` also matched `nginx-helper`, `old-nginx`, anything
+# with the substring in it. A deployment where nginx published nothing and some
+# other container published 80 and 443 would have satisfied this completeness
+# check -- the gate would report the site as served while the service that is
+# supposed to serve it was not listening.
+while IFS='|' read -r svc ports; do
+    [ "$svc" = nginx ] || continue
     [ -n "$ports" ] || continue
     while IFS= read -r p; do
         case "$p" in *"->"*) ;; *) continue ;; esac
@@ -420,7 +427,7 @@ while IFS='|' read -r name ports; do
         case "$hostport" in 80) SEEN_80=1 ;; 443) SEEN_443=1 ;; esac
     done <<< "${ports//, /$'\n'}"
 done < <(docker ps --filter "label=com.docker.compose.project=$PROJECT" \
-             --format '{{.Names}}|{{.Ports}}')
+             --format '{{.Label "com.docker.compose.service"}}|{{.Ports}}')
 [ "$SEEN_80" = 1 ]  || fail "nginx publishes no off-host 80/tcp; http:// callers have nowhere to land"
 [ "$SEEN_443" = 1 ] || fail "nginx publishes no off-host 443/tcp"
 echo "  nginx publishes 80/tcp and 443/tcp, and nothing else is reachable off-host"

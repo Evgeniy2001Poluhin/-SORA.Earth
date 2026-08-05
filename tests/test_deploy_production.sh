@@ -89,6 +89,10 @@ case "$argv" in
     *"config --services"*)  cat "$STUB_DIR/services"; exit 0 ;;
     *"ps --format {{.Service}}"*)
         cut -d'|' -f2 "$STUB_DIR/running"; exit 0 ;;
+    *'{{.Label "com.docker.compose.service"}}|{{.Ports}}'*)
+        # Before the label-only branch, which would otherwise swallow this.
+        # Field 2 is the compose service, field 3 the ports.
+        awk -F'|' '{print $2"|"$3}' "$STUB_DIR/running"; exit 0 ;;
     *'{{.Label "com.docker.compose.service"}} {{.Image}} {{.ID}}'*)
         awk -F'|' '{print $2" image-"$2" id-"$2}' "$STUB_DIR/running"; exit 0 ;;
     *'{{.Label "com.docker.compose.service"}}'*)
@@ -710,6 +714,29 @@ echo "nginx" > "$STUB_DIR/services"
 echo "p-nginx-1|nginx|" > "$STUB_DIR/running"
 run_guard
 refused_because "a runtime publishing nothing at all" "no off-host 80/tcp"
+rm -rf "$SANDBOX"
+
+
+echo "== a decoy service cannot satisfy the completeness check =="
+# `case "$name" in *nginx*)` matched any container whose name contained the
+# substring. With nginx publishing nothing and a helper publishing 80 and 443,
+# the gate reported the site as served while the service meant to serve it was
+# not listening.
+new_sandbox
+printf 'nginx\nnginx-helper\n' > "$STUB_DIR/services"
+{
+    echo "p-nginx-1|nginx|"
+    echo "p-nginx-helper-1|nginx-helper|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"
+} > "$STUB_DIR/running"
+cat > "$STUB_DIR/rendered" <<'JSON'
+{"services": {
+  "nginx":        {"ports": [{"target": 80, "published": "80", "protocol": "tcp"},
+                             {"target": 443, "published": "443", "protocol": "tcp"}]},
+  "nginx-helper": {"ports": []}
+}}
+JSON
+run_guard
+refused_because "a helper publishing 80/443 does not stand in for nginx" "no off-host 80/tcp"
 rm -rf "$SANDBOX"
 
 echo
