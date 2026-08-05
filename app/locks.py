@@ -1,3 +1,4 @@
+import threading
 import time
 import uuid
 import logging
@@ -8,6 +9,27 @@ logger = logging.getLogger(__name__)
 ACQUIRED = "acquired"
 HELD = "held"
 UNAVAILABLE = "unavailable"
+
+# Compare-and-delete in one step. A GET followed by a DELETE is two round
+# trips, and the lease can expire between them: another process takes the same
+# key, and the first owner's DELETE removes a lock it no longer holds. Then two
+# processes believe they are alone.
+_RELEASE_LUA = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+end
+return 0
+"""
+
+# Same shape for renewal: extend only a lease we still own. Renewing by key
+# alone would let a process that has already lost the lock keep pushing out
+# someone else's expiry.
+_RENEW_LUA = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("expire", KEYS[1], ARGV[2])
+end
+return 0
+"""
 
 
 class StrictLock:
@@ -33,11 +55,19 @@ class StrictLock:
     that -- see the advisory lock in refresh_indicator_history.
     """
 
-    def __init__(self, key: str, timeout: int = 300):
+    def __init__(self, key: str, timeout: int = 300, renew: bool = False):
         self.key = key
         self.timeout = timeout
         self.token = str(uuid.uuid4())
         self.state = None
+        self.renew = renew
+        # Set when the lease is found to belong to someone else, or could not
+        # be renewed. A holder that has lost the lock must stop doing the work
+        # the lock was protecting -- silently carrying on is the failure the
+        # lock exists to prevent.
+        self.lost = threading.Event()
+        self._stop = threading.Event()
+        self._renewer = None
 
     def acquire(self) -> str:
         try:
@@ -49,6 +79,8 @@ class StrictLock:
             got = bool(redis_client.set(
                 self.key, self.token, nx=True, ex=self.timeout))
             self.state = ACQUIRED if got else HELD
+            if self.state == ACQUIRED and self.renew:
+                self._start_renewal()
             return self.state
         except Exception as e:
             # An exception is not evidence that nobody holds the lock, so it
@@ -57,13 +89,57 @@ class StrictLock:
             self.state = UNAVAILABLE
             return UNAVAILABLE
 
-    def release(self) -> None:
-        """Release only if we still hold our own token.
+    def renew_once(self) -> bool:
+        """Extend our own lease. False means we no longer hold it."""
+        try:
+            from app.redis_cache import redis_client, REDIS_AVAILABLE
 
-        Checked because a lock that expired and was retaken by someone else
-        must not be released by us; deleting it then would hand a third
-        process a lock two others believe they hold.
+            if not REDIS_AVAILABLE:
+                return False
+            extended = redis_client.eval(
+                _RENEW_LUA, 1, self.key, self.token, self.timeout)
+            return bool(extended)
+        except Exception as e:
+            logger.warning("strict lock renewal failed for %s: %s", self.key, e)
+            return False
+
+    def _start_renewal(self) -> None:
+        """Refresh the lease every timeout/3 until told to stop.
+
+        A third of the lease, so two consecutive failures still leave time to
+        notice. Without this a run that outlives its lease keeps working while
+        another process takes the key -- the exact overlap the lock exists to
+        prevent, and the one nobody would see, since the first process never
+        learns it lost.
         """
+        interval = max(1.0, self.timeout / 3.0)
+
+        def loop():
+            while not self._stop.wait(interval):
+                if not self.renew_once():
+                    logger.error(
+                        "strict lock %s is no longer ours; signalling the "
+                        "holder to stop", self.key)
+                    self.lost.set()
+                    return
+
+        self._renewer = threading.Thread(
+            target=loop, name=f"lock-renew-{self.key}", daemon=True)
+        self._renewer.start()
+
+    def release(self) -> None:
+        """Release only our own lease, atomically.
+
+        Compare-and-delete in one Lua step rather than GET then DELETE: the
+        lease can expire between those two calls, another process can take the
+        same key, and the DELETE would then remove a lock we no longer hold --
+        leaving two processes each believing they are alone.
+        """
+        self._stop.set()
+        if self._renewer is not None:
+            self._renewer.join(timeout=5)
+            self._renewer = None
+
         if self.state != ACQUIRED:
             return
         try:
@@ -71,8 +147,7 @@ class StrictLock:
 
             if not REDIS_AVAILABLE:
                 return
-            if redis_client.get(self.key) in (self.token, self.token.encode()):
-                redis_client.delete(self.key)
+            redis_client.eval(_RELEASE_LUA, 1, self.key, self.token)
         except Exception as e:
             logger.warning("strict lock release failed for %s: %s", self.key, e)
         finally:

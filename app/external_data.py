@@ -312,11 +312,23 @@ def _fetch_wb_series(
         page += 1
 
 
+class HistoryRefreshLockLost(RuntimeError):
+    """The exclusivity the refresh depends on went away mid-run.
+
+    Raised rather than returning short counters, because a partial run that
+    looks like a complete one is the failure mode worth avoiding: the caller
+    would record success, and the pairs never fetched would look like pairs
+    the source had nothing for. Whatever was committed before the loss stays
+    committed -- it was written while the lock was held.
+    """
+
+
 def refresh_indicator_history(
     db=None,
     countries: Optional[Dict[str, str]] = None,
     indicators: Optional[Dict[str, str]] = None,
     job_name: str = "external_data_refresh",
+    still_ours=None,
 ) -> Dict[str, int]:
     """Store the full World Bank series for each (country, indicator).
 
@@ -364,13 +376,30 @@ def refresh_indicator_history(
         fetched_at = datetime.utcnow()
         is_postgres = db.get_bind().dialect.name == "postgresql"
 
+        def _check(when: str) -> None:
+            """Refuse to keep going once the lease is somebody else's."""
+            if still_ours is not None and not still_ours():
+                raise HistoryRefreshLockLost(
+                    f"the refresh lock was lost {when} "
+                    f"({iso3}/{code}); stopping with "
+                    f"{stats['inserted']} inserted, {stats['revised']} revised")
+
         for name, iso3 in countries.items():
             for key, code in indicators.items():
+                # Twice, not once. A single check between pairs is not enough:
+                # the fetch below runs outside the lock and takes seconds, so
+                # the lease can lapse while it is in flight and the write would
+                # then happen without exclusivity.
+                _check("before starting a pair")
+
                 # Outside the lock on purpose: this is seconds of network, and
                 # holding a lock across it would serialise the slow part rather
                 # than the part that needs serialising.
                 series = _fetch_wb_series(iso3, code)
                 stats["fetched"] += len(series)
+
+                # The one that matters: everything after this point writes.
+                _check("during the fetch")
 
                 # Everything below is one transaction per pair, opened by the
                 # advisory lock and closed by the commit at the end of the
@@ -707,12 +736,20 @@ def refresh_live_data(trigger_source: str = "manual") -> Dict:
             # running is not a trade worth making.
             from app.locks import ACQUIRED, HELD, StrictLock
 
-            lock = StrictLock(key=HISTORY_LOCK_KEY, timeout=3600)
+            lock = StrictLock(key=HISTORY_LOCK_KEY, timeout=3600, renew=True)
             state = lock.acquire()
             try:
                 if state == ACQUIRED:
-                    history = refresh_indicator_history(
-                        job_name="external_data_refresh")
+                    try:
+                        history = refresh_indicator_history(
+                            job_name="external_data_refresh",
+                            still_ours=lambda: not lock.lost.is_set())
+                    except HistoryRefreshLockLost as e:
+                        # Degraded, not success: pairs were written, the run
+                        # did not finish, and the ones never reached must not
+                        # be mistaken for pairs the source had nothing for.
+                        history_skipped = f"lock lost mid-run: {e}"
+                        logger.error("history refresh lost its lock: %s", e)
                 elif state == HELD:
                     history_skipped = "another history refresh holds the lock"
                 else:

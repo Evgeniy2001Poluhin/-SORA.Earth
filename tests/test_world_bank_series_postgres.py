@@ -26,6 +26,7 @@ import json
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from sqlalchemy import text
@@ -50,11 +51,30 @@ THREE_YEARS = [
 
 
 class _Handler(BaseHTTPRequestHandler):
-    """Serves one indicator series in the World Bank's two-element envelope."""
+    """Serves one indicator series in the World Bank's two-element envelope.
+
+    `requests` records every path served, so a test can assert what was asked
+    for -- which pages were fetched, and whether a pair was requested at all.
+    """
 
     series = THREE_YEARS
+    per_page = None      # None: serve everything on one page
+    requests = []
 
     def do_GET(self):  # noqa: N802  (BaseHTTPRequestHandler's spelling)
+        type(self).requests.append(self.path)
+
+        query = parse_qs(urlparse(self.path).query)
+        page = int(query.get("page", ["1"])[0])
+        size = type(self).per_page
+
+        if size:
+            pages = max(1, (len(type(self).series) + size - 1) // size)
+            window = type(self).series[(page - 1) * size:page * size]
+        else:
+            pages = 1
+            window = type(self).series
+
         rows = [
             {
                 "indicator": {"id": CODE, "value": "GDP growth (annual %)"},
@@ -66,13 +86,13 @@ class _Handler(BaseHTTPRequestHandler):
                 "obs_status": "",
                 "decimal": 1,
             }
-            for period, value in type(self).series
+            for period, value in window
         ]
         header = {
-            "page": 1,
-            "pages": 1,
-            "per_page": len(rows),
-            "total": len(rows),
+            "page": page,
+            "pages": pages,
+            "per_page": size or len(rows),
+            "total": len(type(self).series),
             "sourceid": "2",
             "lastupdated": "2026-07-01",
         }
@@ -94,6 +114,8 @@ def wb_stub(monkeypatch):
     import app.external_data as ed
 
     _Handler.series = THREE_YEARS
+    _Handler.per_page = None
+    _Handler.requests = []
     server = HTTPServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -264,14 +286,17 @@ def _concurrent_refresh(engine, barrier, results, index):
     """One refresh in its own session, released together with the others."""
     from app.external_data import refresh_indicator_history
 
-    with Session(engine) as session:
-        barrier.wait(timeout=30)
-        try:
+    try:
+        with Session(engine) as session:
+            # Inside the try: a BrokenBarrierError raised here would otherwise
+            # escape the thread, leaving results[index] as None and the failure
+            # reported as a NoneType error in the main thread.
+            barrier.wait(timeout=30)
             results[index] = refresh_indicator_history(
                 db=session, countries={ISO3: ISO3},
                 indicators={"gdp_growth": CODE})
-        except Exception as e:  # recorded, so the assertion can name it
-            results[index] = e
+    except BaseException as e:  # recorded, so the assertion can name it
+        results[index] = e
 
 
 def test_two_concurrent_runs_insert_one_row_each_period(scratch_db, wb_stub):
@@ -298,6 +323,13 @@ def test_two_concurrent_runs_insert_one_row_each_period(scratch_db, wb_stub):
         t.start()
     for t in threads:
         t.join(timeout=60)
+
+    # Checked before touching results: a deadlock would otherwise surface as
+    # "'NoneType' object is not subscriptable", which names neither the thread
+    # nor the reason.
+    for i, t in enumerate(threads):
+        assert not t.is_alive(), f"run {i} did not finish within 60s"
+        assert results[i] is not None, f"run {i} recorded no result"
 
     for r in results:
         assert not isinstance(r, Exception), f"a run raised: {r!r}"
@@ -354,6 +386,10 @@ def test_two_concurrent_runs_record_one_revision(scratch_db, wb_stub):
     for t in threads:
         t.join(timeout=60)
 
+    for i, t in enumerate(threads):
+        assert not t.is_alive(), f"run {i} did not finish within 60s"
+        assert results[i] is not None, f"run {i} recorded no result"
+
     for r in results:
         assert not isinstance(r, Exception), f"a run raised: {r!r}"
 
@@ -369,6 +405,72 @@ def test_two_concurrent_runs_record_one_revision(scratch_db, wb_stub):
         ), {"iso3": ISO3, "code": CODE}).scalar()
 
     assert count == 2, f"expected the original and one revision, got {count}"
+
+
+def test_pagination_is_followed_across_pages(db, wb_stub):
+    """The claim this PR makes about pagination, actually exercised.
+
+    Every other test here is served on a single page, so until now "follows
+    pagination" was asserted in a description and nowhere else -- the stub
+    always said `pages: 1`. With three observations at two per page the fetch
+    must ask for both pages and keep all three, in the source's order.
+    """
+    from app.external_data import refresh_indicator_history
+
+    wb_stub.per_page = 2
+    wb_stub.requests = []
+
+    stats = refresh_indicator_history(db=db, countries={ISO3: ISO3},
+                                      indicators={"gdp_growth": CODE})
+
+    pages = [urlparse(p).query for p in wb_stub.requests]
+    assert len(pages) == 2, f"expected two page requests, got {pages}"
+    assert "page=1" in pages[0] and "page=2" in pages[1]
+
+    assert stats["fetched"] == 3, "an observation was lost between pages"
+    rows = _stored(db)
+    assert [r[0].year for r in rows] == [2023, 2024, 2025]
+    assert [float(r[1]) for r in rows] == pytest.approx([3.65, 4.92, 1.00])
+
+
+def test_losing_the_lease_during_the_fetch_writes_nothing(db, wb_stub):
+    """The window a between-pairs check alone would miss.
+
+    The fetch runs outside the advisory lock and takes seconds, so the lease
+    can lapse while it is in flight. The write that follows would then happen
+    without exclusivity, which is what the lock exists to prevent.
+
+    Asserted: nothing is written for the pair whose lease was lost, and no
+    further pair is even requested.
+    """
+    from app.external_data import HistoryRefreshLockLost, refresh_indicator_history
+
+    ours = {"yes": True}
+
+    def still_ours():
+        # Holds for the first check (before the pair), gone by the second
+        # (after the fetch) -- exactly the interleaving in question.
+        if not wb_stub.requests:
+            return True
+        ours["yes"] = False
+        return False
+
+    wb_stub.requests = []
+
+    with pytest.raises(HistoryRefreshLockLost) as exc:
+        refresh_indicator_history(
+            db=db,
+            countries={ISO3: ISO3, "DEU": "DEU"},
+            indicators={"gdp_growth": CODE},
+            still_ours=still_ours,
+        )
+
+    assert "during the fetch" in str(exc.value)
+    db.rollback()
+    assert _stored(db) == [], "rows were written after the lease was lost"
+    assert len(wb_stub.requests) == 1, (
+        f"a further pair was fetched after losing the lease: {wb_stub.requests}"
+    )
 
 
 def test_an_error_envelope_is_reported_not_swallowed(caplog):

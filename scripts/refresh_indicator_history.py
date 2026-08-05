@@ -35,6 +35,7 @@ Exit codes
     2   the lock is held by another run
     3   the refresh raised, or arguments were wrong
     4   the lock could not be reached, so exclusivity cannot be assured
+    5   the lock was lost mid-run; what was written stands, the run does not
 """
 
 import argparse
@@ -95,7 +96,10 @@ def main() -> int:
                   "nothing else can write to this database", file=sys.stderr)
             return 4
 
-        lock = StrictLock(key=LOCK_KEY, timeout=3600)
+        # renew=True: a full run took 587s against a 3600s lease in rehearsal,
+        # but a slow source could outlast it, and a lease that lapses mid-run
+        # lets a second process start while this one keeps writing.
+        lock = StrictLock(key=LOCK_KEY, timeout=3600, renew=True)
         state = lock.acquire()
         if state == HELD:
             print(f"{LOCK_KEY} is held -- a refresh is already running. "
@@ -118,14 +122,30 @@ def main() -> int:
     sys.stdout.flush()
 
     try:
-        stats = refresh_indicator_history(
-            countries=countries, indicators=indicators,
-            job_name="manual_history_refresh",
-        )
-    except Exception as e:  # noqa: BLE001 -- reported, then re-raised as a code
+        from app.external_data import HistoryRefreshLockLost
+
+        try:
+            stats = refresh_indicator_history(
+                countries=countries, indicators=indicators,
+                job_name="manual_history_refresh",
+                still_ours=None if lock is None else (
+                    lambda: not lock.lost.is_set()),
+            )
+        except HistoryRefreshLockLost as e:
+            # Non-zero on purpose: the pairs already written are fine, the run
+            # as a whole is not, and reporting it as a success would make the
+            # untouched pairs look like pairs the source had nothing for.
+            print(f"LOCK LOST after {time.time() - started:.1f}s: {e}",
+                  file=sys.stderr)
+            return 5
+    except Exception as e:  # noqa: BLE001 -- reported, then turned into a code
         print(f"FAILED after {time.time() - started:.1f}s: {e}", file=sys.stderr)
         return 3
     finally:
+        # Order matters and it is all in finally: stop renewing, join the
+        # renewal thread, then release atomically. release() does the first
+        # two itself, so one call is enough -- and it must happen even when
+        # the refresh raised.
         if lock is not None:
             lock.release()
 
