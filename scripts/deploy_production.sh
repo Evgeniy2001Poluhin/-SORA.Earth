@@ -768,17 +768,72 @@ echo "  certificates come from /etc/letsencrypt"
 # restarts it. Having the mechanism is not the same as having the reload, so
 # both are named. Absence is a warning rather than a refusal: it does not make
 # this deployment wrong, it makes a future morning wrong.
-if systemctl list-timers 'certbot*' --no-pager 2>/dev/null | grep -q certbot \
-   || crontab -l 2>/dev/null | grep -q certbot; then
-    echo "  a certbot renewal mechanism is present"
-    if find /etc/letsencrypt/renewal-hooks/deploy -type f 2>/dev/null | grep -q .; then
-        echo "  renewal has deploy hooks"
-    else
-        echo "  WARNING: no deploy hook in /etc/letsencrypt/renewal-hooks/deploy/;"
-        echo "           a renewed certificate will not reach nginx until it restarts"
+# Report the certificate's own remaining life first. It is the fact that
+# decides whether anyone needs to act, and unlike the renewal mechanism it can
+# be read straight off disk without interrogating systemd.
+CERT_MIN_DAYS=""
+for _live in /etc/letsencrypt/live/*/; do
+    [ -f "${_live}cert.pem" ] || continue
+    _end="$(openssl x509 -enddate -noout -in "${_live}cert.pem" 2>/dev/null | cut -d= -f2)"
+    [ -n "$_end" ] || continue
+    _days=$(( ( $(date -d "$_end" +%s) - $(date +%s) ) / 86400 ))
+    echo "  $(basename "$_live") expires in ${_days} day(s)"
+    if [ -z "$CERT_MIN_DAYS" ] || [ "$_days" -lt "$CERT_MIN_DAYS" ]; then
+        CERT_MIN_DAYS="$_days"
     fi
+done
+
+# Three outcomes, not two. This printed "no certbot timer or cron entry found"
+# whenever the lookup did not succeed, which reads as "renewal is not
+# configured" -- a claim it cannot support when the real reason is that it
+# could not ask. Observed on 2026-08-05: the deployment warned while
+# certbot.timer was enabled, active, and had last run ten hours earlier. The
+# warning was not reproducible afterwards, so the cause stays unproven; what is
+# certain is that the check reported absence on evidence that only showed
+# failure to determine.
+#
+# The result is captured into a variable rather than piped: under `set -o
+# pipefail` a non-zero systemctl makes the whole pipeline non-zero regardless of
+# what grep found, and the branch taken then says nothing about certbot.
+RENEWAL="absent"
+if _timers="$(systemctl list-timers 'certbot*' --no-pager 2>/dev/null)"; then
+    case "$_timers" in
+        *certbot*) RENEWAL="present (systemd timer)" ;;
+    esac
 else
-    echo "  WARNING: no certbot timer or cron entry found; certificates may not renew"
+    RENEWAL="undetermined"
+fi
+if [ "$RENEWAL" != "present (systemd timer)" ] \
+   && crontab -l 2>/dev/null | grep -q certbot; then
+    RENEWAL="present (cron)"
+fi
+
+case "$RENEWAL" in
+    present*)
+        echo "  a certbot renewal mechanism is present: ${RENEWAL#present }"
+        if find /etc/letsencrypt/renewal-hooks/deploy -type f 2>/dev/null | grep -q .; then
+            echo "  renewal has deploy hooks"
+        else
+            echo "  WARNING: no deploy hook in /etc/letsencrypt/renewal-hooks/deploy/;"
+            echo "           a renewed certificate will not reach nginx until it restarts"
+        fi
+        ;;
+    undetermined)
+        echo "  NOTE: could not query systemd for a renewal timer, and root has"
+        echo "        no certbot cron entry. This says nothing about whether"
+        echo "        renewal is configured -- check by hand if the expiry above"
+        echo "        is close."
+        ;;
+    *)
+        echo "  WARNING: no certbot timer and no cron entry; certificates may not renew"
+        ;;
+esac
+
+# A mechanism that exists is not a mechanism that worked. Expiry inside the
+# 30-day window is when Let's Encrypt renewal should already have happened.
+if [ -n "$CERT_MIN_DAYS" ] && [ "$CERT_MIN_DAYS" -lt 30 ]; then
+    echo "  WARNING: a certificate expires in ${CERT_MIN_DAYS} day(s); renewal"
+    echo "           should have run by now whatever the mechanism reports"
 fi
 
 step "the site answers"

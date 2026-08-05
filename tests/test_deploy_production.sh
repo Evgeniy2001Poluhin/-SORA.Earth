@@ -428,8 +428,15 @@ check "it records the config hash" "$(grep -c "^nginx_config   sha256:$CONF_SUM"
 check "it records what it replaced" "$(grep -c 'state replaced by this run' "$MAN")" "1"
 check "including the previous commit" "$(grep -c '^previous_commit ' "$MAN")" "1"
 check "and the previous images"     "$(grep -c '^previous_images:' "$MAN")" "1"
-check "it warns about certificate renewal" \
-    "$(grep -qi 'no certbot timer' "$SANDBOX/out" && echo yes || echo no)" "yes"
+# The systemctl stub exits 1, so this scenario is "the lookup failed", not "no
+# renewal is configured". The previous assertion here demanded the words "no
+# certbot timer" for it -- enshrining the conflation of the two. Production
+# showed the cost on 2026-08-05: the deployment reported renewal missing while
+# certbot.timer was enabled, active and had run ten hours earlier.
+check "an unavailable systemctl is reported as undetermined, not absent" \
+    "$(grep -qi 'could not query systemd' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "and it does not claim the timer is missing" \
+    "$(grep -qi 'no certbot timer and no cron' "$SANDBOX/out" && echo yes || echo no)" "no"
 # The guard refuses a dirty tree, so a guard that dirties the tree refuses its
 # own next run. The default manifest directory was inside the checkout and every
 # test overrode it, which is precisely why nobody noticed.
@@ -1052,6 +1059,43 @@ check "and it names the checkout" \
     "$(grep -q 'cannot check out' "$SANDBOX/out" && echo yes || echo no)" "yes"
 check "the journal says rollback-failed, not mutating" \
     "$(grep -q '^state          rollback-failed' "$SANDBOX/manifests/in-progress" 2>/dev/null && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+echo "== renewal: present, absent and undetermined are three states =="
+# Undetermined is covered above, by the default stub that exits 1. These two
+# are the states that stub can never produce, and without them "undetermined"
+# could be the only branch this suite ever reaches -- which is how the previous
+# assertion looked correct while the other two were untested.
+
+new_sandbox
+cat > "$STUB_DIR/bin/systemctl" <<'STUB'
+#!/usr/bin/env bash
+cat <<'OUT'
+NEXT                        LEFT  LAST                        PASSED UNIT          ACTIVATES
+Wed 2026-08-05 21:12:48 UTC 5h    Wed 2026-08-05 05:05:04 UTC 10h    certbot.timer certbot.service
+OUT
+STUB
+chmod +x "$STUB_DIR/bin/systemctl"
+run_guard
+check "a systemd timer is reported present" \
+    "$(grep -q 'renewal mechanism is present: (systemd timer)' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "and no absence is claimed" \
+    "$(grep -qi 'no certbot timer and no cron' "$SANDBOX/out" && echo yes || echo no)" "no"
+rm -rf "$SANDBOX"
+
+new_sandbox
+cat > "$STUB_DIR/bin/systemctl" <<'STUB'
+#!/usr/bin/env bash
+echo "0 timers listed."
+STUB
+chmod +x "$STUB_DIR/bin/systemctl"
+run_guard
+# systemctl answered and certbot is genuinely not there. This is the only case
+# in which claiming absence is supported by the evidence.
+check "a successful lookup finding nothing warns of real absence" \
+    "$(grep -qi 'no certbot timer and no cron' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "and it is not reported as undetermined" \
+    "$(grep -qi 'could not query systemd' "$SANDBOX/out" && echo yes || echo no)" "no"
 rm -rf "$SANDBOX"
 
 echo
