@@ -92,27 +92,43 @@ class FeatureEngineer:
     def add_external_regressors(self, df: pd.DataFrame, country: Optional[str] = None) -> pd.DataFrame:
         """Add external time series data from database tables.
 
-        Fetches:
-        - gdp_growth: GDP growth from CountryIndicatorHistory (World Bank)
-        - air_quality: PM2.5 from RegionSignal (OpenAQ)
-        - carbon_price: Carbon price ($/tCO2) from RegionSignal
+        One regressor, not three. `air_quality` and `carbon_price` were
+        removed in #95 rather than left at zero:
 
-        Data is merged by nearest date (forward-filled for gaps).
-        Falls back to zeros if DB is unavailable or no data found.
+        - `air_quality` read `region_signals` for pm25. That table holds six
+          metrics and none is air quality. PM2.5 does exist, in
+          `environmental_observations` under `pm2_5`, but the join is not a
+          rename: region keys are country codes for nineteen of twenty-one
+          regions and city codes (RU-MOW, RU-SPE) for the rest, and there were
+          eight hours of observations at the time of writing. Merging that
+          onto a multi-month frame produces a step at the join boundary, which
+          a model will happily fit.
+        - `carbon_price` read `region_signals` for carbon prices. There are
+          none, anywhere in the database. No ingester writes them.
+
+        A column of zeros is not a neutral placeholder. Zero is an economically
+        meaningful value for both of these -- clean air, no carbon price -- so
+        a model cannot tell "we have no data" from "the figure is zero", and
+        neither could anyone reading the frame. Declaring a regressor the
+        platform does not have is worse than declaring one fewer.
+
+        `gdp_growth` stays: it carries real data after #96, verified across
+        all 30 countries on production with variance > 0.
 
         Args:
             df: Input DataFrame with 'ds' column
             country: Country/region code for data lookup
 
         Returns:
-            DataFrame with external regressor columns
+            DataFrame with the gdp_growth column added
         """
         df = df.copy()
 
-        # Default zeros — overwritten if DB data available
+        # The default is still 0.0, and still a compromise -- but a declared
+        # one, for a single regressor whose data is known to exist. When it is
+        # absent the warning below says so rather than leaving a plausible
+        # number in place unremarked.
         df["gdp_growth"] = 0.0
-        df["air_quality"] = 0.0
-        df["carbon_price"] = 0.0
 
         if country is None:
             log.debug("No country specified, using placeholder regressors")
@@ -122,15 +138,6 @@ class FeatureEngineer:
             gdp_series = self._fetch_gdp_growth(country)
             if not gdp_series.empty:
                 df = self._merge_regressor(df, gdp_series, "gdp_growth")
-
-            aq_series = self._fetch_air_quality(country)
-            if not aq_series.empty:
-                df = self._merge_regressor(df, aq_series, "air_quality")
-
-            carbon_series = self._fetch_carbon_price(country)
-            if not carbon_series.empty:
-                df = self._merge_regressor(df, carbon_series, "carbon_price")
-
         except Exception as e:
             log.warning(f"External regressor fetch failed: {e}. Using zeros.")
 
@@ -138,16 +145,11 @@ class FeatureEngineer:
         # that had never once carried a value looked exactly like one that was
         # working. A column left entirely at its default contributes nothing to
         # the forecast, and that is worth saying out loud.
-        dead = [name for name in ("gdp_growth", "air_quality", "carbon_price")
-                if not (df[name] != 0.0).any()]
-        if dead:
+        if not (df["gdp_growth"] != 0.0).any():
             log.warning(
-                "External regressors carrying no data for country=%s: %s. "
-                "These columns are all zeros and contribute nothing.",
-                country, ", ".join(dead),
+                "gdp_growth carries no data for country=%s: the column is all "
+                "zeros and contributes nothing.", country,
             )
-        log.debug("External regressors: %d/3 active for country=%s",
-                  3 - len(dead), country)
         return df
 
     @staticmethod
@@ -191,60 +193,14 @@ class FeatureEngineer:
         finally:
             db.close()
 
-    @staticmethod
-    def _fetch_air_quality(region: str) -> pd.Series:
-        """Fetch PM2.5 time series from RegionSignal."""
-        try:
-            from app.database import SessionLocal, RegionSignal
-        except ImportError:
-            return pd.Series(dtype=float)
-
-        db = SessionLocal()
-        try:
-            rows = db.query(RegionSignal).filter(
-                RegionSignal.region_code == region.upper(),
-                RegionSignal.metric.in_(["pm25", "PM2.5", "pm2_5", "pm25_ugm3"])
-            ).order_by(RegionSignal.observed_at.asc()).all()
-
-            if not rows:
-                return pd.Series(dtype=float)
-
-            data = {pd.to_datetime(r.observed_at): r.value for r in rows if r.value is not None}
-            return pd.Series(data, name="air_quality").sort_index()
-        finally:
-            db.close()
-
-    @staticmethod
-    def _fetch_carbon_price(region: str) -> pd.Series:
-        """Fetch carbon price time series ($/tCO2) from RegionSignal.
-
-        Looks for metrics: carbon_price, co2_price, ets_price, carbon_tax
-        """
-        try:
-            from app.database import SessionLocal, RegionSignal
-        except ImportError:
-            return pd.Series(dtype=float)
-
-        db = SessionLocal()
-        try:
-            rows = db.query(RegionSignal).filter(
-                RegionSignal.region_code == region.upper(),
-                RegionSignal.metric.in_([
-                    "carbon_price",
-                    "co2_price",
-                    "ets_price",      # EU Emissions Trading System
-                    "carbon_tax",
-                    "carbon_price_usd_tco2"
-                ])
-            ).order_by(RegionSignal.observed_at.asc()).all()
-
-            if not rows:
-                return pd.Series(dtype=float)
-
-            data = {pd.to_datetime(r.observed_at): r.value for r in rows if r.value is not None}
-            return pd.Series(data, name="carbon_price").sort_index()
-        finally:
-            db.close()
+    # _fetch_air_quality and _fetch_carbon_price lived here and were removed
+    # with their regressors (#95). Both read `region_signals` for metrics that
+    # table has never held, so both returned an empty series on every call and
+    # the columns stayed at 0.0 in every forecast the platform has produced.
+    #
+    # Keeping working-looking code for a feature that was withdrawn is how the
+    # next person concludes the data is merely missing rather than absent by
+    # decision. The reasoning is in add_external_regressors and in #95.
 
     @staticmethod
     def _merge_regressor(df: pd.DataFrame, series: pd.Series, col_name: str) -> pd.DataFrame:
