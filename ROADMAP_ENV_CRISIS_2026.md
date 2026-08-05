@@ -9,6 +9,37 @@
 
 ---
 
+## M1 Data Trust — signed off 2026-08-06
+
+Production `0a1e458`, schema `c58e21a9f7d4`. Full audit:
+[docs/M1_DATA_TRUST_REPORT.md](docs/M1_DATA_TRUST_REPORT.md).
+
+What is signed off is narrow and checkable: **the platform no longer claims to
+use data it does not have.**
+
+    sources     5 World Bank indicators, each verified to exist at the source
+                2 removed (#97): EN.ATM.CO2E.PC and GE.EST are not published
+                by the World Bank; their values were static benchmarks wearing
+                a World Bank code, and are now labelled benchmark:*
+    periods     every World Bank observation carries the year the source
+                states; 0 rows lack a source or a fetch time
+    coverage    26.4-65.2 dated points per country, up from 1.0-1.4
+    features    1 external regressor, not 3. gdp_growth: coverage 1.00 and
+                variance > 0 across all 30 countries. air_quality and
+                carbon_price withdrawn rather than left at 0.0 -- zero is
+                economically meaningful for both, so a model could not tell
+                "no data" from "the figure is zero".
+    reporting   runs report per-pair outcomes; a transient failure degrades
+                the run rather than passing as success
+
+**Not covered, and not claimed:** point-in-time backtesting (#75, M2),
+measured air quality (#57), the consumer API (#84), full structured run
+reporting (#74). The scheduled history refresh stays **off** pending a cadence
+decision -- six hours for annual series means four runs a day reporting
+`inserted=0`, and a signal that is normal four times a day is not a signal.
+
+---
+
 ## 1. Product Vision
 
 SORA.Earth должна стать платформой экологической аналитики, которая:
