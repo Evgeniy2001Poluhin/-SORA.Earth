@@ -151,3 +151,36 @@ def test_regressor_column_carries_the_value_not_zero(indicator_db):
     assert result["gdp_growth"].tolist() == pytest.approx([4.92] * 10), (
         "gdp_growth stayed at its 0.0 default despite data being present"
     )
+
+
+def test_a_fallback_value_never_reaches_the_regressor(indicator_db):
+    """Benchmark stand-ins must not train the model.
+
+    The fallback chain writes static figures under the same indicator code
+    when a fetch fails. No such row exists in production today -- gdp_growth
+    is in neither BENCHMARKS nor GLOBAL_AVG, so the chain cannot produce one --
+    but that is a property of configuration elsewhere, and adding the key to
+    BENCHMARKS would be enough to change it silently.
+
+    The query carries the guarantee now, so it holds whatever else moves.
+    """
+    _insert(indicator_db, [(GDP_GROWTH_INDICATOR, datetime(2024, 1, 1), 4.92)])
+
+    db = indicator_db()
+    try:
+        db.add(database.CountryIndicatorHistory(
+            country_iso3="RUS", country_name="Russia",
+            indicator_code=GDP_GROWTH_INDICATOR, indicator_name="test",
+            value=99.9, source="benchmark",
+            as_of_date=datetime(2025, 1, 1),
+            fetched_at=datetime(2026, 8, 6), refresh_job_name="test",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    series = FeatureEngineer._fetch_gdp_growth("RUS")
+
+    assert len(series) == 1, f"a non-world_bank row entered the series: {series}"
+    assert series.iloc[0] == pytest.approx(4.92)
+    assert 99.9 not in series.values
