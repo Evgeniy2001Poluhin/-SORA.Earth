@@ -1,6 +1,6 @@
 # M1 Data Trust — production sign-off
 
-**Date:** 2026-08-06
+**Date:** 2026-08-06 MSK (2026-08-05 UTC)
 **Production commit:** `0a1e458`
 **Schema:** `c58e21a9f7d4`
 **Scope:** the platform's external data — its sources, periods, provenance, coverage, and the model features built on them.
@@ -25,6 +25,11 @@ and every declared model feature carries real, varying values.
 ## 1. Sources
 
 Five indicators are collected from the World Bank. Two were removed.
+
+`rows` is the raw row count and **includes duplicates left by the pre-#96
+write path**; `points/country` is the average number of *distinct dated facts*
+per country — `count(distinct (country, period)) / count(distinct country)` —
+which is the figure that describes coverage.
 
 | indicator code | rows | countries | points/country | range |
 |---|---|---|---|---|
@@ -51,13 +56,18 @@ rows still carrying EN.ATM.CO2E.PC or GE.EST:  none
 
 ## 2. Periods
 
+The claim is about **World Bank observations**, and only about sources that
+publish a period:
+
 ```
+world_bank rows with no period:        0
 rows with no source or no fetch time:  0
 ```
 
-Every World Bank observation carries the year the source states. Benchmark and
-global-average values carry no period, deliberately — those sources state
-none, and inventing one would assert precision they did not give.
+Benchmark and global-average values carry **no period at all**, deliberately
+and by the same measurement — those sources state none, and inventing one
+would assert precision they did not give. They are excluded from the claim
+above rather than counted as satisfying it.
 
 ## 3. Provenance
 
@@ -70,9 +80,13 @@ for countries where a fetch failed. This is a weaker version of the problem
 just fixed: the indicator is genuinely published by the World Bank and the
 value is a stand-in for the same quantity, so the code is not a false claim in
 the way `GE.EST` was. But a query filtering on `indicator_code` alone still
-mixes measured and substituted values. **`source` distinguishes them and
-nothing currently filters on it.** Recorded in #95; not a blocker for M1,
-because the provenance is stored and correct.
+mixes measured and substituted values.
+
+They affect `SI.POV.GINI` (1,355), `EG.FEC.RNEW.ZS` (291) and
+`NY.GDP.PCAP.CD` (279). **None affects a model feature:** the only regressor
+reads `NY.GDP.MKTP.KD.ZG`, which has no fallback row, and now filters on
+source regardless. So this is a reporting concern, not a training one.
+Recorded in #95.
 
 ## 4. Coverage and history
 
@@ -99,7 +113,7 @@ One external regressor, not three.
 
 | feature | status |
 |---|---|
-| `gdp_growth` | **live** — coverage 1.00 and variance > 0 across all 30 countries |
+| `gdp_growth` | **live** — coverage 1.00 and variance > 0 across all 30 countries, measured values only |
 | `air_quality` | **withdrawn** |
 | `carbon_price` | **withdrawn** |
 
@@ -118,6 +132,25 @@ Verified on production after the deployment:
 regressor columns:            ['gdp_growth']
 countries with variance > 0:  30 of 30
 ```
+
+**Fallback values cannot reach the regressor.** Running the feature builder's
+exact filters grouped by source:
+
+```
+NY.GDP.MKTP.KD.ZG, dated, non-null, by source:
+  world_bank   2,130 rows   30 countries
+  (no other source)
+```
+
+No benchmark or global-average row is eligible, and none exists — `gdp_growth`
+is in neither `BENCHMARKS` nor `GLOBAL_AVG`, so the fallback chain cannot
+produce one, and `refresh_indicator_history` writes `source='world_bank'`
+unconditionally.
+
+That was a property of configuration elsewhere: adding the key to `BENCHMARKS`
+would have been enough to change it silently. The query now filters on
+`source='world_bank'`, so the guarantee belongs to the feature rather than to
+an accident, with a test that fails if the filter is removed.
 
 ## 6. Run reporting
 

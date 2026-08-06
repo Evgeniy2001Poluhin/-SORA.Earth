@@ -175,6 +175,18 @@ class FeatureEngineer:
             rows = db.query(CountryIndicatorHistory).filter(
                 CountryIndicatorHistory.country_iso3 == country.upper(),
                 CountryIndicatorHistory.indicator_code == GDP_GROWTH_INDICATOR,
+                # Measured values only. The fallback chain writes static
+                # benchmark figures under the same indicator code when a fetch
+                # fails, and a model must not silently train on a stand-in.
+                #
+                # No such row exists today -- gdp_growth is in neither
+                # BENCHMARKS nor GLOBAL_AVG, so the chain cannot produce one,
+                # and refresh_indicator_history writes source='world_bank'
+                # unconditionally. That is a property of two things a future
+                # edit could change without noticing. Adding the key to
+                # BENCHMARKS would be enough. Stated here so the guarantee is
+                # the query's, not an accident of configuration elsewhere.
+                CountryIndicatorHistory.source == "world_bank",
                 CountryIndicatorHistory.as_of_date.isnot(None),
                 CountryIndicatorHistory.value.isnot(None),
             ).order_by(
