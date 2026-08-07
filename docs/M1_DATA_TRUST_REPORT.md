@@ -1,7 +1,8 @@
 # M1 Data Trust — production sign-off
 
-**Date:** 2026-08-06 MSK (2026-08-05 UTC)
-**Production commit:** `1b0aacc` — deployed 2026-08-07 04:19Z
+**Signed off:** 2026-08-06 MSK (2026-08-05 UTC), against production `0a1e458`
+**Production verified:** 2026-08-07 04:19Z, on `1b0aacc`
+**Production commit:** `1b0aacc`
 **Schema:** `c58e21a9f7d4`
 **Scope:** the platform's external data — its sources, periods, provenance, coverage, and the model features built on them.
 
