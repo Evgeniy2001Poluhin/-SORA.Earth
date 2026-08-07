@@ -876,3 +876,58 @@ jobs:
           alembic upgrade 0b0ff6d1594e:e3f8a7c15d92 --sql > /tmp/offline_catchup.sql
           grep -q 'DO \$migration\$' /tmp/offline_catchup.sql
           echo "Catch-up offline script generated without an Inspector"
+
+  # One context for branch protection to require, instead of six.
+  #
+  # Requiring the six jobs directly means six names that must match exactly and
+  # forever: rename a job in this file and the requirement silently stops being
+  # satisfiable, and the failure mode is "nothing can merge" rather than
+  # "something is unprotected". One aggregate is one name to get right.
+  #
+  # `if: always()` is load-bearing. Without it this job is skipped whenever a
+  # dependency fails -- and a skipped required check does not report a failure,
+  # so the gate would open exactly when it is needed.
+  #
+  # Secret scanning is deliberately not aggregated here: one of its jobs is
+  # legitimately skipped on some runs, and folding a routine skip into a gate
+  # means either accepting skips (which hides real ones) or blocking on them.
+  required-checks:
+    name: required-checks
+    if: always()
+    runs-on: ubuntu-latest
+    needs:
+      - backend-tests
+      - environmental-postgres-tests
+      - migration-bootstrap
+      - integration-tests
+      - shell-scripts
+      - frontend-checks
+    steps:
+      - name: Every job must have succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          results = {name: spec.get("result")
+                     for name, spec in json.loads(os.environ["RESULTS"]).items()}
+
+          for name, result in sorted(results.items()):
+              print(f"  {name:<32} {result}")
+
+          # Anything that is not `success` fails this job, including `skipped`.
+          # A skipped dependency is not a pass: it means the job did not run,
+          # and a gate that treats "did not run" as "went fine" is the defect
+          # this exists to close.
+          bad = {n: r for n, r in results.items() if r != "success"}
+          if bad:
+              print()
+              print("FAILED: " + ", ".join(f"{n} was {r}" for n, r in sorted(bad.items())))
+              sys.exit(1)
+
+          print()
+          print(f"all {len(results)} required jobs succeeded")
+          PY
