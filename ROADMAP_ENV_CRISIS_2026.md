@@ -9,9 +9,13 @@
 
 ---
 
-## M1 Data Trust — signed off 2026-08-06 MSK (2026-08-05 UTC)
+## M1 Data Trust — signed off 2026-08-06, production verified 2026-08-07
 
-Production `0a1e458`, schema `c58e21a9f7d4`. Full audit:
+Signed off 2026-08-06 MSK against production `0a1e458`; production moved to
+`1b0aacc` on 2026-08-07 04:19Z and every figure was re-measured unchanged. The
+two commits differ by one SQL filter that removes nothing which was in use.
+
+Production `1b0aacc`, schema `c58e21a9f7d4`. Full audit:
 [docs/M1_DATA_TRUST_REPORT.md](docs/M1_DATA_TRUST_REPORT.md).
 
 What is signed off is narrow and checkable: **the platform no longer claims to
