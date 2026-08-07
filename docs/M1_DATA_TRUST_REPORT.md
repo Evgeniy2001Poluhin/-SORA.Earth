@@ -1,12 +1,20 @@
 # M1 Data Trust — production sign-off
 
 **Date:** 2026-08-06 MSK (2026-08-05 UTC)
-**Production commit:** `0a1e458`
+**Production commit:** `1b0aacc` — deployed 2026-08-07 04:19Z
 **Schema:** `c58e21a9f7d4`
 **Scope:** the platform's external data — its sources, periods, provenance, coverage, and the model features built on them.
 
 Every figure below was read from production after the deployment, not from a
 test environment and not from an earlier note.
+
+**The figures were measured on `0a1e458` and re-measured unchanged on
+`1b0aacc`.** The two differ by one SQL filter — `source='world_bank'` in the
+GDP query — which removes nothing that was in use, because every eligible row
+was already `world_bank`. It converts that from a property of configuration
+elsewhere into a property of the query. Re-measured on the deployed code:
+coverage 1.00, variance > 0 across all 30 countries, zero non-`world_bank`
+rows eligible.
 
 ---
 
@@ -183,10 +191,14 @@ the pair counters behave over repeated unattended runs.
 ## 8. Production health at sign-off
 
 ```
-commit         0a1e458          schema      c58e21a9f7d4
+commit         1b0aacc          schema      c58e21a9f7d4
 /health        200              unhealthy containers  0
 rows           104,309          deploy exit code      0, no rollback
 ```
+
+The source filter is present in the **running image**, not only in the
+repository — the file's SHA inside the container matches the tree
+(`cfd5912948498bc5`).
 
 ---
 

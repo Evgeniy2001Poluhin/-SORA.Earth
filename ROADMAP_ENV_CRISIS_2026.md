@@ -11,7 +11,7 @@
 
 ## M1 Data Trust — signed off 2026-08-06 MSK (2026-08-05 UTC)
 
-Production `0a1e458`, schema `c58e21a9f7d4`. Full audit:
+Production `1b0aacc`, schema `c58e21a9f7d4`. Full audit:
 [docs/M1_DATA_TRUST_REPORT.md](docs/M1_DATA_TRUST_REPORT.md).
 
 What is signed off is narrow and checkable: **the platform no longer claims to
