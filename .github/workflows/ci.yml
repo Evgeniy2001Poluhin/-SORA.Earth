@@ -7,6 +7,13 @@ on:
   # than main, and with [main] here it received no checks at all and could not
   # be reviewed against CI.
   pull_request:
+  # Re-run against an exact ref by hand. Without this, a result that someone
+  # doubts cannot be reproduced: there is no way to ask for a run on a given
+  # SHA, and the fallback is rebuilding every job locally -- which took a
+  # Python 3.11 container, a PostgreSQL 16 container and several hours to
+  # settle one question (#105). A push run also cannot be re-triggered without
+  # an empty commit.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
