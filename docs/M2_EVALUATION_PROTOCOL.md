@@ -570,5 +570,48 @@ exists. Both statements hold at once.
 
 The next task is separate from this protocol and is a prerequisite for it:
 **define and begin collecting the canonical daily regional score of §1** —
-#114. Until its first write, the clock in §7 has not started, and the region
-set of §1.4 remains undeclared.
+#114.
+
+### 10.1 The observation layer already exists
+
+Found after the audit above and material to §7, so recorded here rather than
+left in the issue.
+
+`environmental_observations` is live and ingesting hourly:
+
+```text
+event_time span    2026-07-31 … 2026-08-07   (8 days, all present)
+regions            104
+indicators         22
+sources            4
+rows               53,006, all is_valid
+```
+
+It already carries most of the §1.1 contract, and carries it better in one
+respect: `event_time`, `published_at` and `ingested_at` are three distinct
+timestamps, `source_revision` records vintage identity per record, and
+`UNIQUE (source, source_record_id)` enforces deduplication in the database.
+
+**What is missing is the score layer, not the observations.**
+`region_esg_scores` carries `UNIQUE (region_code)` — one row per region, ever,
+upserted in place, so each recomputation destroys the previous value. Its 85
+rows all read `updated_at = 2026-07-31 20:04:26`, and the aggregator that
+writes them reads `region_signals`, which has taken no row since 2026-07-30
+(#116).
+
+### 10.2 Consequence for the §7 clock
+
+Because `environmental_observations` records both event time and ingestion
+time, a dated score series can be **computed backwards to 2026-07-31** under
+the strict rule of §2.1 (`ingested_at <= origin`). That is a genuine as-of
+reconstruction, not back-dating, and it is available only because the
+observation layer was built with the two timestamps separated.
+
+This does not lower the gate. h=7 still requires 174 days of target history and
+h=30 requires 540. What changes is the **start date**: 2026-07-31, already
+elapsed, rather than the day someone builds a writer.
+
+The region set of §1.4 remains undeclared, and the canonical score of §1 still
+does not exist — 104 regions appear in the observation layer against 85 in the
+frozen score table, and which of them are declared is exactly the decision
+§1.4 forbids making later.
