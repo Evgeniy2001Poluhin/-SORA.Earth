@@ -13,7 +13,17 @@ on:
   # Python 3.11 container, a PostgreSQL 16 container and several hours to
   # settle one question (#105). A push run also cannot be re-triggered without
   # an empty commit.
+  #
+  # The input is what makes this answer the actual question. Without it a
+  # manual run checks out the branch tip, so asking "was *this commit* green"
+  # gets an answer about a different tree -- which is the confusion that
+  # started #105.
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit SHA, branch or tag to check out. Defaults to the branch this run was started from."
+        required: false
+        type: string
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -26,6 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.ref }}
           lfs: true
           # No authenticated git operation runs after checkout -- the only git
           # call is a local `git lfs ls-files` -- so the token does not need to
@@ -122,6 +133,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
 
       - uses: actions/setup-node@v4
@@ -170,6 +182,8 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - uses: actions/setup-python@v5
         with:
@@ -323,6 +337,7 @@ jobs:
       # pointer's own "version https://git-lfs.github.com/spec/v1" first line.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.ref }}
           lfs: true
           persist-credentials: false
 
@@ -408,6 +423,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
 
       # Two gates, deliberately at different strictness.
@@ -584,6 +600,7 @@ jobs:
       # the scenario step needs them materialised like backend-tests does.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.ref }}
           lfs: true
 
       - uses: actions/setup-python@v5
