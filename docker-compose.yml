@@ -26,6 +26,16 @@ services:
       timeout: 10s
       retries: 5
       start_period: 40s
+    # Prometheus scrapes `backend:8000` from infra/prometheus.yml, which both
+    # compose files mount -- and the backend service is `app` here and
+    # `backend` in production. Without this alias the dev Prometheus scrapes a
+    # host that does not exist and reports a target that never comes up, which
+    # looks like nothing rather than like an error (#94, and the same shape as
+    # #91).
+    networks:
+      default:
+        aliases:
+          - backend
 
   scheduler:
     build: .
