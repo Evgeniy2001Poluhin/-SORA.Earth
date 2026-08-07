@@ -241,3 +241,5 @@ Every fix in this milestone was checked by reverting it and confirming the
 test went red. Several tests passed without the fix on the first attempt and
 were rewritten; a green test is not evidence until it has been shown able to
 fail.
+
+<!-- Touched to verify that required-checks gates a merge (#105). Safe to revert. -->
