@@ -691,8 +691,23 @@ def scheduled_pretrain_forecast_models():
 def refresh_forecast_metrics():
     """Keep Prometheus forecast metrics fresh for Grafana dashboard.
 
-    Calls LSTM status endpoint via HTTP to trigger metric export in backend container.
-    This ensures metrics are available in the backend's /metrics/prometheus endpoint.
+    Calls the LSTM status endpoint, whose handler sets three gauges as a side
+    effect: sora_forecast_samples_total, sora_forecast_lstm_active and
+    sora_forecast_days_remaining.
+
+    They surface at **/metrics**, served from the prometheus_client registry by
+    Instrumentator, and that is what Prometheus scrapes. This docstring used to
+    name `/metrics/prometheus`, which returns 404 -- measured. The platform has
+    two endpoints that look alike and are not:
+
+        /metrics                    the real registry, 21 sora_* series
+        /api/v1/metrics/prometheus  13 lines assembled by hand from an
+                                    in-process dict, carrying none of the 22
+                                    metrics declared in app/prom_metrics.py
+        /metrics/prometheus         does not exist
+
+    Checking the wrong one is how these gauges appeared to be missing after
+    #93 fixed the call that sets them. See #94.
     """
     import requests
 
