@@ -26,7 +26,22 @@ on:
         type: string
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Per commit for pushes, per ref for everything else.
+  #
+  # Keying on the ref alone meant every merge to main cancelled the run for the
+  # commit before it. Measured: four of the last ten main commits have no
+  # completed run -- not because none was created, but because the next merge,
+  # seconds later, killed it. A commit that is never verified looks identical
+  # to one that passed, and that is how "main has no CI" (#105) appeared to be
+  # true when the runs existed all along.
+  #
+  # A push is a distinct thing to verify: superseding it loses the only check
+  # that commit will ever get. A pull request is not -- a newer push to the
+  # same branch makes the older run irrelevant, and cancelling saves runner
+  # time. workflow_dispatch gets its own group so a manual re-run does not
+  # cancel the automatic verification of the same commit, which is exactly what
+  # happened the first time this input was used.
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
