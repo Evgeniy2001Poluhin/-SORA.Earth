@@ -243,3 +243,4 @@ were rewritten; a green test is not evidence until it has been shown able to
 fail.
 
 <!-- Touched to verify that required-checks gates a merge (#105). Safe to revert. -->
+<!-- second touch: restarts CI so the pending state can be observed -->
