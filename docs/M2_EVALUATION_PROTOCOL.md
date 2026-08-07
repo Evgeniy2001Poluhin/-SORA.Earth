@@ -458,13 +458,34 @@ are incompatible with evaluation unless pinned. Both are pinned here.
 (`app/services/forecasting/prophet.py`), run **directly** — not through
 `EnsembleForecaster` and not through the production fallback chain.
 
-Reason, stated so it is not revisited later: `EnsembleForecaster` weights its
-members by sample size (`n >= 100: LSTM=0.7, Prophet=0.3`; `70 <= n < 100:
-LSTM=0.3, Prophet=0.7`; `n < 10`: LinearTrend). The model's identity therefore
-changes as the series grows, so "the model" would not be one thing across
-folds, and an expanding window would cross those thresholds mid-evaluation. A
-model whose composition depends on how much data it has cannot be compared
-across folds that differ precisely in how much data they have.
+Reason, stated so it is not revisited later: `EnsembleForecaster` re-weights
+its members by sample size on every `fit`, read from the code rather than its
+docstring, which describes thresholds the code does not have:
+
+```text
+n < 10        lstm 0.0  prophet 0.6  linear 0.4   + Prophet fitted on
+                                                    bootstrap-augmented data
+10 ≤ n < 33   lstm 0.0  prophet 0.9  linear 0.1   (LSTM_MIN_ROWS = 33)
+33 ≤ n < 50   lstm 0.2  prophet 0.8  linear 0.0
+50 ≤ n < 100  lstm 0.4  prophet 0.6  linear 0.0
+n ≥ 100       lstm 0.7  prophet 0.3  linear 0.0
+```
+
+The model's identity therefore changes as the series grows. An expanding window
+over the h=7 entry condition of §7 crosses **three** of these thresholds
+mid-evaluation, so "the model" would be a different composition in early folds
+than in late ones — and the folds differ from each other precisely in how much
+data they have. The comparison would confound model with sample size.
+
+The `n < 10` branch is disqualifying on its own: it fits Prophet on
+**synthetic data** produced by `_bootstrap_augment(…, target_size=30)`. A
+metric computed on a model fitted to generated observations measures the
+generator.
+
+Weights are also redistributed silently when a member fails to fit
+(`ensemble.py:107-123`), so two folds reporting "the ensemble" may not have run
+the same combination — which is the same defect as the fallback chain below,
+one level down.
 
 **Fallbacks are recorded, never silent.** The stack documents a chain that
 "never fails" (`app/services/forecasting/__init__.py:11`). For evaluation, any
