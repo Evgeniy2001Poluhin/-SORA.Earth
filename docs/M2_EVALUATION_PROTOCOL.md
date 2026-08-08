@@ -82,9 +82,23 @@ force names it, and every fold reads that version only. Without this, a
 recomputation would silently change results already reported — the same
 failure §9 forbids by another route.
 
-**Retries are idempotent.** A re-run for a region-day that already has a record
-under the same `calculation_version` is a no-op and is counted as such, not an
-error.
+**Retries are idempotent only when the content matches.** The key
+`(region_id, observed_date, calculation_version)` does not contain
+`input_snapshot_id`, `inputs` or `total_score`, so "a record already exists"
+does not mean "the same record". A re-run must compare the immutable snapshot
+fields:
+
+- **identical** — a no-op, counted as a retry, not an error. This is the
+  scheduler re-running after a transient failure.
+- **different** — a **conflict**. Refused and reported, never silently
+  accepted. A differing value under an unchanged `calculation_version` means
+  either the inputs moved without the code moving, or two writers disagree;
+  both are findings, and swallowing them reintroduces the overwrite this
+  contract exists to prevent.
+
+A scheduler retry and a backfill are distinguished by the key, not by
+intent: a retry carries the same `calculation_version`, a backfill a new one.
+Nothing needs to know which caller it was.
 
 **Backfill:** writing a region-day that already exists under the same
 `calculation_version` is refused — it cannot be distinguished from a duplicate.
@@ -134,6 +148,12 @@ The declared region set is **not yet fixed**, because it depends on the design
 decision in #114. It is fixed by a version bump to this document, which is
 required **before the first snapshot is written** — not before the first model
 run, because the coverage denominators of §5 and §7 are meaningless without it.
+
+A concrete precedent now exists and should be followed rather than reinvented:
+`app/services/esg_aggregator.DECLARED_REGIONS` enumerates 85 `region_id`
+values explicitly, with a test asserting the set still matches both ingesters.
+That is the shape this requires — an enumeration plus a drift guard, not a
+count.
 
 What is fixed now, and cannot be revisited:
 
@@ -647,10 +667,26 @@ sources            4
 rows               53,006, all is_valid
 ```
 
-It already carries most of the §1.1 contract, and carries it better in one
-respect: `event_time`, `published_at` and `ingested_at` are three distinct
-timestamps, `source_revision` records vintage identity per record, and
-`UNIQUE (source, source_record_id)` enforces deduplication in the database.
+It carries part of the §1.1 contract, and the two overstatements in the
+first version of this section are worth correcting rather than quietly
+editing, because both were guarantees read off a schema instead of measured.
+
+**Three distinct timestamps** — `event_time`, `published_at`, `ingested_at`.
+This holds, and it is the property that matters most.
+
+**`source_revision` is declared and never written.** Measured on production:
+NULL in **all 57,884 rows**, every source. The column that would hold a
+vintage identifier is empty, which is why §2.2 requires the vintage to be
+recorded separately and #121 has to add one.
+
+**Deduplication is conditional, not universal.** The index is
+`UNIQUE (source, source_record_id) WHERE source_record_id IS NOT NULL`, over a
+nullable column. Rows sharing a source with a NULL id are all permitted. Today
+no row has a NULL id — 0 of 57,884 — so the guarantee holds as a property of
+the data that has arrived, not of the schema that admits it. Before any strict
+reconstruction depends on it, either the column becomes NOT NULL for score
+inputs or a deterministic fallback key is defined; until then it is an open
+gate, recorded here as one.
 
 **What is missing is the score layer, not the observations.**
 `region_esg_scores` carries `UNIQUE (region_code)` — one row per region, ever,
