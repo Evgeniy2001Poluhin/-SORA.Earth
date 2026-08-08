@@ -32,8 +32,18 @@ class EnsembleForecaster(BaseForecastModel):
         50 <= n < 100   lstm 0.4   prophet 0.6   linear 0.0
         n >= 100        lstm 0.7   prophet 0.3   linear 0.0
 
-    33 is `LSTM_MIN_ROWS`, and it is derived rather than chosen: seq_length(14)
-    + max_lag(14) + buffer(5). It moves whenever those hyper-parameters move.
+    33 is `LSTM_MIN_ROWS`. The number was *computed* as seq_length(14) +
+    max_lag(14) + buffer(5), but it is a literal here and does **not** move on
+    its own. `LSTMForecaster.fit()` recomputes its own minimum from
+    `self.seq_length + 14 + 5`, so raising `seq_length` leaves this gate at 33
+    while the model needs more: the ensemble would admit LSTM, the fit would
+    raise, and the weights would be redistributed silently -- the failure the
+    note below describes, reached through the gate meant to prevent it.
+
+    The two must be changed together. `tests/test_forecasting_ensemble_weighting_contract.py`
+    drives the real `LSTMForecaster` across this boundary rather than restating
+    the arithmetic, so a divergence fails a test instead of surfacing as a
+    quietly reweighted forecast.
 
     Two behaviours that the tiers above do not show, both material to anyone
     reading a metric off this model:

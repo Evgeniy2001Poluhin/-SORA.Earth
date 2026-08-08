@@ -152,7 +152,7 @@ def test_bootstrap_augmentation_does_not_run_outside_cold_start(stub_submodels):
 
 
 def test_weights_are_redistributed_silently_when_a_member_fails(monkeypatch):
-    """ensemble.py:107-123 -- a failed fit rewrites the weights and only logs.
+    """A failed member fit rewrites the weights and only logs.
 
     Two runs both reporting "the ensemble" need not have run the same
     combination, which is why it belongs in the docstring.
@@ -178,7 +178,7 @@ def test_weights_are_redistributed_silently_when_a_member_fails(monkeypatch):
     assert forecaster.weights["lstm"] == 0.0
     assert [name for name, _ in forecaster._active_models] == ["prophet", "linear"]
 
-    # The inline comment at ensemble.py:109 says "Don't let Prophet reach 1.0 -
+    # The inline comment in the LSTM failure branch says "Don't let Prophet reach 1.0 -
     # keep Linear as safety net". It does reach 1.0: linear carries 0.0 in every
     # normal tier, so normalising {0.0, 0.9, 0.0} puts everything on Prophet.
     # Pinned as measured rather than as intended -- the comment describes an
@@ -202,3 +202,51 @@ def test_a_prophet_failure_moves_the_weight_the_other_way(monkeypatch):
 
     assert forecaster.weights["prophet"] == 0.0
     assert forecaster.weights["lstm"] == pytest.approx(1.0)
+
+
+def _frame(n_rows):
+    import pandas as pd
+    return pd.DataFrame({
+        "ds": pd.date_range("2026-01-01", periods=n_rows, freq="D"),
+        "y": [50.0 + (i % 7) for i in range(n_rows)],
+    })
+
+
+def _insufficient_data(model, n_rows):
+    """Did LSTMForecaster refuse this many rows as too few?
+
+    Any other failure -- and tiny frames fail in several ways once training
+    starts -- is not what this asks about.
+    """
+    try:
+        model.fit(_frame(n_rows), "y", epochs=1)
+    except ValueError as e:
+        return "Insufficient data" in str(e)
+    except Exception:
+        return False
+    return False
+
+
+def test_the_gate_matches_what_the_lstm_actually_requires():
+    """LSTM_MIN_ROWS is a literal; LSTMForecaster recomputes its own minimum.
+
+    Nothing links them. Raising `seq_length` leaves this gate at 33 while the
+    model needs more, so the ensemble admits LSTM, the fit raises, and the
+    weights are redistributed silently -- through the gate meant to prevent
+    exactly that.
+
+    Driving the real model across the boundary rather than restating
+    `seq_length + 14 + 5` is the point: a test that recomputes the formula
+    agrees with itself no matter how far the two drift apart.
+    """
+    from app.services.forecasting.lstm import LSTMForecaster
+
+    assert _insufficient_data(LSTMForecaster(), LSTM_MIN_ROWS - 1), (
+        f"the LSTM accepts {LSTM_MIN_ROWS - 1} rows, so the ensemble's gate "
+        f"of {LSTM_MIN_ROWS} is stricter than the model requires"
+    )
+    assert not _insufficient_data(LSTMForecaster(), LSTM_MIN_ROWS), (
+        f"the LSTM refuses {LSTM_MIN_ROWS} rows as insufficient, but the "
+        f"ensemble admits it at that size -- the fit will raise and the "
+        f"weights will be redistributed silently"
+    )
