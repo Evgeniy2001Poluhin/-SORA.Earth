@@ -53,8 +53,25 @@ REQUIRED_METRICS = (
 # make in passing here.
 
 # How old the newest observation may be before a run is degraded rather than a
-# success. The sources behind REQUIRED_METRICS publish daily, so this allows
-# one missed day before saying so.
+# success. The sources behind REQUIRED_METRICS emit daily, so this allows one
+# missed run before saying so.
+#
+# What this checks, stated exactly, because the weaker reading is the tempting
+# one: **it detects a stalled pipeline, not stale information.** Both sources
+# behind REQUIRED_METRICS are static literals in the source tree --
+# `sber_veb_baseline` is a hardcoded dict of 85 constants, and `rosstat` makes
+# no network call at all and imports `data.rosstat_snapshot_2024`, described in
+# its own docstring as an offline 2024 snapshot refreshed roughly half-yearly.
+# They re-emit the same values every run stamped with `now`, so `event_time` is
+# always current while the numbers are from 2024. Measured over the 9 days held
+# in `environmental_observations`: every one of the six metrics has exactly
+# **one distinct value per region**.
+#
+# A source republishing a constant on schedule is therefore indistinguishable
+# here from a source that is reporting, and this bound will not tell them
+# apart. It was still worth adding -- a pipeline that stops is a real failure
+# and used to be invisible -- but claiming more for it than it does would
+# repeat the mistake this file was fixed for. See #114.
 _MAX_AGE_HOURS = float(os.getenv("SORA_AGGREGATOR_MAX_AGE_HOURS", "48"))
 
 
