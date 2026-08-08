@@ -513,21 +513,35 @@ one level down.
 fold or region where the primary model did not fit is reported as a fallback
 with the reason, and is **not** counted as a result of the primary model.
 
-**Excluding it from the primary metric excludes it from every metric.** A
+**A method-specific failure may not shrink that method's population.** A
 region-fold dropped because the primary model failed to fit is dropped from the
-baselines and the secondary metrics too. Otherwise the comparison that decides
-the verdict — model against baseline — would be computed over two different
-populations, and a model that fails precisely on its hard cases would look
-better for having failed. The same rule governs every other exclusion in this
-document (§3.2 zero denominator, §4 no observation before the origin, §5.3
-empty test window): **all metrics are computed over one common population of
-region-folds**, the intersection of those admissible under every method being
-compared.
+baselines too, for that metric. Otherwise the comparison deciding the verdict
+would run over two different populations, and a model that fails precisely on
+its hard cases would look better for having failed.
 
-Exclusions are counted and reported. **If more than 10% of region-folds are
-excluded for any reason, the run's verdict is `not testable`** rather than a
-comparison over what survived. That threshold is fixed here, before it is known
-which method would benefit.
+Stated once, as the general rule: **for any given metric, the set of
+region-folds it is computed over is identical across every method being
+compared.** A region-fold leaves a metric only for reasons that hold for all
+methods alike — and when it does, it leaves for all of them.
+
+The distinction matters, because not every exclusion in this document is
+method-specific and they must not be swept together:
+
+| exclusion | applies to | effect |
+|---|---|---|
+| §3.2 zero MASE denominator | all methods equally — the scaling constant is a property of the data | leaves **MASE only**; MAE and RMSE are still computed there, for every method |
+| §4 no observation at or before the origin | all methods — nothing can be fitted or carried forward | leaves every metric |
+| §5.3 no observed test day | all methods — there is nothing to score against | leaves every metric |
+| §8.1 primary model failed to fit | **one method only** | leaves every metric, for every method, so the comparison stays like-for-like |
+
+Only the last is an asymmetry being corrected. The first is deliberately *not*
+a whole-population exclusion: MASE being incomputable says nothing about
+whether MAE is.
+
+Exclusions are counted and reported per metric. **If more than 10% of
+region-folds leave the primary metric for any reason, the run's verdict is
+`not testable`** rather than a comparison over what survived. That threshold is
+fixed here, before it is known which method it would favour.
 
 **Features.** Primary: the target's own history only — no external regressor.
 
