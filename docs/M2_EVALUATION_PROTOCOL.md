@@ -704,21 +704,35 @@ document.**
 
 The observation layer is real. The values inside it are not observations.
 
-Measured on production across the 9 days held, distinct values **per region**:
+**Audit window: `event_time` from 2026-07-31 to 2026-08-07 inclusive**, the
+eight days in §10.1. Every figure below is computed over exactly that window,
+including the denominator of each average, so the table is reproducible from
+the window alone.
+
+Distinct values **per region**, averaged across the regions carrying the
+metric:
 
 ```text
-rosstat        avg_income_rub        1.00      85 regions
-rosstat        budget_transparency   1.00      85 regions
-rosstat        digital_gov_index     1.00      85 regions
-rosstat        life_expectancy       1.00      85 regions
-rosstat        unemployment_rate     1.00      85 regions
-sber_veb       esg_index_baseline    1.00      85 regions
+source                 indicator            days  regions   distinct/region
+rosstat                avg_income_rub          8       85              1.00
+rosstat                budget_transparency     8       85              1.00
+rosstat                digital_gov_index       8       85              1.00
+rosstat                life_expectancy         8       85              1.00
+rosstat                unemployment_rate       8       85              1.00
+sber_veb_baseline      esg_index_baseline      8       85              1.00
 
-openmeteo      temperature          99.90      21 regions
-openmeteo      humidity             53.48      21 regions
-openmeteo_aq   pm2_5                54.48      21 regions
-openmeteo_aq   ozone                51.24      21 regions
+openmeteo              temperature             8       21             95.81
+openmeteo              humidity                8       21             52.28
+openmeteo              wind_direction          8       21            112.19
+openmeteo_air_quality  pm2_5                   3       21             46.38
+openmeteo_air_quality  ozone                   3       21             44.38
 ```
+
+An earlier revision of this section quoted figures from a nine-day window while
+§10.1 stated eight, which made the numbers unreproducible from the stated
+window even though the conclusion was unaffected. The values differ slightly
+from that revision for the same reason -- a day more or less of weather changes
+a count of distinct temperatures, and changes nothing about a constant.
 
 Every metric the ESG formula reads has **exactly one value per region**, on
 every day. Not slow-moving annual statistics — static literals in the source
@@ -763,8 +777,11 @@ before any data existed and remains binding on the first run that ever happens.
 
 **What was decided, and what was ruled out:**
 
-- **Adopted:** the ESG score is a structural cross-section over 85 regions and
-  is not forecast. That is the honest current product.
+- **Adopted:** the ESG score is a structural cross-section and is not
+  forecast. That is the honest current product. The **85 regions are the
+  current score-table population, not the §1.4 declared set** -- §1.4 remains
+  undeclared, and nothing here may be used as protocol coverage until it names
+  the exact ids and a mapping version.
 - **Separate product, not M2:** forecasting `openmeteo` and air quality, which
   do vary, over their 21 regions. Legitimate, and it may not be renamed an ESG
   forecast.
