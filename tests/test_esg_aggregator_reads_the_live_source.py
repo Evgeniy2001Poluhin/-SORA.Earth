@@ -67,19 +67,25 @@ def session_factory(tmp_path, monkeypatch):
     return factory
 
 
-def _observe(session, region, source, indicator, value, event_time=None, valid=True):
+def _observe(session, region, source, indicator, value, event_time=None,
+             valid=True, ingested_at=None):
+    when = event_time or _now()
     session.add(EnvironmentalObservation(
         region_id=region,
         indicator=indicator,
         value=value,
         source=source,
-        event_time=event_time or _now(),
-        ingested_at=event_time or _now(),
+        event_time=when,
+        # Separate on purpose: for these sources `event_time` is `now` on every
+        # run regardless of how old the numbers are, so only `ingested_at`
+        # says whether the pipeline moved.
+        ingested_at=ingested_at or when,
         is_valid=valid,
     ))
 
 
-def _full_region(session, region="RU-MOS", event_time=None, base=70.0):
+def _full_region(session, region="RU-MOS", event_time=None, base=70.0,
+                 ingested_at=None):
     """Every metric the formula requires, so a score can actually be produced."""
     for source, indicator, value in (
         ("sber_veb_baseline", "esg_index_baseline", base),
@@ -89,7 +95,8 @@ def _full_region(session, region="RU-MOS", event_time=None, base=70.0):
         ("rosstat", "budget_transparency", 60.0),
         ("rosstat", "digital_gov_index", 80.0),
     ):
-        _observe(session, region, source, indicator, value, event_time)
+        _observe(session, region, source, indicator, value, event_time,
+                 ingested_at=ingested_at)
 
 
 def test_it_reads_the_live_observation_table(session_factory):
@@ -147,33 +154,107 @@ def test_an_empty_source_is_degraded_not_a_success(session_factory):
     assert "no valid observations" in result["reason"]
 
 
-def test_a_stale_source_is_degraded_not_a_success(session_factory):
+def test_a_stalled_pipeline_is_degraded_not_a_success(session_factory):
+    """Nothing ingested for 100h: the writer stopped, as it did for 8 days."""
     s = session_factory()
-    _full_region(s, event_time=_now() - timedelta(hours=100))
+    _full_region(s, ingested_at=_now() - timedelta(hours=100))
     s.commit()
     s.close()
 
-    result = esg_aggregator.recalc_all_regions(max_age_hours=48)
+    result = esg_aggregator.recalc_all_regions(max_ingest_age_hours=48)
 
     assert result["status"] == "degraded", result
-    assert "100" in result["reason"] or "old" in result["reason"]
-    assert result["newest_age_hours"] >= 99
-    # The scores are still computed and written -- degraded is about trust in
-    # the inputs, not a refusal to record what they imply.
+    assert "ingestion silent" in result["reason"]
+    assert result["pipeline_freshness"]["stalled"] is True
+    assert result["pipeline_freshness"]["age_hours"] >= 99
+    # Scores are still computed and written -- degraded is about trust in the
+    # pipeline, not a refusal to record what the rows imply.
     assert result["regions_computed"] == 1
 
 
-def test_fresh_data_is_not_degraded(session_factory):
-    """The staleness check must be able to pass, or it asserts nothing."""
+def test_a_running_pipeline_is_not_degraded(session_factory):
+    """The check must be able to pass, or it asserts nothing."""
     s = session_factory()
-    _full_region(s, event_time=_now() - timedelta(hours=1))
+    _full_region(s, ingested_at=_now() - timedelta(hours=1))
     s.commit()
     s.close()
 
-    result = esg_aggregator.recalc_all_regions(max_age_hours=48)
+    result = esg_aggregator.recalc_all_regions(max_ingest_age_hours=48)
 
     assert result["status"] == "success", result
+    assert result["pipeline_freshness"]["stalled"] is False
     assert "reason" not in result
+
+
+def test_an_old_event_time_does_not_stall_a_running_pipeline(session_factory):
+    """The distinction this report exists to draw.
+
+    A source may legitimately carry observations older than the bound while
+    ingestion runs perfectly. Measuring staleness on `event_time` would call
+    that a failure; measuring it on `ingested_at` does not.
+    """
+    s = session_factory()
+    _full_region(
+        s,
+        event_time=_now() - timedelta(days=400),
+        ingested_at=_now() - timedelta(minutes=5),
+    )
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions(max_ingest_age_hours=48)
+
+    assert result["status"] == "success", result
+    assert result["pipeline_freshness"]["stalled"] is False
+
+
+def test_the_score_declares_itself_structural(session_factory):
+    s = session_factory()
+    _full_region(s)
+    s.commit()
+    s.close()
+
+    assert esg_aggregator.recalc_all_regions()["score_kind"] == "structural"
+
+
+def test_the_vintage_is_declared_not_inferred_from_row_timestamps(session_factory):
+    """A row written seconds ago still carries 2024 numbers.
+
+    This is the provenance lie in one assertion: `event_time` is `now` because
+    the ingester stamps a literal with `now`, and nothing in the database can
+    contradict it. So the vintage is declared, and a fresh row must not change
+    what is reported.
+    """
+    s = session_factory()
+    _full_region(s, event_time=_now(), ingested_at=_now())
+    s.commit()
+    s.close()
+
+    vintage = esg_aggregator.recalc_all_regions()["source_data_vintage"]
+
+    assert "2024" in vintage["rosstat"]
+    assert "unversioned" in vintage["sber_veb_baseline"]
+
+
+def test_no_change_is_a_success_for_a_structural_index(session_factory):
+    """regions_written == 0 is the expected steady state, not a fault.
+
+    The inputs are static literals, so an unchanged score means the sources
+    behaved exactly as they are built to. Reporting that as degraded would
+    make the normal case indistinguishable from a broken one -- the same
+    confusion, pointed the other way.
+    """
+    s = session_factory()
+    _full_region(s)
+    s.commit()
+    s.close()
+
+    esg_aggregator.recalc_all_regions()
+    second = esg_aggregator.recalc_all_regions()
+
+    assert second["regions_written"] == 0
+    assert second["status"] == "success", second
+    assert second["regions_computed"] == 1
 
 
 def test_invalid_observations_are_not_read(session_factory):

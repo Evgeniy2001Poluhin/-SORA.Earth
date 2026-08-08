@@ -52,27 +52,42 @@ REQUIRED_METRICS = (
 # platform commits to scoring is the declaration in #114, not a decision to
 # make in passing here.
 
-# How old the newest observation may be before a run is degraded rather than a
-# success. The sources behind REQUIRED_METRICS emit daily, so this allows one
-# missed run before saying so.
+# The score this file produces is a **structural cross-section**, not a
+# reading of anything that changes over time, and it says so in its own output
+# rather than leaving that to be inferred.
 #
-# What this checks, stated exactly, because the weaker reading is the tempting
-# one: **it detects a stalled pipeline, not stale information.** Both sources
-# behind REQUIRED_METRICS are static literals in the source tree --
-# `sber_veb_baseline` is a hardcoded dict of 85 constants, and `rosstat` makes
-# no network call at all and imports `data.rosstat_snapshot_2024`, described in
-# its own docstring as an offline 2024 snapshot refreshed roughly half-yearly.
-# They re-emit the same values every run stamped with `now`, so `event_time` is
-# always current while the numbers are from 2024. Measured over the 9 days held
-# in `environmental_observations`: every one of the six metrics has exactly
-# **one distinct value per region**.
+# Both sources behind REQUIRED_METRICS are static literals in the source tree:
+# `sber_veb_baseline` is a hardcoded dict of 85 constants with no network call,
+# and `rosstat` makes no network call either, importing
+# `data.rosstat_snapshot_2024` -- an offline 2024 snapshot refreshed roughly
+# half-yearly, per its own docstring. Measured over the 9 days held in
+# `environmental_observations`, every one of the six metrics has exactly **one
+# distinct value per region**, against 99.9 for openmeteo temperature over the
+# same window.
 #
-# A source republishing a constant on schedule is therefore indistinguishable
-# here from a source that is reporting, and this bound will not tell them
-# apart. It was still worth adding -- a pipeline that stops is a real failure
-# and used to be invisible -- but claiming more for it than it does would
-# repeat the mistake this file was fixed for. See #114.
-_MAX_AGE_HOURS = float(os.getenv("SORA_AGGREGATOR_MAX_AGE_HOURS", "48"))
+# So the score is real between regions and constant within one. It is an index,
+# and #114 established that no forecasting target can be built from it.
+SCORE_KIND = "structural"
+
+# Declared here because neither source reports its own vintage, and the row
+# timestamps cannot stand in for it: both re-emit their values every run
+# stamped with `now`, so `event_time` is always today while the numbers are
+# from 2024. Writing `event_time = now` for a literal is a provenance defect in
+# the ingesters and is tracked separately; until it is fixed, this is the only
+# place the true vintage is stated.
+SOURCE_DATA_VINTAGE = {
+    "rosstat": "2024 offline snapshot (data.rosstat_snapshot_2024)",
+    "sber_veb_baseline": "unversioned literal (app/ingesters/sber_veb_baseline.py)",
+}
+
+# How long ingestion may be silent before the run is degraded.
+#
+# This measures `ingested_at`: **whether the pipeline is running**, which is a
+# real and previously invisible failure -- the aggregator read a table dead for
+# eight days and reported ok (#116). It is deliberately *not* called freshness
+# of the data, and it is not computed from `event_time`, because for these
+# sources a current `event_time` means only that a constant was re-stamped.
+_MAX_INGEST_AGE_HOURS = float(os.getenv("SORA_AGGREGATOR_MAX_INGEST_AGE_HOURS", "48"))
 
 
 def _clip(v, lo=0, hi=100):
@@ -88,7 +103,11 @@ def _norm(v, lo, hi):
 def _latest_by_region(db):
     """Newest valid observation per (region, source, indicator).
 
-    Returns (metrics_by_region, newest_event_time, rows_examined).
+    Returns (metrics_by_region, newest_ingested_at, rows_examined).
+
+    `ingested_at` rather than `event_time`, deliberately: the caller uses it to
+    ask whether ingestion is still running, and `event_time` cannot answer that
+    for a source that re-stamps a literal with `now`.
 
     `row_number()` rather than DISTINCT ON, matching app/services/point_in_time.py:
     production is PostgreSQL but the test suite runs on SQLite, and a read path
@@ -100,7 +119,7 @@ def _latest_by_region(db):
             EnvironmentalObservation.source,
             EnvironmentalObservation.indicator,
             EnvironmentalObservation.value,
-            EnvironmentalObservation.event_time,
+            EnvironmentalObservation.ingested_at,
             func.row_number()
             .over(
                 partition_by=(
@@ -136,18 +155,20 @@ def _latest_by_region(db):
     )
 
     result = defaultdict(dict)
-    newest = None
+    newest_ingest = None
     examined = 0
 
-    for region_id, source, indicator, value, event_time, _rn in db.execute(
+    for region_id, source, indicator, value, ingested_at, _rn in db.execute(
         select(ranked).where(ranked.c.rn == 1)
     ):
         examined += 1
         result[region_id][f"{source}:{indicator}"] = (value, source)
-        if event_time is not None and (newest is None or event_time > newest):
-            newest = event_time
+        if ingested_at is not None and (
+            newest_ingest is None or ingested_at > newest_ingest
+        ):
+            newest_ingest = ingested_at
 
-    return result, newest, examined
+    return result, newest_ingest, examined
 
 
 def _get(metrics, key):
@@ -209,26 +230,38 @@ def _age_hours(newest):
     return (datetime.now(timezone.utc) - newest).total_seconds() / 3600.0
 
 
-def recalc_all_regions(max_age_hours: float | None = None):
-    """Recompute every region's score from the newest valid observations.
+def recalc_all_regions(max_ingest_age_hours: float | None = None):
+    """Recompute every region's structural ESG index from the declared metrics.
 
-    The return value distinguishes three outcomes rather than two, following
-    the rule already established for the environmental quality job (#56, #69):
-    a window with nothing in it must not look like a window that was
-    aggregated successfully.
+    The report separates two things that a single "freshness" number ran
+    together, and conflating them is what let an eight-day staleness pass
+    unnoticed (#116):
 
-    `regions_written` counts rows the database actually changed, which is not
-    the same as `regions_computed`. When the source data has not moved, the
-    recomputed values are identical, SQLAlchemy emits no UPDATE, and the
-    column's `onupdate=func.now()` never fires -- so `updated_at` keeps meaning
-    "when the value last changed" and says nothing about whether anything ran.
-    That distinction is the reason this job reports staleness itself instead of
-    leaving it to be inferred from a timestamp.
+    `pipeline_freshness` -- is ingestion still running? Measured on
+    `ingested_at`. A stalled pipeline is a real failure and degrades the run.
+
+    `source_data_vintage` -- how old is the *information*? Declared per source,
+    because neither source reports it and both re-stamp their literals with
+    `now`. No timestamp in the database can answer this, which is exactly why
+    it is stated rather than measured.
+
+    A fresh pipeline carrying 2024 numbers is the normal state here, not an
+    anomaly, and the output must not read as though the values were observed
+    today.
+
+    `regions_written` counts rows the database actually changed. **Zero is the
+    expected result for a structural index** whose inputs are static: the
+    recomputed values are identical, SQLAlchemy emits no UPDATE, and
+    `onupdate=func.now()` never fires. That is a property of the sources, not
+    a fault in this job, so it is never treated as degraded.
     """
-    limit = _MAX_AGE_HOURS if max_age_hours is None else max_age_hours
+    limit = (
+        _MAX_INGEST_AGE_HOURS if max_ingest_age_hours is None
+        else max_ingest_age_hours
+    )
     db = SessionLocal()
     try:
-        latest, newest, examined = _latest_by_region(db)
+        latest, newest_ingest, examined = _latest_by_region(db)
 
         computed = 0
         written = 0
@@ -248,22 +281,32 @@ def recalc_all_regions(max_age_hours: float | None = None):
                 written += 1
         db.commit()
 
-        age = _age_hours(newest)
+        ingest_age = _age_hours(newest_ingest)
+        stalled = ingest_age is not None and ingest_age > limit
+
         reasons = []
         if examined == 0:
             reasons.append("no valid observations for any required metric")
-        if age is not None and age > limit:
+        if stalled:
             reasons.append(
-                f"newest observation is {age:.1f}h old, limit {limit:.0f}h"
+                f"ingestion silent for {ingest_age:.1f}h, limit {limit:.0f}h"
             )
 
         result = {
             "status": "degraded" if reasons else "success",
+            "score_kind": SCORE_KIND,
             "regions_computed": computed,
             "regions_written": written,
             "observations_examined": examined,
-            "newest_observation": newest.isoformat() if newest else None,
-            "newest_age_hours": round(age, 1) if age is not None else None,
+            "pipeline_freshness": {
+                "newest_ingested_at": (
+                    newest_ingest.isoformat() if newest_ingest else None
+                ),
+                "age_hours": round(ingest_age, 1) if ingest_age is not None else None,
+                "stalled": stalled,
+            },
+            # Not derived from any row timestamp -- see SOURCE_DATA_VINTAGE.
+            "source_data_vintage": dict(SOURCE_DATA_VINTAGE),
         }
         if reasons:
             result["reason"] = "; ".join(reasons)
@@ -275,8 +318,10 @@ def recalc_all_regions(max_age_hours: float | None = None):
             )
         else:
             log.info(
-                "[esg_aggregator] computed %d regions, %d changed, %d observations",
-                computed, written, examined,
+                "[esg_aggregator] %s index: %d regions computed, %d changed, "
+                "%d observations; vintage %s",
+                SCORE_KIND, computed, written, examined,
+                ", ".join(f"{k}={v}" for k, v in SOURCE_DATA_VINTAGE.items()),
             )
         return result
     except Exception as e:
