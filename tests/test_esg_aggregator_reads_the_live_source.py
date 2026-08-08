@@ -190,9 +190,13 @@ def test_a_stalled_pipeline_is_degraded_not_a_success(session_factory):
     assert "ingestion silent" in result["reason"]
     assert result["pipeline_freshness"]["stalled"] is True
     assert result["pipeline_freshness"]["age_hours"] >= 99
-    # Scores are still computed and written -- degraded is about trust in the
-    # pipeline, not a refusal to record what the rows imply.
-    assert result["regions_computed"] == 85
+    # Under the strict contract a stale pair is not admitted to a score, so
+    # nothing is written. The earlier revision computed all 85 here, which is
+    # exactly the behaviour the pair-level contract removed.
+    assert result["required_pairs_stale"] == 510
+    assert result["required_pairs_fresh"] == 0
+    assert result["regions_computed"] == 0
+    assert result["regions_incomplete"] == 85
 
 
 def test_a_running_pipeline_is_not_degraded(session_factory):
@@ -490,6 +494,7 @@ def test_an_incomplete_region_is_not_written(session_factory):
     assert result["status"] == "degraded", result
     assert result["regions_incomplete"] == 1
     assert result["regions_computed"] == 84
+    assert result["required_pairs_missing"] == 5
     assert "RU-MOS" in result["incomplete_regions"]
 
     s = session_factory()
@@ -511,7 +516,9 @@ def test_a_region_missing_one_metric_is_still_incomplete(session_factory):
     result = esg_aggregator.recalc_all_regions()
 
     assert result["regions_incomplete"] == 1
-    assert result["incomplete_regions"]["RU-SPE"] == ["rosstat:life_expectancy"]
+    assert result["incomplete_regions"]["RU-SPE"] == {
+        "missing": ["rosstat:life_expectancy"]
+    }
 
 
 def test_a_region_absent_from_the_source_is_visible(session_factory):
@@ -592,3 +599,126 @@ def test_the_formula_itself_refuses_an_incomplete_set():
         assert esg_aggregator._compute_one(partial) == {}, (
             f"a set missing {key} must not produce a score"
         )
+
+
+# --- pair-level freshness contract ------------------------------------------
+#
+# A global maximum over ingested_at proves that *something* is being written.
+# It cannot see one required pair that stopped: 509 pairs arriving today and
+# one a week old leaves the region formally complete, the global timestamp
+# fresh, the week-old value in the score, and the run reporting success.
+
+
+def test_one_stale_pair_out_of_510_degrades_the_run(session_factory):
+    s = session_factory()
+    _all_declared(s, ingested_at=_now() - timedelta(minutes=5))
+    s.commit()
+    stale = s.query(EnvironmentalObservation).filter_by(
+        region_id="RU-TVE", indicator="unemployment_rate"
+    ).one()
+    stale.ingested_at = _now() - timedelta(days=7)
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions(max_ingest_age_hours=48)
+
+    assert result["status"] == "degraded", result
+    assert result["required_pairs_total"] == 510
+    assert result["required_pairs_stale"] == 1
+    assert result["required_pairs_fresh"] == 509
+    assert result["regions_incomplete"] == 1
+    assert result["regions_complete"] == 84
+    assert result["incomplete_regions"]["RU-TVE"] == {
+        "stale": ["rosstat:unemployment_rate"]
+    }
+
+    s = session_factory()
+    assert s.query(RegionESGScore).filter_by(region_code="RU-TVE").count() == 0
+    s.close()
+
+
+def test_one_source_stopping_degrades_while_the_global_clock_looks_fresh(session_factory):
+    """The exact scenario the global check cannot see.
+
+    rosstat stops entirely; sber_veb_baseline keeps writing its baseline every
+    day. `pipeline_freshness` stays green because something is still arriving.
+    """
+    s = session_factory()
+    _all_declared(s, ingested_at=_now() - timedelta(days=7))
+    s.commit()
+    for row in s.query(EnvironmentalObservation).filter_by(
+        source="sber_veb_baseline"
+    ):
+        row.ingested_at = _now() - timedelta(minutes=5)
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions(max_ingest_age_hours=48)
+
+    # The diagnostic says everything is fine, and it is not wrong -- something
+    # is being written. It is simply not the question that matters.
+    assert result["pipeline_freshness"]["stalled"] is False
+    assert result["status"] == "degraded", result
+    assert result["required_pairs_stale"] == 425      # 85 regions x 5 rosstat
+    assert result["required_pairs_fresh"] == 85       # 85 x sber_veb_baseline
+    assert result["regions_complete"] == 0
+    assert result["regions_incomplete"] == 85
+
+
+def test_a_pair_without_an_ingested_at_is_not_counted_fresh(session_factory):
+    """Unknown is not acceptable -- treating it so is how the defect worked.
+
+    `EnvironmentalObservation.ingested_at` is NOT NULL, so this cannot arise
+    from the database today. Asserted at the classifier so the guard has
+    evidence behind it rather than being defence nobody has exercised.
+    """
+    metrics = {
+        k: (1.0, k.split(":")[0], _now())
+        for k in esg_aggregator.REQUIRED_METRIC_KEYS
+    }
+    missing, stale, fresh = esg_aggregator._classify_pairs(metrics, 48)
+    assert (missing, stale, len(fresh)) == ([], [], 6)
+
+    key = "rosstat:life_expectancy"
+    metrics[key] = (1.0, "rosstat", None)
+    missing, stale, fresh = esg_aggregator._classify_pairs(metrics, 48)
+    assert missing == [key]
+    assert len(fresh) == 5
+
+
+def test_every_pair_fresh_is_a_success(session_factory):
+    """The contract must be passable, or every assertion above proves nothing."""
+    s = session_factory()
+    _all_declared(s, ingested_at=_now() - timedelta(hours=1))
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions(max_ingest_age_hours=48)
+
+    assert result["status"] == "success", result
+    assert result["required_pairs_total"] == 510
+    assert result["required_pairs_fresh"] == 510
+    assert result["required_pairs_stale"] == 0
+    assert result["required_pairs_missing"] == 0
+    assert result["regions_complete"] == 85
+
+
+def test_an_undeclared_region_does_not_pad_the_denominator(session_factory):
+    """510 is 85 declared x 6 required, whatever else the table holds."""
+    s = session_factory()
+    _all_declared(s, ingested_at=_now() - timedelta(hours=1))
+    _full_region(s, region="BRA", ingested_at=_now() - timedelta(hours=1))
+    _full_region(s, region="CAN", ingested_at=_now() - timedelta(hours=1))
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions(max_ingest_age_hours=48)
+
+    assert result["required_pairs_total"] == 510
+    assert result["required_pairs_fresh"] == 510
+    assert result["regions_undeclared"] == 2
+    assert result["status"] == "success", result
+
+    s = session_factory()
+    assert s.query(RegionESGScore).count() == 85
+    s.close()

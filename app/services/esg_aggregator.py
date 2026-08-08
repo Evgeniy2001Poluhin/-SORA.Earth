@@ -237,7 +237,10 @@ def _latest_by_region(db):
         select(ranked).where(ranked.c.rn == 1)
     ):
         examined += 1
-        result[region_id][f"{source}:{indicator}"] = (value, source)
+        # `ingested_at` is carried per entry, not only as a global maximum:
+        # the contract is checked per (region, source, indicator) pair, and a
+        # maximum over all rows cannot see one pair that stopped.
+        result[region_id][f"{source}:{indicator}"] = (value, source, ingested_at)
         if ingested_at is not None and (
             newest_ingest is None or ingested_at > newest_ingest
         ):
@@ -257,6 +260,43 @@ REQUIRED_METRIC_KEYS = tuple(f"{src}:{ind}" for src, ind in REQUIRED_METRICS)
 def _missing_metrics(metrics) -> tuple:
     """Which of the six required metrics this region does not have."""
     return tuple(k for k in REQUIRED_METRIC_KEYS if metrics.get(k) is None)
+
+
+def _classify_pairs(metrics, limit_hours):
+    """Sort one region's required pairs into missing, stale and fresh.
+
+    Checked per pair rather than against a single newest-row timestamp, because
+    a maximum over all rows only proves that *something* is being written. With
+    509 pairs updating daily and one silent for a week, the region still looks
+    complete, the global timestamp still looks fresh, the week-old value still
+    enters the score, and the run still reports success. The same holds if
+    rosstat stops entirely while sber_veb_baseline keeps writing its baseline
+    every day.
+
+    A pair with no `ingested_at` is counted missing rather than fresh: it
+    cannot be shown to have arrived within the bound, and treating unknown as
+    acceptable is how the original defect worked.
+
+    This is still pipeline freshness -- age is measured on `ingested_at`.
+    Vintage of the information is a separate field entirely; see
+    SOURCE_DATA_VINTAGE.
+    """
+    missing, stale, fresh = [], [], []
+    for key in REQUIRED_METRIC_KEYS:
+        entry = metrics.get(key)
+        if entry is None:
+            missing.append(key)
+            continue
+        ingested_at = entry[2] if len(entry) > 2 else None
+        if ingested_at is None:
+            missing.append(key)
+            continue
+        age = _age_hours(ingested_at)
+        if age is not None and age > limit_hours:
+            stale.append(key)
+        else:
+            fresh.append(key)
+    return missing, stale, fresh
 
 
 def _compute_one(metrics):
@@ -304,7 +344,9 @@ def _compute_one(metrics):
 
     total = env_v * 0.4 + soc_v * 0.35 + gov_v * 0.25
 
-    sources = {src for _, src in metrics.values()}
+    # entry is (value, source, ingested_at); index rather than unpack so a
+    # further field does not break this the way widening to three did.
+    sources = {entry[1] for entry in metrics.values()}
     confidence = min(1.0, len(sources) / 3.0)
 
     return {
@@ -370,15 +412,27 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
         written = 0
         absent = []
         incomplete = {}
+        pairs_missing = 0
+        pairs_stale = 0
+        pairs_fresh = 0
 
         for region_code in sorted(DECLARED_REGIONS):
             metrics = latest.get(region_code) or {}
+            missing, stale, fresh = _classify_pairs(metrics, limit)
+            pairs_missing += len(missing)
+            pairs_stale += len(stale)
+            pairs_fresh += len(fresh)
+
             if not metrics:
                 absent.append(region_code)
                 continue
-            missing = _missing_metrics(metrics)
-            if missing:
-                incomplete[region_code] = missing
+            if missing or stale:
+                detail = {}
+                if missing:
+                    detail["missing"] = missing
+                if stale:
+                    detail["stale"] = stale
+                incomplete[region_code] = detail
                 continue
 
             scores = _compute_one(metrics)
@@ -386,7 +440,7 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
                 # Unreachable while _compute_one's only refusal is the
                 # completeness gate already applied above; kept so a future
                 # refusal cannot be silently counted as a computed region.
-                incomplete[region_code] = ("refused_by_formula",)
+                incomplete[region_code] = {"refused_by_formula": True}
                 continue
 
             computed += 1
@@ -418,6 +472,12 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
             reasons.append(
                 f"ingestion silent for {ingest_age:.1f}h, limit {limit:.0f}h"
             )
+        if pairs_stale:
+            reasons.append(
+                f"{pairs_stale} required pairs not ingested within {limit:.0f}h"
+            )
+        if pairs_missing:
+            reasons.append(f"{pairs_missing} required pairs missing")
         if absent:
             reasons.append(f"{len(absent)} declared regions absent from the source")
         if incomplete:
@@ -429,12 +489,24 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
             "status": "degraded" if reasons else "success",
             "score_kind": SCORE_KIND,
             "regions_declared": len(DECLARED_REGIONS),
+            "regions_complete": computed,
             "regions_computed": computed,
             "regions_written": written,
             "regions_absent": len(absent),
             "regions_incomplete": len(incomplete),
             "regions_undeclared": len(undeclared),
             "observations_examined": examined,
+            # The contract, checked per (region, source, indicator). The
+            # denominator is the declared set times the required metrics, so
+            # it does not move with what the table happens to hold and an
+            # undeclared region cannot pad it.
+            "required_pairs_total": len(DECLARED_REGIONS) * len(REQUIRED_METRIC_KEYS),
+            "required_pairs_fresh": pairs_fresh,
+            "required_pairs_stale": pairs_stale,
+            "required_pairs_missing": pairs_missing,
+            # Diagnostic only. A maximum over all rows proves that something is
+            # being written, never that every required pair is -- which is what
+            # `required_pairs_stale` is for.
             "pipeline_freshness": {
                 "newest_ingested_at": (
                     newest_ingest.isoformat() if newest_ingest else None
@@ -454,9 +526,7 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
         if absent:
             result["absent_regions"] = absent[:20]
         if incomplete:
-            result["incomplete_regions"] = {
-                k: list(v) for k, v in sorted(incomplete.items())[:20]
-            }
+            result["incomplete_regions"] = dict(sorted(incomplete.items())[:20])
         if undeclared:
             result["undeclared_regions"] = undeclared[:20]
 
@@ -466,9 +536,11 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
             # from working.
             log.warning(
                 "[esg_aggregator] degraded: %s (declared=%d computed=%d "
-                "written=%d examined=%d absent=%d incomplete=%d)",
+                "written=%d examined=%d absent=%d incomplete=%d "
+                "pairs fresh=%d stale=%d missing=%d)",
                 result["reason"], len(DECLARED_REGIONS), computed, written,
                 examined, len(absent), len(incomplete),
+                pairs_fresh, pairs_stale, pairs_missing,
             )
         else:
             log.info(
