@@ -13,9 +13,11 @@ what is computed from them.
 from __future__ import annotations
 
 import logging
+import math
 import os
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import and_, func, or_, select
 
@@ -69,6 +71,32 @@ REQUIRED_METRICS = (
 # and #114 established that no forecasting target can be built from it.
 SCORE_KIND = "structural"
 
+
+# The regions this index is defined over.
+#
+# Declared, not derived from whatever the table happens to hold: a set that
+# follows the data cannot notice a region going missing, which is one of the
+# two failures the completeness contract below exists to catch. Both sources
+# cover exactly these 85 -- a test asserts that, so a divergence becomes a
+# decision someone makes rather than a silent change in what "85 regions"
+# means.
+DECLARED_REGIONS = frozenset({
+    "RU-AD", "RU-AL", "RU-ALT", "RU-AMU", "RU-ARK", "RU-AST", "RU-BA",
+    "RU-BEL", "RU-BRY", "RU-BU", "RU-CE", "RU-CHE", "RU-CHU", "RU-CR",
+    "RU-CU", "RU-DA", "RU-IN", "RU-IRK", "RU-IVA", "RU-KAM", "RU-KB",
+    "RU-KC", "RU-KDA", "RU-KEM", "RU-KGD", "RU-KGN", "RU-KHA", "RU-KHM",
+    "RU-KIR", "RU-KK", "RU-KL", "RU-KLU", "RU-KO", "RU-KOS", "RU-KR",
+    "RU-KRS", "RU-KYA", "RU-LEN", "RU-LIP", "RU-MAG", "RU-ME", "RU-MO",
+    "RU-MOS", "RU-MOW", "RU-MUR", "RU-NEN", "RU-NGR", "RU-NIZ", "RU-NVS",
+    "RU-OMS", "RU-ORE", "RU-ORL", "RU-PER", "RU-PNZ", "RU-PRI", "RU-PSK",
+    "RU-ROS", "RU-RYA", "RU-SA", "RU-SAK", "RU-SAM", "RU-SAR", "RU-SE",
+    "RU-SEV", "RU-SMO", "RU-SPE", "RU-STA", "RU-SVE", "RU-TA", "RU-TAM",
+    "RU-TOM", "RU-TUL", "RU-TVE", "RU-TY", "RU-TYU", "RU-UD", "RU-ULY",
+    "RU-VGG", "RU-VLA", "RU-VLG", "RU-VOR", "RU-YAN", "RU-YAR", "RU-YEV",
+    "RU-ZAB",
+})
+
+
 # Declared here because neither source reports its own vintage, and the row
 # timestamps cannot stand in for it: both re-emit their values every run
 # stamped with `now`, so `event_time` is always today while the numbers are
@@ -87,7 +115,54 @@ SOURCE_DATA_VINTAGE = {
 # eight days and reported ok (#116). It is deliberately *not* called freshness
 # of the data, and it is not computed from `event_time`, because for these
 # sources a current `event_time` means only that a constant was re-stamped.
-_MAX_INGEST_AGE_HOURS = float(os.getenv("SORA_AGGREGATOR_MAX_INGEST_AGE_HOURS", "48"))
+_MAX_INGEST_AGE_ENV = "SORA_AGGREGATOR_MAX_INGEST_AGE_HOURS"
+_DEFAULT_MAX_INGEST_AGE_HOURS = 48.0
+
+
+class AggregatorConfigError(ValueError):
+    """The aggregator's environment configuration cannot be used."""
+
+
+def _parse_max_ingest_age_hours(raw: Optional[str] = None) -> float:
+    """Read and validate the ingestion-silence bound.
+
+    Called per run rather than at import. A typo in a production environment
+    variable used to raise inside `float()` while this module was being
+    imported, which takes down the backend and the scheduler at startup -- a
+    configuration mistake becoming an outage, in two services, for a value
+    consulted once per aggregation.
+
+    It is still fail-fast: an unusable value raises rather than falling back to
+    the default. Silently substituting 48h would mean a deployment believing it
+    had set a bound it had not, and this is a production policy rather than a
+    convenience setting. The difference is only in blast radius -- the run
+    fails, loudly, and the process keeps serving.
+
+    Absent or empty means "not configured" and takes the default. Zero and
+    negative are rejected: a non-positive bound marks every run stalled, which
+    would make the signal permanent and therefore worthless.
+    """
+    value = os.getenv(_MAX_INGEST_AGE_ENV) if raw is None else raw
+    if value is None or not value.strip():
+        return _DEFAULT_MAX_INGEST_AGE_HOURS
+
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise AggregatorConfigError(
+            f"{_MAX_INGEST_AGE_ENV}={value!r} is not a number"
+        ) from None
+
+    if not math.isfinite(parsed):
+        raise AggregatorConfigError(
+            f"{_MAX_INGEST_AGE_ENV}={value!r} is not finite"
+        )
+    if parsed <= 0:
+        raise AggregatorConfigError(
+            f"{_MAX_INGEST_AGE_ENV}={value!r} must be greater than zero; "
+            f"a non-positive bound reports every run as stalled"
+        )
+    return parsed
 
 
 def _clip(v, lo=0, hi=100):
@@ -176,7 +251,28 @@ def _get(metrics, key):
     return t[0] if t else None
 
 
+REQUIRED_METRIC_KEYS = tuple(f"{src}:{ind}" for src, ind in REQUIRED_METRICS)
+
+
+def _missing_metrics(metrics) -> tuple:
+    """Which of the six required metrics this region does not have."""
+    return tuple(k for k in REQUIRED_METRIC_KEYS if metrics.get(k) is None)
+
+
 def _compute_one(metrics):
+    """Compute one region's index. Requires the complete metric set.
+
+    The `is not None` branches below are defensive, not permissive: a region
+    missing any required metric is refused here and never reaches them. Before
+    that gate existed, a region carrying only `sber_veb_baseline` produced
+    `env = soc = gov = base`, a full-looking score from one input, and a run
+    reporting success -- indistinguishable in the output from a region with all
+    six. That is what makes REQUIRED_METRICS required rather than merely
+    allowed.
+    """
+    if _missing_metrics(metrics):
+        return {}
+
     base = _get(metrics, "sber_veb_baseline:esg_index_baseline")
 
     unemp = _get(metrics, "rosstat:unemployment_rate")
@@ -254,21 +350,45 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
     recomputed values are identical, SQLAlchemy emits no UPDATE, and
     `onupdate=func.now()` never fires. That is a property of the sources, not
     a fault in this job, so it is never treated as degraded.
+
+    The completeness contract is strict. The loop walks **DECLARED_REGIONS**,
+    not the regions the table happens to contain, so a region that vanishes
+    from the source is visible as absent rather than simply unmentioned. A
+    region missing any required metric is **not written**, because a partial
+    score is indistinguishable in the output from a complete one, and the run
+    is degraded.
     """
-    limit = (
-        _MAX_INGEST_AGE_HOURS if max_ingest_age_hours is None
-        else max_ingest_age_hours
-    )
     db = SessionLocal()
     try:
+        limit = (
+            _parse_max_ingest_age_hours() if max_ingest_age_hours is None
+            else max_ingest_age_hours
+        )
         latest, newest_ingest, examined = _latest_by_region(db)
 
         computed = 0
         written = 0
-        for region_code, metrics in latest.items():
+        absent = []
+        incomplete = {}
+
+        for region_code in sorted(DECLARED_REGIONS):
+            metrics = latest.get(region_code) or {}
+            if not metrics:
+                absent.append(region_code)
+                continue
+            missing = _missing_metrics(metrics)
+            if missing:
+                incomplete[region_code] = missing
+                continue
+
             scores = _compute_one(metrics)
             if not scores:
+                # Unreachable while _compute_one's only refusal is the
+                # completeness gate already applied above; kept so a future
+                # refusal cannot be silently counted as a computed region.
+                incomplete[region_code] = ("refused_by_formula",)
                 continue
+
             computed += 1
             row = db.query(RegionESGScore).filter_by(region_code=region_code).first()
             if row:
@@ -281,22 +401,39 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
                 written += 1
         db.commit()
 
+        undeclared = sorted(set(latest) - DECLARED_REGIONS)
         ingest_age = _age_hours(newest_ingest)
         stalled = ingest_age is not None and ingest_age > limit
 
         reasons = []
         if examined == 0:
             reasons.append("no valid observations for any required metric")
+        elif computed == 0:
+            # Rows were read and no score came out: the same shape of defect
+            # this file was fixed for, one layer in.
+            reasons.append(
+                f"read {examined} observations and computed 0 regions"
+            )
         if stalled:
             reasons.append(
                 f"ingestion silent for {ingest_age:.1f}h, limit {limit:.0f}h"
+            )
+        if absent:
+            reasons.append(f"{len(absent)} declared regions absent from the source")
+        if incomplete:
+            reasons.append(
+                f"{len(incomplete)} declared regions missing required metrics"
             )
 
         result = {
             "status": "degraded" if reasons else "success",
             "score_kind": SCORE_KIND,
+            "regions_declared": len(DECLARED_REGIONS),
             "regions_computed": computed,
             "regions_written": written,
+            "regions_absent": len(absent),
+            "regions_incomplete": len(incomplete),
+            "regions_undeclared": len(undeclared),
             "observations_examined": examined,
             "pipeline_freshness": {
                 "newest_ingested_at": (
@@ -307,23 +444,44 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
             },
             # Not derived from any row timestamp -- see SOURCE_DATA_VINTAGE.
             "source_data_vintage": dict(SOURCE_DATA_VINTAGE),
+            # Says where the vintage above came from. It is duplicated here
+            # from the ingesters because the database cannot express it; once
+            # #121 lands it must come from the observation row's source
+            # revision and this mapping must be deleted, not left as a
+            # second answer to the same question.
+            "vintage_provenance": "declared_in_aggregator",
         }
+        if absent:
+            result["absent_regions"] = absent[:20]
+        if incomplete:
+            result["incomplete_regions"] = {
+                k: list(v) for k, v in sorted(incomplete.items())[:20]
+            }
+        if undeclared:
+            result["undeclared_regions"] = undeclared[:20]
+
         if reasons:
             result["reason"] = "; ".join(reasons)
             # Loud, because this is the case that used to be indistinguishable
             # from working.
             log.warning(
-                "[esg_aggregator] degraded: %s (computed=%d written=%d examined=%d)",
-                result["reason"], computed, written, examined,
+                "[esg_aggregator] degraded: %s (declared=%d computed=%d "
+                "written=%d examined=%d absent=%d incomplete=%d)",
+                result["reason"], len(DECLARED_REGIONS), computed, written,
+                examined, len(absent), len(incomplete),
             )
         else:
             log.info(
-                "[esg_aggregator] %s index: %d regions computed, %d changed, "
+                "[esg_aggregator] %s index: %d/%d regions computed, %d changed, "
                 "%d observations; vintage %s",
-                SCORE_KIND, computed, written, examined,
+                SCORE_KIND, computed, len(DECLARED_REGIONS), written, examined,
                 ", ".join(f"{k}={v}" for k, v in SOURCE_DATA_VINTAGE.items()),
             )
         return result
+    except AggregatorConfigError as e:
+        db.rollback()
+        log.error("[esg_aggregator] configuration error: %s", e)
+        return {"status": "error", "error_kind": "configuration", "error": str(e)}
     except Exception as e:
         db.rollback()
         log.exception("[esg_aggregator] failed: %s", e)

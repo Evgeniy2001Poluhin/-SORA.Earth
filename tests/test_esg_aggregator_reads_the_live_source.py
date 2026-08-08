@@ -84,33 +84,56 @@ def _observe(session, region, source, indicator, value, event_time=None,
     ))
 
 
+FULL_SET = (
+    ("sber_veb_baseline", "esg_index_baseline", 70.0),
+    ("rosstat", "unemployment_rate", 5.0),
+    ("rosstat", "avg_income_rub", 75000.0),
+    ("rosstat", "life_expectancy", 73.0),
+    ("rosstat", "budget_transparency", 60.0),
+    ("rosstat", "digital_gov_index", 80.0),
+)
+
+
 def _full_region(session, region="RU-MOS", event_time=None, base=70.0,
-                 ingested_at=None):
-    """Every metric the formula requires, so a score can actually be produced."""
-    for source, indicator, value in (
-        ("sber_veb_baseline", "esg_index_baseline", base),
-        ("rosstat", "unemployment_rate", 5.0),
-        ("rosstat", "avg_income_rub", 75000.0),
-        ("rosstat", "life_expectancy", 73.0),
-        ("rosstat", "budget_transparency", 60.0),
-        ("rosstat", "digital_gov_index", 80.0),
-    ):
+                 ingested_at=None, skip=()):
+    """Every metric the formula requires, so a score can actually be produced.
+
+    `skip` drops indicators, to build the incomplete region the contract must
+    refuse.
+    """
+    for source, indicator, value in FULL_SET:
+        if indicator in skip:
+            continue
+        if indicator == "esg_index_baseline":
+            value = base
         _observe(session, region, source, indicator, value, event_time,
                  ingested_at=ingested_at)
+
+
+def _all_declared(session, **kwargs):
+    """Seed every declared region completely.
+
+    The tests seed all 85 rather than one, because the completeness contract
+    counts absent regions and a single-region fixture would be degraded by
+    design. Passing the contract has to be possible, or the assertions about
+    failing it prove nothing.
+    """
+    for region in sorted(esg_aggregator.DECLARED_REGIONS):
+        _full_region(session, region=region, **kwargs)
 
 
 def test_it_reads_the_live_observation_table(session_factory):
     """The point of #116. Reading region_signals, this finds nothing."""
     s = session_factory()
-    _full_region(s)
+    _all_declared(s)
     s.commit()
     s.close()
 
     result = esg_aggregator.recalc_all_regions()
 
     assert result["status"] == "success", result
-    assert result["regions_computed"] == 1
-    assert result["observations_examined"] == 6
+    assert result["regions_computed"] == 85
+    assert result["observations_examined"] == 510
 
     s = session_factory()
     row = s.query(RegionESGScore).filter_by(region_code="RU-MOS").one()
@@ -157,7 +180,7 @@ def test_an_empty_source_is_degraded_not_a_success(session_factory):
 def test_a_stalled_pipeline_is_degraded_not_a_success(session_factory):
     """Nothing ingested for 100h: the writer stopped, as it did for 8 days."""
     s = session_factory()
-    _full_region(s, ingested_at=_now() - timedelta(hours=100))
+    _all_declared(s, ingested_at=_now() - timedelta(hours=100))
     s.commit()
     s.close()
 
@@ -169,13 +192,13 @@ def test_a_stalled_pipeline_is_degraded_not_a_success(session_factory):
     assert result["pipeline_freshness"]["age_hours"] >= 99
     # Scores are still computed and written -- degraded is about trust in the
     # pipeline, not a refusal to record what the rows imply.
-    assert result["regions_computed"] == 1
+    assert result["regions_computed"] == 85
 
 
 def test_a_running_pipeline_is_not_degraded(session_factory):
     """The check must be able to pass, or it asserts nothing."""
     s = session_factory()
-    _full_region(s, ingested_at=_now() - timedelta(hours=1))
+    _all_declared(s, ingested_at=_now() - timedelta(hours=1))
     s.commit()
     s.close()
 
@@ -194,7 +217,7 @@ def test_an_old_event_time_does_not_stall_a_running_pipeline(session_factory):
     that a failure; measuring it on `ingested_at` does not.
     """
     s = session_factory()
-    _full_region(
+    _all_declared(
         s,
         event_time=_now() - timedelta(days=400),
         ingested_at=_now() - timedelta(minutes=5),
@@ -210,7 +233,7 @@ def test_an_old_event_time_does_not_stall_a_running_pipeline(session_factory):
 
 def test_the_score_declares_itself_structural(session_factory):
     s = session_factory()
-    _full_region(s)
+    _all_declared(s)
     s.commit()
     s.close()
 
@@ -226,7 +249,7 @@ def test_the_vintage_is_declared_not_inferred_from_row_timestamps(session_factor
     what is reported.
     """
     s = session_factory()
-    _full_region(s, event_time=_now(), ingested_at=_now())
+    _all_declared(s, event_time=_now(), ingested_at=_now())
     s.commit()
     s.close()
 
@@ -245,7 +268,7 @@ def test_no_change_is_a_success_for_a_structural_index(session_factory):
     confusion, pointed the other way.
     """
     s = session_factory()
-    _full_region(s)
+    _all_declared(s)
     s.commit()
     s.close()
 
@@ -254,7 +277,7 @@ def test_no_change_is_a_success_for_a_structural_index(session_factory):
 
     assert second["regions_written"] == 0
     assert second["status"] == "success", second
-    assert second["regions_computed"] == 1
+    assert second["regions_computed"] == 85
 
 
 def test_invalid_observations_are_not_read(session_factory):
@@ -368,3 +391,204 @@ def test_a_changed_value_is_counted_as_written(session_factory):
     s = session_factory()
     assert s.query(RegionESGScore).one().env_score == 85.0
     s.close()
+
+
+# --- configuration: a bad env value must not take down two services ---------
+
+
+def test_a_bad_env_value_does_not_break_the_import(monkeypatch):
+    """The blast radius, which is the whole point of parsing per run.
+
+    `float(os.getenv(...))` at module scope turns a typo in a production
+    environment variable into a failed import of both the backend and the
+    scheduler, at startup, for a value consulted once per aggregation.
+    """
+    import importlib
+
+    monkeypatch.setenv("SORA_AGGREGATOR_MAX_INGEST_AGE_HOURS", "fourty-eight")
+    module = importlib.reload(esg_aggregator)
+
+    assert module.recalc_all_regions is not None
+    importlib.reload(esg_aggregator)  # restore for the rest of the session
+
+
+def test_a_bad_env_value_fails_the_run_loudly(session_factory, monkeypatch):
+    """Fail-fast, not a silent default.
+
+    Substituting 48h would leave a deployment believing it had set a bound it
+    had not. This is a production policy, not a convenience setting.
+    """
+    s = session_factory()
+    _all_declared(s)
+    s.commit()
+    s.close()
+
+    monkeypatch.setenv("SORA_AGGREGATOR_MAX_INGEST_AGE_HOURS", "fourty-eight")
+    result = esg_aggregator.recalc_all_regions()
+
+    assert result["status"] == "error"
+    assert result["error_kind"] == "configuration"
+    assert "SORA_AGGREGATOR_MAX_INGEST_AGE_HOURS" in result["error"]
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "nan", "inf", "abc"])
+def test_unusable_bounds_are_rejected(value):
+    with pytest.raises(esg_aggregator.AggregatorConfigError):
+        esg_aggregator._parse_max_ingest_age_hours(value)
+
+
+@pytest.mark.parametrize("value,expected", [("", 48.0), ("12", 12.0), ("0.5", 0.5)])
+def test_usable_bounds_are_accepted(value, expected):
+    """The rejection must be able to not fire, or it asserts nothing."""
+    assert esg_aggregator._parse_max_ingest_age_hours(value) == expected
+
+
+# --- completeness contract --------------------------------------------------
+
+
+def test_rows_read_and_nothing_computed_is_degraded(session_factory):
+    """`examined > 0, computed == 0` is the same defect one layer in.
+
+    The source was read, the run produced no result, and reporting success
+    would make that indistinguishable from a run that scored every region.
+    """
+    s = session_factory()
+    for region in sorted(esg_aggregator.DECLARED_REGIONS):
+        _observe(s, region, "sber_veb_baseline", "esg_index_baseline", 70.0)
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions()
+
+    assert result["status"] == "degraded", result
+    assert result["observations_examined"] == 85
+    assert result["regions_computed"] == 0
+    assert "read 85 observations and computed 0 regions" in result["reason"]
+
+
+def test_an_incomplete_region_is_not_written(session_factory):
+    """A partial score is indistinguishable from a complete one once stored.
+
+    Before the gate, a region holding only `sber_veb_baseline` produced
+    env = soc = gov = base -- a full-looking row from one input.
+    """
+    s = session_factory()
+    _all_declared(s)
+    # Commit before deleting: autoflush is off, so a bulk delete issued against
+    # unflushed inserts would find nothing and quietly leave the region whole.
+    s.commit()
+    for _source, indicator, _v in FULL_SET:
+        if indicator != "esg_index_baseline":
+            s.query(EnvironmentalObservation).filter_by(
+                region_id="RU-MOS", indicator=indicator
+            ).delete()
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions()
+
+    assert result["status"] == "degraded", result
+    assert result["regions_incomplete"] == 1
+    assert result["regions_computed"] == 84
+    assert "RU-MOS" in result["incomplete_regions"]
+
+    s = session_factory()
+    assert s.query(RegionESGScore).filter_by(region_code="RU-MOS").count() == 0
+    s.close()
+
+
+def test_a_region_missing_one_metric_is_still_incomplete(session_factory):
+    """Five of six is not five-sixths of a score; it is a different score."""
+    s = session_factory()
+    _all_declared(s)
+    s.commit()
+    s.query(EnvironmentalObservation).filter_by(
+        region_id="RU-SPE", indicator="life_expectancy"
+    ).delete()
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions()
+
+    assert result["regions_incomplete"] == 1
+    assert result["incomplete_regions"]["RU-SPE"] == ["rosstat:life_expectancy"]
+
+
+def test_a_region_absent_from_the_source_is_visible(session_factory):
+    """Walking the table instead of the declared set cannot see this at all."""
+    s = session_factory()
+    _all_declared(s)
+    s.commit()
+    s.query(EnvironmentalObservation).filter_by(region_id="RU-KAM").delete()
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions()
+
+    assert result["status"] == "degraded", result
+    assert result["regions_absent"] == 1
+    assert "RU-KAM" in result["absent_regions"]
+    assert result["regions_computed"] == 84
+
+
+def test_an_undeclared_region_is_reported_and_not_written(session_factory):
+    """environmental_observations holds 19 country codes this index does not score."""
+    s = session_factory()
+    _all_declared(s)
+    _full_region(s, region="BRA")
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions()
+
+    assert result["regions_undeclared"] == 1
+    assert "BRA" in result["undeclared_regions"]
+    assert result["regions_computed"] == 85
+
+    s = session_factory()
+    assert s.query(RegionESGScore).filter_by(region_code="BRA").count() == 0
+    s.close()
+
+
+def test_the_declared_set_matches_both_sources(session_factory):
+    """Drift guard for the declaration.
+
+    DECLARED_REGIONS is written out rather than derived, so that a region
+    leaving a source is a decision someone makes. This is what turns that
+    into a decision instead of a surprise.
+    """
+    from app.ingesters.sber_veb_baseline import BASELINE
+
+    assert set(esg_aggregator.DECLARED_REGIONS) == set(BASELINE)
+    assert len(esg_aggregator.DECLARED_REGIONS) == 85
+
+
+def test_the_vintage_says_where_it_came_from(session_factory):
+    """Until #121 the mapping is duplicated here; the output must admit it."""
+    s = session_factory()
+    _all_declared(s)
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions()
+
+    assert result["vintage_provenance"] == "declared_in_aggregator"
+
+
+def test_the_formula_itself_refuses_an_incomplete_set():
+    """Defence in depth, tested directly.
+
+    The caller checks completeness before calling `_compute_one`, so this gate
+    is shadowed and mutating it away turns nothing red. That makes it a guard
+    with no evidence behind it, which is the state this suite exists to avoid.
+    Asserted here so a future caller that forgets the check cannot slip a
+    partial score through.
+    """
+    complete = {f"{src}:{ind}": (1.0, src) for src, ind in esg_aggregator.REQUIRED_METRICS}
+    assert esg_aggregator._compute_one(complete) != {}
+
+    for key in list(complete):
+        partial = {k: v for k, v in complete.items() if k != key}
+        assert esg_aggregator._compute_one(partial) == {}, (
+            f"a set missing {key} must not produce a score"
+        )
