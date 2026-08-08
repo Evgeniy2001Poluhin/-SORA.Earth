@@ -26,14 +26,15 @@ class TestDataQualityValidation:
         obs_time = now - timedelta(minutes=10)  # Fresh data
 
         measurement = {
-            "parameter": {"name": "pm25"},
+            "datetime": {"utc": obs_time.isoformat()},
             "value": 25.0,
-            "unit": "µg/m³",
-            "locationId": "loc123",
+            "coordinates": {"latitude": 38.9, "longitude": -77.0},
+            "sensorsId": 3920,
+            "locationsId": 155,
         }
 
         quality, issues = ingester._validate_measurement(
-            "pm25", 25.0, obs_time, now, measurement
+            "pm25", 25.0, obs_time, now, measurement, "µg/m³"
         )
 
         assert quality == DataQuality.EXCELLENT
@@ -97,22 +98,29 @@ class TestDataQualityValidation:
         assert any("old_data" in issue for issue in issues)
 
     def test_unit_mismatch_detected(self, ingester):
-        """Test that unit mismatches are detected but not fatal."""
+        """A unit mismatch is fatal: the value would be stored mislabelled.
+
+        Every range here is calibrated for µg/m³ and every emitted Signal is
+        labelled `ug/m3`, so a ppm reading passes the range check and lands
+        under the wrong unit. This asserted GOOD until #117 made the check
+        able to fire at all -- `actual_unit` was read off the measurement,
+        where v3 never puts it, so it was always None.
+        """
         now = datetime.now(timezone.utc)
         obs_time = now
 
         measurement = {
-            "parameter": {"name": "pm25"},
+            "datetime": {"utc": obs_time.isoformat()},
             "value": 25.0,
-            "unit": "ppm",  # Wrong unit
-            "locationId": "loc123",
+            "sensorsId": 3920,
+            "locationsId": 155,
         }
 
         quality, issues = ingester._validate_measurement(
-            "pm25", 25.0, obs_time, now, measurement
+            "pm25", 25.0, obs_time, now, measurement, "ppm"
         )
 
-        assert quality == DataQuality.GOOD
+        assert quality == DataQuality.INVALID
         assert any("unit_mismatch" in issue for issue in issues)
 
     def test_suspicious_zero_detected(self, ingester):
@@ -332,21 +340,24 @@ class TestProcessMeasurement:
     def test_process_valid_measurement(self, ingester):
         """Test processing a valid measurement."""
         now = datetime.now(timezone.utc)
-        obs_time_str = (now - timedelta(minutes=10)).isoformat() + "Z"
+        # `.isoformat()` on an aware datetime already ends in "+00:00";
+        # appending "Z" makes "+00:00Z", which fromisoformat rejects, so the
+        # parser fell back to `now` and this test passed without ever reading
+        # the timestamp it was named for.
+        obs_time_str = (now - timedelta(minutes=10)).isoformat()
 
         measurement = {
-            "parameter": {"name": "pm25"},
+            "datetime": {"utc": obs_time_str},
             "value": 25.0,
-            "unit": "µg/m³",
-            "locationId": "loc123",
-            "period": {
-                "datetimeLast": {
-                    "utc": obs_time_str
-                }
-            }
+            "coordinates": {"latitude": 38.9, "longitude": -77.0},
+            "sensorsId": 3920,
+            "locationsId": 155,
         }
+        sensor_params = {3920: {"name": "pm25", "units": "µg/m³"}}
 
-        signal = ingester._process_measurement(measurement, "USA", now)
+        signal = ingester._process_measurement(
+            measurement, "USA", now, sensor_params
+        )
 
         assert signal is not None
         assert signal.metric == "pm25_ugm3"
@@ -417,23 +428,25 @@ class TestQualityStatistics:
         """Test that quality stats are updated during measurement processing."""
         now = datetime.now(timezone.utc)
 
+        sensor_params = {3920: {"name": "pm25", "units": "µg/m³"}}
+
         # Process excellent measurement
         measurement1 = {
-            "parameter": {"name": "pm25"},
+            "datetime": {"utc": now.isoformat()},
             "value": 25.0,
-            "unit": "µg/m³",
-            "locationId": "loc123",
+            "sensorsId": 3920,
+            "locationsId": 155,
         }
-        ingester._process_measurement(measurement1, "USA", now)
+        ingester._process_measurement(measurement1, "USA", now, sensor_params)
 
         # Process invalid measurement
         measurement2 = {
-            "parameter": {"name": "pm25"},
+            "datetime": {"utc": now.isoformat()},
             "value": 999.0,  # Out of range
-            "unit": "µg/m³",
-            "locationId": "loc123",
+            "sensorsId": 3920,
+            "locationsId": 155,
         }
-        ingester._process_measurement(measurement2, "USA", now)
+        ingester._process_measurement(measurement2, "USA", now, sensor_params)
 
         assert ingester.quality_stats["total"] == 2
         assert ingester.quality_stats["excellent"] == 1
