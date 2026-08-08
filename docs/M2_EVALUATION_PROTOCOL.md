@@ -3,10 +3,18 @@
 ```text
 Protocol            preregistered, version 1.0
 Target readiness    FAILED
-Reason              canonical temporal unit not established;
-                    insufficient non-overlapping origins
+M2 status           BLOCKED -- no temporal target
+Reason              the regional ESG score is a structural index computed
+                    from versioned static snapshots; it carries no temporal
+                    signal, so an evidential 7/30-day backtest is impossible
+                    regardless of how many repeated records accumulate
 Model runs          none performed
 ```
+
+**This is a preregistered negative feasibility result.** M2 is not a failed
+benchmark and must not be recorded as a completed one: no benchmark was run,
+because the target does not admit one. The protocol below is retained in full
+for a future target that does.
 
 **Version:** 1.0 · **Registered:** 2026-08-08 MSK (2026-08-07 UTC)
 **Supersedes:** nothing
@@ -609,19 +617,20 @@ it is a change of mind that quietly rewrites history.
 
 ## 10. Status and next step
 
-M2 is **not failed**. Its first result is stated plainly:
+M2 is **not a failed model**. No model was run. The target contains no temporal
+signal, which is a finding about the data and not a result about any method.
+
+Its first result is stated plainly:
 
 > **The dataset the platform currently holds does not permit an evidential
-> backtest.** The target is a deterministic function of user input, has no
-> entity key, is not append-only, and does not record any quantity that evolves
-> over time.
+> backtest.** The evaluation target audited in §6 is a deterministic function of
+> user input, has no entity key, is not append-only, and records no quantity
+> that evolves over time. The regional index examined in §10.2 fails the same
+> test for a different reason: its inputs are static snapshots, so it is
+> constant within every region.
 
-M2 also cannot be closed as a completed benchmark until a valid temporal target
-exists. Both statements hold at once.
-
-The next task is separate from this protocol and is a prerequisite for it:
-**define and begin collecting the canonical daily regional score of §1** —
-issue #114.
+M2 cannot be closed as a completed benchmark. §10.3 records the verdict and the
+state it moves to.
 
 ### 10.1 The observation layer already exists
 
@@ -650,17 +659,85 @@ rows all read `updated_at = 2026-07-31 20:04:26`, and the aggregator that
 writes them reads `region_signals`, which has taken no row since 2026-07-30
 (#116).
 
-### 10.2 Consequence for the §7 clock
+### 10.2 The §7 clock has not started, and will not start by waiting
 
-Because `environmental_observations` records both event time and ingestion
-time, a dated score series can be **computed backwards to 2026-07-31** under
-the strict rule of §2.1 (`ingested_at <= origin`). That is a genuine as-of
-reconstruction, not back-dating, and it is available only because the
-observation layer was built with the two timestamps separated.
+An earlier revision of this section concluded that a dated score series could
+be reconstructed back to 2026-07-31, and that the §7 clock had therefore
+started. **That was wrong, and the correction is the decisive result of this
+document.**
 
-This does not lower the gate. h=7 still requires 174 days of target history and
-h=30 requires 540. What changes is the **start date**: 2026-07-31, already
-elapsed, rather than the day someone builds a writer.
+The observation layer is real. The values inside it are not observations.
+
+Measured on production across the 9 days held, distinct values **per region**:
+
+```text
+rosstat        avg_income_rub        1.00      85 regions
+rosstat        budget_transparency   1.00      85 regions
+rosstat        digital_gov_index     1.00      85 regions
+rosstat        life_expectancy       1.00      85 regions
+rosstat        unemployment_rate     1.00      85 regions
+sber_veb       esg_index_baseline    1.00      85 regions
+
+openmeteo      temperature          99.90      21 regions
+openmeteo      humidity             53.48      21 regions
+openmeteo_aq   pm2_5                54.48      21 regions
+openmeteo_aq   ozone                51.24      21 regions
+```
+
+Every metric the ESG formula reads has **exactly one value per region**, on
+every day. Not slow-moving annual statistics — static literals in the source
+tree. `app/ingesters/sber_veb_baseline.py` is a hardcoded dict of 85 constants
+with no network call; `app/ingesters/rosstat.py` makes no network call either
+and imports `data.rosstat_snapshot_2024`, described in its own docstring as an
+offline 2024 snapshot refreshed roughly half-yearly. Both re-emit their values
+each run stamped with `now`, which is why `event_time` advances while the
+numbers do not (#121).
+
+Values differ *between* regions — 34 to 77 distinct values across the 85 — so
+the score is meaningful as a cross-section. It has no temporal content at all.
+
+**Consequences, and none of them are lifted by time:**
+
+- A canonical daily score built exactly as §1 specifies would be, for each
+  region, a **constant**. Against it the last-value baseline of §4 is exact:
+  MAE = 0. No model can beat it, and §8.2's GDP ablation is unanswerable.
+- The §7 entry conditions would be **satisfied on schedule by a series
+  containing nothing**. Twelve non-overlapping windows at ≥80% coverage is a
+  test of record count, and repeated writes of a constant pass it. This is the
+  one way the gate as written can be met without the thing it was gating for.
+- Therefore #114 **is not to be implemented in the form proposed there.** A
+  scheduled writer would produce a table satisfying the schema and the count,
+  holding no new observation. The issue anticipated this scenario as a risk;
+  it is the measured state.
+
+### 10.3 Verdict
+
+> **M2 forecasting feasibility: target readiness FAILED.** The current regional
+> ESG score is a structural index computed from versioned static snapshots. An
+> evidential 7/30-day backtest is impossible regardless of how many repeated
+> records accumulate.
+
+M2 moves to **`BLOCKED — no temporal target`**. Not closed as a completed
+benchmark: nothing was benchmarked, and recording it as finished would assert a
+measurement that was never taken.
+
+This protocol is retained unchanged for a future target. Every fixed choice in
+it — metrics, baselines, folds, modes, entry gate, amendment rule — was made
+before any data existed and remains binding on the first run that ever happens.
+
+**What was decided, and what was ruled out:**
+
+- **Adopted:** the ESG score is a structural cross-section over 85 regions and
+  is not forecast. That is the honest current product.
+- **Separate product, not M2:** forecasting `openmeteo` and air quality, which
+  do vary, over their 21 regions. Legitimate, and it may not be renamed an ESG
+  forecast.
+- **Future project, not now:** acquiring inputs that genuinely change on a
+  monthly or quarterly cadence for a declared region set, storing their source
+  period and vintage rather than the ingester's run time (#121). Only when a
+  varying target exists does the §7 clock start.
+
+M3 does not begin before that.
 
 The region set of §1.4 remains undeclared, and the canonical score of §1 still
 does not exist — 104 regions appear in the observation layer against 85 in the
