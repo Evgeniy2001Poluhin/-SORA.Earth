@@ -22,13 +22,63 @@ LSTM_MIN_ROWS = 33  # seq_length(14) + max_lag(14) + buffer(5) = 33
 class EnsembleForecaster(BaseForecastModel):
     """Ensemble model with intelligent auto-weighting and cold-start strategy.
 
-    Weighting strategy:
-    - n >= 100: LSTM=0.7, Prophet=0.3
-    - 70 <= n < 100: LSTM=0.3, Prophet=0.7
-    - n < 70: Skip LSTM entirely (insufficient for feature engineering)
-    - n < 10: Use LinearTrend fallback with bootstrap augmentation for Prophet
+    Weighting strategy, by sample count n (see `fit`). Four tiers plus cold
+    start; every row sums to 1.0, so the closing `_normalize_weights()` leaves
+    them unchanged unless a member fails:
+
+        n < 10          lstm 0.0   prophet 0.6   linear 0.4
+        10 <= n < 33    lstm 0.0   prophet 0.9   linear 0.1
+        33 <= n < 50    lstm 0.2   prophet 0.8   linear 0.0
+        50 <= n < 100   lstm 0.4   prophet 0.6   linear 0.0
+        n >= 100        lstm 0.7   prophet 0.3   linear 0.0
+
+    33 is `LSTM_MIN_ROWS`. The number was *computed* as seq_length(14) +
+    max_lag(14) + buffer(5), but it is a literal here and does **not** move on
+    its own. `LSTMForecaster.fit()` recomputes its own minimum from
+    `self.seq_length + 14 + 5`, so raising `seq_length` leaves this gate at 33
+    while the model needs more: the ensemble would admit LSTM, the fit would
+    raise, and the weights would be redistributed silently -- the failure the
+    note below describes, reached through the gate meant to prevent it.
+
+    The two must be changed together. `tests/test_forecasting_ensemble_weighting_contract.py`
+    drives the real `LSTMForecaster` across this boundary rather than restating
+    the arithmetic, so a divergence fails a test instead of surfacing as a
+    quietly reweighted forecast.
+
+    Two behaviours that the tiers above do not show, both material to anyone
+    reading a metric off this model:
+
+    * **Below n=10 Prophet is fitted on synthetic rows.** Cold start calls
+      `_bootstrap_augment(df, target_col, target_size=30)` and hands Prophet the
+      result -- interpolated midpoints plus noise, inserted between real
+      observations. Roughly 20 of the 30 rows it trains on were manufactured
+      here, so a metric computed in this tier describes the augmenter as much as
+      the model. LinearTrend, in the same tier, gets the real rows.
+
+    * **Weights are redistributed silently when a member fails to fit**
+      (see `fit`, the `except` branches). A failed LSTM moves its weight to
+      Prophet, a failed Prophet moves its weight to LSTM or LinearTrend, and
+      only a log line records it. Two runs both reporting "the ensemble" need
+      not have run the same combination, so `metadata["models_used"]` on the
+      result -- not the table above -- is what says which models spoke.
+
+      One wrinkle worth knowing: the comment guarding the LSTM branch says it
+      keeps Prophet below 1.0 as a safety net, and it does not. Linear carries
+      0.0 in every normal tier, so normalising leaves Prophet at exactly 1.0.
 
     Fallback chain: LSTM + Prophet → Prophet-only → LinearTrend
+
+    A note on this docstring, because it was wrong for eight commits (#115): it
+    used to describe a cutoff at 70 and an `LSTM=0.3, Prophet=0.7` pair. Both
+    were accurate when written -- at 5ef1386 `LSTM_MIN_ROWS` really was 70,
+    derived as seq_length(30) + 10 + 30 lost to lags. Shrinking seq_length to 14
+    (2b2a98a) and removing the synthetic backfill that padded small datasets
+    (e555560, 00fabf4) re-evaluated the same formula to 33, and the 0.3/0.7 tier
+    was split into 0.2/0.8 and 0.4/0.6. The prose was not updated with either.
+    The thresholds are a consequence of the LSTM's feature engineering, not a
+    policy, so they are expected to move again -- if seq_length or the lag set
+    changes, this table is stale and
+    `tests/test_forecasting_ensemble_weighting_contract.py` will say so.
     """
 
     def __init__(self):
