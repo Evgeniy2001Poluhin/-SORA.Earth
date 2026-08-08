@@ -58,18 +58,30 @@ total_score          the value
 calculation_version  which scoring code produced it
 ```
 
-**Uniqueness:** a database constraint on `(region_id, observed_date)`. Without
-it a retried scheduler run produces two records for one region-day, and the
-per-region-day weighting of §3.1 silently double-counts it.
+**Uniqueness:** a database constraint on
+`(region_id, observed_date, calculation_version)`. Without it a retried
+scheduler run produces two records for one region-day, and the per-region-day
+weighting of §3.1 silently double-counts it.
+
+`calculation_version` is part of the key rather than a plain column so that a
+recomputation under new scoring code can be **retained alongside** the original
+instead of replacing it. Keying on `(region_id, observed_date)` alone would
+make the two mutually exclusive, and the whole point of the append-only rule is
+that the earlier value survives.
+
+**Exactly one version is canonical for evaluation.** The protocol version in
+force names it, and every fold reads that version only. Without this, a
+recomputation would silently change results already reported — the same
+failure §9 forbids by another route.
 
 **Retries are idempotent.** A re-run for a region-day that already has a record
-is a no-op and is counted as such, not an error.
+under the same `calculation_version` is a no-op and is counted as such, not an
+error.
 
-**Backfill:** writing a region-day that already exists is refused. A value may
-be superseded only by a record carrying a different `calculation_version`, and
-both are retained — the original is never overwritten. Reprocessing under the
-*same* `calculation_version` is refused, because it cannot be distinguished
-from a duplicate.
+**Backfill:** writing a region-day that already exists under the same
+`calculation_version` is refused — it cannot be distinguished from a duplicate.
+A new `calculation_version` may write, and both records persist; the original
+is never overwritten.
 
 Two further requirements the audit showed are not decorative:
 
@@ -262,16 +274,19 @@ observed region-day at or before its origin; it grows as origins advance.
 
 Fixed here so that no window is chosen after results are visible.
 
-1. Let `S` be the first `observed_date` in the canonical series and `E` the
-   last `observed_date` for which the full horizon `h` is available
-   (`E = last observed_date − h`).
-2. **The last window ends at `E`.** Windows are then laid **backwards** from
-   `E` in contiguous blocks of `h` days: window *k* covers
-   `[E − k·h + 1, E − (k−1)·h]` for `k = 1, 2, …`. Blocks are contiguous and
-   therefore non-overlapping by construction.
-3. Its origin is the day before the window starts. The initial training
-   requirement of §7 applies to the **earliest** window used: it is admitted
-   only if its origin is at least 90 days (h=7) or 180 days (h=30) after `S`.
+1. Let `S` be the first `observed_date` in the canonical series and **`E` the
+   last `observed_date`** in it. `E` is the end of the most recent test window,
+   not an origin — every day up to and including `E` is available to be
+   predicted, so none is discarded.
+2. Windows are laid **backwards** from `E` in contiguous blocks of `h` days:
+   window *k* covers `[E − k·h + 1, E − (k−1)·h]` for `k = 1, 2, …`, so window
+   1 is `[E − h + 1, E]`. Blocks are contiguous and therefore non-overlapping
+   by construction.
+3. The origin of window *k* is `E − k·h`, the day before its window starts.
+   Training uses every observed region-day at or before that origin. The
+   initial training requirement of §7 applies to the **earliest** window used:
+   it is admitted only if its origin is at least 90 days (h=7) or 180 days
+   (h=30) after `S`.
 4. **Exactly 12 windows are used: `k = 1 … 12`** — the twelve most recent
    admissible ones. If fewer than 12 are admissible, the entry condition of §7
    is not met and no run occurs. If more are available, the older ones are not
@@ -332,6 +347,12 @@ regions                 2        (Europe 167 rows / 14 days;
 ```
 
 ### 6.2 Folds available, counted
+
+These windows are laid **forwards from `S`**, because the question here is
+descriptive — how much this series could support at best. The prescriptive
+construction of §5.1 lays them **backwards from `E`**, and the two do not
+coincide. Neither is used for the other's purpose, and the counts below are not
+an application of §5.1.
 
 | horizon | arithmetic max | windows with data | usable as test |
 |---|---|---|---|
@@ -492,6 +513,22 @@ one level down.
 fold or region where the primary model did not fit is reported as a fallback
 with the reason, and is **not** counted as a result of the primary model.
 
+**Excluding it from the primary metric excludes it from every metric.** A
+region-fold dropped because the primary model failed to fit is dropped from the
+baselines and the secondary metrics too. Otherwise the comparison that decides
+the verdict — model against baseline — would be computed over two different
+populations, and a model that fails precisely on its hard cases would look
+better for having failed. The same rule governs every other exclusion in this
+document (§3.2 zero denominator, §4 no observation before the origin, §5.3
+empty test window): **all metrics are computed over one common population of
+region-folds**, the intersection of those admissible under every method being
+compared.
+
+Exclusions are counted and reported. **If more than 10% of region-folds are
+excluded for any reason, the run's verdict is `not testable`** rather than a
+comparison over what survived. That threshold is fixed here, before it is known
+which method would benefit.
+
 **Features.** Primary: the target's own history only — no external regressor.
 
 **Hyperparameters.** Library defaults, recorded verbatim in the version that
@@ -570,7 +607,7 @@ exists. Both statements hold at once.
 
 The next task is separate from this protocol and is a prerequisite for it:
 **define and begin collecting the canonical daily regional score of §1** —
-#114.
+issue #114.
 
 ### 10.1 The observation layer already exists
 
