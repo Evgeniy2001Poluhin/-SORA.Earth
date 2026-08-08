@@ -282,6 +282,18 @@ class RegionESGScore(Base):
     updated_at = Column(DateTime(timezone=True), default=func.now(),
                         onupdate=func.now(), nullable=False)
 
+    # A score that is no longer backed by a complete, fresh set of
+    # observations. The aggregator refuses to overwrite it -- a partial
+    # recomputation would be worse -- so without these columns the row stays
+    # readable as current and nothing anywhere says otherwise. That is #116
+    # exactly, moved to the consumer boundary.
+    #
+    # `stale_since` holds when the row *first* stopped being backed, not when
+    # it was last checked: "stale since Tuesday" is actionable, "stale as of
+    # this run" is not.
+    stale_since = Column(DateTime(timezone=True), nullable=True, index=True)
+    stale_reason = Column(Text, nullable=True)
+
     # Declared only in a migration until #88; autogenerate read it as removed.
     __table_args__ = (
         Index("ix_region_esg_scores_id", "id", unique=True),
