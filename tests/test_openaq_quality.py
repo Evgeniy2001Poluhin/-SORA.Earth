@@ -26,14 +26,15 @@ class TestDataQualityValidation:
         obs_time = now - timedelta(minutes=10)  # Fresh data
 
         measurement = {
-            "parameter": {"name": "pm25"},
+            "datetime": {"utc": obs_time.isoformat()},
             "value": 25.0,
-            "unit": "µg/m³",
-            "locationId": "loc123",
+            "coordinates": {"latitude": 38.9, "longitude": -77.0},
+            "sensorsId": 3920,
+            "locationsId": 155,
         }
 
         quality, issues = ingester._validate_measurement(
-            "pm25", 25.0, obs_time, now, measurement
+            "pm25", 25.0, obs_time, now, measurement, "µg/m³"
         )
 
         assert quality == DataQuality.EXCELLENT
@@ -335,18 +336,17 @@ class TestProcessMeasurement:
         obs_time_str = (now - timedelta(minutes=10)).isoformat() + "Z"
 
         measurement = {
-            "parameter": {"name": "pm25"},
+            "datetime": {"utc": obs_time_str},
             "value": 25.0,
-            "unit": "µg/m³",
-            "locationId": "loc123",
-            "period": {
-                "datetimeLast": {
-                    "utc": obs_time_str
-                }
-            }
+            "coordinates": {"latitude": 38.9, "longitude": -77.0},
+            "sensorsId": 3920,
+            "locationsId": 155,
         }
+        sensor_params = {3920: {"name": "pm25", "units": "µg/m³"}}
 
-        signal = ingester._process_measurement(measurement, "USA", now)
+        signal = ingester._process_measurement(
+            measurement, "USA", now, sensor_params
+        )
 
         assert signal is not None
         assert signal.metric == "pm25_ugm3"
@@ -417,23 +417,25 @@ class TestQualityStatistics:
         """Test that quality stats are updated during measurement processing."""
         now = datetime.now(timezone.utc)
 
+        sensor_params = {3920: {"name": "pm25", "units": "µg/m³"}}
+
         # Process excellent measurement
         measurement1 = {
-            "parameter": {"name": "pm25"},
+            "datetime": {"utc": now.isoformat()},
             "value": 25.0,
-            "unit": "µg/m³",
-            "locationId": "loc123",
+            "sensorsId": 3920,
+            "locationsId": 155,
         }
-        ingester._process_measurement(measurement1, "USA", now)
+        ingester._process_measurement(measurement1, "USA", now, sensor_params)
 
         # Process invalid measurement
         measurement2 = {
-            "parameter": {"name": "pm25"},
+            "datetime": {"utc": now.isoformat()},
             "value": 999.0,  # Out of range
-            "unit": "µg/m³",
-            "locationId": "loc123",
+            "sensorsId": 3920,
+            "locationsId": 155,
         }
-        ingester._process_measurement(measurement2, "USA", now)
+        ingester._process_measurement(measurement2, "USA", now, sensor_params)
 
         assert ingester.quality_stats["total"] == 2
         assert ingester.quality_stats["excellent"] == 1

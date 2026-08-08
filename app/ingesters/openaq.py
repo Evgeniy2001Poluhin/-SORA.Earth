@@ -68,6 +68,26 @@ REGION_CAPITALS = [
 PARAMETERS = ("pm25", "pm10", "no2", "o3", "so2", "co")
 
 
+def _sensor_parameter_map(location: Dict[str, Any]) -> Dict[int, Dict[str, str]]:
+    """Map sensorsId -> {"name", "units"} from a v3 location object.
+
+    A v3 `latest` result identifies its pollutant only by `sensorsId`; the
+    parameter and its units live on the sensor. Until #117 this ingester read
+    `measurement["parameter"]["name"]`, which the latest endpoint has never
+    returned, so every measurement was discarded and every run reported zero
+    from an HTTP 200.
+    """
+    mapping: Dict[int, Dict[str, str]] = {}
+    for sensor in location.get("sensors") or []:
+        sensor_id = sensor.get("id")
+        param = sensor.get("parameter") or {}
+        name = param.get("name")
+        if sensor_id is None or not name:
+            continue
+        mapping[sensor_id] = {"name": name, "units": param.get("units") or ""}
+    return mapping
+
+
 class OpenAQIngester(BaseIngester):
     """Ingester for OpenAQ air quality data with data quality pipeline.
 
@@ -127,12 +147,25 @@ class OpenAQIngester(BaseIngester):
 
                     # Fetch latest measurements from the best location
                     loc_id = locs[0].get("id")
+
+                    # A v3 `latest` result names no pollutant -- it carries
+                    # sensorsId, and the parameter belongs to the sensor. The
+                    # location object already lists its sensors, so the map is
+                    # built from the response in hand rather than from another
+                    # request against a 2000/hour budget.
+                    sensor_params = _sensor_parameter_map(locs[0])
+                    if not sensor_params:
+                        log.debug("[openaq] %s - location %s lists no sensors",
+                                  code, loc_id)
+
                     lr = await c.get(f"https://api.openaq.org/v3/locations/{loc_id}/latest")
                     lr.raise_for_status()
 
                     # Process each measurement with quality checks
                     for measurement in lr.json().get("results", []):
-                        signal = self._process_measurement(measurement, code, now)
+                        signal = self._process_measurement(
+                            measurement, code, now, sensor_params
+                        )
                         if signal:
                             all_signals.append(signal)
 
@@ -157,21 +190,26 @@ class OpenAQIngester(BaseIngester):
         self,
         measurement: Dict[str, Any],
         region_code: str,
-        now: datetime
+        now: datetime,
+        sensor_params: Optional[Dict[int, Dict[str, str]]] = None,
     ) -> Optional[Signal]:
         """Process and validate a single measurement.
 
         Args:
-            measurement: Measurement data from OpenAQ API
+            measurement: One item from GET /v3/locations/{id}/latest, whose
+                documented fields are datetime, value, coordinates, sensorsId
+                and locationsId -- and nothing else
             region_code: Region code (e.g., "DEU", "USA")
             now: Current timestamp
+            sensor_params: sensorsId -> {"name", "units"}, from the location's
+                sensors list. Without it the pollutant cannot be identified.
 
         Returns:
             Signal object if valid, None if invalid
         """
-        # Extract parameter info
-        param_obj = measurement.get("parameter") or {}
-        param = param_obj.get("name", "")
+        # The pollutant comes from the sensor, not the measurement (#117).
+        sensor = (sensor_params or {}).get(measurement.get("sensorsId")) or {}
+        param = sensor.get("name", "")
         if param not in PARAMETERS:
             return None
 
@@ -179,10 +217,8 @@ class OpenAQIngester(BaseIngester):
         if value is None:
             return None
 
-        # Extract observation timestamp
-        period = measurement.get("period", {})
-        datetime_last = period.get("datetimeLast", {})
-        obs_time_str = datetime_last.get("utc")
+        # Extract observation timestamp: v3 latest carries `datetime.utc`.
+        obs_time_str = (measurement.get("datetime") or {}).get("utc")
 
         if obs_time_str:
             try:
@@ -198,7 +234,8 @@ class OpenAQIngester(BaseIngester):
             value,
             obs_time,
             now,
-            measurement
+            measurement,
+            sensor.get("units"),
         )
 
         # Update quality statistics
@@ -225,8 +262,8 @@ class OpenAQIngester(BaseIngester):
                 "quality": quality.value,
                 "quality_issues": issues,
                 "data_age_hours": (now - obs_time).total_seconds() / 3600,
-                "unit_original": measurement.get("unit"),
-                "location_id": measurement.get("locationId"),
+                "unit_original": sensor.get("units"),
+                "location_id": measurement.get("locationsId"),
             }
         )
 
@@ -236,7 +273,8 @@ class OpenAQIngester(BaseIngester):
         value: float,
         obs_time: datetime,
         now: datetime,
-        raw_data: Dict[str, Any]
+        raw_data: Dict[str, Any],
+        sensor_unit: Optional[str] = None,
     ) -> tuple[DataQuality, List[str]]:
         """Run comprehensive data quality checks.
 
@@ -273,14 +311,17 @@ class OpenAQIngester(BaseIngester):
         elif data_age > timedelta(hours=3):
             issues.append(f"old_data[age={data_age.total_seconds()/3600:.1f}h]")
 
-        # 3. Unit consistency check
+        # 3. Unit consistency check. A v3 latest result carries no unit; it is
+        # a property of the sensor, passed in. Reading it off the measurement
+        # made this check unable to fire (#117).
         expected_unit = param_meta["unit"]
-        actual_unit = raw_data.get("unit")
+        actual_unit = sensor_unit if sensor_unit is not None else raw_data.get("unit")
         if actual_unit and actual_unit not in [expected_unit, "µg/m³", "ug/m3", "μg/m³"]:
             issues.append(f"unit_mismatch[expected={expected_unit},got={actual_unit}]")
 
-        # 4. Completeness check
-        if not raw_data.get("locationId"):
+        # 4. Completeness check. The v3 field is `locationsId`; `locationId`
+        # never exists, so this fired on every record it ever reached.
+        if not raw_data.get("locationsId"):
             issues.append("missing_location_id")
 
         # 5. Suspicious zero check (PM2.5/PM10 exactly 0 is rare)
