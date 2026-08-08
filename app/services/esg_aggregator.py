@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.database import SessionLocal, EnvironmentalObservation, RegionESGScore
 
@@ -360,6 +361,56 @@ def _compute_one(metrics):
     }
 
 
+def _stale_reason(missing, stale) -> str:
+    parts = []
+    if missing:
+        parts.append(f"missing {len(missing)}: {', '.join(missing[:3])}")
+    if stale:
+        parts.append(f"stale {len(stale)}: {', '.join(stale[:3])}")
+    return "; ".join(parts) or "unbacked"
+
+
+def _mark_stale(db, region_code, missing, stale):
+    """Record on the row itself that its score is no longer backed.
+
+    The score is deliberately not overwritten -- recomputing from a partial set
+    would replace a complete old value with an incomplete new one. But leaving
+    the row untouched makes it indistinguishable from a current score to
+    anything reading `region_esg_scores` directly, which `app/routes/map_russia.py`
+    does. That is #116 at the consumer boundary rather than the producer's.
+
+    `stale_since` is set once and preserved, so it answers "since when" rather
+    than "as of this run". `updated_at` is left alone: it means "when the score
+    last changed", and marking staleness does not change a score.
+    """
+    row = db.query(RegionESGScore).filter_by(region_code=region_code).first()
+    if row is None:
+        # Never written, so there is nothing that could be misread.
+        return
+    reason = _stale_reason(missing, stale)
+    previous = row.updated_at
+    if row.stale_since is None:
+        row.stale_since = datetime.now(timezone.utc)
+    row.stale_reason = reason
+    # `onupdate=func.now()` fires whenever an UPDATE is emitted for this row,
+    # and marking staleness emits one. Assigning `previous` is not enough --
+    # an assignment of an equal value leaves the attribute clean, so the
+    # column stays out of the SET clause and onupdate wins. flag_modified
+    # forces it in, carrying the old value, so `updated_at` keeps meaning
+    # "when the score changed" rather than "when the row was touched".
+    row.updated_at = previous
+    flag_modified(row, "updated_at")
+
+
+def _clear_stale(row):
+    """The region is backed again; the marks must not outlive the condition."""
+    if row.stale_since is not None or row.stale_reason is not None:
+        row.stale_since = None
+        row.stale_reason = None
+        return True
+    return False
+
+
 def _age_hours(newest):
     if newest is None:
         return None
@@ -410,6 +461,7 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
 
         computed = 0
         written = 0
+        recovered = 0
         absent = []
         incomplete = {}
         pairs_missing = 0
@@ -425,6 +477,7 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
 
             if not metrics:
                 absent.append(region_code)
+                _mark_stale(db, region_code, missing, stale)
                 continue
             if missing or stale:
                 detail = {}
@@ -433,6 +486,7 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
                 if stale:
                     detail["stale"] = stale
                 incomplete[region_code] = detail
+                _mark_stale(db, region_code, missing, stale)
                 continue
 
             scores = _compute_one(metrics)
@@ -446,10 +500,15 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
             computed += 1
             row = db.query(RegionESGScore).filter_by(region_code=region_code).first()
             if row:
+                cleared = _clear_stale(row)
                 if any(getattr(row, k) != v for k, v in scores.items()):
                     for k, v in scores.items():
                         setattr(row, k, v)
                     written += 1
+                elif cleared:
+                    # The score is unchanged but the row is: it stopped being
+                    # marked stale, and that is a change a reader acts on.
+                    recovered += 1
             else:
                 db.add(RegionESGScore(region_code=region_code, **scores))
                 written += 1
@@ -492,6 +551,9 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
             "regions_complete": computed,
             "regions_computed": computed,
             "regions_written": written,
+            # Rows whose score was unchanged but which stopped being marked
+            # stale -- a change a reader acts on, invisible in regions_written.
+            "regions_unmarked_stale": recovered,
             "regions_absent": len(absent),
             "regions_incomplete": len(incomplete),
             "regions_undeclared": len(undeclared),

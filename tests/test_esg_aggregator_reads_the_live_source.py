@@ -722,3 +722,180 @@ def test_an_undeclared_region_does_not_pad_the_denominator(session_factory):
     s = session_factory()
     assert s.query(RegionESGScore).count() == 85
     s.close()
+
+
+# --- a score that stopped being backed must say so on the row ---------------
+#
+# The aggregator refuses to overwrite a score whose region went incomplete --
+# recomputing from a partial set would replace a complete value with a worse
+# one. But an untouched row is indistinguishable from a current score to
+# anything reading region_esg_scores directly, which app/routes/map_russia.py
+# does. That is #116 at the consumer boundary rather than the producer's.
+
+
+def _row(session_factory, region="RU-MOS"):
+    s = session_factory()
+    try:
+        return s.query(RegionESGScore).filter_by(region_code=region).one()
+    finally:
+        s.close()
+
+
+def test_a_region_that_goes_incomplete_is_marked_on_the_row(session_factory):
+    s = session_factory()
+    _all_declared(s)
+    s.commit()
+    s.close()
+    esg_aggregator.recalc_all_regions()
+
+    before = _row(session_factory)
+    assert before.stale_since is None
+    score_before = before.total_score
+
+    # Push updated_at into the past explicitly. Without this the assertion
+    # below cannot fail: SQLite renders onupdate as CURRENT_TIMESTAMP at
+    # second resolution, the test finishes inside one second, and the value
+    # matches whether or not it was preserved.
+    updated_before = _now() - timedelta(days=3)
+    s = session_factory()
+    row = s.query(RegionESGScore).filter_by(region_code="RU-MOS").one()
+    row.updated_at = updated_before
+    s.query(EnvironmentalObservation).filter_by(
+        region_id="RU-MOS", indicator="life_expectancy"
+    ).delete()
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions()
+    assert result["status"] == "degraded"
+    assert result["regions_incomplete"] == 1
+
+    after = _row(session_factory)
+    assert after.stale_since is not None, (
+        "the row still reads as a current score, which is the whole defect"
+    )
+    assert "life_expectancy" in after.stale_reason
+    assert after.total_score == score_before, (
+        "the score must be preserved, not recomputed from a partial set"
+    )
+    stored = after.updated_at
+    if stored.tzinfo is None:
+        stored = stored.replace(tzinfo=timezone.utc)
+    assert abs((stored - updated_before).total_seconds()) < 2, (
+        "updated_at means 'when the score changed'; marking staleness is not "
+        f"a change of score, but it moved to {stored}"
+    )
+
+
+def test_stale_since_records_when_it_started_not_when_it_was_last_checked(session_factory):
+    s = session_factory()
+    _all_declared(s)
+    s.commit()
+    s.close()
+    esg_aggregator.recalc_all_regions()
+
+    s = session_factory()
+    s.query(EnvironmentalObservation).filter_by(
+        region_id="RU-MOS", indicator="life_expectancy"
+    ).delete()
+    s.commit()
+    s.close()
+
+    esg_aggregator.recalc_all_regions()
+    first = _row(session_factory).stale_since
+    esg_aggregator.recalc_all_regions()
+    second = _row(session_factory).stale_since
+
+    assert first == second, "'stale since Tuesday' is actionable; 'as of now' is not"
+
+
+def test_the_mark_is_cleared_when_the_region_is_backed_again(session_factory):
+    s = session_factory()
+    _all_declared(s)
+    s.commit()
+    s.close()
+    esg_aggregator.recalc_all_regions()
+
+    s = session_factory()
+    removed = s.query(EnvironmentalObservation).filter_by(
+        region_id="RU-MOS", indicator="life_expectancy"
+    ).one()
+    value, source, event_time = removed.value, removed.source, removed.event_time
+    s.delete(removed)
+    s.commit()
+    s.close()
+    esg_aggregator.recalc_all_regions()
+    assert _row(session_factory).stale_since is not None
+
+    s = session_factory()
+    _observe(s, "RU-MOS", source, "life_expectancy", value, event_time)
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions()
+
+    assert result["status"] == "success", result
+    assert result["regions_unmarked_stale"] == 1
+    row = _row(session_factory)
+    assert row.stale_since is None
+    assert row.stale_reason is None
+
+
+def test_a_stale_pair_marks_the_row_too(session_factory):
+    """Not only a missing metric -- an old one has the same consequence."""
+    s = session_factory()
+    _all_declared(s, ingested_at=_now() - timedelta(minutes=5))
+    s.commit()
+    s.close()
+    esg_aggregator.recalc_all_regions(max_ingest_age_hours=48)
+
+    s = session_factory()
+    row = s.query(EnvironmentalObservation).filter_by(
+        region_id="RU-TVE", indicator="unemployment_rate"
+    ).one()
+    row.ingested_at = _now() - timedelta(days=7)
+    s.commit()
+    s.close()
+
+    esg_aggregator.recalc_all_regions(max_ingest_age_hours=48)
+
+    marked = _row(session_factory, "RU-TVE")
+    assert marked.stale_since is not None
+    assert "stale" in marked.stale_reason
+    assert "unemployment_rate" in marked.stale_reason
+
+
+def test_a_region_that_vanishes_entirely_is_marked(session_factory):
+    s = session_factory()
+    _all_declared(s)
+    s.commit()
+    s.close()
+    esg_aggregator.recalc_all_regions()
+
+    s = session_factory()
+    s.query(EnvironmentalObservation).filter_by(region_id="RU-KAM").delete()
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions()
+
+    assert result["regions_absent"] == 1
+    marked = _row(session_factory, "RU-KAM")
+    assert marked.stale_since is not None
+    assert marked.total_score is not None, "the last known score is preserved"
+
+
+def test_a_region_never_written_needs_no_mark(session_factory):
+    """Nothing can be misread if nothing was written."""
+    s = session_factory()
+    for region in sorted(esg_aggregator.DECLARED_REGIONS):
+        _observe(s, region, "sber_veb_baseline", "esg_index_baseline", 70.0)
+    s.commit()
+    s.close()
+
+    result = esg_aggregator.recalc_all_regions()
+
+    assert result["regions_computed"] == 0
+    s = session_factory()
+    assert s.query(RegionESGScore).count() == 0
+    s.close()
