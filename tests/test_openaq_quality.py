@@ -98,22 +98,29 @@ class TestDataQualityValidation:
         assert any("old_data" in issue for issue in issues)
 
     def test_unit_mismatch_detected(self, ingester):
-        """Test that unit mismatches are detected but not fatal."""
+        """A unit mismatch is fatal: the value would be stored mislabelled.
+
+        Every range here is calibrated for µg/m³ and every emitted Signal is
+        labelled `ug/m3`, so a ppm reading passes the range check and lands
+        under the wrong unit. This asserted GOOD until #117 made the check
+        able to fire at all -- `actual_unit` was read off the measurement,
+        where v3 never puts it, so it was always None.
+        """
         now = datetime.now(timezone.utc)
         obs_time = now
 
         measurement = {
-            "parameter": {"name": "pm25"},
+            "datetime": {"utc": obs_time.isoformat()},
             "value": 25.0,
-            "unit": "ppm",  # Wrong unit
-            "locationId": "loc123",
+            "sensorsId": 3920,
+            "locationsId": 155,
         }
 
         quality, issues = ingester._validate_measurement(
-            "pm25", 25.0, obs_time, now, measurement
+            "pm25", 25.0, obs_time, now, measurement, "ppm"
         )
 
-        assert quality == DataQuality.GOOD
+        assert quality == DataQuality.INVALID
         assert any("unit_mismatch" in issue for issue in issues)
 
     def test_suspicious_zero_detected(self, ingester):
@@ -333,7 +340,11 @@ class TestProcessMeasurement:
     def test_process_valid_measurement(self, ingester):
         """Test processing a valid measurement."""
         now = datetime.now(timezone.utc)
-        obs_time_str = (now - timedelta(minutes=10)).isoformat() + "Z"
+        # `.isoformat()` on an aware datetime already ends in "+00:00";
+        # appending "Z" makes "+00:00Z", which fromisoformat rejects, so the
+        # parser fell back to `now` and this test passed without ever reading
+        # the timestamp it was named for.
+        obs_time_str = (now - timedelta(minutes=10)).isoformat()
 
         measurement = {
             "datetime": {"utc": obs_time_str},

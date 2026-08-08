@@ -332,8 +332,25 @@ class OpenAQIngester(BaseIngester):
         if value < 0:
             issues.append("negative_value")
 
-        # Determine overall quality
-        if any(issue == "negative_value" or issue.startswith("out_of_range[") for issue in issues):
+        # Determine overall quality.
+        #
+        # A unit mismatch is invalid, not a note on an otherwise usable value.
+        # Every range in PARAMETER_RANGES is calibrated for µg/m³ and every
+        # emitted Signal is labelled `ug/m3`, so a reading in other units
+        # passes the range check and is then stored under the wrong unit --
+        # CO in ppm is ~0.5-5, comfortably inside [0, 50000], and wrong by
+        # three orders of magnitude.
+        #
+        # Converting instead of rejecting would need molecular weight plus
+        # assumed temperature and pressure; inventing those to keep a
+        # measurement is how a plausible number replaces a real one. Until a
+        # conversion is specified, refusing is the honest option (#117).
+        if any(
+            issue == "negative_value"
+            or issue.startswith("out_of_range[")
+            or issue.startswith("unit_mismatch[")
+            for issue in issues
+        ):
             return DataQuality.INVALID, issues
 
         if len(issues) == 0:

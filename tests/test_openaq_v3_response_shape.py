@@ -178,3 +178,43 @@ def test_a_location_without_sensors_yields_an_empty_map():
     assert _sensor_parameter_map({"id": 1}) == {}
     assert _sensor_parameter_map({"id": 1, "sensors": []}) == {}
     assert _sensor_parameter_map({"id": 1, "sensors": [{"id": 7}]}) == {}
+
+
+PPM_LOCATION = {
+    "id": 155,
+    "sensors": [
+        {"id": 7001, "parameter": {"name": "co", "units": "ppm"}},
+    ],
+}
+
+
+def test_a_reading_in_other_units_is_not_emitted(ingester):
+    """It would be stored mislabelled, and inside the accepted range.
+
+    Every range in PARAMETER_RANGES is calibrated for µg/m³ and every Signal is
+    labelled `ug/m3`. CO in ppm is ~0.5-5, comfortably inside [0, 50000], so
+    the range check passes and the value lands three orders of magnitude wrong
+    under a unit it is not in.
+    """
+    now = datetime.now(timezone.utc)
+    record = _latest(value=3.0, sensors_id=7001)
+
+    signal = ingester._process_measurement(
+        record, "USA", now, _sensor_parameter_map(PPM_LOCATION)
+    )
+
+    assert signal is None
+    assert ingester.quality_stats["invalid"] == 1
+
+
+def test_a_reading_in_the_expected_unit_is_emitted(ingester):
+    """The refusal must be able to not fire, or it asserts nothing."""
+    now = datetime.now(timezone.utc)
+
+    signal = ingester._process_measurement(
+        _latest(value=25.0), "USA", now, _sensor_parameter_map(LOCATION)
+    )
+
+    assert signal is not None
+    assert signal.unit == "ug/m3"
+    assert signal.metadata["unit_original"] == "µg/m³"
