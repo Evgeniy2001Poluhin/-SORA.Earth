@@ -18,6 +18,19 @@ class Signal:
     observed_at: datetime | None = None
     metadata: dict | None = None
 
+    # Appended with defaults so every existing positional constructor keeps
+    # meaning what it meant. `observed` is the default because that is what the
+    # honest sources already emit -- openmeteo carries real observation times,
+    # and it must not be reclassified by a change aimed at the two that do not.
+    #
+    # A missing `observed_at` is NOT quietly reinterpreted as `not_applicable`.
+    # Inferring the kind from an absent field is exactly how `now` came to be
+    # written; a source with no observation time has to say which kind it is.
+    temporal_kind: str = "observed"
+    period_start: datetime | None = None
+    period_end: datetime | None = None
+    source_revision: str | None = None
+
 class BaseIngester(ABC):
     name: str = "base"
     default_ttl_hours: int = 720
