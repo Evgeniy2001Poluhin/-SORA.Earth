@@ -194,6 +194,14 @@ def canonical_identity(*, source: str, region_code: str, metric: str, kind: str,
     same snapshot collapses; a real observation is identified by when it was
     observed, so the existing behaviour is unchanged.
     """
+    # `observed` keeps the identity it has always had, byte for byte. These
+    # identities are already stored: hashing them would mean a re-fetched
+    # observation no longer matches its row, the partial unique index would not
+    # fire, and the first run after deploy would duplicate everything it re-read
+    # -- the defect #121 exists to stop, reintroduced from the other side.
+    if kind == OBSERVED:
+        return f"{region_code}_{metric}_{event_time.isoformat()}"
+
     parts = {
         "schema": IDENTITY_SCHEMA,
         "source": source,
@@ -201,9 +209,7 @@ def canonical_identity(*, source: str, region_code: str, metric: str, kind: str,
         "metric": metric,
         "kind": kind,
     }
-    if kind == OBSERVED:
-        parts["event_time"] = event_time.isoformat()
-    elif kind == PERIOD:
+    if kind == PERIOD:
         parts["period_start"] = period_start.isoformat()
         parts["period_end"] = period_end.isoformat()
         parts["revision"] = source_revision
