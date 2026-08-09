@@ -29,9 +29,12 @@ def _isolate_test_database():
     A session fixture would be too late. This runs at conftest import, above the
     `from app.database import ...` below, which is the first import of it.
 
-    `setdefault`, not assignment: CI points `DATABASE_URL` at PostgreSQL after
-    `alembic upgrade head`, and overriding that would quietly move the whole
-    suite onto SQLite and stop testing the database that production uses.
+    The database is taken only from `TEST_DATABASE_URL`, never from an ambient
+    `DATABASE_URL`. An earlier version used `setdefault`, which keeps whatever
+    is already exported -- safe against overwriting CI's configuration, and
+    unsafe in the direction that matters: a shell holding a production URL
+    would hand the suite production, and the suite writes. CI passes the same
+    ephemeral PostgreSQL URL as `TEST_DATABASE_URL`, so nothing there is lost.
 
     A file rather than `:memory:`. In-memory SQLite gives each connection its
     own database, so anything crossing a connection boundary would see an empty
@@ -40,11 +43,10 @@ def _isolate_test_database():
     `mkdtemp` rather than `tmp_path_factory` for the same timing reason, and it
     is per-process, so xdist workers cannot collide.
     """
-    if os.environ.get("DATABASE_URL"):
-        return None
+    from tests._database_url import choose_database_url
 
-    directory = tempfile.mkdtemp(prefix="sora-tests-")
-    os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(directory, 'test.db')}"
+    url, directory = choose_database_url(os.environ)
+    os.environ["DATABASE_URL"] = url
     return directory
 
 

@@ -99,3 +99,54 @@ def test_the_isolation_is_not_applied_when_a_database_is_chosen_explicitly():
         assert "sora-tests-" not in url, (
             "an explicitly configured database was replaced by the temporary one"
         )
+
+
+# --- which database the suite is allowed to take ---------------------------
+
+
+def test_an_ambient_database_url_is_not_trusted():
+    """A shell holding a production URL must not become the test database.
+
+    The first version used `os.environ.setdefault`, which keeps whatever is
+    already exported. That is safe against overwriting CI's configuration and
+    unsafe in the direction that matters -- the suite writes, and `create_all`
+    would add missing tables to whatever it was handed.
+
+    Asserted against the pure chooser rather than by exporting the variable and
+    re-importing the application, because reproducing this case for real means
+    pointing a test run at the database nobody wants it to touch.
+    """
+    from tests._database_url import choose_database_url
+
+    url, temp = choose_database_url(
+        {"DATABASE_URL": "postgresql://sora:pw@prod.internal:5432/sora_earth"},
+        make_temp_dir=lambda: "/tmp/pretend",
+    )
+
+    assert url.startswith("sqlite:///"), (
+        f"an ambient DATABASE_URL was accepted as the test database: {url}"
+    )
+    assert temp == "/tmp/pretend", "no temporary database was created"
+
+
+def test_an_explicit_test_database_url_is_used_as_given():
+    """CI passes its ephemeral PostgreSQL this way, and nothing else may.
+
+    The temporary directory must not be created either: a stray one would mean
+    the chooser did the work and then discarded it, which is how a cleanup hook
+    ends up deleting something it did not make.
+    """
+    from tests._database_url import choose_database_url
+
+    def _must_not_run():
+        raise AssertionError("a temporary database was created despite an "
+                             "explicit TEST_DATABASE_URL")
+
+    url, temp = choose_database_url(
+        {"TEST_DATABASE_URL": "postgresql://sora:sora2026@localhost:5432/sora_earth",
+         "DATABASE_URL": "postgresql://sora:pw@prod.internal:5432/sora_earth"},
+        make_temp_dir=_must_not_run,
+    )
+
+    assert url == "postgresql://sora:sora2026@localhost:5432/sora_earth"
+    assert temp is None, "cleanup would remove a directory this run did not create"
