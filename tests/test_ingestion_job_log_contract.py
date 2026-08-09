@@ -78,7 +78,18 @@ def _normalise(call):
 
 def _run(source, *, signals=(), persist_result=None, fetch_error=None,
          lock_acquired=True):
-    """Run a job with every side effect captured, and return what it recorded."""
+    """Run a job with every side effect captured, and return what it recorded.
+
+    openaq is stood down by default since #57 -- its stations for the declared
+    regions stopped reporting in 2017 -- so the job short-circuits before the
+    shared runner unless the source is enabled. The adapter and its contract
+    are deliberately kept, and this file is what keeps them honest, so it turns
+    the source on rather than letting the disabled path stand in for a
+    contract it does not exercise. That openaq is *not* scheduled by default
+    is asserted in tests/test_openaq_stood_down.py.
+    """
+    import os
+    from unittest.mock import patch as _patch
     from app.services.environmental import scheduler_jobs
 
     job = {
@@ -92,7 +103,8 @@ def _run(source, *, signals=(), persist_result=None, fetch_error=None,
     lock = MagicMock()
     lock.acquire.return_value = lock_acquired
 
-    with patch("app.locks.RedisLock", return_value=lock), \
+    with _patch.dict(os.environ, {"SORA_OPENAQ_ENABLED": "true"}), \
+         patch("app.locks.RedisLock", return_value=lock), \
          patch(FETCH[source], new_callable=AsyncMock, **fetch_kw), \
          patch("app.ingesters.persist.persist_environmental_observations",
                return_value=persist_result), \

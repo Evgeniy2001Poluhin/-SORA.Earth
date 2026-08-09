@@ -394,8 +394,35 @@ def scheduled_openaq_ingestion():
     failures rather than raising them. Kept rather than removed, because the
     decorator is what should end up firing once that is fixed; see
     `_run_ingestion`.
+
+    Stood down by default (#57). The stations for every declared region
+    stopped reporting in September 2017, so running this hourly spends 21
+    requests to produce nothing and posts a `degraded` line four times a day.
+    A warning that is normal every hour is one nobody reads, so the disabled
+    state is reported as its own status rather than as a failure.
     """
     from app.ingesters.openaq import OpenAQIngester
+    from app.ingesters.source_register import (
+        SOURCE_REGISTER, STATUS_DISABLED_NO_CURRENT_STATIONS, openaq_enabled,
+    )
+
+    if not openaq_enabled():
+        facts = SOURCE_REGISTER["openaq"]
+        result = {
+            "job": "openaq_ingestion",
+            "status": STATUS_DISABLED_NO_CURRENT_STATIONS,
+            "records_processed": 0,
+            "measurement_kind": facts.measurement_kind,
+            "last_verified_data": facts.last_verified_data,
+            "reenable_condition": facts.reenable_condition,
+        }
+        # info, not warning: this is a decision that is in force, not a fault.
+        logger.info(
+            "openaq_ingestion skipped: %s (no station newer than %s in any "
+            "declared region)",
+            STATUS_DISABLED_NO_CURRENT_STATIONS, facts.last_verified_data,
+        )
+        return result
 
     return _run_ingestion(
         job_name="openaq_ingestion",

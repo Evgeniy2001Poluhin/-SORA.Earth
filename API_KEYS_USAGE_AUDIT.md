@@ -198,7 +198,7 @@ def stream_explanation_hf(...):
 | `OPENAI_API_KEY` | 🟢 USED | Co-Pilot (explanations, Q&A) | ✅ Yes | Smart templates | 🔴 **YES** | ✅ **KEEP** |
 | `OPENAI_BASE_URL` | 🟢 USED | Co-Pilot (base URL override) | ✅ Yes | api.openai.com | ➖ N/A | ✅ **KEEP** |
 | `LLM_MODEL` | 🟢 USED | Co-Pilot (model selection) | ✅ Yes | gpt-4o-mini | ➖ N/A | ✅ **KEEP** |
-| `OPENAQ_API_KEY` | 🟢 USED | OpenAQ ingester (air quality) | ✅ Yes | Skip ingester | ➖ Empty | ✅ **KEEP** |
+| `OPENAQ_API_KEY` | ⚪ NOT REQUIRED | OpenAQ ingester, stood down (#57) | ✅ Yes | Source not scheduled | ➖ Empty | ⚪ **OPTIONAL** |
 | `HF_API_TOKEN` | 🔴 DEAD | (removed) | N/A | N/A | ➖ N/A | ❌ **REMOVED** |
 
 ---

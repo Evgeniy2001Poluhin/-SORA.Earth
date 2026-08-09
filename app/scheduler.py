@@ -849,14 +849,34 @@ def init_scheduler(start: bool = True):
             scheduled_data_quality_aggregation,
         )
 
-        # OpenAQ air quality ingestion (every 1 hour)
-        scheduler.add_job(
-            scheduled_openaq_ingestion,
-            IntervalTrigger(hours=1),
-            id="auto_openaq_ingestion",
-            name="Ingest OpenAQ air quality data every 1h",
-            replace_existing=True,
-        )
+        # OpenAQ air quality ingestion -- stood down by default (#57).
+        #
+        # Every station within 25km of the 21 declared regions stopped
+        # reporting in September 2017, measured with a working key and HTTP
+        # 200 throughout. Scheduling it spends 21 requests an hour to produce
+        # nothing, and the resulting `degraded` four times a day is a warning
+        # that is normal, which is not a warning.
+        #
+        # The job is not registered rather than registered-and-skipping: a job
+        # that exists and does nothing still shows up as a scheduled job.
+        # Re-enabling needs SORA_OPENAQ_ENABLED and the condition recorded in
+        # SOURCE_REGISTER["openaq"].reenable_condition -- the flag alone does
+        # not make the stations report.
+        from app.ingesters.source_register import openaq_enabled
+
+        if openaq_enabled():
+            scheduler.add_job(
+                scheduled_openaq_ingestion,
+                IntervalTrigger(hours=1),
+                id="auto_openaq_ingestion",
+                name="Ingest OpenAQ air quality data every 1h",
+                replace_existing=True,
+            )
+        else:
+            logger.info(
+                "openaq ingestion not scheduled: disabled_no_current_stations "
+                "(set SORA_OPENAQ_ENABLED=true to override; see #57)"
+            )
 
         # Open-Meteo weather ingestion (every 1 hour)
         scheduler.add_job(
@@ -912,7 +932,9 @@ def init_scheduler(start: bool = True):
         "auto_run_ingesters",
         "auto_refresh_external_data",
         "refresh_forecast_metrics",
-        "auto_openaq_ingestion",
+        # auto_openaq_ingestion is deliberately absent: the job is not
+        # registered unless SORA_OPENAQ_ENABLED is set, and an immediate run
+        # of a job that does not exist is not an error worth logging.
         "auto_openmeteo_ingestion",
         # Without this the first air-quality rows arrive an hour after a
         # deployment, and a restart to check the source is working produces
