@@ -433,6 +433,51 @@ else
         || fail "$TARGET is not an ancestor of origin/main; only merged code may be deployed"
     [ "$TARGET" != "$ORIGIN_MAIN" ] \
         || fail "$TARGET is origin/main; use a plain deploy rather than --rollback"
+    # The journal records deployments this script made. One made by hand leaves
+    # no entry, and the next scripted run then names the last *scripted* commit
+    # as the one it replaced, skipping everything in between (#133). The "to
+    # undo:" line this script prints is derived from that field, so an operator
+    # following the script's own suggestion can land several commits further
+    # back than they expect -- silently, at the moment they are least able to
+    # check.
+    #
+    # Read before the checkout below. Afterwards HEAD is the target and the
+    # observation is worthless: that is precisely the mistake the manifest
+    # itself made once, recording the commit being deployed as the commit being
+    # replaced.
+    RUNNING_SHA="$(git rev-parse HEAD)"
+    JOURNAL_SHA=""
+    if [ -L "$MANIFEST_DIR/latest" ] || [ -e "$MANIFEST_DIR/latest" ]; then
+        JOURNAL_SHA="$(awk '/^commit /{print $2}' \
+            "$MANIFEST_DIR/$(readlink "$MANIFEST_DIR/latest")" 2>/dev/null || true)"
+    fi
+
+    echo "  checked out now: ${RUNNING_SHA:0:12}"
+    if [ -n "$JOURNAL_SHA" ]; then
+        echo "  journal records: ${JOURNAL_SHA:0:12}"
+    else
+        echo "  journal records: nothing yet"
+    fi
+    echo "  rollback target: ${TARGET:0:12}"
+
+    # Only when the journal claims something and is contradicted. An empty
+    # journal cannot mislead anyone -- there is no suggestion to follow, so the
+    # target came from the operator rather than from this script, and refusing
+    # would block the first recovery on a fresh host for no reason.
+    if [ -n "$JOURNAL_SHA" ] && [ "$JOURNAL_SHA" != "$RUNNING_SHA" ]; then
+        echo "  the journal does not describe what is checked out: something was" >&2
+        echo "  deployed outside this script, so its history has a gap and any" >&2
+        echo "  target taken from it is a guess rather than a record." >&2
+        # The acknowledgement carries the observed commit, so it cannot be set
+        # in advance or pasted from a runbook: the operator has to read this
+        # output to produce it.
+        [ "${ROLLBACK_ACKNOWLEDGE:-}" = "$RUNNING_SHA" ] || fail \
+"the journal (${JOURNAL_SHA:0:12}) disagrees with the checkout (${RUNNING_SHA:0:12}).
+     Confirm that ${TARGET:0:12} is the commit you want, then re-run with
+     ROLLBACK_ACKNOWLEDGE=$RUNNING_SHA"
+        echo "  divergence acknowledged for ${RUNNING_SHA:0:12}"
+    fi
+
     echo "  rolling back to ${TARGET:0:12}, an ancestor of origin/main"
     git checkout --quiet --detach "$TARGET"
 fi
