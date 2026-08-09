@@ -7,11 +7,27 @@ hourly "primary" ingestion jobs never wrote a single row to
 environmental_observations. These tests pin the fix: both jobs must call the
 persist layer with the fetched signals and the correct source name.
 """
+import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.ingesters.base import Signal
 from app.ingesters.persist import PersistResult
+
+
+@pytest.fixture(autouse=True)
+def _openaq_enabled_for_these(monkeypatch):
+    """OpenAQ is stood down from *scheduling* (#57), not removed.
+
+    Its adapter and job must still behave correctly when a deployment enables
+    it, and this file is part of what keeps them honest -- so it turns the
+    source on rather than letting the disabled short-circuit stand in for a
+    contract it does not exercise. That the source is *not* scheduled by
+    default is asserted in tests/test_openaq_stood_down.py.
+    """
+    monkeypatch.setenv("SORA_OPENAQ_ENABLED", "true")
+    monkeypatch.setenv("OPENAQ_API_KEY", "test-key")
+
 
 
 def _fake_persist_result(n=1):

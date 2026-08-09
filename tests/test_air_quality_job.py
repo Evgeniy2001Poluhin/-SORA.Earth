@@ -97,7 +97,10 @@ def test_it_runs_immediately_on_startup():
     immediate = src[start:src.index("):", start)]
     assert '"auto_openmeteo_air_quality_ingestion"' in immediate, \
         "the air-quality job is not in the immediate-run set"
-    assert '"auto_openaq_ingestion"' in immediate
+    # auto_openaq_ingestion is deliberately absent since #57: the job is not
+    # registered unless SORA_OPENAQ_ENABLED is set, and an immediate run of a
+    # job that does not exist is not something to arrange.
+    assert '"auto_openaq_ingestion"' not in immediate
 
 
 def test_a_write_failure_fails_the_job():
@@ -153,16 +156,46 @@ def test_signals_without_a_timestamp_do_not_fail_the_run():
     assert result["status"] == "success"
 
 
-def test_it_is_scheduled_beside_openaq_not_instead_of_it():
-    """The whole point of the change, and the thing a later edit could quietly
-    undo by "cleaning up" a source that produces no rows."""
+def test_the_comparison_openaq_was_kept_for_cannot_be_made():
+    """This asserted the two sources run in parallel "until they have been
+    compared". That requirement is discharged, not ignored, and the difference
+    matters enough to write down.
+
+    The comparison was to be measured against modelled on real production data.
+    It cannot be made: OpenAQ's stations for all 21 declared regions stopped
+    reporting in September 2017, so there is no measured series to compare a
+    modelled one against. Running an hourly job that returns nothing does not
+    move that forward -- 24 degraded runs a day for as long as it is scheduled,
+    and never a row (#57).
+
+    So OpenAQ is stood down from scheduling while everything needed to compare
+    remains in place: the adapter, the v3 parser, its tests, and a re-enable
+    condition stated in advance. What is gone is the pretence that leaving a
+    silent job running constitutes waiting for evidence.
+
+    The air-quality job must still be registered, and the register must still
+    say the two are different kinds -- that is what stops a later edit from
+    "cleaning up" the distinction along with the schedule.
+    """
     import inspect
     from app import scheduler as scheduler_module
+    from app.ingesters.source_register import SOURCE_REGISTER
 
     src = inspect.getsource(scheduler_module)
     assert 'id="auto_openmeteo_air_quality_ingestion"' in src, \
         "the air-quality job is not registered with the scheduler"
-    assert 'id="auto_openaq_ingestion"' in src, \
-        "OpenAQ was removed; the two must run in parallel until they have been compared"
     assert 'id="auto_openmeteo_ingestion"' in src, \
         "the weather job was removed"
+
+    # Registered only behind the gate, never unconditionally.
+    assert 'id="auto_openaq_ingestion"' in src, \
+        "the OpenAQ adapter was removed; it is stood down, not deleted"
+    assert "openaq_scheduling_refusal" in src, \
+        "OpenAQ is registered without the gate that stands it down"
+
+    aq = SOURCE_REGISTER["openaq"]
+    assert aq.status == "disabled_no_current_stations"
+    assert aq.measurement_kind != SOURCE_REGISTER["openmeteo_air_quality"].measurement_kind, \
+        "the modelled source has been recorded as the measured one"
+    assert aq.reenable_condition, \
+        "stood down with no stated way back is removal by another name"
