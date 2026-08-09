@@ -747,9 +747,28 @@ echo "  nginx configuration matches the repository (${REPO_SUM:0:12})"
 "${DC[@]}" exec -T nginx nginx -t >/dev/null 2>&1 || fail "nginx rejects its own configuration"
 echo "  nginx accepts the configuration"
 
-UPSTREAM="$("${DC[@]}" exec -T nginx sh -c "grep -A2 'upstream sora_backend' /etc/nginx/nginx.conf | grep server" | tr -d ' \r')"
-[ "$UPSTREAM" = "serverbackend:8000;" ] || fail "nginx proxies to '$UPSTREAM'; expected backend:8000"
-echo "  upstream is backend:8000"
+# The whole block, not a fixed window after the name. `grep -A2` broke the
+# moment the block gained a comment: the `server` line moved past the third
+# line, the parser returned nothing, and the deploy failed here rather than at
+# anything real (#129). A parser that depends on the line count of a comment is
+# a check on formatting.
+UPSTREAM="$("${DC[@]}" exec -T nginx sh -c \
+    "awk '/upstream[[:space:]]+sora_backend[[:space:]]*\\{/,/\\}/' /etc/nginx/nginx.conf \
+     | grep -E '^[[:space:]]*server[[:space:]]'" | tr -d '\r' | tr -s ' ' | sed 's/^ //;s/ $//')"
+
+case "$UPSTREAM" in
+    *"backend:8000"*) ;;
+    *) fail "nginx proxies to '$UPSTREAM'; expected backend:8000" ;;
+esac
+# `resolve` is what makes the address re-read on the resolver TTL instead of
+# frozen when the workers start. Without it a container recreate outside this
+# script strands nginx on an address that no longer exists -- 4.5 minutes of
+# 502 on 2026-08-09, with every container reporting healthy.
+case "$UPSTREAM" in
+    *resolve*) ;;
+    *) fail "upstream '$UPSTREAM' has no 'resolve'; nginx would cache the address" ;;
+esac
+echo "  upstream is $UPSTREAM"
 
 step "certificates"
 

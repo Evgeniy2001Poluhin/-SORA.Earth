@@ -158,10 +158,19 @@ def test_the_deploy_script_checks_the_public_endpoint():
 
 
 def test_the_deploy_script_inspects_the_upstream_it_deployed():
-    m = re.search(r"^[^#\n]*upstream sora_backend.*$", DEPLOY, re.M)
-    assert m, "no executable line reads back the upstream being served through"
-    assert re.search(r"exec|grep|cat", m.group(0)), (
-        f"the upstream name appears but nothing reads it: {m.group(0).strip()}"
+    """The extraction spans several lines since the parser stopped being a
+    fixed window, so this looks at the assignment as a whole rather than at
+    one line -- an earlier version demanded `awk`/`grep` on the same line as
+    the upstream name and failed on the multi-line form it asked for."""
+    m = re.search(r"^[^#\n]*UPSTREAM=.*?\)\"?$", DEPLOY, re.M | re.S)
+    assert m, "nothing assigns UPSTREAM from the running configuration"
+
+    assignment = m.group(0)
+    assert "sora_backend" in assignment, (
+        f"UPSTREAM is read from something other than sora_backend: {assignment!r}"
+    )
+    assert re.search(r"exec|awk|grep", assignment), (
+        f"UPSTREAM is assigned but nothing reads the config: {assignment!r}"
     )
 
 
@@ -192,3 +201,91 @@ def test_the_project_instructions_name_the_supported_path():
     assert not re.search(
         r"^git pull && docker compose .*up -d --build", deployment_section, re.M
     ), "the manual deploy command is still presented as the way to deploy"
+
+
+# --- the deploy script must be able to parse the config it deploys ---------
+
+
+def _upstream_as_the_deploy_reads_it(conf_path) -> str:
+    """Run the extraction the deploy script actually uses.
+
+    The awk range and the grep pattern are lifted out of
+    `scripts/deploy_production.sh` and executed against the given config --
+    not reimplemented in Python. A reimplementation agrees with itself no
+    matter what the script does, which is exactly how the first version of
+    this test stayed green while the script still used `grep -A2`.
+    """
+    import subprocess
+
+    # Anchored on sora_backend: the script is 960 lines and its *first* awk is
+    # `/^commit /{print $2}` from somewhere else entirely, which this test
+    # happily executed against nginx.conf and reported an empty upstream.
+    awk = re.search(r"awk '([^']*sora_backend[^']*)'", _DEPLOY_RAW)
+    assert awk, "no awk range over sora_backend found in deploy_production.sh"
+    grep = re.search(r"grep -E '([^']*server[^']*)'", _DEPLOY_RAW)
+    assert grep, "no grep filter for the server line found"
+
+    program = awk.group(1).replace("\\\\", "\\")
+    r = subprocess.run(
+        ["sh", "-c", f"awk '{program}' \"$1\" | grep -E '{grep.group(1)}'",
+         "sh", str(conf_path)],
+        capture_output=True, text=True,
+    )
+    return " ".join(r.stdout.split())
+
+
+def test_the_deploy_parser_still_finds_the_upstream_it_checks():
+    """The check that was missing, and it would have stopped every deploy.
+
+    The script used `grep -A2 'upstream sora_backend' | grep server` and
+    compared against `serverbackend:8000;`. Adding comments inside the block
+    pushed `server` past the third line, so the extraction returned an empty
+    string and the deploy failed at that check -- before reaching anything
+    real (#129).
+
+    The earlier contract test asserted the script *reads* the upstream. It did
+    not assert the script can read *this* upstream, which is the difference
+    between a mechanism existing and a mechanism working.
+    """
+    got = _upstream_as_the_deploy_reads_it(ROOT / "nginx" / "nginx.conf")
+
+    assert got, (
+        "the deploy would extract an empty upstream and abort; the parser "
+        "cannot see past the comments in the block"
+    )
+    assert "backend:8000" in got, f"upstream does not name backend:8000: {got!r}"
+    assert "resolve" in got, (
+        f"upstream has no `resolve`, so nginx caches the address: {got!r}"
+    )
+
+
+def test_the_deploy_parser_is_not_a_fixed_window_after_the_name():
+    """A parser bounded by line count is a check on formatting.
+
+    `grep -A2` breaks on a comment. The replacement reads the whole block, so
+    it must survive one being added.
+    """
+    import tempfile
+
+    with_comment = CONF.replace(
+        "upstream sora_backend {",
+        "upstream sora_backend {\n        # a note someone adds later\n"
+        "        # and a second line of it\n        # and a third",
+        1,
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as fh:
+        fh.write(with_comment)
+    got = _upstream_as_the_deploy_reads_it(fh.name)
+
+    assert "backend:8000" in got and "resolve" in got, (
+        f"three comment lines broke the extraction: {got!r}"
+    )
+
+
+def test_the_deploy_script_requires_resolve_not_just_the_host():
+    """Checking only `backend:8000` would pass a config that caches again."""
+    m = re.search(r"^[^#\n]*resolve[^#\n]*\bfail\b.*$", DEPLOY, re.M)
+    assert m or re.search(r"\*resolve\*", DEPLOY), (
+        "the deploy accepts an upstream without `resolve`, so the fix could "
+        "be reverted and every deployment would still report success"
+    )
