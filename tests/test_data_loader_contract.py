@@ -135,6 +135,61 @@ def test_no_rows_yields_an_empty_frame_with_the_same_columns():
     assert len(out) == 0
 
 
+def _db_with_no_values():
+    """Evaluations exist, but every metric on them is NULL.
+
+    All three columns are `Column(Float)` -- nullable -- so this is a state the
+    database can actually hold, not a constructed impossibility.
+    """
+    session = MagicMock()
+    session.query.return_value.order_by.return_value.all.return_value = [
+        SimpleNamespace(created_at=f"2026-01-0{d} 12:00:00", total_score=None,
+                        co2_reduction=None, success_probability=None)
+        for d in (1, 2)
+    ]
+    return session
+
+
+@pytest.mark.parametrize("metric", ["score", "co2_reduction", "prob"])
+def test_rows_with_no_values_for_the_metric_keep_the_schema(metric):
+    """The second empty path, which used to return a frame with no columns.
+
+    `recs` is filtered by `is not None`, so rows-present/all-NULL collapses to
+    the same empty list as no-rows -- but it reached `pd.DataFrame(recs)`
+    instead of the early return, and a DataFrame built from an empty list has
+    no columns at all. A caller doing `df["ds"]` got a KeyError rather than an
+    empty series, and the docstring promised otherwise.
+
+    Parametrised because the metric is dispatched by an if/elif/else with three
+    separate comprehensions, not one attribute lookup: each branch is its own
+    opportunity to reintroduce this.
+    """
+    out = load_time_series(_db_with_no_values(), metric)
+
+    assert out.empty
+    assert list(out.columns) == ["ds", "y"], (
+        f"{metric}: empty result carries no schema, so downstream column "
+        f"access raises instead of yielding nothing"
+    )
+
+
+def test_the_two_empty_paths_return_the_same_schema():
+    """Whichever way the result is empty, it has to look the same.
+
+    Asserted against each other rather than against a literal: a change that
+    altered both paths together would otherwise satisfy two separate literal
+    assertions while callers still saw the schema move.
+    """
+    no_rows = MagicMock()
+    no_rows.query.return_value.order_by.return_value.all.return_value = []
+
+    from_no_rows = load_time_series(no_rows, "score")
+    from_no_values = load_time_series(_db_with_no_values(), "score")
+
+    assert from_no_rows.empty and from_no_values.empty
+    assert list(from_no_rows.columns) == list(from_no_values.columns)
+
+
 # ---------------------------------------------------------------------- prose
 
 

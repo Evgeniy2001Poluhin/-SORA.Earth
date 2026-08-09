@@ -69,7 +69,12 @@ def load_time_series(db: Session, metric: MetricType) -> pd.DataFrame:
         recs = [{"ds": pd.to_datetime(str(r.created_at)[:19]), "y": float(r.success_probability)}
                 for r in rows if r.success_probability is not None]
 
-    df = pd.DataFrame(recs).dropna()
+    # Naming the columns here is what keeps the empty result usable: `recs` is
+    # already filtered by `is not None`, so rows-present/all-NULL arrives as an
+    # empty list, and a DataFrame built from one has no columns at all. This
+    # frame is returned as-is below, so the schema set here is the schema the
+    # caller sees.
+    df = pd.DataFrame(recs, columns=["ds", "y"]).dropna()
     if df.empty:
         return df
 
