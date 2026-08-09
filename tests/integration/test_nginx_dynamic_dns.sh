@@ -37,6 +37,13 @@ set -uo pipefail
 CONF=${1:?usage: test_nginx_dynamic_dns.sh <nginx.conf> [fixed|legacy]}
 MODE=${2:-fixed}
 
+# A typo would otherwise take the default and report PASS for the mode nobody
+# asked for -- `legcy` running the fixed path and passing is worse than no run.
+case "$MODE" in
+    fixed|legacy) ;;
+    *) echo "FAIL: unknown mode '$MODE' (expected fixed or legacy)"; exit 1 ;;
+esac
+
 command -v docker >/dev/null || { echo "SKIP: no docker"; exit 0; }
 docker info >/dev/null 2>&1 || { echo "SKIP: docker daemon unreachable"; exit 0; }
 [ -f "$CONF" ] || { echo "FAIL: $CONF not found"; exit 1; }
@@ -78,7 +85,12 @@ be = re.search(r"upstream\s+sora_backend\s*\{.*?\}", c, re.S)
 gr = re.search(r"upstream\s+sora_grafana\s*\{.*?\}", c, re.S)
 if not be:
     sys.exit("upstream sora_backend not found in " + src)
-be, gr = be.group(0), (gr.group(0) if gr else "upstream sora_grafana { server grafana:3000; }")
+if not gr:
+    # Substituting a working block here would let the grafana assertion pass
+    # against a config that no longer has one -- the harness would be testing
+    # its own fallback.
+    sys.exit("upstream sora_grafana not found in " + src)
+be, gr = be.group(0), gr.group(0)
 if mode == "legacy":
     res = ""
     be = "upstream sora_backend { server backend:8000; }"
@@ -161,8 +173,15 @@ note "4. nginx unchanged      = id $([ "$ngx_id1" = "$ngx_id2" ] && echo same ||
 [ "$ngx_id1" = "$ngx_id2" ] || broken "the nginx container was replaced"
 [ "$ngx_up1" = "$ngx_up2" ] || broken "nginx restarted; the test would prove nothing"
 
-# 6: within valid=10s + resolver_timeout=2s + slack.
-sleep 14
+# 6: derived from the generated config, not hardcoded. A `valid=` raised to
+# 60s would make a fixed 14s wait fail for the wrong reason, and lowered to 1s
+# would make the run needlessly slow.
+VALID=$(grep -oE 'valid=[0-9]+' "$DIR/nginx.conf" | head -1 | cut -d= -f2)
+RTO=$(grep -oE 'resolver_timeout[[:space:]]+[0-9]+' "$DIR/nginx.conf" | grep -oE '[0-9]+' | head -1)
+[ "$MODE" = "legacy" ] && { VALID=${VALID:-10}; RTO=${RTO:-2}; }
+DEADLINE=$(( ${VALID:-10} + ${RTO:-2} + 3 ))
+note "   waiting                = ${DEADLINE}s (valid=${VALID:-10} + timeout=${RTO:-2} + 3)"
+sleep "$DEADLINE"
 code2=$(status /)
 note "5. after the move       = $code2"
 
