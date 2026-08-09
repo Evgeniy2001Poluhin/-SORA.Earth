@@ -23,9 +23,19 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 
+#: An instrument reading. The only kind that can settle a question about the
+#: physical world at a place and time.
 MEASURED = "measured"
+#: A model's estimate. Present where instruments are absent, which is exactly
+#: why it must never stand in for one silently.
 MODELLED = "modelled"
-DERIVED = "derived"
+#: Official statistics compiled offline and shipped in the source tree. Neither
+#: measured here nor modelled here: someone else measured, and this holds a
+#: dated copy.
+ADMINISTRATIVE_SNAPSHOT = "administrative_snapshot"
+#: A constant chosen by an author and committed as a literal. No measurement
+#: and no model stands behind the number.
+STATIC_BASELINE = "static_baseline"
 
 STATUS_ACTIVE = "active"
 STATUS_DISABLED_NO_CURRENT_STATIONS = "disabled_no_current_stations"
@@ -97,28 +107,32 @@ SOURCE_REGISTER: Dict[str, SourceFacts] = {
     ),
     "rosstat": SourceFacts(
         name="rosstat",
-        measurement_kind=DERIVED,
+        measurement_kind=ADMINISTRATIVE_SNAPSHOT,
         status=STATUS_ACTIVE,
         coverage="85 declared regions, 5 metrics",
         last_verified_data="2024",
         requires_api_key=False,
         notes=(
-            "An offline snapshot compiled into the source tree "
-            "(data.rosstat_snapshot_2024); no network call. Its values are "
-            "constant per region, and it is re-emitted daily stamped with the "
-            "run time, which is the provenance defect in #121."
+            "Rosstat/Minfin/Mincifry official statistics for 2024, compiled "
+            "offline into the source tree (data.rosstat_snapshot_2024); no "
+            "network call. Someone measured these; this holds a dated copy, "
+            "which is why it is not `derived` -- that word would put it in the "
+            "same box as a literal nobody measured. Re-emitted daily stamped "
+            "with the run time, the provenance defect in #121."
         ),
     ),
     "sber_veb_baseline": SourceFacts(
         name="sber_veb_baseline",
-        measurement_kind=DERIVED,
+        measurement_kind=STATIC_BASELINE,
         status=STATUS_ACTIVE,
         coverage="85 declared regions, 1 metric",
         last_verified_data=None,
         requires_api_key=False,
         notes=(
-            "A hardcoded dict of 85 constants with no network call and no "
-            "version identifier. Same provenance defect as rosstat (#121)."
+            "A hardcoded dict of 85 constants, no network call, no version "
+            "identifier and no measurement or model behind the numbers -- an "
+            "author chose them. Distinct from rosstat, which is a dated copy "
+            "of statistics someone did measure. Same provenance defect (#121)."
         ),
     ),
 }

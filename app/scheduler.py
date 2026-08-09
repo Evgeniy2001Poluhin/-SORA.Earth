@@ -854,8 +854,9 @@ def init_scheduler(start: bool = True):
         # Every station within 25km of the 21 declared regions stopped
         # reporting in September 2017, measured with a working key and HTTP
         # 200 throughout. Scheduling it spends 21 requests an hour to produce
-        # nothing, and the resulting `degraded` four times a day is a warning
-        # that is normal, which is not a warning.
+        # nothing: measured on production over 2026-08-04..08, 24 runs a day,
+        # every one degraded. A warning that is normal every hour is not a
+        # warning.
         #
         # The job is not registered rather than registered-and-skipping: a job
         # that exists and does nothing still shows up as a scheduled job.

@@ -396,10 +396,11 @@ def scheduled_openaq_ingestion():
     `_run_ingestion`.
 
     Stood down by default (#57). The stations for every declared region
-    stopped reporting in September 2017, so running this hourly spends 21
-    requests to produce nothing and posts a `degraded` line four times a day.
-    A warning that is normal every hour is one nobody reads, so the disabled
-    state is reported as its own status rather than as a failure.
+    stopped reporting in September 2017, so running it spends 21 requests
+    an hour to produce nothing: measured on production over 2026-08-04..08,
+    **24 runs a day, every one degraded**. A warning that is normal every hour
+    is one nobody reads, so the disabled state is reported as its own status
+    rather than as a failure.
     """
     from app.ingesters.openaq import OpenAQIngester
     from app.ingesters.source_register import (

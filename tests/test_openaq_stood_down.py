@@ -2,9 +2,9 @@
 
 Every station within 25km of the 21 declared regions stopped reporting in
 September 2017 (#57), measured with a working API key and HTTP 200 throughout.
-Running the ingester hourly spends 21 requests to produce nothing and posts a
-`degraded` line four times a day -- a warning that is normal every hour, which
-nobody reads.
+Running the ingester hourly spends 21 requests to produce nothing: measured on
+production over 2026-08-04..08, 24 runs a day, every one degraded. A warning
+that is normal every hour is one nobody reads.
 
 Two things this must not become:
 
@@ -127,3 +127,26 @@ def test_the_parser_and_its_tests_are_kept():
     assert _sensor_parameter_map({"sensors": [
         {"id": 1, "parameter": {"name": "pm25", "units": "µg/m³"}}
     ]}) == {1: {"name": "pm25", "units": "µg/m³"}}
+
+
+def test_every_source_kind_is_distinct_where_the_sources_are():
+    """Four kinds, because collapsing them hides what a number is worth.
+
+    `derived` covered both rosstat and sber_veb_baseline in the first version
+    of this register. It should not: rosstat is a dated copy of statistics
+    somebody measured, sber_veb_baseline is a constant an author chose. Under
+    one word a reader cannot tell which is which, and the whole point of the
+    register is that they can.
+    """
+    from app.ingesters.source_register import (
+        ADMINISTRATIVE_SNAPSHOT, STATIC_BASELINE,
+    )
+
+    assert SOURCE_REGISTER["rosstat"].measurement_kind == ADMINISTRATIVE_SNAPSHOT
+    assert SOURCE_REGISTER["sber_veb_baseline"].measurement_kind == STATIC_BASELINE
+    assert ADMINISTRATIVE_SNAPSHOT != STATIC_BASELINE
+
+    kinds = {f.name: f.measurement_kind for f in SOURCE_REGISTER.values()}
+    assert len(set(kinds.values())) == 4, (
+        f"the register collapsed distinct sources into one kind: {kinds}"
+    )
