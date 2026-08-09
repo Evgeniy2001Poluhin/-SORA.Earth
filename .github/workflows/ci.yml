@@ -125,7 +125,6 @@ jobs:
             -q
         env:
           DATABASE_URL: "sqlite:///./test.db"
-          TEST_DATABASE_URL: "sqlite:///./test.db"
           REDIS_URL: ""
           SECRET_KEY: "ci-test-secret"
           SORA_ADMIN_TOKEN: "ci-test-admin"

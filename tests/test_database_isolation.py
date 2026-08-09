@@ -50,15 +50,25 @@ def test_the_database_is_not_inside_the_repository():
     )
 
 
-def test_the_repository_database_is_not_created_by_running_the_suite():
+def test_the_repository_database_is_untouched_by_the_suite():
     """Absence of the side effect, not just of the binding.
 
     Checked separately because the two can come apart: something could point
     the engine elsewhere and still touch `data/sora.db` on the way past.
+
+    The earlier version of this test could not fail when the file already
+    existed -- `not exists() or engine_path != repo_db` is satisfied by the
+    binding alone, so it re-asserted the previous test under a name that
+    promised more. Compared here against a fingerprint taken in conftest before
+    the application was imported: existence, size, mtime_ns and SHA-256.
     """
-    assert not (REPO_ROOT / "data" / "sora.db").exists() or _database_path() != (
-        REPO_ROOT / "data" / "sora.db"), (
-        "the suite is using the repository's own database file"
+    from tests.conftest import REPO_DB, REPO_DB_BEFORE, _fingerprint
+
+    after = _fingerprint(REPO_DB)
+
+    assert after == REPO_DB_BEFORE, (
+        f"the repository database changed while the suite ran: "
+        f"{REPO_DB_BEFORE} -> {after}"
     )
 
 
@@ -92,13 +102,25 @@ def test_the_isolation_is_not_applied_when_a_database_is_chosen_explicitly():
     fixed. Asserted through the environment rather than by calling the helper,
     since what matters is the state the suite ended up in.
     """
-    url = os.environ.get("DATABASE_URL", "")
+    from sqlalchemy.engine import make_url
 
-    assert url, "DATABASE_URL is unset; the suite has no database of its own"
-    if not url.startswith("sqlite"):
-        assert "sora-tests-" not in url, (
-            "an explicitly configured database was replaced by the temporary one"
-        )
+    explicit = os.environ.get("TEST_DATABASE_URL")
+    if not explicit:
+        pytest.skip("no explicit test database configured; nothing to honour")
+
+    wanted = make_url(explicit)
+    actual = engine.url
+
+    # Compared field by field. `str(url)` masks the password, so two different
+    # credentials render identically and the comparison would pass on a
+    # database the caller did not ask for. Driver is compared by backend name
+    # so `postgresql` and `postgresql+psycopg2` are not treated as a mismatch.
+    assert actual.get_backend_name() == wanted.get_backend_name()
+    assert (actual.host, actual.port, actual.database, actual.username) == (
+        wanted.host, wanted.port, wanted.database, wanted.username), (
+        f"TEST_DATABASE_URL asked for {wanted.render_as_string()} and the "
+        f"engine is bound to {actual.render_as_string()}"
+    )
 
 
 # --- which database the suite is allowed to take ---------------------------

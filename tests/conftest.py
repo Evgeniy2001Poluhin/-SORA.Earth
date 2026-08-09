@@ -6,7 +6,6 @@ that don't need FastAPI (e.g., persistence unit tests).
 """
 import os
 import shutil
-import tempfile
 
 # Prevent APScheduler from starting in tests
 os.environ.setdefault("RUN_SCHEDULER", "false")
@@ -53,10 +52,35 @@ def _isolate_test_database():
 _TEST_DB_DIR = _isolate_test_database()
 
 
+def _fingerprint(path):
+    """Existence, size, mtime and content digest -- or None when absent.
+
+    Taken here, before the application is imported, so "the suite did not touch
+    the repository's database" can be asserted against the state that preceded
+    it rather than against the state it left.
+    """
+    import hashlib
+    if not os.path.exists(path):
+        return None
+    st = os.stat(path)
+    with open(path, "rb") as fh:
+        return (st.st_size, st.st_mtime_ns, hashlib.sha256(fh.read()).hexdigest())
+
+
+REPO_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "data", "sora.db")
+REPO_DB_BEFORE = _fingerprint(REPO_DB)
+
+
 def pytest_sessionfinish(session, exitstatus):
-    """Remove what this process created, and only that."""
+    """Remove what this process created, and only that.
+
+    Errors are not swallowed. `ignore_errors=True` would hide a directory that
+    could not be removed, and a cleanup that silently does nothing is how
+    temporary state becomes permanent state.
+    """
     if _TEST_DB_DIR:
-        shutil.rmtree(_TEST_DB_DIR, ignore_errors=True)
+        shutil.rmtree(_TEST_DB_DIR)
 
 
 def _provision_test_schema():
