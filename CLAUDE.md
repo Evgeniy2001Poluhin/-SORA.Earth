@@ -375,11 +375,31 @@ curl -X POST http://localhost:8000/api/v1/model/retrain \
 - Project directory: `/opt/sora_earth_ai_platform`
 - Domain: https://sora-earth.online
 
-**Deployment:**
+**Deployment — one supported way, and this is it:**
+
 ```bash
 cd /opt/sora_earth_ai_platform
-git pull && docker compose -f docker-compose.prod.yml up -d --build backend
+./scripts/deploy_production.sh
 ```
+
+Rollback is the same script: `./scripts/deploy_production.sh --rollback SHA`.
+
+**A manual `docker compose up` / `build` / `restart` is not a deployment
+procedure, and a green container health check is not evidence that the site
+works.** The script exists because every incident in the month it was written
+came from deploying by hand, and it is not a wrapper around convenience: it
+recreates nginx *after* the backend, runs `nginx -t`, checks the upstream, the
+certificate store, and finally `https://sora-earth.online/health` from outside.
+
+This section previously carried the manual command above. On 2026-08-09 it was
+followed, the backend was recreated, it took the address the scheduler had been
+using, nginx kept the old one, and the public site returned 502 for four and a
+half minutes -- while `docker inspect` reported both containers healthy with
+zero restarts. The supported script would have prevented it (#129).
+
+Recreating a single container by hand for a quick check is still recreating it:
+if you do it, reload nginx afterwards and verify the public endpoint, or expect
+the same failure.
 
 **Production Containers (9):**
 - `backend` - FastAPI application
@@ -460,6 +480,8 @@ docker compose -f docker-compose.prod.yml logs -f backend
 docker compose -f docker-compose.prod.yml logs -f scheduler
 
 # Restart specific service
+# A restart is not a deployment. For a code change use
+# ./scripts/deploy_production.sh -- this only bounces the current image.
 docker compose -f docker-compose.prod.yml restart backend
 
 # Check container status
