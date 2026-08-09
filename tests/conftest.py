@@ -5,12 +5,56 @@ LAZY (inside fixtures, not module-level) to avoid loading ML models for tests
 that don't need FastAPI (e.g., persistence unit tests).
 """
 import os
+import shutil
+import tempfile
 
 # Prevent APScheduler from starting in tests
 os.environ.setdefault("RUN_SCHEDULER", "false")
 
 import pytest
 from unittest.mock import MagicMock, patch
+
+
+def _isolate_test_database():
+    """Give the suite its own database file, before anything can open one.
+
+    `app/database.py` reads `DATABASE_URL` and builds the engine at import time,
+    and its default is `data/sora.db` inside the repository. That file survives
+    between runs, and `create_all(checkfirst=True)` only creates missing
+    *tables* -- it never alters an existing one. So a column added to a model
+    silently did not reach the tests: the suite kept using a schema built by
+    some earlier session, and the failure surfaced as `no such column` from deep
+    inside persistence rather than as anything about the schema.
+
+    A session fixture would be too late. This runs at conftest import, above the
+    `from app.database import ...` below, which is the first import of it.
+
+    `setdefault`, not assignment: CI points `DATABASE_URL` at PostgreSQL after
+    `alembic upgrade head`, and overriding that would quietly move the whole
+    suite onto SQLite and stop testing the database that production uses.
+
+    A file rather than `:memory:`. In-memory SQLite gives each connection its
+    own database, so anything crossing a connection boundary would see an empty
+    schema -- trading this class of false result for a new one.
+
+    `mkdtemp` rather than `tmp_path_factory` for the same timing reason, and it
+    is per-process, so xdist workers cannot collide.
+    """
+    if os.environ.get("DATABASE_URL"):
+        return None
+
+    directory = tempfile.mkdtemp(prefix="sora-tests-")
+    os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(directory, 'test.db')}"
+    return directory
+
+
+_TEST_DB_DIR = _isolate_test_database()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Remove what this process created, and only that."""
+    if _TEST_DB_DIR:
+        shutil.rmtree(_TEST_DB_DIR, ignore_errors=True)
 
 
 def _provision_test_schema():
