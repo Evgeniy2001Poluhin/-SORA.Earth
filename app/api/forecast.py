@@ -32,9 +32,12 @@ def _get_db():
 
 
 def _query_time_series(db: Session, metric: str) -> pd.DataFrame:
-    """Query evaluation history and build a time series DataFrame with interpolation.
+    """Delegate to the shared time-series loader.
 
-    Uses centralized data loader with interpolation and synthetic extension.
+    What the returned frame contains, and the limits on reading it, are
+    documented on `load_time_series`. This wrapper describes none of that on
+    purpose: a second copy of another function's contract is exactly what went
+    stale here, and it stayed wrong long after the behaviour it named was gone.
     """
     from app.services.forecasting.data_loader import load_time_series
     return load_time_series(db, metric)
