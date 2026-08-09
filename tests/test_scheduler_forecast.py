@@ -26,6 +26,12 @@ def test_scheduled_pretrain_forecast_models_success(monkeypatch):
 
         mock_db = MagicMock()
         mock_db.query.return_value.order_by.return_value.all.return_value = mock_rows
+        # The job reads through `with SessionLocal() as read_db:` since #127,
+        # so the mock has to be its own context manager -- otherwise `read_db`
+        # is `__enter__()`'s auto-created child and the rows above never
+        # reach the code under test.
+        mock_db.__enter__.return_value = mock_db
+        mock_db.__exit__.return_value = False
 
         with patch('app.database.SessionLocal', return_value=mock_db):
             # Mock ModelRegistry and cache
@@ -74,6 +80,12 @@ def test_scheduled_pretrain_forecast_models_insufficient_data():
 
         mock_db = MagicMock()
         mock_db.query.return_value.order_by.return_value.all.return_value = mock_rows
+        # The job reads through `with SessionLocal() as read_db:` since #127,
+        # so the mock has to be its own context manager -- otherwise `read_db`
+        # is `__enter__()`'s auto-created child and the rows above never
+        # reach the code under test.
+        mock_db.__enter__.return_value = mock_db
+        mock_db.__exit__.return_value = False
 
         with patch('app.database.SessionLocal', return_value=mock_db):
             result = scheduled_pretrain_forecast_models()
@@ -118,6 +130,12 @@ def test_scheduled_pretrain_forecast_models_training_error():
 
         mock_db = MagicMock()
         mock_db.query.return_value.order_by.return_value.all.return_value = mock_rows
+        # The job reads through `with SessionLocal() as read_db:` since #127,
+        # so the mock has to be its own context manager -- otherwise `read_db`
+        # is `__enter__()`'s auto-created child and the rows above never
+        # reach the code under test.
+        mock_db.__enter__.return_value = mock_db
+        mock_db.__exit__.return_value = False
 
         with patch('app.database.SessionLocal', return_value=mock_db):
             # Mock forecaster that raises exception during fit
@@ -153,6 +171,12 @@ def test_scheduled_pretrain_forecast_models_partial_success():
 
         mock_db = MagicMock()
         mock_db.query.return_value.order_by.return_value.all.return_value = mock_rows
+        # The job reads through `with SessionLocal() as read_db:` since #127,
+        # so the mock has to be its own context manager -- otherwise `read_db`
+        # is `__enter__()`'s auto-created child and the rows above never
+        # reach the code under test.
+        mock_db.__enter__.return_value = mock_db
+        mock_db.__exit__.return_value = False
 
         with patch('app.database.SessionLocal', return_value=mock_db):
             # Mock forecaster that fails on first call, succeeds on others
@@ -200,6 +224,12 @@ def test_scheduled_pretrain_forecast_models_data_quality():
 
         mock_db = MagicMock()
         mock_db.query.return_value.order_by.return_value.all.return_value = mock_rows
+        # The job reads through `with SessionLocal() as read_db:` since #127,
+        # so the mock has to be its own context manager -- otherwise `read_db`
+        # is `__enter__()`'s auto-created child and the rows above never
+        # reach the code under test.
+        mock_db.__enter__.return_value = mock_db
+        mock_db.__exit__.return_value = False
 
         with patch('app.database.SessionLocal', return_value=mock_db):
             mock_forecaster = MagicMock()
