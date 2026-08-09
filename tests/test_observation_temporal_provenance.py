@@ -167,6 +167,51 @@ def test_an_observed_signal_is_unchanged():
     assert row["period_start"] is None and row["period_end"] is None
 
 
+def test_an_observed_identity_is_byte_for_byte_what_main_produced():
+    """The compatibility this change nearly broke.
+
+    An earlier draft hashed every identity, including `observed`. Those
+    identities are already stored: a re-fetched observation would have hashed to
+    something the partial unique index has never seen, the conflict would not
+    have fired, and the first run after deploy would have duplicated every row
+    it re-read -- the failure #121 exists to stop, reintroduced from the other
+    side. `test_an_observed_signal_is_unchanged` did not catch it because it
+    checked the kind and the timestamps, not the identity.
+
+    The expectation is written out as a literal rather than taken from the
+    helper. Comparing the helper to itself would let both sides move to a hash
+    together and still agree.
+    """
+    sig = Signal(region_code="RU-MOW", source="openmeteo", metric="temperature",
+                 value=21.5, observed_at=T0)
+
+    row = _signal_to_observation_dict(sig, "openmeteo")
+
+    assert row["source_record_id"] == "RU-MOW_temperature_2026-08-09T12:00:00+00:00", (
+        "the observed identity changed; every stored row of this source would "
+        "stop matching and be inserted again"
+    )
+
+
+def test_the_same_observation_twice_yields_one_identity():
+    """Deduplication for observed rows, stated directly.
+
+    The identity is what the unique index sees, so "the same reading arrives
+    again" has to produce the same string -- on main it did, and it still must.
+    """
+    sig = Signal(region_code="RU-MOW", source="openmeteo", metric="temperature",
+                 value=21.5, observed_at=T0)
+
+    first = _signal_to_observation_dict(sig, "openmeteo")["source_record_id"]
+    with _at(T0 + timedelta(days=3)):
+        second = _signal_to_observation_dict(sig, "openmeteo")["source_record_id"]
+
+    assert first == second, (
+        "re-reading one observation produced two identities, so the row would "
+        "be stored twice"
+    )
+
+
 def test_two_observations_at_different_times_stay_distinct():
     """Deduplication for real observations keeps working as before."""
     a = Signal(region_code="RU-MOW", source="openmeteo", metric="temperature",
