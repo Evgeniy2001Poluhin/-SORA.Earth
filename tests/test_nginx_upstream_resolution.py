@@ -29,7 +29,29 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 CONF = (ROOT / "nginx" / "nginx.conf").read_text()
-DEPLOY = (ROOT / "scripts" / "deploy_production.sh").read_text()
+_DEPLOY_RAW = (ROOT / "scripts" / "deploy_production.sh").read_text()
+
+
+def _executable_lines(text: str) -> str:
+    """The script with comments and blank lines removed.
+
+    Searching the raw text for `nginx -t` is satisfied by a comment mentioning
+    it -- and this script is heavily commented, precisely because each check
+    records an incident. A guarantee has to be asserted against a line that
+    runs. The same over-broad substring check has now been caught three times
+    in this repository; stripping comments is the cheap half of the fix, and
+    the assertions below add structure on top.
+    """
+    out = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+DEPLOY = _executable_lines(_DEPLOY_RAW)
 
 
 # --- layer 2: the configuration re-resolves -------------------------------
@@ -92,7 +114,7 @@ def test_no_proxy_pass_targets_a_bare_hostname():
 def test_the_deploy_script_recreates_nginx_after_the_backend():
     """The ordering is the guarantee. nginx must re-resolve *after* the new
     backend exists, or it caches the address that is about to be replaced."""
-    up = DEPLOY.index('up -d --build --remove-orphans', DEPLOY.index('step "deploying"'))
+    up = DEPLOY.index("up -d --build --remove-orphans", DEPLOY.index('step "deploying"'))
     recreate = DEPLOY.index("up -d --force-recreate nginx", up)
 
     assert recreate > up, (
@@ -101,25 +123,45 @@ def test_the_deploy_script_recreates_nginx_after_the_backend():
 
 
 def test_the_deploy_script_validates_the_nginx_configuration():
-    assert "nginx -t" in DEPLOY, (
-        "the deploy no longer checks that nginx accepts its own configuration"
+    """Asserted against a line that runs, and against its failure path.
+
+    `nginx -t` appearing anywhere proves it is mentioned. What matters is that
+    the deploy executes it *and* stops when it fails.
+    """
+    m = re.search(r"^[^#\n]*\bnginx -t\b.*$", DEPLOY, re.M)
+    assert m, "no executable line runs `nginx -t`"
+    assert re.search(r"\|\||&&|fail|exit", m.group(0)), (
+        f"`nginx -t` runs but its result is discarded: {m.group(0).strip()}"
     )
 
 
 def test_the_deploy_script_checks_the_public_endpoint():
     """Container health is measured inside the container and cannot see the
     path a user takes. During the incident it was green throughout."""
-    assert "sora-earth.online" in DEPLOY, (
-        "the deploy verifies nothing from outside; a 502 would pass unnoticed"
+    # Three separate facts, because the script is structured rather than
+    # inline: the URL is a variable, the fetch is a helper, and the two are
+    # joined at the call site. An earlier version of this test demanded the
+    # URL and `curl` on one line and failed on the better structure.
+    site = re.search(
+        r"^[^#\n]*\bSITE=.*https://[^\s\"']*sora-earth\.online", DEPLOY, re.M
     )
-    assert re.search(r"https://[^\s\"']*sora-earth\.online", DEPLOY), (
-        "the external check does not use https, which is the scheme users get"
+    assert site, "no executable line defines the public https URL"
+
+    fetch = re.search(r"^[^#\n]*curl[^#\n]*http_code", DEPLOY, re.M)
+    assert fetch, "nothing fetches an HTTP status code with curl"
+
+    used = re.findall(r'^[^#\n]*http_code\s+"\$\{?SITE', DEPLOY, re.M)
+    assert used, (
+        "the public URL is defined and a fetcher exists, but nothing fetches "
+        "*that* URL -- container health would be the only evidence"
     )
 
 
 def test_the_deploy_script_inspects_the_upstream_it_deployed():
-    assert "upstream sora_backend" in DEPLOY, (
-        "the deploy no longer reads back the upstream it is serving through"
+    m = re.search(r"^[^#\n]*upstream sora_backend.*$", DEPLOY, re.M)
+    assert m, "no executable line reads back the upstream being served through"
+    assert re.search(r"exec|grep|cat", m.group(0)), (
+        f"the upstream name appears but nothing reads it: {m.group(0).strip()}"
     )
 
 
