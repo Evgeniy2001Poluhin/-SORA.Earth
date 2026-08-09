@@ -71,7 +71,9 @@ new_sandbox() {
     echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" >> "$STUB_DIR/running"
     echo "p-backend-1|backend|8000/tcp" >> "$STUB_DIR/running"
     echo "$CONF_SUM" > "$STUB_DIR/container_conf_sum"
-    echo "    server backend:8000;" > "$STUB_DIR/upstream_line"
+    # `resolve` is required since #129: without it nginx caches the address
+    # and a container recreate strands it.
+    echo "    server backend:8000 resolve;" > "$STUB_DIR/upstream_line"
     echo "/etc/letsencrypt" > "$STUB_DIR/cert_source"
     echo 200 > "$STUB_DIR/http_code"
 
@@ -138,7 +140,11 @@ case "$argv" in
     *"nginx -t"*)
         [ -f "$STUB_DIR/nginx_t_fails" ] && exit 1
         exit 0 ;;
-    *"upstream sora_backend"*)
+    # Both spellings: the check used `grep -A2 \'upstream sora_backend\'` and
+    # now uses an awk range written `upstream[[:space:]]+sora_backend`, which
+    # the literal glob no longer matched -- the stub fell through, returned
+    # nothing, and every deployment test refused with an empty upstream.
+    *"upstream sora_backend"*|*"sora_backend[[:space:]]"*|*"+sora_backend"*)
         # `upstream_cmd_fails` reproduces what a real daemon did: the command
         # exits non-zero with no output -- `grep` finding nothing -- which under
         # `set -e` ends the script outside any `fail`.
@@ -365,9 +371,18 @@ refused_because "a config nginx itself rejects" "rejects its own configuration"
 rm -rf "$SANDBOX"
 
 new_sandbox
-echo "    server app:8000;" > "$STUB_DIR/upstream_line"
+echo "    server app:8000 resolve;" > "$STUB_DIR/upstream_line"
 run_guard
 refused_because "an upstream that is not backend" "expected backend:8000"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# The host is right and the address would still be frozen at worker start.
+# Accepting this is how the fix could be reverted while every deployment kept
+# reporting success (#129).
+echo "    server backend:8000;" > "$STUB_DIR/upstream_line"
+run_guard
+refused_because "an upstream without resolve" "has no 'resolve'"
 rm -rf "$SANDBOX"
 
 echo "== it refuses certificates from anywhere but the renewed store =="
