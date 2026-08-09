@@ -39,10 +39,12 @@ class ClosedSessionUsed(AssertionError):
 class FakeSession:
     """Tracks its own lifecycle and refuses use after close."""
 
-    def __init__(self, ledger):
+    def __init__(self, ledger, transactional=False):
         self._ledger = ledger
+        self._transactional = transactional
         self.closed = False
         self.committed = False
+        self.rolled_back = False
         self.added = []
         ledger.opened.append(self)
 
@@ -54,9 +56,24 @@ class FakeSession:
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, exc_type, exc, tb):
+        # `SessionLocal.begin()` commits on a clean exit and rolls back on an
+        # exception. A fake that only closes cannot tell those apart, so a
+        # test asserting "the earlier log survives" would pass against code
+        # that rolled it back.
+        if self._transactional:
+            if exc_type is None:
+                self.commit()
+            else:
+                self.rollback()
         self.close()
         return False
+
+    def rollback(self):
+        self.rolled_back = True
+        for obj in self.added:
+            if obj in self._ledger.written:
+                self._ledger.written.remove(obj)
 
     # -- use ------------------------------------------------------------
     def _check(self):
@@ -104,7 +121,7 @@ class FakeSessionLocal:
         return FakeSession(self._ledger)
 
     def begin(self):
-        return FakeSession(self._ledger)
+        return FakeSession(self._ledger, transactional=True)
 
 
 def _series(n=40):
@@ -114,13 +131,21 @@ def _series(n=40):
     })
 
 
-def _run(monkeypatch, *, rows=None, train_side_effect=None, series=None):
-    """Drive the job with every external effect captured."""
+def _run(monkeypatch, *, rows=None, train_side_effect=None, series=None,
+         ledger=None):
+    """Drive the job with every external effect captured.
+
+    `ledger` may be passed in so several runs share one, which is the only way
+    to observe accumulation across runs -- a fresh ledger per run starts from
+    zero and would report "no accumulation" against a job that leaked every
+    time.
+    """
     import app.database as database
     from app.services.forecasting import data_loader
     import app.scheduler as scheduler
 
-    ledger = Ledger(rows if rows is not None else [object()] * 50)
+    if ledger is None:
+        ledger = Ledger(rows if rows is not None else [object()] * 50)
     monkeypatch.setattr(database, "SessionLocal", FakeSessionLocal(ledger))
 
     during_training = []
@@ -255,14 +280,36 @@ def test_each_metric_is_written_in_its_own_transaction(monkeypatch):
 
 
 def test_a_later_failure_keeps_the_earlier_logs(monkeypatch):
-    """Today a third-model failure leaves the first two committed. It stays."""
+    """Today a third-model failure leaves the first two committed. It stays.
+
+    Three-row series so `len(test_df) >= 3` is false and the validation fits
+    are skipped: exactly one `fit` per metric, so "call two" is the second
+    *metric* rather than the second fit of the first one. Without that the
+    failure could land before any metric had been written, and the assertion
+    would hold for the wrong reason.
+
+    Asserting on the first record's `status` rather than on the list being
+    non-empty, because the failure path writes a log too -- a `status="failed"`
+    row would satisfy "something was written" while proving nothing.
+    """
     def fail_on_second(call_number):
         if call_number == 2:
             raise RuntimeError("second model refused to fit")
 
-    _result, ledger, _ = _run(monkeypatch, train_side_effect=fail_on_second)
+    tiny = {m: _series(3) for m in ("score", "prob", "co2_reduction")}
+    _result, ledger, _ = _run(
+        monkeypatch, train_side_effect=fail_on_second, series=tiny
+    )
 
     assert ledger.written, "the first metric's log was lost when the second failed"
+    assert ledger.written[0].status == "success", (
+        f"the first record is {ledger.written[0].status!r}; the successful "
+        f"metric's log did not survive the later failure"
+    )
+    assert any(getattr(o, "status", None) == "failed" for o in ledger.written), (
+        "the failing metric wrote no failure log, so the run is not the "
+        "scenario this test names"
+    )
 
 
 def test_a_failure_mid_run_still_closes_every_session(monkeypatch):
@@ -278,10 +325,23 @@ def test_a_failure_mid_run_still_closes_every_session(monkeypatch):
 
 
 def test_repeated_runs_do_not_accumulate_open_sessions(monkeypatch):
-    """Three per invocation was the observed cost; the second run must add none."""
-    for _ in range(3):
-        _result, ledger, _ = _run(monkeypatch)
-        assert ledger.open_now == []
+    """Three per invocation was the observed cost.
+
+    One ledger across all three runs: a fresh ledger per run starts from zero
+    and would report "no accumulation" against a job that leaks every time.
+    """
+    shared = Ledger([object()] * 50)
+
+    for run in range(1, 4):
+        _result, _ledger, _ = _run(monkeypatch, ledger=shared)
+        assert shared.open_now == [], (
+            f"after run {run}, {len(shared.open_now)} session(s) are still "
+            f"open; the leak accumulates across invocations"
+        )
+
+    assert len(shared.opened) >= 3 * run, (
+        "the runs did not open sessions at all, so nothing was measured"
+    )
 
 
 # --- the shape, not just the outcome ---------------------------------------
