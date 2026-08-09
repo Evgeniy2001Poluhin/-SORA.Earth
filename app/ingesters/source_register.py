@@ -157,3 +157,27 @@ def openaq_enabled() -> bool:
     return os.getenv(_OPENAQ_ENABLED_ENV, "off").strip().lower() in {
         "1", "true", "yes", "on", "enabled",
     }
+
+
+def openaq_scheduling_refusal() -> Optional[str]:
+    """Why OpenAQ must not be scheduled, or None if it may be.
+
+    Two distinct refusals, and collapsing them would hide the one that is a
+    mistake:
+
+    `disabled_no_current_stations`
+        The default. A decision in force, logged at info.
+
+    `enabled_without_api_key`
+        The operator asked for this source and cannot have it. Registering
+        anyway would schedule a job whose `fetch()` returns an empty list
+        before it calls anything -- the same empty hourly run standing the
+        source down exists to stop, one layer further in. Logged at warning,
+        because a configuration that cannot do what it says is a fault rather
+        than a policy.
+    """
+    if not openaq_enabled():
+        return STATUS_DISABLED_NO_CURRENT_STATIONS
+    if not (os.getenv("OPENAQ_API_KEY") or "").strip():
+        return "enabled_without_api_key"
+    return None

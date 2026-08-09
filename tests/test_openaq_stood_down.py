@@ -150,3 +150,62 @@ def test_every_source_kind_is_distinct_where_the_sources_are():
     assert len(set(kinds.values())) == 4, (
         f"the register collapsed distinct sources into one kind: {kinds}"
     )
+
+
+# --- enabling without a key must not recreate the empty hourly run ----------
+
+
+def test_the_flag_alone_does_not_schedule_the_source(monkeypatch):
+    """`SORA_OPENAQ_ENABLED=true` with no key is a fetch that cannot run.
+
+    `OpenAQIngester.fetch()` returns an empty list before it calls the API when
+    the key is absent. Registering the job anyway reproduces the thing standing
+    the source down removes -- an hourly run that produces nothing -- one layer
+    further in, and this time asked for by the operator.
+    """
+    from app.ingesters.source_register import openaq_scheduling_refusal
+
+    monkeypatch.setenv("SORA_OPENAQ_ENABLED", "true")
+    monkeypatch.delenv("OPENAQ_API_KEY", raising=False)
+
+    assert openaq_scheduling_refusal() == "enabled_without_api_key"
+
+
+@pytest.mark.parametrize("key", ["", "   ", "\t"])
+def test_a_blank_key_counts_as_no_key(monkeypatch, key):
+    from app.ingesters.source_register import openaq_scheduling_refusal
+
+    monkeypatch.setenv("SORA_OPENAQ_ENABLED", "true")
+    monkeypatch.setenv("OPENAQ_API_KEY", key)
+
+    assert openaq_scheduling_refusal() == "enabled_without_api_key"
+
+
+def test_the_two_refusals_are_told_apart(monkeypatch):
+    """One is a decision in force; the other is a misconfiguration.
+
+    Reported as the same thing, the mistake would be logged at the level the
+    policy uses and read as normal.
+    """
+    from app.ingesters.source_register import openaq_scheduling_refusal
+
+    monkeypatch.delenv("SORA_OPENAQ_ENABLED", raising=False)
+    monkeypatch.delenv("OPENAQ_API_KEY", raising=False)
+    default_refusal = openaq_scheduling_refusal()
+
+    monkeypatch.setenv("SORA_OPENAQ_ENABLED", "true")
+    misconfigured = openaq_scheduling_refusal()
+
+    assert default_refusal == STATUS_DISABLED_NO_CURRENT_STATIONS
+    assert misconfigured == "enabled_without_api_key"
+    assert default_refusal != misconfigured
+
+
+def test_a_complete_configuration_is_allowed(monkeypatch):
+    """The refusal must be able to not fire, or it asserts nothing."""
+    from app.ingesters.source_register import openaq_scheduling_refusal
+
+    monkeypatch.setenv("SORA_OPENAQ_ENABLED", "true")
+    monkeypatch.setenv("OPENAQ_API_KEY", "a-real-looking-key")
+
+    assert openaq_scheduling_refusal() is None

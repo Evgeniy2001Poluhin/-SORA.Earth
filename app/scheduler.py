@@ -863,9 +863,12 @@ def init_scheduler(start: bool = True):
         # Re-enabling needs SORA_OPENAQ_ENABLED and the condition recorded in
         # SOURCE_REGISTER["openaq"].reenable_condition -- the flag alone does
         # not make the stations report.
-        from app.ingesters.source_register import openaq_enabled
+        from app.ingesters.source_register import (
+            openaq_enabled, openaq_scheduling_refusal,
+        )
 
-        if openaq_enabled():
+        _openaq_refusal = openaq_scheduling_refusal()
+        if _openaq_refusal is None:
             scheduler.add_job(
                 scheduled_openaq_ingestion,
                 IntervalTrigger(hours=1),
@@ -873,10 +876,21 @@ def init_scheduler(start: bool = True):
                 name="Ingest OpenAQ air quality data every 1h",
                 replace_existing=True,
             )
+        elif _openaq_refusal == "enabled_without_api_key":
+            # Loud: the operator asked for this source and cannot get it.
+            # Registering anyway would schedule a fetch that returns an empty
+            # list before it calls anything -- the same empty hourly run the
+            # flag exists to stop, one layer down.
+            logger.warning(
+                "openaq ingestion not scheduled: SORA_OPENAQ_ENABLED is set "
+                "but OPENAQ_API_KEY is missing or blank; set the key or unset "
+                "the flag (see #57)"
+            )
         else:
             logger.info(
-                "openaq ingestion not scheduled: disabled_no_current_stations "
-                "(set SORA_OPENAQ_ENABLED=true to override; see #57)"
+                "openaq ingestion not scheduled: %s "
+                "(set SORA_OPENAQ_ENABLED=true to override; see #57)",
+                _openaq_refusal,
             )
 
         # Open-Meteo weather ingestion (every 1 hour)

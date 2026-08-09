@@ -102,9 +102,19 @@ OPENAI_API_KEY=
 
 ---
 
-### 2. ✅ OPENAQ_API_KEY - **USED** (Optional)
+### 2. ⚪ OPENAQ_API_KEY - **NOT REQUIRED** (source stood down)
 
-**Status:** 🟢 ACTIVE (optional data ingester, graceful skip if not set)
+**Status:** ⚪ STOOD DOWN (#57) — the hourly job is **not registered** unless
+`SORA_OPENAQ_ENABLED` is set, so this key is not needed to operate the platform.
+
+Every station within 25 km of the 21 declared regions stopped reporting in
+September 2017, measured on production with a working key and HTTP 200
+throughout. Scheduled ingestion produced 24 `degraded` runs a day and no rows.
+
+The key is read **only** when an enabled run reaches the API. Enabling the
+source without a key is refused at registration rather than scheduled: a job
+that returns an empty list before it calls anything is the failure this change
+removes, one layer down.
 
 **Usage Location:**
 ```python
@@ -120,14 +130,21 @@ async def fetch(self):
 ```
 
 **Called By:**
-- `app/ingesters/runner.py:19-23` - Registered in INGESTERS list
-- Background job: External data refresh scheduler
+- `app/scheduler.py` — hourly job, registered **only** when
+  `SORA_OPENAQ_ENABLED` is set *and* `OPENAQ_API_KEY` is non-blank
+- `app/ingesters/runner.py` — still listed; the adapter is kept, not removed
 
 **Behavior:**
-- **If OPENAQ_API_KEY set:** Fetches PM2.5 and NO2 air quality data for 5 Russian regions
-- **If NOT set:** Skips OpenAQ ingester (logs info message, no error)
+- **Default (flag unset):** the job is not registered. A direct call returns
+  `disabled_no_current_stations` and makes no request.
+- **Flag set, key present:** hourly ingestion runs as before.
+- **Flag set, key missing:** registration is refused with a warning naming both,
+  because scheduling a fetch that cannot authenticate produces the same empty
+  runs the flag exists to stop.
 
-**Graceful Degradation:** ✅ YES (explicit check + early return)
+**Graceful Degradation:** ✅ YES — and the source register
+(`app/ingesters/source_register.py`) records why it is down and what would have
+to be true to schedule it again.
 
 **Data Ingested:**
 - **Regions:** RU-MOW, RU-SPE, RU-MOS, RU-LEN, RU-SA (capital cities)
@@ -234,14 +251,16 @@ Frontend:
 └─────────────────────────────────────────────────────────────┘
 
 Scheduler:
-  app/scheduler.py (background job)
+  app/scheduler.py
        ↓
-  app/ingesters/runner.py:run_all()
-       ↓
-  app/ingesters/openaq.py:20 fetch()
-       ├── if OPENAQ_API_KEY: fetch data from openaq.org
-       └── else: log.info() + return []
+  if SORA_OPENAQ_ENABLED and OPENAQ_API_KEY:
+       ├── register hourly job → openaq.py fetch() → openaq.org
+       └── else: not registered (default), logged with the reason
 ```
+
+Do not obtain a key to "restore" this source. It authenticates correctly today
+and the stations still have nothing recent; the gap is in the data, not in the
+credentials. See `SOURCE_REGISTER["openaq"].reenable_condition`.
 
 ---
 
