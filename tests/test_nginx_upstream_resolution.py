@@ -1,0 +1,291 @@
+"""nginx must not freeze an upstream address when its workers start.
+
+On 2026-08-09 a deploy recreated the backend, it took the address the scheduler
+had been using, and nginx kept sending to the old one: 4.5 minutes of 502 on
+the public endpoint while `docker inspect` reported both containers healthy
+with zero restarts (#129). Name resolution was never broken -- `getent hosts
+backend` inside the nginx container returned the new address throughout. Only
+the cached one was stale.
+
+There are two independent defences, and these tests cover both because they
+protect different events:
+
+  1. `scripts/deploy_production.sh` recreates nginx after the backend and
+     verifies the public endpoint. It already existed; the incident happened
+     because it was bypassed by a manual `docker compose up`.
+  2. `resolver` plus `resolve` on the upstream, so an out-of-band recreate --
+     one that never goes through the script -- recovers on its own.
+
+The behavioural test for the second layer needs live containers and lives in
+the production acceptance for #129, not here: a unit test cannot move a
+container's IP. What is asserted here is that the configuration says what it
+must, and that the script's guarantees have not quietly gone away.
+"""
+import re
+from pathlib import Path
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CONF = (ROOT / "nginx" / "nginx.conf").read_text()
+_DEPLOY_RAW = (ROOT / "scripts" / "deploy_production.sh").read_text()
+
+
+def _executable_lines(text: str) -> str:
+    """The script with comments and blank lines removed.
+
+    Searching the raw text for `nginx -t` is satisfied by a comment mentioning
+    it -- and this script is heavily commented, precisely because each check
+    records an incident. A guarantee has to be asserted against a line that
+    runs. The same over-broad substring check has now been caught three times
+    in this repository; stripping comments is the cheap half of the fix, and
+    the assertions below add structure on top.
+    """
+    out = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+DEPLOY = _executable_lines(_DEPLOY_RAW)
+
+
+# --- layer 2: the configuration re-resolves -------------------------------
+
+
+def test_a_resolver_is_configured():
+    """Without one, `resolve` on an upstream is a configuration error."""
+    assert re.search(r"^\s*resolver\s+127\.0\.0\.11\b", CONF, re.M), (
+        "Docker's embedded DNS is not configured as the resolver"
+    )
+
+
+def test_the_resolver_result_expires():
+    """A cache that never expires is the failure with extra steps."""
+    m = re.search(r"^\s*resolver\s+127\.0\.0\.11\s+valid=(\d+)s", CONF, re.M)
+    assert m, "the resolver has no `valid=` window"
+    assert 1 <= int(m.group(1)) <= 60, (
+        f"valid={m.group(1)}s is outside a useful range: long enough to be a "
+        f"stale-address window, or short enough to be a lookup per request"
+    )
+
+
+@pytest.mark.parametrize("name,host", [
+    ("sora_backend", "backend:8000"),
+    ("sora_grafana", "grafana:3000"),
+])
+def test_each_upstream_re_resolves(name, host):
+    """`resolve` needs a shared-memory zone; without it nginx refuses to start,
+    so the two are asserted together rather than separately."""
+    block = re.search(
+        rf"upstream\s+{name}\s*\{{(.*?)\}}", CONF, re.S
+    )
+    assert block, f"upstream {name} is missing"
+    body = block.group(1)
+
+    assert re.search(rf"^\s*server\s+{re.escape(host)}\s+resolve\s*;", body, re.M), (
+        f"{name} resolves {host} once at startup; a container recreate strands it"
+    )
+    assert re.search(rf"^\s*zone\s+{name}\s+\S+;", body, re.M), (
+        f"{name} has `resolve` without a zone, which nginx rejects"
+    )
+
+
+def test_no_proxy_pass_targets_a_bare_hostname():
+    """A literal host in proxy_pass is resolved at config load, like the old
+    upstream was. Named upstreams keep the URI semantics that a variable target
+    would change."""
+    bare = [
+        line.strip()
+        for line in CONF.splitlines()
+        if "proxy_pass" in line
+        and re.search(r"proxy_pass\s+https?://(?!sora_)[a-z][\w.-]*[:/]", line)
+    ]
+    assert bare == [], f"proxy_pass targets a hostname directly: {bare}"
+
+
+# --- layer 1: the supported deploy path still guarantees what it claims ----
+
+
+def test_the_deploy_script_recreates_nginx_after_the_backend():
+    """The ordering is the guarantee. nginx must re-resolve *after* the new
+    backend exists, or it caches the address that is about to be replaced."""
+    up = DEPLOY.index("up -d --build --remove-orphans", DEPLOY.index('step "deploying"'))
+    recreate = DEPLOY.index("up -d --force-recreate nginx", up)
+
+    assert recreate > up, (
+        "nginx is recreated before the backend, so it can cache the old address"
+    )
+
+
+def test_the_deploy_script_validates_the_nginx_configuration():
+    """Asserted against a line that runs, and against its failure path.
+
+    `nginx -t` appearing anywhere proves it is mentioned. What matters is that
+    the deploy executes it *and* stops when it fails.
+    """
+    m = re.search(r"^[^#\n]*\bnginx -t\b.*$", DEPLOY, re.M)
+    assert m, "no executable line runs `nginx -t`"
+    assert re.search(r"\|\||&&|fail|exit", m.group(0)), (
+        f"`nginx -t` runs but its result is discarded: {m.group(0).strip()}"
+    )
+
+
+def test_the_deploy_script_checks_the_public_endpoint():
+    """Container health is measured inside the container and cannot see the
+    path a user takes. During the incident it was green throughout."""
+    # Three separate facts, because the script is structured rather than
+    # inline: the URL is a variable, the fetch is a helper, and the two are
+    # joined at the call site. An earlier version of this test demanded the
+    # URL and `curl` on one line and failed on the better structure.
+    site = re.search(
+        r"^[^#\n]*\bSITE=.*https://[^\s\"']*sora-earth\.online", DEPLOY, re.M
+    )
+    assert site, "no executable line defines the public https URL"
+
+    fetch = re.search(r"^[^#\n]*curl[^#\n]*http_code", DEPLOY, re.M)
+    assert fetch, "nothing fetches an HTTP status code with curl"
+
+    used = re.findall(r'^[^#\n]*http_code\s+"\$\{?SITE', DEPLOY, re.M)
+    assert used, (
+        "the public URL is defined and a fetcher exists, but nothing fetches "
+        "*that* URL -- container health would be the only evidence"
+    )
+
+
+def test_the_deploy_script_inspects_the_upstream_it_deployed():
+    """The extraction spans several lines since the parser stopped being a
+    fixed window, so this looks at the assignment as a whole rather than at
+    one line -- an earlier version demanded `awk`/`grep` on the same line as
+    the upstream name and failed on the multi-line form it asked for."""
+    m = re.search(r"^[^#\n]*UPSTREAM=.*?\)\"?$", DEPLOY, re.M | re.S)
+    assert m, "nothing assigns UPSTREAM from the running configuration"
+
+    assignment = m.group(0)
+    assert "sora_backend" in assignment, (
+        f"UPSTREAM is read from something other than sora_backend: {assignment!r}"
+    )
+    assert re.search(r"exec|awk|grep", assignment), (
+        f"UPSTREAM is assigned but nothing reads the config: {assignment!r}"
+    )
+
+
+# --- documentation ---------------------------------------------------------
+
+
+def test_the_project_instructions_name_the_supported_path():
+    """CLAUDE.md carried the manual command that caused the incident, and it is
+    loaded into every session -- so the wrong instruction propagates."""
+    claude = (ROOT / "CLAUDE.md").read_text()
+
+    assert "scripts/deploy_production.sh" in claude, (
+        "the project instructions do not name the supported deployment path"
+    )
+
+    # Anchored on the production section specifically: CLAUDE.md has an
+    # earlier "**Deployment:**" line describing the compose topology, and
+    # slicing from the first match tested the wrong paragraph.
+    marker = "**Deployment — one supported way"
+    assert marker in claude, "the production deployment section was renamed"
+    # Whitespace-normalised: the paragraph is hard-wrapped, so "not a
+    # deployment procedure" spans a newline in the file. A substring test that
+    # depends on where a line happens to break tests the formatting.
+    deployment_section = " ".join(claude[claude.index(marker):][:1800].split())
+    assert "not a deployment procedure" in deployment_section, (
+        "the instructions do not say that a manual compose up is not a deploy"
+    )
+    assert not re.search(
+        r"^git pull && docker compose .*up -d --build", deployment_section, re.M
+    ), "the manual deploy command is still presented as the way to deploy"
+
+
+# --- the deploy script must be able to parse the config it deploys ---------
+
+
+def _upstream_as_the_deploy_reads_it(conf_path) -> str:
+    """Run the extraction the deploy script actually uses.
+
+    The awk range and the grep pattern are lifted out of
+    `scripts/deploy_production.sh` and executed against the given config --
+    not reimplemented in Python. A reimplementation agrees with itself no
+    matter what the script does, which is exactly how the first version of
+    this test stayed green while the script still used `grep -A2`.
+    """
+    import subprocess
+
+    # Anchored on sora_backend: the script is 960 lines and its *first* awk is
+    # `/^commit /{print $2}` from somewhere else entirely, which this test
+    # happily executed against nginx.conf and reported an empty upstream.
+    awk = re.search(r"awk '([^']*sora_backend[^']*)'", _DEPLOY_RAW)
+    assert awk, "no awk range over sora_backend found in deploy_production.sh"
+    grep = re.search(r"grep -E '([^']*server[^']*)'", _DEPLOY_RAW)
+    assert grep, "no grep filter for the server line found"
+
+    program = awk.group(1).replace("\\\\", "\\")
+    r = subprocess.run(
+        ["sh", "-c", f"awk '{program}' \"$1\" | grep -E '{grep.group(1)}'",
+         "sh", str(conf_path)],
+        capture_output=True, text=True,
+    )
+    return " ".join(r.stdout.split())
+
+
+def test_the_deploy_parser_still_finds_the_upstream_it_checks():
+    """The check that was missing, and it would have stopped every deploy.
+
+    The script used `grep -A2 'upstream sora_backend' | grep server` and
+    compared against `serverbackend:8000;`. Adding comments inside the block
+    pushed `server` past the third line, so the extraction returned an empty
+    string and the deploy failed at that check -- before reaching anything
+    real (#129).
+
+    The earlier contract test asserted the script *reads* the upstream. It did
+    not assert the script can read *this* upstream, which is the difference
+    between a mechanism existing and a mechanism working.
+    """
+    got = _upstream_as_the_deploy_reads_it(ROOT / "nginx" / "nginx.conf")
+
+    assert got, (
+        "the deploy would extract an empty upstream and abort; the parser "
+        "cannot see past the comments in the block"
+    )
+    assert "backend:8000" in got, f"upstream does not name backend:8000: {got!r}"
+    assert "resolve" in got, (
+        f"upstream has no `resolve`, so nginx caches the address: {got!r}"
+    )
+
+
+def test_the_deploy_parser_is_not_a_fixed_window_after_the_name():
+    """A parser bounded by line count is a check on formatting.
+
+    `grep -A2` breaks on a comment. The replacement reads the whole block, so
+    it must survive one being added.
+    """
+    import tempfile
+
+    with_comment = CONF.replace(
+        "upstream sora_backend {",
+        "upstream sora_backend {\n        # a note someone adds later\n"
+        "        # and a second line of it\n        # and a third",
+        1,
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as fh:
+        fh.write(with_comment)
+    got = _upstream_as_the_deploy_reads_it(fh.name)
+
+    assert "backend:8000" in got and "resolve" in got, (
+        f"three comment lines broke the extraction: {got!r}"
+    )
+
+
+def test_the_deploy_script_requires_resolve_not_just_the_host():
+    """Checking only `backend:8000` would pass a config that caches again."""
+    m = re.search(r"^[^#\n]*resolve[^#\n]*\bfail\b.*$", DEPLOY, re.M)
+    assert m or re.search(r"\*resolve\*", DEPLOY), (
+        "the deploy accepts an upstream without `resolve`, so the fix could "
+        "be reverted and every deployment would still report success"
+    )
