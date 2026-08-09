@@ -111,10 +111,23 @@ Every station within 25 km of the 21 declared regions stopped reporting in
 September 2017, measured on production with a working key and HTTP 200
 throughout. Scheduled ingestion produced 24 `degraded` runs a day and no rows.
 
-The key is read **only** when an enabled run reaches the API. Enabling the
-source without a key is refused at registration rather than scheduled: a job
-that returns an empty list before it calls anything is the failure this change
-removes, one layer down.
+`OPENAQ_API_KEY` is checked at registration **only for the presence of a
+non-blank value**. When a run is registered, the ingester reads the key again
+immediately before the API request. The value is not stored in the source
+register and is not written to logs.
+
+Three states, and they are distinguished rather than collapsed:
+
+| `SORA_OPENAQ_ENABLED` | `OPENAQ_API_KEY` | outcome | log level |
+|---|---|---|---|
+| unset / false | anything | `disabled_no_current_stations`, job not registered | info |
+| true | blank or absent | `enabled_without_api_key`, job not registered | warning |
+| true | non-blank | registered; the ingester reads the key before the request | — |
+
+The middle row is a fault, not a policy: the configuration asks for a source it
+cannot fetch. Registering it anyway would schedule a job whose `fetch()`
+returns an empty list before calling anything — the failure standing the source
+down removes, one layer further in.
 
 **Usage Location:**
 ```python
@@ -138,9 +151,12 @@ async def fetch(self):
 - **Default (flag unset):** the job is not registered. A direct call returns
   `disabled_no_current_stations` and makes no request.
 - **Flag set, key present:** hourly ingestion runs as before.
-- **Flag set, key missing:** registration is refused with a warning naming both,
-  because scheduling a fetch that cannot authenticate produces the same empty
-  runs the flag exists to stop.
+- **Flag set, key missing or blank:** registration is refused with a warning
+  naming both variables and neither value, because scheduling a fetch that
+  cannot authenticate produces the same empty runs the flag exists to stop.
+  A direct call to the job returns `enabled_without_api_key` and builds no
+  client — one decision, `openaq_scheduling_refusal()`, is consulted by both
+  the scheduler and the job.
 
 **Graceful Degradation:** ✅ YES — and the source register
 (`app/ingesters/source_register.py`) records why it is down and what would have
@@ -253,9 +269,12 @@ Frontend:
 Scheduler:
   app/scheduler.py
        ↓
-  if SORA_OPENAQ_ENABLED and OPENAQ_API_KEY:
-       ├── register hourly job → openaq.py fetch() → openaq.org
-       └── else: not registered (default), logged with the reason
+  openaq_scheduling_refusal()
+       ├── None                          → register hourly job
+       │                                    → openaq.py fetch() re-reads the key
+       │                                    → openaq.org
+       ├── disabled_no_current_stations  → not registered (default), info
+       └── enabled_without_api_key       → not registered, warning
 ```
 
 Do not obtain a key to "restore" this source. It authenticates correctly today

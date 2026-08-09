@@ -209,3 +209,136 @@ def test_a_complete_configuration_is_allowed(monkeypatch):
     monkeypatch.setenv("OPENAQ_API_KEY", "a-real-looking-key")
 
     assert openaq_scheduling_refusal() is None
+
+
+# --- the three states, asserted against real scheduler registration ---------
+#
+# Not by reading app/scheduler.py as text: source inspection passes if the
+# right words appear in the wrong branch. These call init_scheduler and look at
+# the jobs it actually created.
+
+SECRET = "sk-openaq-do-not-log-me-42"
+
+
+def _registered_job_ids(monkeypatch, *, flag=None, key=None):
+    import warnings
+    from app import scheduler as scheduler_module
+
+    monkeypatch.setenv("RUN_SCHEDULER", "true")
+    if flag is None:
+        monkeypatch.delenv("SORA_OPENAQ_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("SORA_OPENAQ_ENABLED", flag)
+    if key is None:
+        monkeypatch.delenv("OPENAQ_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("OPENAQ_API_KEY", key)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        scheduler_module.init_scheduler(start=False)
+    return {j.id for j in scheduler_module.scheduler.get_jobs()}
+
+
+@pytest.mark.parametrize("key", [None, SECRET])
+def test_flag_off_never_registers_whatever_the_key(monkeypatch, key):
+    """A key present without the flag must not schedule anything."""
+    assert "auto_openaq_ingestion" not in _registered_job_ids(
+        monkeypatch, flag=None, key=key
+    )
+
+
+@pytest.mark.parametrize("key", [None, "", "   "])
+def test_flag_on_without_a_usable_key_does_not_register(monkeypatch, key):
+    assert "auto_openaq_ingestion" not in _registered_job_ids(
+        monkeypatch, flag="true", key=key
+    )
+
+
+def test_flag_on_with_a_key_registers(monkeypatch):
+    """The gate must be able to open, or the two tests above prove nothing."""
+    ids = _registered_job_ids(monkeypatch, flag="true", key=SECRET)
+
+    assert "auto_openaq_ingestion" in ids
+    # The other environmental jobs are unaffected by this gate.
+    assert "auto_openmeteo_air_quality_ingestion" in ids
+    assert "auto_openmeteo_ingestion" in ids
+
+
+def test_the_refusal_log_names_the_variables_and_not_the_value(
+    monkeypatch, caplog
+):
+    """A secret in a log line outlives the run that wrote it."""
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        _registered_job_ids(monkeypatch, flag="true", key="")
+
+    text = caplog.text
+    assert "SORA_OPENAQ_ENABLED" in text
+    assert "OPENAQ_API_KEY" in text
+    assert SECRET not in text
+
+
+def test_the_register_holds_no_secret(monkeypatch):
+    """`requires_api_key=False` is a fact about operation, not a place to
+    stash the key."""
+    from dataclasses import asdict
+
+    monkeypatch.setenv("OPENAQ_API_KEY", SECRET)
+    blob = " ".join(
+        str(v) for facts in SOURCE_REGISTER.values() for v in asdict(facts).values()
+    )
+
+    assert SECRET not in blob
+    assert SOURCE_REGISTER["openaq"].requires_api_key is False
+
+
+def test_neither_refused_path_builds_a_client_or_reaches_the_network(monkeypatch):
+    """Reporting a status while still constructing the ingester would leave
+    the traffic in place and only change what the log says about it."""
+    import importlib
+
+    jobs = importlib.import_module("app.services.environmental.scheduler_jobs")
+    import app.ingesters.openaq as openaq_module
+
+    built = []
+    monkeypatch.setattr(
+        openaq_module, "OpenAQIngester",
+        lambda *a, **k: built.append(1) or (_ for _ in ()).throw(
+            AssertionError("the ingester was constructed on a refused path")
+        ),
+    )
+
+    for flag, key in ((None, None), ("true", "")):
+        if flag is None:
+            monkeypatch.delenv("SORA_OPENAQ_ENABLED", raising=False)
+        else:
+            monkeypatch.setenv("SORA_OPENAQ_ENABLED", flag)
+        monkeypatch.setenv("OPENAQ_API_KEY", key or "")
+        jobs.scheduled_openaq_ingestion()
+
+    assert built == []
+
+
+def test_the_ingester_alone_is_safe_without_a_key(monkeypatch):
+    """Independent of the scheduler gate.
+
+    Someone calling the adapter directly -- a script, a console, a future job
+    -- must not reach the network without a key either. The gate is a second
+    line, not the only one.
+    """
+    import asyncio
+
+    from app.ingesters.openaq import OpenAQIngester
+
+    monkeypatch.delenv("OPENAQ_API_KEY", raising=False)
+    ingester = OpenAQIngester()
+    monkeypatch.setattr(
+        ingester, "client",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("a client was opened without a key")
+        ),
+    )
+
+    assert asyncio.run(ingester.fetch()) == []

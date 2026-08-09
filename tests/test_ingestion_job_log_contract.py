@@ -103,7 +103,8 @@ def _run(source, *, signals=(), persist_result=None, fetch_error=None,
     lock = MagicMock()
     lock.acquire.return_value = lock_acquired
 
-    with _patch.dict(os.environ, {"SORA_OPENAQ_ENABLED": "true"}), \
+    with _patch.dict(os.environ, {"SORA_OPENAQ_ENABLED": "true",
+                                  "OPENAQ_API_KEY": "test-key"}), \
          patch("app.locks.RedisLock", return_value=lock), \
          patch(FETCH[source], new_callable=AsyncMock, **fetch_kw), \
          patch("app.ingesters.persist.persist_environmental_observations",
