@@ -30,14 +30,22 @@ someone checked the contents at the time, and nobody did.
 Identity is derived from the kind, because "the same row" means something
 different for each:
 
-    observed         source + region + metric + event_time
-    period           source + region + metric + period bounds + revision
-    not_applicable   source + region + metric + revision
+    observed         region + metric + event_time, in the stored format
+    period           source + region + metric + period bounds + revision, hashed
+    not_applicable   source + region + metric + revision, hashed
 
-Serialised canonically and hashed rather than joined with a separator: the old
-`{region}_{metric}_{time}` was ambiguous, since `_` occurs inside region codes
-and metric names, and it embedded the timestamp -- which is why a re-stamped
-constant produced a new identity every run and the unique index never fired.
+The two are deliberately not alike. `observed` keeps `{region}_{metric}_{time}`
+unchanged because those identities are already in the database: hashing them
+would mean a re-fetched observation no longer matches its stored row, the unique
+index would not fire, and the first run after deploy would duplicate everything
+it re-read. That format is ambiguous -- `_` occurs inside region codes and metric
+names -- and replacing it is worth doing, as its own migration with a mapping.
+
+The new kinds have nothing stored to stay compatible with, so they start
+canonical: deterministic serialisation, hashed, namespaced by kind. What they
+must not do is embed a timestamp the way the old format did, since that is why a
+re-stamped constant produced a fresh identity on every run and the unique index
+never fired.
 """
 from __future__ import annotations
 
