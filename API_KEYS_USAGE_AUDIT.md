@@ -102,9 +102,32 @@ OPENAI_API_KEY=
 
 ---
 
-### 2. ✅ OPENAQ_API_KEY - **USED** (Optional)
+### 2. ⚪ OPENAQ_API_KEY - **NOT REQUIRED** (source stood down)
 
-**Status:** 🟢 ACTIVE (optional data ingester, graceful skip if not set)
+**Status:** ⚪ STOOD DOWN (#57) — the hourly job is **not registered** unless
+`SORA_OPENAQ_ENABLED` is set, so this key is not needed to operate the platform.
+
+Every station within 25 km of the 21 declared regions stopped reporting in
+September 2017, measured on production with a working key and HTTP 200
+throughout. Scheduled ingestion produced 24 `degraded` runs a day and no rows.
+
+`OPENAQ_API_KEY` is checked at registration **only for the presence of a
+non-blank value**. When a run is registered, the ingester reads the key again
+immediately before the API request. The value is not stored in the source
+register and is not written to logs.
+
+Three states, and they are distinguished rather than collapsed:
+
+| `SORA_OPENAQ_ENABLED` | `OPENAQ_API_KEY` | outcome | log level |
+|---|---|---|---|
+| unset / false | anything | `disabled_no_current_stations`, job not registered | info |
+| true | blank or absent | `enabled_without_api_key`, job not registered | warning |
+| true | non-blank | registered; the ingester reads the key before the request | — |
+
+The middle row is a fault, not a policy: the configuration asks for a source it
+cannot fetch. Registering it anyway would schedule a job whose `fetch()`
+returns an empty list before calling anything — the failure standing the source
+down removes, one layer further in.
 
 **Usage Location:**
 ```python
@@ -120,14 +143,24 @@ async def fetch(self):
 ```
 
 **Called By:**
-- `app/ingesters/runner.py:19-23` - Registered in INGESTERS list
-- Background job: External data refresh scheduler
+- `app/scheduler.py` — hourly job, registered **only** when
+  `SORA_OPENAQ_ENABLED` is set *and* `OPENAQ_API_KEY` is non-blank
+- `app/ingesters/runner.py` — still listed; the adapter is kept, not removed
 
 **Behavior:**
-- **If OPENAQ_API_KEY set:** Fetches PM2.5 and NO2 air quality data for 5 Russian regions
-- **If NOT set:** Skips OpenAQ ingester (logs info message, no error)
+- **Default (flag unset):** the job is not registered. A direct call returns
+  `disabled_no_current_stations` and makes no request.
+- **Flag set, key present:** hourly ingestion runs as before.
+- **Flag set, key missing or blank:** registration is refused with a warning
+  naming both variables and neither value, because scheduling a fetch that
+  cannot authenticate produces the same empty runs the flag exists to stop.
+  A direct call to the job returns `enabled_without_api_key` and builds no
+  client — one decision, `openaq_scheduling_refusal()`, is consulted by both
+  the scheduler and the job.
 
-**Graceful Degradation:** ✅ YES (explicit check + early return)
+**Graceful Degradation:** ✅ YES — and the source register
+(`app/ingesters/source_register.py`) records why it is down and what would have
+to be true to schedule it again.
 
 **Data Ingested:**
 - **Regions:** RU-MOW, RU-SPE, RU-MOS, RU-LEN, RU-SA (capital cities)
@@ -198,7 +231,7 @@ def stream_explanation_hf(...):
 | `OPENAI_API_KEY` | 🟢 USED | Co-Pilot (explanations, Q&A) | ✅ Yes | Smart templates | 🔴 **YES** | ✅ **KEEP** |
 | `OPENAI_BASE_URL` | 🟢 USED | Co-Pilot (base URL override) | ✅ Yes | api.openai.com | ➖ N/A | ✅ **KEEP** |
 | `LLM_MODEL` | 🟢 USED | Co-Pilot (model selection) | ✅ Yes | gpt-4o-mini | ➖ N/A | ✅ **KEEP** |
-| `OPENAQ_API_KEY` | 🟢 USED | OpenAQ ingester (air quality) | ✅ Yes | Skip ingester | ➖ Empty | ✅ **KEEP** |
+| `OPENAQ_API_KEY` | ⚪ NOT REQUIRED | OpenAQ ingester, stood down (#57) | ✅ Yes | Source not scheduled | ➖ Empty | ⚪ **OPTIONAL** |
 | `HF_API_TOKEN` | 🔴 DEAD | (removed) | N/A | N/A | ➖ N/A | ❌ **REMOVED** |
 
 ---
@@ -234,14 +267,19 @@ Frontend:
 └─────────────────────────────────────────────────────────────┘
 
 Scheduler:
-  app/scheduler.py (background job)
+  app/scheduler.py
        ↓
-  app/ingesters/runner.py:run_all()
-       ↓
-  app/ingesters/openaq.py:20 fetch()
-       ├── if OPENAQ_API_KEY: fetch data from openaq.org
-       └── else: log.info() + return []
+  openaq_scheduling_refusal()
+       ├── None                          → register hourly job
+       │                                    → openaq.py fetch() re-reads the key
+       │                                    → openaq.org
+       ├── disabled_no_current_stations  → not registered (default), info
+       └── enabled_without_api_key       → not registered, warning
 ```
+
+Do not obtain a key to "restore" this source. It authenticates correctly today
+and the stations still have nothing recent; the gap is in the data, not in the
+credentials. See `SOURCE_REGISTER["openaq"].reenable_condition`.
 
 ---
 

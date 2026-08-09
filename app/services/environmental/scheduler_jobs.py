@@ -394,8 +394,50 @@ def scheduled_openaq_ingestion():
     failures rather than raising them. Kept rather than removed, because the
     decorator is what should end up firing once that is fixed; see
     `_run_ingestion`.
+
+    Stood down by default (#57). The stations for every declared region
+    stopped reporting in September 2017, so running it spends 21 requests
+    an hour to produce nothing: measured on production over 2026-08-04..08,
+    **24 runs a day, every one degraded**. A warning that is normal every hour
+    is one nobody reads, so the disabled state is reported as its own status
+    rather than as a failure.
     """
     from app.ingesters.openaq import OpenAQIngester
+    from app.ingesters.source_register import (
+        SOURCE_REGISTER, STATUS_DISABLED_NO_CURRENT_STATIONS,
+        openaq_scheduling_refusal,
+    )
+
+    # The same decision the scheduler registers on, not a second reading of
+    # the flag. Checking only `openaq_enabled()` here let a direct call build
+    # the ingester on the `enabled_without_api_key` path, while the scheduler
+    # refused to register it -- two answers to one question, and the looser
+    # one reachable by anything that calls the job directly.
+    refusal = openaq_scheduling_refusal()
+    if refusal is not None:
+        facts = SOURCE_REGISTER["openaq"]
+        result = {
+            "job": "openaq_ingestion",
+            "status": refusal,
+            "records_processed": 0,
+            "measurement_kind": facts.measurement_kind,
+            "last_verified_data": facts.last_verified_data,
+            "reenable_condition": facts.reenable_condition,
+        }
+        if refusal == STATUS_DISABLED_NO_CURRENT_STATIONS:
+            # info, not warning: a decision in force, not a fault.
+            logger.info(
+                "openaq_ingestion skipped: %s (no station newer than %s in "
+                "any declared region)",
+                refusal, facts.last_verified_data,
+            )
+        else:
+            # warning: the configuration asks for something it cannot do.
+            logger.warning(
+                "openaq_ingestion skipped: %s (SORA_OPENAQ_ENABLED is set but "
+                "OPENAQ_API_KEY is missing or blank)", refusal,
+            )
+        return result
 
     return _run_ingestion(
         job_name="openaq_ingestion",

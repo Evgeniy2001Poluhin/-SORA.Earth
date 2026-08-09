@@ -27,6 +27,21 @@ from app.services.environmental import scheduler_jobs
 from app.ingesters.classification import classify_run, EMPTY, FAILURE
 
 
+@pytest.fixture(autouse=True)
+def _openaq_enabled_for_these(monkeypatch):
+    """OpenAQ is stood down from *scheduling* (#57), not removed.
+
+    Its adapter and job must still behave correctly when a deployment enables
+    it, and this file is part of what keeps them honest -- so it turns the
+    source on rather than letting the disabled short-circuit stand in for a
+    contract it does not exercise. That the source is *not* scheduled by
+    default is asserted in tests/test_openaq_stood_down.py.
+    """
+    monkeypatch.setenv("SORA_OPENAQ_ENABLED", "true")
+    monkeypatch.setenv("OPENAQ_API_KEY", "test-key")
+
+
+
 def _signal(region="RU-MOW"):
     """A real Signal, because the job reads .metadata off each one.
 
