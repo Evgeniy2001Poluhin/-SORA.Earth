@@ -515,6 +515,11 @@ def scheduled_run_ingesters():
         lock.release()
 
 
+#: The metrics this job trains, named once. The loop used to carry the list
+#: inline while the session it read through was closed above it (#127).
+PRETRAIN_METRICS = ("score", "prob", "co2_reduction")
+
+
 def scheduled_pretrain_forecast_models():
     """Pre-train forecast models and warm the cache.
 
@@ -537,22 +542,43 @@ def scheduled_pretrain_forecast_models():
         from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
         from datetime import datetime
 
-        db = SessionLocal()
-        try:
-            rows = db.query(Evaluation).order_by(Evaluation.created_at.asc()).all()
-        finally:
-            db.close()
-
-        if not rows or len(rows) < 10:
-            logger.info("Forecast pretrain: insufficient data (%d rows)", len(rows) if rows else 0)
-            return {"status": "skipped", "reason": "insufficient_data"}
-
-        metrics_trained = []
-        # Use centralized data loader with interpolation and synthetic extension
+        # Read everything training needs, then close the read transaction
+        # before any model is fitted (#127).
+        #
+        # This used to close the session and go on using it: `db.close()` in a
+        # finally, then `load_time_series(db, ...)` once per metric in the loop
+        # below. A closed SQLAlchemy Session does not raise -- it acquires a
+        # fresh connection and opens a new transaction -- and the reference was
+        # then lost when `db` was rebound inside the loop, so nothing ever
+        # ended them. Three metrics, three server connections held out of
+        # pgbouncer's pool for the life of the process.
+        #
+        # The `finally: db.close()` sitting right above the loop is what made
+        # that invisible on reading, which is why the shape being removed is
+        # the rebinding, not only the missing close.
+        #
+        # One session for the whole function would fix the lost reference and
+        # replace it with a read transaction held open across LSTM and Prophet
+        # training. Reading is separated from training instead.
         from app.services.forecasting.data_loader import load_time_series
 
-        for metric_name in ["score", "prob", "co2_reduction"]:
-            df = load_time_series(db, metric_name)
+        with SessionLocal() as read_db:
+            rows = read_db.query(Evaluation).order_by(Evaluation.created_at.asc()).all()
+
+            if not rows or len(rows) < 10:
+                logger.info("Forecast pretrain: insufficient data (%d rows)", len(rows) if rows else 0)
+                return {"status": "skipped", "reason": "insufficient_data"}
+
+            series_by_metric = {
+                metric_name: load_time_series(read_db, metric_name)
+                for metric_name in PRETRAIN_METRICS
+            }
+        # Read transaction closed. Nothing below holds a database connection
+        # while a model is being fitted.
+
+        metrics_trained = []
+
+        for metric_name, df in series_by_metric.items():
             if len(df) < 3:
                 continue
 
@@ -614,9 +640,15 @@ def scheduled_pretrain_forecast_models():
                 # Store in cache
                 forecast_cache.store_fitted_model("ensemble", metric_name, df, forecaster, ttl=21600)
 
-                # Log metrics to database
-                db = SessionLocal()
-                try:
+                # Log metrics to database: one short write transaction per
+                # metric, opened after training rather than around it.
+                #
+                # Per-metric rather than one write for all three, deliberately:
+                # today a failure on the third model leaves the first two
+                # already committed, and collapsing them into a single
+                # transaction would roll those back. That is a behaviour
+                # change, and this fix is about a leaked connection.
+                with SessionLocal.begin() as write_db:
                     metric_log = ForecastModelMetrics(
                         trained_at=datetime.utcnow(),
                         metric_name=metric_name,
@@ -631,10 +663,7 @@ def scheduled_pretrain_forecast_models():
                         trigger_source="auto_scheduler",
                         status="success"
                     )
-                    db.add(metric_log)
-                    db.commit()
-                finally:
-                    db.close()
+                    write_db.add(metric_log)
 
                 # Update Prometheus metrics
                 from app.prom_metrics import sora_forecast_mae, sora_forecast_rmse, sora_forecast_r2, sora_forecast_mape
@@ -658,11 +687,15 @@ def scheduled_pretrain_forecast_models():
             except Exception as e:
                 logger.warning("Forecast pretrain failed for %s: %s", metric_name, e)
 
-                # Log failure to database
+                # Log failure to database, in its own short transaction.
+                #
+                # This path closed its session correctly and still rebound
+                # `db` inside the loop -- the shape that hid the leak on the
+                # success path (#127). Converted with it so the name cannot
+                # come back into the loop by either route.
                 try:
-                    db = SessionLocal()
-                    try:
-                        metric_log = ForecastModelMetrics(
+                    with SessionLocal.begin() as write_db:
+                        write_db.add(ForecastModelMetrics(
                             trained_at=datetime.utcnow(),
                             metric_name=metric_name,
                             model_type="ensemble",
@@ -670,11 +703,7 @@ def scheduled_pretrain_forecast_models():
                             trigger_source="auto_scheduler",
                             status="failed",
                             error_message=str(e)[:500]
-                        )
-                        db.add(metric_log)
-                        db.commit()
-                    finally:
-                        db.close()
+                        ))
                 except Exception:
                     pass  # Don't fail if logging fails
 
