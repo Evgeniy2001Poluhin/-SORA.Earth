@@ -232,7 +232,7 @@ def get_experiment_stats():
                 .order_by(RetrainLog.started_at.desc())
                 .first()
             )
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
         # Logged with a traceback, and reported as unavailable rather than as
         # zero runs. The previous version put `str(e)` into the response, which
         # both misreported the state and leaked database details to a public

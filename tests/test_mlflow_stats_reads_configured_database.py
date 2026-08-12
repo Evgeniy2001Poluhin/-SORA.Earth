@@ -199,7 +199,10 @@ def test_it_reads_postgresql_when_that_is_what_is_configured():
     """Everything above builds its own SQLite, and the defect was about not
     using the configured backend at all -- so one case has to exercise the real
     one. Skipped unless the suite is pointed at PostgreSQL; the CI job that does
-    is `environmental-postgres-tests`.
+    is `integration-tests`, which runs against the PostgreSQL service. Named
+    here because a reader otherwise cannot tell whether this case ever runs --
+    it skips silently everywhere else, and an earlier version of this docstring
+    named the wrong job.
 
     Uses the application's own `SessionLocal` rather than a fixture engine: what
     is under test is that `get_experiment_stats` reads *that*.
@@ -235,5 +238,10 @@ def test_it_reads_postgresql_when_that_is_what_is_configured():
         )
     finally:
         with SessionLocal() as db:
-            db.query(RetrainLog).filter(RetrainLog.model_version == marker).delete()
+            deleted = (db.query(RetrainLog)
+                       .filter(RetrainLog.model_version == marker).delete())
             db.commit()
+        # Asserted, not assumed. A `finally` that runs proves the statement was
+        # reached, not that the row is gone -- and a row left behind in the
+        # shared CI database would be read by the next run as if it were its own.
+        assert deleted == 1, f"cleanup removed {deleted} rows, expected 1"
