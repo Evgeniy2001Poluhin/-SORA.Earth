@@ -96,12 +96,16 @@ def test_the_schema_matches_the_models_rather_than_an_older_run():
 
 
 def test_the_isolation_is_not_applied_when_a_database_is_chosen_explicitly():
-    """CI points DATABASE_URL at PostgreSQL after `alembic upgrade head`.
+    """CI points TEST_DATABASE_URL at PostgreSQL after `alembic upgrade head`.
 
-    Overriding that would move the whole suite onto SQLite and stop testing the
+    Ignoring it would move the whole suite onto SQLite and stop testing the
     database production runs -- a much larger false result than the one being
     fixed. Asserted through the environment rather than by calling the helper,
     since what matters is the state the suite ended up in.
+
+    Named precisely: this said `DATABASE_URL`, which is the variable the branch
+    stops trusting. A description of the old contract sitting next to the test
+    that enforces the new one is how the old one gets restored.
     """
     from sqlalchemy.engine import make_url
 
