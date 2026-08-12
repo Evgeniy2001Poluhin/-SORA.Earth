@@ -66,13 +66,26 @@ def at_parent(tmp_path):
     with engine.begin() as c:
         c.execute(text(f'CREATE SCHEMA "{schema}"'))
 
+    # One connection, handed to Alembic. `cfg.attributes["schema"]` did not
+    # work: Alembic builds its own engine from sqlalchemy.url, so a search_path
+    # set here reached nothing, the migration ran in `public`, and every
+    # assertion inspected an empty schema. The recorder was on this engine and
+    # saw no migration statement either.
+    connection = engine.connect()
+    connection.execute(text(f'SET search_path TO "{schema}"'))
+    connection.commit()
+
     cfg = Config("alembic.ini")
     cfg.set_main_option("sqlalchemy.url", _url())
-    cfg.attributes["schema"] = schema
+    cfg.attributes["connection"] = connection
     command.upgrade(cfg, PARENT)
 
     yield engine, cfg, schema
 
+    # Rollback before close: a case that ended mid-transaction would otherwise
+    # hold locks and DROP SCHEMA would wait on itself.
+    connection.rollback()
+    connection.close()
     with engine.begin() as c:
         c.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
     engine.dispose()
