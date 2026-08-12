@@ -117,17 +117,6 @@ DECLARED_REGIONS = frozenset({
 })
 
 
-# Declared here because neither source reports its own vintage, and the row
-# timestamps cannot stand in for it: both re-emit their values every run
-# stamped with `now`, so `event_time` is always today while the numbers are
-# from 2024. Writing `event_time = now` for a literal is a provenance defect in
-# the ingesters and is tracked separately; until it is fixed, this is the only
-# place the true vintage is stated.
-SOURCE_DATA_VINTAGE = {
-    "rosstat": "2024 offline snapshot (data.rosstat_snapshot_2024)",
-    "sber_veb_baseline": "unversioned literal (app/ingesters/sber_veb_baseline.py)",
-}
-
 # How long ingestion may be silent before the run is degraded.
 #
 # This measures `ingested_at`: **whether the pipeline is running**, which is a
@@ -215,6 +204,10 @@ def _latest_by_region(db):
             EnvironmentalObservation.indicator,
             EnvironmentalObservation.value,
             EnvironmentalObservation.ingested_at,
+            EnvironmentalObservation.temporal_kind,
+            EnvironmentalObservation.period_start,
+            EnvironmentalObservation.period_end,
+            EnvironmentalObservation.source_revision,
             func.row_number()
             .over(
                 partition_by=(
@@ -269,10 +262,19 @@ def _latest_by_region(db):
     newest_ingest = None
     examined = 0
 
-    for region_id, source, indicator, value, ingested_at, _rn in db.execute(
+    vintage: dict[str, str] = {}
+
+    for (region_id, source, indicator, value, ingested_at, kind,
+         period_start, period_end, source_revision, _rn) in db.execute(
         select(ranked).where(ranked.c.rn == 1)
     ):
         examined += 1
+        # Read off the row rather than declared in this module. A hardcoded
+        # mapping was the workaround while the database could not express a
+        # vintage: it said "2024 offline snapshot" because someone wrote that
+        # here, not because any row claimed it. Now the row does.
+        vintage.setdefault(source, _vintage_of(kind, period_start, period_end,
+                                               source_revision))
         # `ingested_at` is carried per entry, not only as a global maximum:
         # the contract is checked per (region, source, indicator) pair, and a
         # maximum over all rows cannot see one pair that stopped.
@@ -282,7 +284,7 @@ def _latest_by_region(db):
         ):
             newest_ingest = ingested_at
 
-    return result, newest_ingest, examined
+    return result, newest_ingest, examined, vintage
 
 
 def _get(metrics, key):
@@ -319,6 +321,26 @@ def _ordering_key():
     )
 
 
+def _vintage_of(kind, period_start, period_end, source_revision):
+    """What the row itself says about how old its information is.
+
+    Each kind answers differently, and none of them is `ingested_at`: when the
+    platform last read a number says nothing about when the number was true.
+
+        period          the interval it describes
+        not_applicable  the revision of the constant, which is all there is
+        observed        the row is as old as its observation
+
+    Returned as text because this goes into a report a human reads. The
+    machine-readable form is the row.
+    """
+    if kind == temporal.PERIOD and period_start and period_end:
+        return f"period {period_start.date()}..{period_end.date()} ({source_revision})"
+    if kind == temporal.NOT_APPLICABLE:
+        return f"no observation date; snapshot {source_revision}"
+    return "observed"
+
+
 def _classify_pairs(metrics, limit_hours):
     """Sort one region's required pairs into missing, stale and fresh.
 
@@ -335,8 +357,10 @@ def _classify_pairs(metrics, limit_hours):
     acceptable is how the original defect worked.
 
     This is still pipeline freshness -- age is measured on `ingested_at`.
-    Vintage of the information is a separate field entirely; see
-    SOURCE_DATA_VINTAGE.
+    Vintage of the information is a separate field entirely, read off the
+    selected rows: a period for rosstat, a snapshot revision for the constants.
+    A pipeline that ran an hour ago can be delivering numbers from 2024, and
+    both facts have to be reportable at once.
     """
     missing, stale, fresh = [], [], []
     for key in REQUIRED_METRIC_KEYS:
@@ -513,7 +537,7 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
             _parse_max_ingest_age_hours() if max_ingest_age_hours is None
             else max_ingest_age_hours
         )
-        latest, newest_ingest, examined = _latest_by_region(db)
+        latest, newest_ingest, examined, vintage = _latest_by_region(db)
 
         computed = 0
         written = 0
@@ -632,14 +656,14 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
                 "age_hours": round(ingest_age, 1) if ingest_age is not None else None,
                 "stalled": stalled,
             },
-            # Not derived from any row timestamp -- see SOURCE_DATA_VINTAGE.
-            "source_data_vintage": dict(SOURCE_DATA_VINTAGE),
-            # Says where the vintage above came from. It is duplicated here
-            # from the ingesters because the database cannot express it; once
-            # #121 lands it must come from the observation row's source
-            # revision and this mapping must be deleted, not left as a
+            # Read off the selected rows. Until #121 this was a mapping
+            # declared in this module, because no column could hold a vintage
+            # and `event_time` said "today" for numbers from 2024. The rows now
+            # carry it -- a period for rosstat, a snapshot revision for the
+            # constants -- so the mapping is deleted rather than kept as a
             # second answer to the same question.
-            "vintage_provenance": "declared_in_aggregator",
+            "source_data_vintage": vintage,
+            "vintage_provenance": "derived_from_observation_rows",
         }
         if absent:
             result["absent_regions"] = absent[:20]
@@ -665,7 +689,7 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
                 "[esg_aggregator] %s index: %d/%d regions computed, %d changed, "
                 "%d observations; vintage %s",
                 SCORE_KIND, computed, len(DECLARED_REGIONS), written, examined,
-                ", ".join(f"{k}={v}" for k, v in SOURCE_DATA_VINTAGE.items()),
+                ", ".join(f"{k}={v}" for k, v in vintage.items()),
             )
         return result
     except AggregatorConfigError as e:

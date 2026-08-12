@@ -266,13 +266,17 @@ def test_the_score_declares_itself_structural(session_factory):
     assert esg_aggregator.recalc_all_regions()["score_kind"] == "structural"
 
 
-def test_the_vintage_is_declared_not_inferred_from_row_timestamps(session_factory):
-    """A row written seconds ago still carries 2024 numbers.
+def test_a_fresh_row_does_not_make_old_information_look_recent(session_factory):
+    """The provenance lie, inverted into the property that replaced it.
 
-    This is the provenance lie in one assertion: `event_time` is `now` because
-    the ingester stamps a literal with `now`, and nothing in the database can
-    contradict it. So the vintage is declared, and a fresh row must not change
-    what is reported.
+    This used to assert the vintage was *declared* in the aggregator, because
+    `event_time` said `now` for numbers from 2024 and nothing in the database
+    could contradict it. The rows can contradict it now: rosstat carries the
+    period it describes, and the constants carry a revision instead of a date.
+
+    Ingested a moment ago, and still reported as 2024 -- which is the whole
+    point. What changed is that this comes off the row rather than from a
+    mapping someone maintained by hand.
     """
     s = session_factory()
     _all_declared(s, event_time=_now(), ingested_at=_now())
@@ -281,8 +285,12 @@ def test_the_vintage_is_declared_not_inferred_from_row_timestamps(session_factor
 
     vintage = esg_aggregator.recalc_all_regions()["source_data_vintage"]
 
-    assert "2024" in vintage["rosstat"]
-    assert "unversioned" in vintage["sber_veb_baseline"]
+    assert "2024" in vintage["rosstat"], vintage
+    assert "no observation date" in vintage["sber_veb_baseline"], vintage
+    assert "rev:" in vintage["sber_veb_baseline"], (
+        "the constants report no revision, so two different snapshots would be "
+        "indistinguishable in the output"
+    )
 
 
 def test_no_change_is_a_success_for_a_structural_index(session_factory):
@@ -593,7 +601,13 @@ def test_the_declared_set_matches_both_sources(session_factory):
 
 
 def test_the_vintage_says_where_it_came_from(session_factory):
-    """Until #121 the mapping is duplicated here; the output must admit it."""
+    """The field exists so a reader can tell a fact from a hand-maintained one.
+
+    It said `declared_in_aggregator` while the database could not hold a
+    vintage. That was honest and it was a workaround. It now says the rows were
+    read, and the mapping is gone rather than kept as a second answer to the
+    same question -- two answers is how they drift.
+    """
     s = session_factory()
     _all_declared(s)
     s.commit()
@@ -601,7 +615,11 @@ def test_the_vintage_says_where_it_came_from(session_factory):
 
     result = esg_aggregator.recalc_all_regions()
 
-    assert result["vintage_provenance"] == "declared_in_aggregator"
+    assert result["vintage_provenance"] == "derived_from_observation_rows"
+    assert not hasattr(esg_aggregator, "SOURCE_DATA_VINTAGE"), (
+        "the declared mapping is still there; it would be a second, silently "
+        "diverging answer to the question the rows now answer"
+    )
 
 
 def test_the_formula_itself_refuses_an_incomplete_set():
