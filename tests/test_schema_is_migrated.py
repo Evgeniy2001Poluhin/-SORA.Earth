@@ -298,7 +298,17 @@ def _canonical_then(url, *statements):
             for statement in statements:
                 conn.execute(text(statement))
         engine.dispose()
-    return _alembic(url, "upgrade", "head")
+    # To f2c9a1d47b30, not to head. That revision is the one under test here:
+    # it creates with IF NOT EXISTS and is deliberately re-runnable over a
+    # schema that already has those tables. `upgrade head` re-ran everything
+    # after e3f8a7c15d92 as well, which silently required every later revision
+    # to be idempotent too -- and the first one that was not failed here with
+    # DuplicateColumn, in a test about a different revision entirely.
+    #
+    # Requiring that of every future migration would be worse than the bug it
+    # caught: a revision that skips what already exists accepts a partially or
+    # wrongly built schema as canonical and stamps a version over it.
+    return _alembic(url, "upgrade", "f2c9a1d47b30")
 
 
 @requires_postgres
