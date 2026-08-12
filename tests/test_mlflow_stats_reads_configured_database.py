@@ -23,19 +23,15 @@ import os
 os.environ.setdefault("SORA_OFFLINE", "1")
 
 import json
-from datetime import datetime, timedelta
+import uuid
+from datetime import datetime
 from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, RetrainLog
-
-
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REPO_DB = os.path.join(REPO_ROOT, "data", "sora.db")
 
 
 @pytest.fixture
@@ -84,21 +80,24 @@ def test_metrics_from_the_configured_database_are_returned(configured_db):
     assert result.get("_source") == "retrain_log"
 
 
-def test_the_repository_database_is_not_opened(configured_db, tmp_path):
+def test_the_old_relative_path_is_not_opened(configured_db, tmp_path, monkeypatch):
     """`sqlite3.connect` creates the file it cannot find, so absence is the test.
 
-    Skipped rather than deleted when the file exists: removing a developer's
-    database to make an assertion pass would be a worse defect than the one
-    being fixed.
+    Run from a directory of this test's own, so the property is asserted
+    against a path that certainly did not exist a moment ago. An earlier version
+    checked the repository's own `data/sora.db` and skipped when a developer
+    already had one -- which is the case where the assertion matters least and
+    the case where it silently stopped running. Deleting theirs to make it
+    testable would be a worse defect than the one being fixed.
     """
-    if os.path.exists(REPO_DB):
-        pytest.skip("data/sora.db exists; this asserts it is not created")
+    (tmp_path / "data").mkdir()
+    monkeypatch.chdir(tmp_path)
 
     _add_run(configured_db, metrics={"roc_auc": 0.5})
     _stats()
 
-    assert not os.path.exists(REPO_DB), (
-        "reading stats created a database inside the repository"
+    assert not (tmp_path / "data" / "sora.db").exists(), (
+        "reading stats created a database at the old relative path"
     )
 
 
@@ -191,3 +190,50 @@ def test_a_database_failure_does_not_leak_its_message(tmp_path):
     rendered = json.dumps(result)
     for leak in ("Traceback", "OperationalError", "no such table", "sqlite3"):
         assert leak not in rendered, f"the response carries {leak!r}: {rendered}"
+
+
+# --- against the database production actually runs --------------------------
+
+
+def test_it_reads_postgresql_when_that_is_what_is_configured():
+    """Everything above builds its own SQLite, and the defect was about not
+    using the configured backend at all -- so one case has to exercise the real
+    one. Skipped unless the suite is pointed at PostgreSQL; the CI job that does
+    is `environmental-postgres-tests`.
+
+    Uses the application's own `SessionLocal` rather than a fixture engine: what
+    is under test is that `get_experiment_stats` reads *that*.
+    """
+    from app.database import RetrainLog, SessionLocal
+
+    if SessionLocal.kw["bind"].url.get_backend_name() != "postgresql":
+        pytest.skip("not configured against PostgreSQL")
+
+    marker = f"ci-{uuid.uuid4().hex[:12]}"
+    repo_db = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "sora.db")
+    existed = os.path.exists(repo_db)
+
+    with SessionLocal() as db:
+        db.add(RetrainLog(status="success", started_at=datetime(2099, 1, 1),
+                          metrics_json=json.dumps({"roc_auc": 0.77}),
+                          model_version=marker))
+        db.commit()
+    try:
+        result = _stats()
+
+        # started_at in 2099 so this row is the newest regardless of what the
+        # shared CI database already holds -- otherwise the assertion would
+        # depend on the order other tests happened to run in.
+        assert result.get("model_version") == marker, (
+            f"the configured PostgreSQL row was not read: {result}"
+        )
+        assert result.get("roc_auc") == 0.77
+        assert result.get("_source") == "retrain_log"
+        assert os.path.exists(repo_db) == existed, (
+            "reading from PostgreSQL touched the repository's SQLite file"
+        )
+    finally:
+        with SessionLocal() as db:
+            db.query(RetrainLog).filter(RetrainLog.model_version == marker).delete()
+            db.commit()
