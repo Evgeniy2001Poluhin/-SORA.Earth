@@ -426,6 +426,8 @@ jobs:
         run: |
           python -m pytest tests/test_api.py \
             tests/test_mlflow_stats_reads_configured_database.py \
+            tests/test_migration_temporal_provenance.py \
+            tests/test_aggregator_selection_postgres.py \
             -v --tb=short --timeout=60 --timeout-method=thread
         env:
           DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
@@ -780,6 +782,40 @@ jobs:
 
           engine = create_engine(os.environ["CATCHUP_URL"])
           with engine.begin() as conn:
+              # A database stamped at 0b0ff6d1594e also has
+              # environmental_observations: f7a8b9c0d1e2 creates it and is an
+              # ancestor, so stamping marks it applied without running it. The
+              # fixture omitted the table, and nothing after that revision
+              # touched it -- until one did, and the gap surfaced as
+              # "relation does not exist" from inside a later migration.
+              #
+              # Frozen DDL, as it stood at f7a8b9c0d1e2, for the same reason
+              # region_esg_scores below is frozen: building it from today's
+              # metadata would give this simulated old database columns that
+              # later revisions are about to add.
+              conn.execute(text("""
+                  CREATE TABLE environmental_observations (
+                      id               serial PRIMARY KEY,
+                      region_id        varchar(32) NOT NULL,
+                      country_code     varchar(3),
+                      latitude         double precision,
+                      longitude        double precision,
+                      indicator        varchar(64) NOT NULL,
+                      value            double precision,
+                      unit             varchar(32),
+                      source           varchar(64) NOT NULL,
+                      source_record_id varchar(128),
+                      source_revision  varchar(64),
+                      event_time       timestamptz NOT NULL,
+                      published_at     timestamptz,
+                      ingested_at      timestamptz NOT NULL DEFAULT NOW(),
+                      quality_score    double precision,
+                      is_valid         boolean NOT NULL DEFAULT true,
+                      metadata_json    text,
+                      created_at       timestamptz NOT NULL DEFAULT NOW(),
+                      updated_at       timestamptz
+                  )
+              """))
               conn.execute(text("""
                   CREATE TABLE region_esg_scores (
                       region_code   text PRIMARY KEY,

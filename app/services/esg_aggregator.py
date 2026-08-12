@@ -19,9 +19,10 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import case, and_, func, or_, select
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.ingesters import temporal
 from app.database import SessionLocal, EnvironmentalObservation, RegionESGScore
 
 log = logging.getLogger(__name__)
@@ -30,6 +31,24 @@ log = logging.getLogger(__name__)
 # The (source, indicator) pairs _compute_one reads, declared rather than left
 # implicit in the formula. A source that stops publishing then shows up as a
 # key missing from a named set, instead of as a value that is quietly None.
+#: What kind of time each source is expected to carry, by name. A source
+#: defines its own temporal semantics: rosstat publishes a yearly snapshot, so
+#: its rows are a period; sber_veb_baseline is a table of constants with no
+#: observation date at all, so its rows are not_applicable.
+#:
+#: Stated per source rather than as one global ordering rule. A global rule
+#: would have to decide whether an observation "beats" a period, which is a
+#: question nobody asked and which has no answer -- they are claims of
+#: different kinds, not the same claim at different times.
+#:
+#: A row whose kind is not the expected one is a data-contract violation. It is
+#: reported as degraded rather than ranked, because ranking it would mean
+#: choosing between two incompatible statements about the same metric.
+EXPECTED_TEMPORAL_KIND = {
+    "sber_veb_baseline": temporal.NOT_APPLICABLE,
+    "rosstat": temporal.PERIOD,
+}
+
 REQUIRED_METRICS = (
     ("sber_veb_baseline", "esg_index_baseline"),
     ("rosstat", "unemployment_rate"),
@@ -97,17 +116,6 @@ DECLARED_REGIONS = frozenset({
     "RU-ZAB",
 })
 
-
-# Declared here because neither source reports its own vintage, and the row
-# timestamps cannot stand in for it: both re-emit their values every run
-# stamped with `now`, so `event_time` is always today while the numbers are
-# from 2024. Writing `event_time = now` for a literal is a provenance defect in
-# the ingesters and is tracked separately; until it is fixed, this is the only
-# place the true vintage is stated.
-SOURCE_DATA_VINTAGE = {
-    "rosstat": "2024 offline snapshot (data.rosstat_snapshot_2024)",
-    "sber_veb_baseline": "unversioned literal (app/ingesters/sber_veb_baseline.py)",
-}
 
 # How long ingestion may be silent before the run is degraded.
 #
@@ -196,6 +204,10 @@ def _latest_by_region(db):
             EnvironmentalObservation.indicator,
             EnvironmentalObservation.value,
             EnvironmentalObservation.ingested_at,
+            EnvironmentalObservation.temporal_kind,
+            EnvironmentalObservation.period_start,
+            EnvironmentalObservation.period_end,
+            EnvironmentalObservation.source_revision,
             func.row_number()
             .over(
                 partition_by=(
@@ -203,8 +215,17 @@ def _latest_by_region(db):
                     EnvironmentalObservation.source,
                     EnvironmentalObservation.indicator,
                 ),
+                # Ranked within one kind, never across kinds. The rows in
+                # a partition all share the expected kind because the filter
+                # below admits nothing else, so this key is unambiguous.
+                #
+                # `event_time DESC` alone was wrong once event_time became
+                # nullable: PostgreSQL puts NULLs first on DESC, so a
+                # not_applicable row would have outranked a real observation.
+                # SQLite orders them last, so a test here would have been
+                # green while production picked the wrong row.
                 order_by=(
-                    EnvironmentalObservation.event_time.desc(),
+                    _ordering_key().desc(),
                     EnvironmentalObservation.ingested_at.desc(),
                     EnvironmentalObservation.id.desc(),
                 ),
@@ -222,6 +243,13 @@ def _latest_by_region(db):
                     and_(
                         EnvironmentalObservation.source == src,
                         EnvironmentalObservation.indicator == ind,
+                        # Only the kind this source is supposed to publish.
+                        # legacy_ingestion_time is excluded by construction:
+                        # it labels rows whose timestamp was an ingestion time
+                        # stored as an observation, and they are evidence of
+                        # what was recorded, not input to a score.
+                        EnvironmentalObservation.temporal_kind
+                        == EXPECTED_TEMPORAL_KIND[src],
                     )
                     for src, ind in REQUIRED_METRICS
                 ]
@@ -234,10 +262,19 @@ def _latest_by_region(db):
     newest_ingest = None
     examined = 0
 
-    for region_id, source, indicator, value, ingested_at, _rn in db.execute(
+    vintage: dict[str, str] = {}
+
+    for (region_id, source, indicator, value, ingested_at, kind,
+         period_start, period_end, source_revision, _rn) in db.execute(
         select(ranked).where(ranked.c.rn == 1)
     ):
         examined += 1
+        # Read off the row rather than declared in this module. A hardcoded
+        # mapping was the workaround while the database could not express a
+        # vintage: it said "2024 offline snapshot" because someone wrote that
+        # here, not because any row claimed it. Now the row does.
+        vintage.setdefault(source, _vintage_of(kind, period_start, period_end,
+                                               source_revision))
         # `ingested_at` is carried per entry, not only as a global maximum:
         # the contract is checked per (region, source, indicator) pair, and a
         # maximum over all rows cannot see one pair that stopped.
@@ -247,7 +284,7 @@ def _latest_by_region(db):
         ):
             newest_ingest = ingested_at
 
-    return result, newest_ingest, examined
+    return result, newest_ingest, examined, vintage
 
 
 def _get(metrics, key):
@@ -261,6 +298,47 @@ REQUIRED_METRIC_KEYS = tuple(f"{src}:{ind}" for src, ind in REQUIRED_METRICS)
 def _missing_metrics(metrics) -> tuple:
     """Which of the six required metrics this region does not have."""
     return tuple(k for k in REQUIRED_METRIC_KEYS if metrics.get(k) is None)
+
+
+def _ordering_key():
+    """Which column means "most recent" for each kind.
+
+    observed        event_time    -- when it was measured
+    period          period_end    -- the end of the interval it describes
+    not_applicable  ingested_at   -- nothing else is available; a constant has
+                                     no date, so the only ordering left is when
+                                     this platform last read it
+
+    A `case` rather than `coalesce`, so the choice is stated per kind instead of
+    falling through whichever column happens to be non-null.
+    """
+    return case(
+        (EnvironmentalObservation.temporal_kind == temporal.OBSERVED,
+         EnvironmentalObservation.event_time),
+        (EnvironmentalObservation.temporal_kind == temporal.PERIOD,
+         EnvironmentalObservation.period_end),
+        else_=EnvironmentalObservation.ingested_at,
+    )
+
+
+def _vintage_of(kind, period_start, period_end, source_revision):
+    """What the row itself says about how old its information is.
+
+    Each kind answers differently, and none of them is `ingested_at`: when the
+    platform last read a number says nothing about when the number was true.
+
+        period          the interval it describes
+        not_applicable  the revision of the constant, which is all there is
+        observed        the row is as old as its observation
+
+    Returned as text because this goes into a report a human reads. The
+    machine-readable form is the row.
+    """
+    if kind == temporal.PERIOD and period_start and period_end:
+        return f"period {period_start.date()}..{period_end.date()} ({source_revision})"
+    if kind == temporal.NOT_APPLICABLE:
+        return f"no observation date; snapshot {source_revision}"
+    return "observed"
 
 
 def _classify_pairs(metrics, limit_hours):
@@ -279,8 +357,10 @@ def _classify_pairs(metrics, limit_hours):
     acceptable is how the original defect worked.
 
     This is still pipeline freshness -- age is measured on `ingested_at`.
-    Vintage of the information is a separate field entirely; see
-    SOURCE_DATA_VINTAGE.
+    Vintage of the information is a separate field entirely, read off the
+    selected rows: a period for rosstat, a snapshot revision for the constants.
+    A pipeline that ran an hour ago can be delivering numbers from 2024, and
+    both facts have to be reportable at once.
     """
     missing, stale, fresh = [], [], []
     for key in REQUIRED_METRIC_KEYS:
@@ -457,7 +537,7 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
             _parse_max_ingest_age_hours() if max_ingest_age_hours is None
             else max_ingest_age_hours
         )
-        latest, newest_ingest, examined = _latest_by_region(db)
+        latest, newest_ingest, examined, vintage = _latest_by_region(db)
 
         computed = 0
         written = 0
@@ -576,14 +656,14 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
                 "age_hours": round(ingest_age, 1) if ingest_age is not None else None,
                 "stalled": stalled,
             },
-            # Not derived from any row timestamp -- see SOURCE_DATA_VINTAGE.
-            "source_data_vintage": dict(SOURCE_DATA_VINTAGE),
-            # Says where the vintage above came from. It is duplicated here
-            # from the ingesters because the database cannot express it; once
-            # #121 lands it must come from the observation row's source
-            # revision and this mapping must be deleted, not left as a
+            # Read off the selected rows. Until #121 this was a mapping
+            # declared in this module, because no column could hold a vintage
+            # and `event_time` said "today" for numbers from 2024. The rows now
+            # carry it -- a period for rosstat, a snapshot revision for the
+            # constants -- so the mapping is deleted rather than kept as a
             # second answer to the same question.
-            "vintage_provenance": "declared_in_aggregator",
+            "source_data_vintage": vintage,
+            "vintage_provenance": "derived_from_observation_rows",
         }
         if absent:
             result["absent_regions"] = absent[:20]
@@ -609,7 +689,7 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
                 "[esg_aggregator] %s index: %d/%d regions computed, %d changed, "
                 "%d observations; vintage %s",
                 SCORE_KIND, computed, len(DECLARED_REGIONS), written, examined,
-                ", ".join(f"{k}={v}" for k, v in SOURCE_DATA_VINTAGE.items()),
+                ", ".join(f"{k}={v}" for k, v in vintage.items()),
             )
         return result
     except AggregatorConfigError as e:

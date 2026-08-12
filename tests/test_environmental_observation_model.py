@@ -33,22 +33,29 @@ def test_environmental_observation_required_fields():
 
 
 def test_environmental_observation_nullable_constraints():
-    """Test nullable constraints match requirements."""
-    table = EnvironmentalObservation.__table__
+    """The temporal columns, after #121.
 
-    # Fields that must NOT be nullable
-    not_nullable = ['id', 'region_id', 'indicator', 'source', 'event_time', 'ingested_at', 'is_valid']
-    for field in not_nullable:
-        col = table.columns[field]
-        assert not col.nullable, f"Field '{field}' should NOT be nullable"
+    This required `event_time` to be NOT NULL. That is the contract #121
+    removes: a column that cannot say "there is no observation time" forces
+    every writer to invent one, and persistence duly wrote `datetime.now()`
+    for two sources that only ever emit literals.
 
-    # Fields that CAN be nullable
-    nullable = ['country_code', 'latitude', 'longitude', 'value', 'unit',
-                'source_record_id', 'source_revision', 'published_at',
-                'quality_score', 'metadata_json', 'updated_at']
-    for field in nullable:
-        col = table.columns[field]
-        assert col.nullable or col.server_default is not None, f"Field '{field}' should be nullable"
+    Replaced rather than deleted -- the nullability of these columns still
+    needs asserting, just with the opposite expectation for `event_time`. The
+    full state machine lives in tests/test_observation_temporal_invariants.py.
+    """
+    from app.database import EnvironmentalObservation
+
+    cols = {c.name: c for c in EnvironmentalObservation.__table__.columns}
+
+    assert cols["event_time"].nullable is True
+    assert cols["temporal_kind"].nullable is False
+    assert cols["period_start"].nullable is True
+    assert cols["period_end"].nullable is True
+    assert cols["source_revision"].nullable is True
+    assert cols["region_id"].nullable is False
+    assert cols["indicator"].nullable is False
+    assert cols["source"].nullable is False
 
 
 def test_environmental_observation_primary_key():

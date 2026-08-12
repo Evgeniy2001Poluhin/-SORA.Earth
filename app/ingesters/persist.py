@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.database import SessionLocal, EnvironmentalObservation
 from app.ingesters.base import Signal
+from app.ingesters import temporal
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +114,13 @@ def persist_environmental_observations(
     return result
 
 
+def _as_utc(value):
+    """Naive datetimes are read as UTC, as they always were here."""
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
 def _signal_to_observation_dict(signal: Signal, source: str) -> Dict[str, Any]:
     """Convert Signal to EnvironmentalObservation dict for insert.
 
@@ -133,19 +141,35 @@ def _signal_to_observation_dict(signal: Signal, source: str) -> Dict[str, Any]:
     if signal.value is None:
         raise ValueError("value required")
 
-    # Ensure timezone-aware datetime
+    # A missing observation time is no longer filled in with the current one.
+    #
+    # It used to be, and that single line is #121: a dict of 85 constants and an
+    # offline 2024 snapshot were recorded as measured today. It also defeated
+    # deduplication -- `event_time` went into `source_record_id`, so a fresh
+    # stamp meant a fresh identity, the unique index never fired, and the same
+    # unchanged literal was inserted again on every run.
     event_time = signal.observed_at
-    if event_time is None:
-        event_time = datetime.now(timezone.utc)
-    elif event_time.tzinfo is None:
+    if event_time is not None and event_time.tzinfo is None:
         # Assume UTC if naive datetime
         event_time = event_time.replace(tzinfo=timezone.utc)
 
-    # Build source_record_id for conflict detection
-    # Format: {region}_{metric}_{timestamp_iso}
-    source_record_id = (
-        f"{signal.region_code}_{signal.metric}_"
-        f"{event_time.isoformat()}"
+    kind = getattr(signal, "temporal_kind", temporal.OBSERVED)
+    period_start = _as_utc(getattr(signal, "period_start", None))
+    period_end = _as_utc(getattr(signal, "period_end", None))
+    source_revision = getattr(signal, "source_revision", None)
+
+    # Refused rather than repaired. A default here is invisible in the data,
+    # which is the property that let the original defect run for months.
+    temporal.validate(kind, event_time=event_time, period_start=period_start,
+                      period_end=period_end, source_revision=source_revision)
+
+    # Derived from whichever fields make a row distinct for its kind, hashed
+    # rather than concatenated: `_` occurs inside region codes and metric names,
+    # so the old `{region}_{metric}_{time}` could not be parsed back apart.
+    source_record_id = temporal.canonical_identity(
+        source=source, region_code=signal.region_code, metric=signal.metric,
+        kind=kind, event_time=event_time, period_start=period_start,
+        period_end=period_end, source_revision=source_revision,
     )
 
     # Calculate quality score from metadata if available
@@ -178,8 +202,11 @@ def _signal_to_observation_dict(signal: Signal, source: str) -> Dict[str, Any]:
         "unit": signal.unit,
         "source": source,
         "source_record_id": source_record_id,
-        "source_revision": None,
+        "source_revision": source_revision,
         "event_time": event_time,
+        "temporal_kind": kind,
+        "period_start": period_start,
+        "period_end": period_end,
         "published_at": None,
         "ingested_at": datetime.now(timezone.utc),
         "quality_score": quality_score,
