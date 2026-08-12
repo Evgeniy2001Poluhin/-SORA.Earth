@@ -385,8 +385,13 @@ class EnvironmentalObservation(Base):
     event_time = Column(DateTime(timezone=True), nullable=True, index=True)
     period_start = Column(DateTime(timezone=True), nullable=True)
     period_end = Column(DateTime(timezone=True), nullable=True)
-    temporal_kind = Column(String(32), nullable=False,
-                           server_default=sa.text("'observed'"), index=True)
+    # No server_default. One would silently make every row that omits the kind
+    # an `observed` -- a claim that a value was measured, asserted by a column
+    # default rather than by anyone who looked. That is the defect this whole
+    # change removes, reintroduced on the field meant to fix it. The migration
+    # does not need it either: it adds the column nullable, backfills from a
+    # frozen mapping, and only then sets NOT NULL.
+    temporal_kind = Column(String(32), nullable=False, index=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
     ingested_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 

@@ -208,3 +208,27 @@ def test_the_expected_checks_are_present_exactly():
         "ck_environmental_observations_temporal_kind_known",
         "ck_environmental_observations_temporal_kind_state",
     }, f"unexpected CHECK set: {sorted(got)}"
+
+
+def test_the_kind_has_no_database_default():
+    """A default here would assert 'measured' on anyone's behalf.
+
+    Every other column may sensibly default. This one carries a claim about
+    where a number came from, and a row that does not say must not be answered
+    for -- that substitution, on `event_time`, is what #121 exists to remove.
+    """
+    col = EnvironmentalObservation.__table__.columns["temporal_kind"]
+
+    assert col.server_default is None, (
+        f"temporal_kind defaults to {col.server_default.arg!r}; a row that "
+        f"omits its kind would be recorded as that without anyone deciding"
+    )
+
+
+def test_a_row_without_a_kind_is_rejected(db):
+    """And the database enforces it, not just the absence of a default."""
+    from sqlalchemy.exc import IntegrityError
+
+    with pytest.raises(IntegrityError):
+        _insert(db, temporal_kind=None, event_time=T)
+    db.rollback()
