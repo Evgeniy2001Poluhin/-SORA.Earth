@@ -688,6 +688,62 @@ check "latest still names the good deployment" \
 check "and no manifest was added"   "$(find "$SANDBOX/manifests" -name '*.txt' | wc -l | tr -d ' ')" "1"
 rm -rf "$SANDBOX"
 
+echo "== the rollback compares the journal against what is checked out =="
+# The journal records deployments this script made. A deployment made by hand
+# leaves no entry, so the next scripted run names the last *scripted* commit as
+# the one it replaced -- skipping everything in between (#133). `--rollback`
+# takes its target from that field via the "to undo:" line this script prints,
+# so an operator following the script's own suggestion can land several commits
+# further back than they expect, silently, at the moment they are least able to
+# check.
+
+new_sandbox
+run_guard                                   # journal and checkout both SECOND
+run_guard --rollback "$FIRST"
+check "an agreeing journal does not block the rollback" "$RC" "0"
+check "and it says what it compared" \
+    "$(grep -c 'journal records' "$SANDBOX/out")" "1"
+rm -rf "$SANDBOX"
+
+new_sandbox
+run_guard                                   # journal records SECOND
+# A deployment by hand: the checkout moves and the journal never hears about it.
+git -C "$REPO" checkout -q --detach "$FIRST"
+run_guard --rollback "$FIRST"
+refused_because "a journal that disagrees with the checkout" \
+    "disagrees with the checkout"
+# Both sides of the comparison must appear, so an operator can see what the
+# refusal is about without going to look. Asserted as "present", not as a
+# count: the number of times each is printed is formatting, not contract.
+check "the refusal names what is checked out" \
+    "$(grep -qc "${FIRST:0:12}" "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "and what the journal claims" \
+    "$(grep -qc "${SECOND:0:12}" "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "and nothing was deployed" \
+    "$(grep -c 'up -d' "$STUB_DIR/calls" 2>/dev/null || echo 0)" "0"
+check "and the checkout did not move" \
+    "$(git -C "$REPO" rev-parse HEAD)" "$FIRST"
+rm -rf "$SANDBOX"
+
+new_sandbox
+run_guard
+git -C "$REPO" checkout -q --detach "$FIRST"
+ROLLBACK_ACKNOWLEDGE="$FIRST" run_guard --rollback "$FIRST"
+check "an acknowledgement carrying the observed commit is accepted" "$RC" "0"
+check "and it says so out loud" \
+    "$(grep -c 'divergence acknowledged' "$SANDBOX/out")" "1"
+rm -rf "$SANDBOX"
+
+new_sandbox
+run_guard
+git -C "$REPO" checkout -q --detach "$FIRST"
+# The wrong SHA, and a plausible one: what the journal claims. An
+# acknowledgement that could be pasted from the runbook without looking would
+# be no acknowledgement at all.
+ROLLBACK_ACKNOWLEDGE="$SECOND" run_guard --rollback "$FIRST"
+refused_because "an acknowledgement of the wrong commit" "disagrees with the checkout"
+rm -rf "$SANDBOX"
+
 echo "== rollback reads the previous manifest, not the checkout =="
 new_sandbox
 run_guard                       # records SECOND as deployed
