@@ -5,12 +5,71 @@ LAZY (inside fixtures, not module-level) to avoid loading ML models for tests
 that don't need FastAPI (e.g., persistence unit tests).
 """
 import os
+import shutil
 
 # Prevent APScheduler from starting in tests
 os.environ.setdefault("RUN_SCHEDULER", "false")
 
 import pytest
 from unittest.mock import MagicMock, patch
+
+
+def _isolate_test_database():
+    """Give the suite its own database file, before anything can open one.
+
+    `app/database.py` reads `DATABASE_URL` and builds the engine at import time,
+    and its default is `data/sora.db` inside the repository. That file survives
+    between runs, and `create_all(checkfirst=True)` only creates missing
+    *tables* -- it never alters an existing one. So a column added to a model
+    silently did not reach the tests: the suite kept using a schema built by
+    some earlier session, and the failure surfaced as `no such column` from deep
+    inside persistence rather than as anything about the schema.
+
+    A session fixture would be too late. This runs at conftest import, above the
+    `from app.database import ...` below, which is the first import of it.
+
+    The database is taken only from `TEST_DATABASE_URL`, never from an ambient
+    `DATABASE_URL`. An earlier version used `setdefault`, which keeps whatever
+    is already exported -- safe against overwriting CI's configuration, and
+    unsafe in the direction that matters: a shell holding a production URL
+    would hand the suite production, and the suite writes. CI passes the same
+    ephemeral PostgreSQL URL as `TEST_DATABASE_URL`, so nothing there is lost.
+
+    A file rather than `:memory:`. In-memory SQLite gives each connection its
+    own database, so anything crossing a connection boundary would see an empty
+    schema -- trading this class of false result for a new one.
+
+    `mkdtemp` rather than `tmp_path_factory` for the same timing reason, and it
+    is per-process, so xdist workers cannot collide.
+    """
+    from tests._database_url import choose_database_url
+
+    url, directory = choose_database_url(os.environ)
+    os.environ["DATABASE_URL"] = url
+    return directory
+
+
+_TEST_DB_DIR = _isolate_test_database()
+
+
+def _fingerprint(path):
+    """Existence, size, mtime and content digest -- or None when absent.
+
+    Taken here, before the application is imported, so "the suite did not touch
+    the repository's database" can be asserted against the state that preceded
+    it rather than against the state it left.
+    """
+    import hashlib
+    if not os.path.exists(path):
+        return None
+    st = os.stat(path)
+    with open(path, "rb") as fh:
+        return (st.st_size, st.st_mtime_ns, hashlib.sha256(fh.read()).hexdigest())
+
+
+REPO_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "data", "sora.db")
+REPO_DB_BEFORE = _fingerprint(REPO_DB)
 
 
 def _provision_test_schema():
@@ -235,21 +294,67 @@ def _dirty_artifacts():
 _ARTIFACTS_DIRTY_AT_START = _dirty_artifacts()
 
 
-def pytest_sessionfinish(session, exitstatus):
-    """Fail the run if it left tracked artifacts modified.
+def _cleanup_test_database(directory):
+    """Remove a temporary database directory this process created.
 
-    Compared against a snapshot taken at start-up so a developer's own
-    uncommitted edits under data/ or models/ do not trip this.
+    `None` means the caller supplied TEST_DATABASE_URL, so there is nothing of
+    ours to remove -- and removing anything then would delete someone else's
+    database. The engine is disposed first: an open SQLite handle can keep the
+    file alive and turn the removal into a silent no-op.
+
+    A named helper rather than an inline block so it can be tested directly.
+    The previous cleanup was unreachable and no test noticed.
     """
-    newly_dirty = _dirty_artifacts() - _ARTIFACTS_DIRTY_AT_START
-    if not newly_dirty:
+    if directory is None:
         return
-    session.exitstatus = 1
-    print(
-        "\nERROR: this run modified tracked artifacts:\n  "
-        + "\n  ".join(sorted(newly_dirty))
-        + "\nGenerated files belong under SORA_DATA_DIR / SORA_MODELS_DIR."
-    )
+
+    from app.database import engine
+
+    engine.dispose()
+    shutil.rmtree(directory)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Everything that has to happen once, after the last test.
+
+    One function, deliberately. A module binds a name once, so a second
+    `pytest_sessionfinish` defined anywhere in this file silently replaces the
+    first and its body never runs. That had already happened: the database
+    cleanup added for the temporary directory was defined above this and was
+    dead from the moment it was written, leaking a directory per run while the
+    isolation it belonged to worked perfectly. Nothing failed, because a
+    cleanup that does not run looks exactly like one that succeeded.
+
+    `test_only_one_session_finish_hook_is_defined` guards the arrangement.
+    """
+    try:
+        # Inside the try, not above it. Computed before, an exception from
+        # either of these skipped the finally entirely and the directory leaked
+        # again -- the same defect as the duplicate hook, through a different
+        # door.
+        newly_dirty = _dirty_artifacts() - _ARTIFACTS_DIRTY_AT_START
+
+        # A test runs at some point in the session and cannot see a write that
+        # happens after it, so a green assertion proves nothing was touched
+        # *up to that test*. This is where the run is actually over.
+        repo_db_changed = _fingerprint(REPO_DB) != REPO_DB_BEFORE
+
+        if newly_dirty:
+            session.exitstatus = 1
+            print(
+                "\nERROR: this run modified tracked artifacts:\n  "
+                + "\n  ".join(sorted(newly_dirty))
+                + "\nGenerated files belong under SORA_DATA_DIR / SORA_MODELS_DIR."
+            )
+        if repo_db_changed:
+            session.exitstatus = 1
+            print(
+                "\nERROR: this run touched the repository database "
+                f"{REPO_DB}.\nThe suite must use its own; see "
+                "tests/_database_url.py."
+            )
+    finally:
+        _cleanup_test_database(_TEST_DB_DIR)
 
 
 @pytest.fixture(scope="session", autouse=True)
