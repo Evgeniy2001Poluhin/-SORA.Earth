@@ -115,11 +115,17 @@ def test_the_isolation_is_not_applied_when_a_database_is_chosen_explicitly():
     # credentials render identically and the comparison would pass on a
     # database the caller did not ask for. Driver is compared by backend name
     # so `postgresql` and `postgresql+psycopg2` are not treated as a mismatch.
-    assert actual.get_backend_name() == wanted.get_backend_name()
-    assert (actual.host, actual.port, actual.database, actual.username) == (
-        wanted.host, wanted.port, wanted.database, wanted.username), (
-        f"TEST_DATABASE_URL asked for {wanted.render_as_string()} and the "
-        f"engine is bound to {actual.render_as_string()}"
+    # Every field, password included. An earlier version compared host, port,
+    # database and username while its own comment named the password as the
+    # risk -- so two different credentials against the same host would have
+    # passed the test that was written to catch exactly that.
+    fields = ("drivername", "username", "password", "host", "port", "database",
+              "query")
+    mismatched = [f for f in fields if getattr(actual, f) != getattr(wanted, f)]
+
+    assert not mismatched, (
+        f"TEST_DATABASE_URL and the engine differ on {mismatched}: asked for "
+        f"{wanted.render_as_string()}, bound to {actual.render_as_string()}"
     )
 
 
@@ -172,3 +178,28 @@ def test_an_explicit_test_database_url_is_used_as_given():
 
     assert url == "postgresql://sora:sora2026@localhost:5432/sora_earth"
     assert temp is None, "cleanup would remove a directory this run did not create"
+
+
+def test_only_one_session_finish_hook_is_defined():
+    """pytest calls one of them, and the other is dead code.
+
+    A module binds a name once. A second `pytest_sessionfinish` anywhere in
+    conftest silently replaces the first, and the replaced body never runs --
+    which is what happened to the database cleanup: it leaked a temporary
+    directory per run while everything looked green, because a cleanup that
+    does not run is indistinguishable from one that succeeded.
+
+    Parsed rather than grepped: a comment or a docstring mentioning the name
+    would satisfy a substring search.
+    """
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse((Path(__file__).parent / "conftest.py").read_text())
+    defined = [n for n in tree.body
+               if isinstance(n, ast.FunctionDef) and n.name == "pytest_sessionfinish"]
+
+    assert len(defined) == 1, (
+        f"conftest defines pytest_sessionfinish {len(defined)} times, at lines "
+        f"{[n.lineno for n in defined]}; only the last one runs"
+    )

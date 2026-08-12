@@ -72,17 +72,6 @@ REPO_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 REPO_DB_BEFORE = _fingerprint(REPO_DB)
 
 
-def pytest_sessionfinish(session, exitstatus):
-    """Remove what this process created, and only that.
-
-    Errors are not swallowed. `ignore_errors=True` would hide a directory that
-    could not be removed, and a cleanup that silently does nothing is how
-    temporary state becomes permanent state.
-    """
-    if _TEST_DB_DIR:
-        shutil.rmtree(_TEST_DB_DIR)
-
-
 def _provision_test_schema():
     """Build the schema for the suite's scratch database.
 
@@ -306,20 +295,55 @@ _ARTIFACTS_DIRTY_AT_START = _dirty_artifacts()
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Fail the run if it left tracked artifacts modified.
+    """Everything that has to happen once, after the last test.
 
-    Compared against a snapshot taken at start-up so a developer's own
-    uncommitted edits under data/ or models/ do not trip this.
+    One function, deliberately. A module binds a name once, so a second
+    `pytest_sessionfinish` defined anywhere in this file silently replaces the
+    first and its body never runs. That had already happened: the database
+    cleanup added for the temporary directory was defined above this and was
+    dead from the moment it was written, leaking a directory per run while the
+    isolation it belonged to worked perfectly. Nothing failed, because a
+    cleanup that does not run looks exactly like one that succeeded.
+
+    `test_only_one_session_finish_hook_is_defined` guards the arrangement.
     """
     newly_dirty = _dirty_artifacts() - _ARTIFACTS_DIRTY_AT_START
-    if not newly_dirty:
-        return
-    session.exitstatus = 1
-    print(
-        "\nERROR: this run modified tracked artifacts:\n  "
-        + "\n  ".join(sorted(newly_dirty))
-        + "\nGenerated files belong under SORA_DATA_DIR / SORA_MODELS_DIR."
-    )
+
+    # Re-checked here rather than only in a test. A test runs at some point in
+    # the session and cannot see a write that happens after it -- so a green
+    # fingerprint assertion proves nothing was touched *up to that test*, which
+    # is a weaker claim than it appears. This is the point where the whole run
+    # is over.
+    repo_db_changed = _fingerprint(REPO_DB) != REPO_DB_BEFORE
+
+    try:
+        if newly_dirty:
+            session.exitstatus = 1
+            print(
+                "\nERROR: this run modified tracked artifacts:\n  "
+                + "\n  ".join(sorted(newly_dirty))
+                + "\nGenerated files belong under SORA_DATA_DIR / SORA_MODELS_DIR."
+            )
+        if repo_db_changed:
+            session.exitstatus = 1
+            print(
+                "\nERROR: this run touched the repository database "
+                f"{REPO_DB}.\nThe suite must use its own; see "
+                "tests/_database_url.py."
+            )
+    finally:
+        # Runs whichever way the checks above went, and only for a directory
+        # this process created -- `_TEST_DB_DIR` is None when the caller
+        # supplied TEST_DATABASE_URL, and removing anything then would delete
+        # someone else's database.
+        if _TEST_DB_DIR:
+            from app.database import engine
+
+            # Released before the files go: an open SQLite handle keeps the
+            # file alive on some platforms and turns cleanup into a silent
+            # no-op.
+            engine.dispose()
+            shutil.rmtree(_TEST_DB_DIR)
 
 
 @pytest.fixture(scope="session", autouse=True)
