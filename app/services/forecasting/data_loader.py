@@ -1,9 +1,7 @@
 """Centralized data loading for forecast training."""
 
 import logging
-import numpy as np
 import pandas as pd
-from datetime import timedelta
 from sqlalchemy.orm import Session
 from typing import Literal
 
@@ -83,16 +81,40 @@ def load_time_series(db: Session, metric: MetricType) -> pd.DataFrame:
 
     # Fill ALL date gaps with interpolation (creates continuous time series)
     date_range = pd.date_range(start=df["ds"].min(), end=df["ds"].max(), freq="D")
-    df = df.set_index("ds").reindex(date_range).interpolate(method="linear").reset_index()
+    # Taken from the values, not from the index. `resample("D")` above already
+    # emits a row for every calendar day, with NaN where nothing was recorded,
+    # so by this point "the date is present" is true of every date and says
+    # nothing. What still distinguishes them is whether a value survived.
+    #
+    # Measured while writing this: reading the index instead marked all five
+    # rows of a two-observation series as observed -- the exact confusion #132
+    # is about, reproduced inside its own fix.
+    df = df.set_index("ds")
+    observed_dates = set(df.index[df["y"].notna()])
+    df = df.reindex(date_range).interpolate(method="linear").reset_index()
     df.columns = ["ds", "y"]
+    df["is_observed"] = df["ds"].isin(observed_dates)
 
     # REMOVED: Synthetic extension with random noise pollutes training
     # Instead: Lower LSTM threshold to work with real interpolated data
     # Original issue: np.random.normal() creates non-deterministic data
     # → Different model every restart, metrics meaningless, forecasts unstable
 
-    # Light smoothing to reduce noise
-    df["y"] = df["y"].rolling(3, min_periods=1, center=True).mean()
+    # REMOVED: a centred 3-day rolling mean, applied to the whole column.
+    #
+    # It was described as light smoothing to reduce noise. Measured, it does
+    # the opposite of what that implies: on an interpolated stretch the values
+    # are already linear and a centred mean is the identity there -- the shift
+    # is exactly 0.000000. The only rows it can change are the observed ones.
+    # Three consecutive observations 10, 100, 10 came back as 55, 40, 55, so a
+    # measured peak of 100 was reported as 40.
+    #
+    # A step that is the identity everywhere except on measurements, and whose
+    # only effect is to alter measurements, cannot be defended as noise
+    # reduction. Consumers wanting a smoothed series can smooth one; they
+    # cannot recover a measurement this had already overwritten.
 
-    log.info(f"Time series for {metric}: {len(df)} days (final)")
+    log.info("Time series for %s: %d days spanning %s..%s, %d observed",
+             metric, len(df), df["ds"].min().date(), df["ds"].max().date(),
+             int(df["is_observed"].sum()))
     return df
