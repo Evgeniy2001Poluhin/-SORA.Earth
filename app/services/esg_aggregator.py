@@ -19,9 +19,10 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import case, and_, func, or_, select
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.ingesters import temporal
 from app.database import SessionLocal, EnvironmentalObservation, RegionESGScore
 
 log = logging.getLogger(__name__)
@@ -30,6 +31,24 @@ log = logging.getLogger(__name__)
 # The (source, indicator) pairs _compute_one reads, declared rather than left
 # implicit in the formula. A source that stops publishing then shows up as a
 # key missing from a named set, instead of as a value that is quietly None.
+#: What kind of time each source is expected to carry, by name. A source
+#: defines its own temporal semantics: rosstat publishes a yearly snapshot, so
+#: its rows are a period; sber_veb_baseline is a table of constants with no
+#: observation date at all, so its rows are not_applicable.
+#:
+#: Stated per source rather than as one global ordering rule. A global rule
+#: would have to decide whether an observation "beats" a period, which is a
+#: question nobody asked and which has no answer -- they are claims of
+#: different kinds, not the same claim at different times.
+#:
+#: A row whose kind is not the expected one is a data-contract violation. It is
+#: reported as degraded rather than ranked, because ranking it would mean
+#: choosing between two incompatible statements about the same metric.
+EXPECTED_TEMPORAL_KIND = {
+    "sber_veb_baseline": temporal.NOT_APPLICABLE,
+    "rosstat": temporal.PERIOD,
+}
+
 REQUIRED_METRICS = (
     ("sber_veb_baseline", "esg_index_baseline"),
     ("rosstat", "unemployment_rate"),
@@ -203,8 +222,17 @@ def _latest_by_region(db):
                     EnvironmentalObservation.source,
                     EnvironmentalObservation.indicator,
                 ),
+                # Ranked within one kind, never across kinds. The rows in
+                # a partition all share the expected kind because the filter
+                # below admits nothing else, so this key is unambiguous.
+                #
+                # `event_time DESC` alone was wrong once event_time became
+                # nullable: PostgreSQL puts NULLs first on DESC, so a
+                # not_applicable row would have outranked a real observation.
+                # SQLite orders them last, so a test here would have been
+                # green while production picked the wrong row.
                 order_by=(
-                    EnvironmentalObservation.event_time.desc(),
+                    _ordering_key().desc(),
                     EnvironmentalObservation.ingested_at.desc(),
                     EnvironmentalObservation.id.desc(),
                 ),
@@ -222,6 +250,13 @@ def _latest_by_region(db):
                     and_(
                         EnvironmentalObservation.source == src,
                         EnvironmentalObservation.indicator == ind,
+                        # Only the kind this source is supposed to publish.
+                        # legacy_ingestion_time is excluded by construction:
+                        # it labels rows whose timestamp was an ingestion time
+                        # stored as an observation, and they are evidence of
+                        # what was recorded, not input to a score.
+                        EnvironmentalObservation.temporal_kind
+                        == EXPECTED_TEMPORAL_KIND[src],
                     )
                     for src, ind in REQUIRED_METRICS
                 ]
@@ -261,6 +296,27 @@ REQUIRED_METRIC_KEYS = tuple(f"{src}:{ind}" for src, ind in REQUIRED_METRICS)
 def _missing_metrics(metrics) -> tuple:
     """Which of the six required metrics this region does not have."""
     return tuple(k for k in REQUIRED_METRIC_KEYS if metrics.get(k) is None)
+
+
+def _ordering_key():
+    """Which column means "most recent" for each kind.
+
+    observed        event_time    -- when it was measured
+    period          period_end    -- the end of the interval it describes
+    not_applicable  ingested_at   -- nothing else is available; a constant has
+                                     no date, so the only ordering left is when
+                                     this platform last read it
+
+    A `case` rather than `coalesce`, so the choice is stated per kind instead of
+    falling through whichever column happens to be non-null.
+    """
+    return case(
+        (EnvironmentalObservation.temporal_kind == temporal.OBSERVED,
+         EnvironmentalObservation.event_time),
+        (EnvironmentalObservation.temporal_kind == temporal.PERIOD,
+         EnvironmentalObservation.period_end),
+        else_=EnvironmentalObservation.ingested_at,
+    )
 
 
 def _classify_pairs(metrics, limit_hours):

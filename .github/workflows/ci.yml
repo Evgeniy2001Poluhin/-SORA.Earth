@@ -427,6 +427,7 @@ jobs:
           python -m pytest tests/test_api.py \
             tests/test_mlflow_stats_reads_configured_database.py \
             tests/test_migration_temporal_provenance.py \
+            tests/test_aggregator_selection_postgres.py \
             -v --tb=short --timeout=60 --timeout-method=thread
         env:
           DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"

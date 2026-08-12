@@ -67,6 +67,22 @@ def session_factory(tmp_path, monkeypatch):
     return factory
 
 
+def _temporal_fields(source, when):
+    """The temporal columns for a source, as its ingester would emit them."""
+    from app.services.esg_aggregator import EXPECTED_TEMPORAL_KIND
+
+    kind = EXPECTED_TEMPORAL_KIND.get(source, "observed")
+    if kind == "period":
+        return dict(temporal_kind=kind, event_time=None,
+                    period_start=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    period_end=datetime(2024, 12, 31, tzinfo=timezone.utc),
+                    source_revision="rev:v1:fixture")
+    if kind == "not_applicable":
+        return dict(temporal_kind=kind, event_time=None,
+                    source_revision="rev:v1:fixture")
+    return dict(temporal_kind=kind, event_time=when)
+
+
 def _observe(session, region, source, indicator, value, event_time=None,
              valid=True, ingested_at=None):
     when = event_time or _now()
@@ -75,11 +91,13 @@ def _observe(session, region, source, indicator, value, event_time=None,
         indicator=indicator,
         value=value,
         source=source,
-        event_time=when,
-        # Stated, not defaulted. The column carries no server_default on
-        # purpose: a row that does not say where its number came from must not
-        # be answered for, and these fixtures do carry a real observation time.
-        temporal_kind="observed",
+        # Each source declares the kind it actually publishes: rosstat a
+        # yearly snapshot, sber_veb_baseline a table of constants. Writing
+        # `observed` for both would make the fixture describe a world the
+        # ingesters do not produce, and the aggregator's selection -- which
+        # admits only the expected kind -- would then be tested against rows
+        # that cannot occur.
+        **_temporal_fields(source, when),
         # Separate on purpose: for these sources `event_time` is `now` on every
         # run regardless of how old the numbers are, so only `ingested_at`
         # says whether the pipeline moved.
