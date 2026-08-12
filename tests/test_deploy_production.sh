@@ -723,8 +723,12 @@ check "the refusal names what is checked out" \
     "$(grep -qc "${FIRST:0:12}" "$SANDBOX/out" && echo yes || echo no)" "yes"
 check "and what the journal claims" \
     "$(grep -qc "${SECOND:0:12}" "$SANDBOX/out" && echo yes || echo no)" "yes"
+# `grep -c` prints 0 and exits 1 on an empty file, so `|| echo 0` appended a
+# second 0 and the comparison saw "0\n0". The earlier fix -- truncating the
+# file -- is what exposed this: while it held stale calls the count was
+# non-zero and the fallback never fired.
 check "and nothing was deployed" \
-    "$(grep -c 'up -d' "$STUB_DIR/calls" 2>/dev/null || echo 0)" "0"
+    "$(grep -c 'up -d' "$STUB_DIR/calls" || true)" "0"
 check "and the checkout did not move" \
     "$(git -C "$REPO" rev-parse HEAD)" "$FIRST"
 rm -rf "$SANDBOX"
