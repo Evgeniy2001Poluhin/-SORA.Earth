@@ -76,6 +76,10 @@ def _observe(session, region, source, indicator, value, event_time=None,
         value=value,
         source=source,
         event_time=when,
+        # Stated, not defaulted. The column carries no server_default on
+        # purpose: a row that does not say where its number came from must not
+        # be answered for, and these fixtures do carry a real observation time.
+        temporal_kind="observed",
         # Separate on purpose: for these sources `event_time` is `now` on every
         # run regardless of how old the numbers are, so only `ingested_at`
         # says whether the pipeline moved.
