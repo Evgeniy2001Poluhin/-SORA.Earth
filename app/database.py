@@ -3,6 +3,7 @@ import os
 
 import sqlalchemy as sa
 from sqlalchemy import (
+    CheckConstraint,
     BigInteger, Boolean, Column, DateTime, Float, Index, Integer, String, Text,
     JSON, create_engine, func,
 )
@@ -370,7 +371,22 @@ class EnvironmentalObservation(Base):
     source_revision = Column(String(64), nullable=True)
 
     # Temporal tracking (all UTC-aware)
-    event_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    #
+    # `event_time` is nullable because not every source has one. It used to be
+    # NOT NULL, and persistence therefore filled it with `datetime.now()` for
+    # the two sources that emit literals -- a dict of 85 constants and an
+    # offline 2024 snapshot were both recorded as measured today (#121). A
+    # column that cannot say "there is no observation time" forces every writer
+    # to invent one.
+    #
+    # What kind of time a row carries, and the rules per kind, are stated once
+    # in app/ingesters/temporal.py; the CHECK constraints below mirror that
+    # table so a direct write cannot route around the validator.
+    event_time = Column(DateTime(timezone=True), nullable=True, index=True)
+    period_start = Column(DateTime(timezone=True), nullable=True)
+    period_end = Column(DateTime(timezone=True), nullable=True)
+    temporal_kind = Column(String(32), nullable=False,
+                           server_default=sa.text("'observed'"), index=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
     ingested_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
@@ -392,7 +408,42 @@ class EnvironmentalObservation(Base):
     # the partial unique index that is the only thing preventing duplicate
     # ingestion. See #88. Declaring them here changes no DDL; it makes the
     # metadata describe what the database already has.
+    # The rules from app/ingesters/temporal.py, stated a second time on
+    # purpose. The validator gives a clear error before an INSERT; these stop a
+    # migration, a repair script or a psql session writing past it -- and those
+    # are exactly the paths that produced the rows #121 is about.
+    #
+    # String + named CHECK rather than a PostgreSQL Enum: the project does not
+    # use Enum systematically, this checks identically on SQLite and
+    # PostgreSQL, and adding a value later is a constraint swap rather than a
+    # type migration.
+    #
+    # Named because a migration has to create and drop them by hand; a
+    # generated name differs between backends and cannot be referred to.
     __table_args__ = (
+        CheckConstraint(
+            "temporal_kind IN ('observed', 'period', 'not_applicable', "
+            "'legacy_ingestion_time')",
+            name="ck_environmental_observations_temporal_kind_known",
+        ),
+        CheckConstraint(
+            # observed and legacy both carry a timestamp and no period. They
+            # differ in what that timestamp means, not in its shape, so the
+            # shape is checked once.
+            "(temporal_kind IN ('observed', 'legacy_ingestion_time')"
+            "  AND event_time IS NOT NULL"
+            "  AND period_start IS NULL AND period_end IS NULL)"
+            " OR (temporal_kind = 'period'"
+            "  AND event_time IS NULL"
+            "  AND period_start IS NOT NULL AND period_end IS NOT NULL"
+            "  AND period_start <= period_end"
+            "  AND source_revision IS NOT NULL)"
+            " OR (temporal_kind = 'not_applicable'"
+            "  AND event_time IS NULL"
+            "  AND period_start IS NULL AND period_end IS NULL"
+            "  AND source_revision IS NOT NULL)",
+            name="ck_environmental_observations_temporal_kind_state",
+        ),
         Index("ix_environmental_observations_source_record_unique",
               "source", "source_record_id",
               unique=True,
