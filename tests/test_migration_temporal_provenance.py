@@ -167,7 +167,8 @@ def test_upgrade_classifies_measured_production_sources(at_parent):
 
     with engine.begin() as c:
         got = dict(c.execute(text(
-            f'SELECT source, temporal_kind FROM "{schema}".environmental_observations')))
+            f'SELECT source, temporal_kind FROM "{schema}".environmental_observations'
+        )).all())
     assert got == MEASURED
     assert _rows(engine, schema) == before, "the migration altered existing fields"
 
@@ -185,7 +186,7 @@ def test_upgrade_classifies_registered_but_unmeasured_openaq(at_parent):
     with engine.begin() as c:
         assert dict(c.execute(text(
             f'SELECT source, temporal_kind FROM "{schema}".environmental_observations'
-        ))) == REGISTERED_UNMEASURED
+        )).all()) == REGISTERED_UNMEASURED
 
 
 # --- 4-5: the refusal, and where it happens ---------------------------------
