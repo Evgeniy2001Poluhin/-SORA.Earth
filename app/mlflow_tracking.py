@@ -193,20 +193,57 @@ def log_model_registry(model, model_name: str, metrics: dict):
 
 
 def get_experiment_stats():
-    import sqlite3, json
+    """Latest successful retrain metrics, read from the configured database.
+
+    This used to open `sqlite3.connect("data/sora.db")` -- a hardcoded relative
+    path that ignored DATABASE_URL entirely (#137). Production runs PostgreSQL,
+    so it created an empty SQLite file, failed to find `retrain_log` in it, and
+    the handler below turned that into the default response. The endpoint has
+    been reporting no metrics regardless of what the real table held.
+
+    Two outcomes that used to look identical are now distinguished. "The query
+    ran and found nothing" is a fact about the data; "the query did not run" is
+    a fact about the system, and reporting the second as the first is what let
+    this last.
+    """
+    import json
+
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from app.database import RetrainLog, SessionLocal
+
     result = {
         "experiment": EXPERIMENT_NAME,
         "tracking_uri": MLFLOW_TRACKING_URI,
         "total_runs": 0,
     }
+    row = None
     try:
-        con = sqlite3.connect("data/sora.db")
-        row = con.execute(
-            "SELECT metrics_json, model_version, started_at FROM retrain_log "
-            "WHERE status='success' AND metrics_json IS NOT NULL "
-            "AND metrics_json != '' ORDER BY started_at DESC LIMIT 1"
-        ).fetchone()
-        con.close()
+        # The configured session, so one code path serves PostgreSQL and
+        # SQLite. Nothing here needs a raw connection: `retrain_log` is a
+        # mapped model.
+        with SessionLocal() as db:
+            row = (
+                db.query(RetrainLog.metrics_json, RetrainLog.model_version,
+                         RetrainLog.started_at)
+                .filter(RetrainLog.status == "success",
+                        RetrainLog.metrics_json.isnot(None),
+                        RetrainLog.metrics_json != "")
+                .order_by(RetrainLog.started_at.desc())
+                .first()
+            )
+    except SQLAlchemyError:
+        # Logged with a traceback, and reported as unavailable rather than as
+        # zero runs. The previous version put `str(e)` into the response, which
+        # both misreported the state and leaked database details to a public
+        # endpoint.
+        logger.exception("get_experiment_stats: retrain_log query failed")
+        result["_retrain_log"] = "unavailable"
+    else:
+        if row is None:
+            result["_retrain_log"] = "no successful runs"
+
+    try:
         if row and row[0]:
             m = json.loads(row[0])
             roc = m.get("roc_auc") or m.get("auc")
@@ -223,8 +260,12 @@ def get_experiment_stats():
             result["model_version"] = row[1] or ""
             result["last_retrain_at"] = str(row[2])
             result["_source"] = "retrain_log"
-    except Exception as e:
-        result["_sqlite_error"] = str(e)
+    except (ValueError, TypeError, KeyError):
+        # Parsing the stored JSON, not reaching the database. Kept narrow: a
+        # bare `except Exception` here is what previously absorbed the
+        # connection failure as well and reported it as zero runs.
+        logger.exception("get_experiment_stats: metrics_json could not be parsed")
+        result["_retrain_log"] = "metrics unreadable"
     if not _OFFLINE:
         try:
             experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
