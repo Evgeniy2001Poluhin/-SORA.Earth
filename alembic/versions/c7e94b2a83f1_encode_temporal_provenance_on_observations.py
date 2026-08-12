@@ -72,6 +72,27 @@ FROM {TABLE}
 """
 
 
+def _require_table(conn):
+    """Fail with a sentence instead of an UndefinedTable from inside LOCK.
+
+    This revision is the first in the chain to touch the table
+    unconditionally, so if an earlier revision did not create it the failure
+    surfaced here -- as `relation does not exist` raised from a LOCK statement,
+    which names neither the cause nor the revision responsible.
+
+    Diagnostic only. It does not repair a chain that fails to create the table;
+    that is a defect of its own and creating the table here would hide it.
+    """
+    if conn.execute(sa.text(f"SELECT to_regclass('{TABLE}')")).scalar() is None:
+        raise RuntimeError(
+            f"{TABLE} does not exist at revision {revision}. It is created by "
+            f"f7a8b9c0d1e2, which precedes this one, so reaching here means the "
+            f"chain did not run it -- or ran it against a different database or "
+            f"schema. This revision will not create the table: doing so would "
+            f"mask which revision is actually missing."
+        )
+
+
 def _lock(conn):
     """Block writers, with a bound on how long we wait for them.
 
@@ -89,6 +110,7 @@ def _lock(conn):
 
 def upgrade() -> None:
     conn = op.get_bind()
+    _require_table(conn)
     _lock(conn)
 
     # --- preflight, before any DDL -----------------------------------------
@@ -186,6 +208,7 @@ def downgrade() -> None:
     whole.
     """
     conn = op.get_bind()
+    _require_table(conn)
     _lock(conn)
 
     stranded = conn.execute(sa.text(
