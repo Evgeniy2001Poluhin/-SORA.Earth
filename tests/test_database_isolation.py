@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 
 import pytest
+from unittest.mock import patch
 
 from app.database import engine
 
@@ -113,8 +114,7 @@ def test_the_isolation_is_not_applied_when_a_database_is_chosen_explicitly():
 
     # Compared field by field. `str(url)` masks the password, so two different
     # credentials render identically and the comparison would pass on a
-    # database the caller did not ask for. Driver is compared by backend name
-    # so `postgresql` and `postgresql+psycopg2` are not treated as a mismatch.
+    # database the caller did not ask for.
     # Every field, password included. An earlier version compared host, port,
     # database and username while its own comment named the password as the
     # risk -- so two different credentials against the same host would have
@@ -202,4 +202,78 @@ def test_only_one_session_finish_hook_is_defined():
     assert len(defined) == 1, (
         f"conftest defines pytest_sessionfinish {len(defined)} times, at lines "
         f"{[n.lineno for n in defined]}; only the last one runs"
+    )
+
+
+def test_the_cleanup_removes_the_directory_it_was_given(tmp_path):
+    """The body that never ran, now exercised directly."""
+    from tests.conftest import _cleanup_test_database
+
+    victim = tmp_path / "sora-tests-x"
+    victim.mkdir()
+    (victim / "test.db").write_bytes(b"")
+
+    _cleanup_test_database(str(victim))
+
+    assert not victim.exists()
+
+
+def test_the_engine_is_disposed_before_the_files_go(tmp_path):
+    """Order matters: an open SQLite handle can keep the file alive, and the
+    removal then does nothing while reporting success."""
+    from unittest.mock import MagicMock
+
+    import app.database
+    from tests.conftest import _cleanup_test_database
+
+    order = []
+    victim = tmp_path / "sora-tests-y"
+    victim.mkdir()
+
+    engine = MagicMock()
+    engine.dispose.side_effect = lambda: order.append("dispose")
+    with patch.object(app.database, "engine", engine), \
+         patch("shutil.rmtree", side_effect=lambda p: order.append("rmtree")):
+        _cleanup_test_database(str(victim))
+
+    assert order == ["dispose", "rmtree"], f"wrong order: {order}"
+
+
+def test_nothing_is_removed_when_the_caller_supplied_the_database():
+    """`None` means TEST_DATABASE_URL was set, so the database is not ours.
+
+    The engine must not even be touched: disposing a caller's connection pool
+    at the end of a run is a side effect nobody asked for.
+    """
+    from unittest.mock import MagicMock
+
+    import app.database
+    from tests.conftest import _cleanup_test_database
+
+    engine = MagicMock()
+    with patch.object(app.database, "engine", engine), \
+         patch("shutil.rmtree") as rmtree:
+        _cleanup_test_database(None)
+
+    engine.dispose.assert_not_called()
+    rmtree.assert_not_called()
+
+
+def test_the_session_finish_hook_calls_the_cleanup():
+    """Uniqueness is not enough: the one surviving hook has to be wired to it.
+
+    Parsed, so a mention in a docstring or a comment does not satisfy it.
+    """
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse((Path(__file__).parent / "conftest.py").read_text())
+    hook = next(n for n in tree.body
+                if isinstance(n, ast.FunctionDef) and n.name == "pytest_sessionfinish")
+    called = {n.func.id for n in ast.walk(hook)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+
+    assert "_cleanup_test_database" in called, (
+        "the surviving hook never calls the cleanup, so the directory leaks "
+        "exactly as it did when the hook was duplicated"
     )

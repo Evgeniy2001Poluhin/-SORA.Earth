@@ -294,6 +294,26 @@ def _dirty_artifacts():
 _ARTIFACTS_DIRTY_AT_START = _dirty_artifacts()
 
 
+def _cleanup_test_database(directory):
+    """Remove a temporary database directory this process created.
+
+    `None` means the caller supplied TEST_DATABASE_URL, so there is nothing of
+    ours to remove -- and removing anything then would delete someone else's
+    database. The engine is disposed first: an open SQLite handle can keep the
+    file alive and turn the removal into a silent no-op.
+
+    A named helper rather than an inline block so it can be tested directly.
+    The previous cleanup was unreachable and no test noticed.
+    """
+    if directory is None:
+        return
+
+    from app.database import engine
+
+    engine.dispose()
+    shutil.rmtree(directory)
+
+
 def pytest_sessionfinish(session, exitstatus):
     """Everything that has to happen once, after the last test.
 
@@ -307,16 +327,18 @@ def pytest_sessionfinish(session, exitstatus):
 
     `test_only_one_session_finish_hook_is_defined` guards the arrangement.
     """
-    newly_dirty = _dirty_artifacts() - _ARTIFACTS_DIRTY_AT_START
-
-    # Re-checked here rather than only in a test. A test runs at some point in
-    # the session and cannot see a write that happens after it -- so a green
-    # fingerprint assertion proves nothing was touched *up to that test*, which
-    # is a weaker claim than it appears. This is the point where the whole run
-    # is over.
-    repo_db_changed = _fingerprint(REPO_DB) != REPO_DB_BEFORE
-
     try:
+        # Inside the try, not above it. Computed before, an exception from
+        # either of these skipped the finally entirely and the directory leaked
+        # again -- the same defect as the duplicate hook, through a different
+        # door.
+        newly_dirty = _dirty_artifacts() - _ARTIFACTS_DIRTY_AT_START
+
+        # A test runs at some point in the session and cannot see a write that
+        # happens after it, so a green assertion proves nothing was touched
+        # *up to that test*. This is where the run is actually over.
+        repo_db_changed = _fingerprint(REPO_DB) != REPO_DB_BEFORE
+
         if newly_dirty:
             session.exitstatus = 1
             print(
@@ -332,18 +354,7 @@ def pytest_sessionfinish(session, exitstatus):
                 "tests/_database_url.py."
             )
     finally:
-        # Runs whichever way the checks above went, and only for a directory
-        # this process created -- `_TEST_DB_DIR` is None when the caller
-        # supplied TEST_DATABASE_URL, and removing anything then would delete
-        # someone else's database.
-        if _TEST_DB_DIR:
-            from app.database import engine
-
-            # Released before the files go: an open SQLite handle keeps the
-            # file alive on some platforms and turns cleanup into a silent
-            # no-op.
-            engine.dispose()
-            shutil.rmtree(_TEST_DB_DIR)
+        _cleanup_test_database(_TEST_DB_DIR)
 
 
 @pytest.fixture(scope="session", autouse=True)
