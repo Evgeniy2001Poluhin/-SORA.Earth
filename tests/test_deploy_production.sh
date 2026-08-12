@@ -709,6 +709,10 @@ new_sandbox
 run_guard                                   # journal records SECOND
 # A deployment by hand: the checkout moves and the journal never hears about it.
 git -C "$REPO" checkout -q --detach "$FIRST"
+# The stub appends every docker invocation for the life of the sandbox, and the
+# deployment above is a real one -- so counting from the start measures that,
+# not the refusal. Truncated here so the window is the rollback attempt alone.
+: > "$STUB_DIR/calls"
 run_guard --rollback "$FIRST"
 refused_because "a journal that disagrees with the checkout" \
     "disagrees with the checkout"
