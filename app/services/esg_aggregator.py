@@ -100,6 +100,30 @@ SCORE_KIND = "structural"
 # cover exactly these 85 -- a test asserts that, so a divergence becomes a
 # decision someone makes rather than a silent change in what "85 regions"
 # means.
+#: The mapping version this declaration is made under (§1.4 of the M2
+#: protocol). Every coverage figure and every stored score is measured against
+#: the set named here, so a change to the membership is a change of instrument:
+#: it requires a new version, and results measured under the old one are not
+#: recomputed. Comparing numbers across versions without saying so would be
+#: comparing two different populations under one name.
+REGION_SET_VERSION = "ru-regions-v1"
+
+
+class UndeclaredRegionError(ValueError):
+    """A region outside the declared set reached the canonical writer.
+
+    Refused rather than filtered. Filtering makes the set follow the data,
+    which is selection on the outcome: a region that stops reporting quietly
+    leaves the denominator and coverage looks unchanged.
+
+    This applies to the canonical score only. `environmental_observations`
+    legitimately holds a second population -- the 21 openmeteo entities, 19 of
+    which are countries rather than Russian regions -- and refusing those at the
+    observation layer would delete data the protocol explicitly allows as a
+    separate product.
+    """
+
+
 DECLARED_REGIONS = frozenset({
     "RU-AD", "RU-AL", "RU-ALT", "RU-AMU", "RU-ARK", "RU-AST", "RU-BA",
     "RU-BEL", "RU-BRY", "RU-BU", "RU-CE", "RU-CHE", "RU-CHU", "RU-CR",
@@ -115,6 +139,24 @@ DECLARED_REGIONS = frozenset({
     "RU-VGG", "RU-VLA", "RU-VLG", "RU-VOR", "RU-YAN", "RU-YAR", "RU-YEV",
     "RU-ZAB",
 })
+
+
+#: The versioned name. `DECLARED_REGIONS` stays as the working alias so the
+#: existing call sites and their drift test keep reading as before.
+DECLARED_REGIONS_V1 = DECLARED_REGIONS
+
+
+def require_declared(region_id):
+    """Gate for anything writing the canonical score. Returns the id."""
+    if region_id not in DECLARED_REGIONS_V1:
+        raise UndeclaredRegionError(
+            f"{region_id!r} is not in {REGION_SET_VERSION} ({len(DECLARED_REGIONS_V1)} "
+            f"regions). The canonical score is defined over that set only. If "
+            f"this is an openmeteo entity it belongs in the observation layer, "
+            f"not here; if the set should include it, that is a new "
+            f"region_set_version, not an addition to this one."
+        )
+    return region_id
 
 
 # How long ingestion may be silent before the run is degraded.
@@ -627,6 +669,7 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
         result = {
             "status": "degraded" if reasons else "success",
             "score_kind": SCORE_KIND,
+            "region_set_version": REGION_SET_VERSION,
             "regions_declared": len(DECLARED_REGIONS),
             "regions_complete": computed,
             "regions_computed": computed,
