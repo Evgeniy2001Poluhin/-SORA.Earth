@@ -16,6 +16,7 @@ import logging
 import math
 import os
 from collections import defaultdict
+import hashlib
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -100,6 +101,30 @@ SCORE_KIND = "structural"
 # cover exactly these 85 -- a test asserts that, so a divergence becomes a
 # decision someone makes rather than a silent change in what "85 regions"
 # means.
+#: The mapping version this declaration is made under (§1.4 of the M2
+#: protocol). Every coverage figure and every stored score is measured against
+#: the set named here, so a change to the membership is a change of instrument:
+#: it requires a new version, and results measured under the old one are not
+#: recomputed. Comparing numbers across versions without saying so would be
+#: comparing two different populations under one name.
+REGION_SET_VERSION = "ru-regions-v1"
+
+
+class UndeclaredRegionError(ValueError):
+    """A region outside the declared set reached the canonical writer.
+
+    Refused rather than filtered. Filtering makes the set follow the data,
+    which is selection on the outcome: a region that stops reporting quietly
+    leaves the denominator and coverage looks unchanged.
+
+    This applies to the canonical score only. `environmental_observations`
+    legitimately holds a second population -- the 21 openmeteo entities, 19 of
+    which are countries rather than Russian regions -- and refusing those at the
+    observation layer would delete data the protocol explicitly allows as a
+    separate product.
+    """
+
+
 DECLARED_REGIONS = frozenset({
     "RU-AD", "RU-AL", "RU-ALT", "RU-AMU", "RU-ARK", "RU-AST", "RU-BA",
     "RU-BEL", "RU-BRY", "RU-BU", "RU-CE", "RU-CHE", "RU-CHU", "RU-CR",
@@ -115,6 +140,32 @@ DECLARED_REGIONS = frozenset({
     "RU-VGG", "RU-VLA", "RU-VLG", "RU-VOR", "RU-YAN", "RU-YAR", "RU-YEV",
     "RU-ZAB",
 })
+
+
+#: The versioned name. `DECLARED_REGIONS` stays as the working alias so the
+#: existing call sites and their drift test keep reading as before.
+DECLARED_REGIONS_V1 = DECLARED_REGIONS
+
+#: Fingerprint of the membership, not of its size. A version string and a count
+#: together still allow one id to be swapped for another -- and if both source
+#: dictionaries were edited in the same commit, the drift test would stay green
+#: while the population silently changed under an unchanged version.
+REGION_SET_FINGERPRINT = hashlib.sha256(
+    "\n".join(sorted(DECLARED_REGIONS_V1)).encode()
+).hexdigest()
+
+
+def require_declared(region_id):
+    """Gate for anything writing the canonical score. Returns the id."""
+    if region_id not in DECLARED_REGIONS_V1:
+        raise UndeclaredRegionError(
+            f"{region_id!r} is not in {REGION_SET_VERSION} ({len(DECLARED_REGIONS_V1)} "
+            f"regions). The canonical score is defined over that set only. If "
+            f"this is an openmeteo entity it belongs in the observation layer, "
+            f"not here; if the set should include it, that is a new "
+            f"region_set_version, not an addition to this one."
+        )
+    return region_id
 
 
 # How long ingestion may be silent before the run is degraded.
@@ -441,6 +492,35 @@ def _compute_one(metrics):
     }
 
 
+def _write_score(db, region_code, scores):
+    """The one place a canonical score reaches the database.
+
+    Extracted so the declared-set guard sits *on* the write rather than beside
+    it. An earlier draft had `require_declared` defined and tested and called
+    from nowhere: the test named after the writer exercised the helper, and an
+    undeclared id would have been stored exactly as before.
+
+    Returns what happened, so the caller's counters stay the caller's.
+    """
+    require_declared(region_code)
+
+    row = db.query(RegionESGScore).filter_by(region_code=region_code).first()
+    if row is None:
+        db.add(RegionESGScore(region_code=region_code, **scores))
+        return "written"
+
+    cleared = _clear_stale(row)
+    if any(getattr(row, k) != v for k, v in scores.items()):
+        for k, v in scores.items():
+            setattr(row, k, v)
+        return "written"
+    if cleared:
+        # The score is unchanged but the row is: it stopped being marked stale,
+        # and that is a change a reader acts on.
+        return "recovered"
+    return "unchanged"
+
+
 def _stale_reason(missing, stale) -> str:
     parts = []
     if missing:
@@ -463,6 +543,8 @@ def _mark_stale(db, region_code, missing, stale):
     than "as of this run". `updated_at` is left alone: it means "when the score
     last changed", and marking staleness does not change a score.
     """
+    require_declared(region_code)
+
     row = db.query(RegionESGScore).filter_by(region_code=region_code).first()
     if row is None:
         # Never written, so there is nothing that could be misread.
@@ -578,20 +660,11 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
                 continue
 
             computed += 1
-            row = db.query(RegionESGScore).filter_by(region_code=region_code).first()
-            if row:
-                cleared = _clear_stale(row)
-                if any(getattr(row, k) != v for k, v in scores.items()):
-                    for k, v in scores.items():
-                        setattr(row, k, v)
-                    written += 1
-                elif cleared:
-                    # The score is unchanged but the row is: it stopped being
-                    # marked stale, and that is a change a reader acts on.
-                    recovered += 1
-            else:
-                db.add(RegionESGScore(region_code=region_code, **scores))
+            outcome = _write_score(db, region_code, scores)
+            if outcome == "written":
                 written += 1
+            elif outcome == "recovered":
+                recovered += 1
         db.commit()
 
         undeclared = sorted(set(latest) - DECLARED_REGIONS)
@@ -627,6 +700,7 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
         result = {
             "status": "degraded" if reasons else "success",
             "score_kind": SCORE_KIND,
+            "region_set_version": REGION_SET_VERSION,
             "regions_declared": len(DECLARED_REGIONS),
             "regions_complete": computed,
             "regions_computed": computed,

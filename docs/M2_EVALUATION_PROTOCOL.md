@@ -144,10 +144,36 @@ never as percentages of the score (§3.3).
 
 ### 1.4 Regions
 
-The declared region set is **not yet fixed**, because it depends on the design
-decision in #114. It is fixed by a version bump to this document, which is
-required **before the first snapshot is written** — not before the first model
-run, because the coverage denominators of §5 and §7 are meaningless without it.
+**Declared 2026-08-13 as `ru-regions-v1`: the 85 Russian federal subjects
+enumerated in `app/services/esg_aggregator.DECLARED_REGIONS_V1`.**
+
+What made this decidable was a measurement, not a preference. The observation
+layer holds 104 distinct ids, and that is not 85 regions with 19 missing. It is
+two populations of different kinds:
+
+```
+canonical    85 Russian federal subjects, RU-*
+contextual   21 openmeteo entities, 19 of them countries
+             (BRA CAN CHN DEU ESP FRA GBR IDN IND ITA JPN KEN KOR MEX
+              NGA NLD POL USA ZAF)
+overlap      2 -- RU-MOW and RU-SPE
+```
+
+Both canonical sources cover the declared set exactly -- no extras, none
+missing -- and a test asserts it, so a divergence becomes someone's decision
+rather than a silent change in what "85 regions" means.
+
+The 19 countries are **not excluded regions**. They are a different unit of
+observation, and §10 already names forecasting them as a legitimate separate
+product. Their data stays in `environmental_observations`.
+
+The refusal therefore sits on the **canonical writer**, not on persistence.
+`require_declared()` raises `UndeclaredRegionError`; a guard in `persist.py`
+would delete the contextual population, which is data the protocol allows.
+
+The set was fixed by this version bump, which is required **before the first
+snapshot is written** — not before the first model run, because the coverage
+denominators of §5 and §7 are meaningless without it.
 
 A concrete precedent now exists and should be followed rather than reinvented:
 `app/services/esg_aggregator.DECLARED_REGIONS` enumerates 85 `region_id`
@@ -841,7 +867,8 @@ before any data existed and remains binding on the first run that ever happens.
 
 M3 does not begin before that.
 
-The region set of §1.4 remains undeclared, and the canonical score of §1 still
-does not exist — 104 regions appear in the observation layer against 85 in the
-frozen score table, and which of them are declared is exactly the decision
-§1.4 forbids making later.
+§1.4 is declared as of 2026-08-13 (`ru-regions-v1`, 85 subjects): the 104 ids
+in the observation layer proved to be two populations rather than one
+incomplete set, so the choice was between kinds and not between members. The
+canonical score of §1 still does not exist -- declaring the population is a
+precondition for building it, not the building.
