@@ -1,10 +1,41 @@
-"""Tests for ensemble forecaster with auto-weighting."""
+"""Tests for ensemble forecaster with auto-weighting.
+
+Every test here fits Prophet, an LSTM and a linear model for real, so the wall
+time is CPU time and scales with whatever else is running.
+
+`test_ensemble_validate` failed on the full suite and passed on its own (#70).
+Measured rather than inferred, on 8 cores:
+
+    alone, idle machine            4.3 - 7.2 s
+    inside the full suite          4.6 s      (+8% -- the suite adds nothing)
+    8 busy-loops  (1x cores)      14.5 s
+    24 busy-loops (3x cores)      34.7 s      <-- past pytest.ini's 30 s
+
+So it is neither a state leak nor an order dependence: the suite context costs
+8%, and contention costs 480%. It is a real timeout, and the budget was the
+thing that was wrong.
+
+It was wrong in a specific way. CI gives these tests **60 s** in the dedicated
+`Run forecasting tests` step, where they run alone and fast, and **30 s** inside
+`backend-tests`, where they run alongside 1300 others and are slow. The budget
+was inverted with respect to the load, which is why the failure only ever
+appeared in the full-suite run.
+
+120 s, on the module, so one budget travels with the tests whichever step runs
+them (a `timeout` marker outranks both the ini file and `--timeout`). That is
+~17x the idle cost here and ~3.5x the worst contended measurement. It is not
+tuned until it passes: a per-test timeout is there to catch a hang, and the
+work these do is a bounded fit. The job-level `timeout-minutes` is still the
+outer bound.
+"""
 
 import pytest
 import pandas as pd
 import numpy as np
 
 from app.services.forecasting.ensemble import EnsembleForecaster
+
+pytestmark = pytest.mark.timeout(120)
 
 
 @pytest.fixture

@@ -1,4 +1,15 @@
-"""Tests for forecast model caching layer."""
+"""Tests for forecast model caching layer.
+
+Same budget as the ensemble tests, for the same measured reason: every case here
+fits a real LSTM to populate the cache, so its wall time is CPU time. Idle they
+cost 1.9-3.3 s each; the contention factor measured alongside #70 was 4.8x at
+3x oversubscription, and the machine in that report ran the suite ~7x slower
+than the one these numbers come from. Nothing here has been seen to time out
+yet -- which is the point of marking the family rather than the one case that
+was caught.
+
+See tests/test_forecasting_ensemble.py for the measurements.
+"""
 
 import time
 import pytest
@@ -7,6 +18,8 @@ import numpy as np
 
 from app.services.forecasting.cache import ForecastModelCache
 from app.services.forecasting.lstm import LSTMForecaster
+
+pytestmark = pytest.mark.timeout(120)
 
 
 @pytest.fixture
