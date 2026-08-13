@@ -115,6 +115,17 @@ case "$argv" in
         [ -f "$STUB_DIR/calls" ] && grep -q 'up -d --build' "$STUB_DIR/calls" \
             && echo "cid-created-by-this-run"
         exit 0 ;;
+    # Before every other `up`/`run` branch: the migration step must be
+    # distinguishable from a container start, or "migrated once, first" cannot
+    # be told from "started something".
+    *"run --rm --build migrate"*|*"run --rm migrate"*)
+        n=$(( $(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0) + 1 ))
+        echo "$n" > "$STUB_DIR/migrate_calls"
+        [ -f "$STUB_DIR/migrate_fails" ] && exit 1
+        exit 0 ;;
+    *"up -d postgres"*)
+        [ -f "$STUB_DIR/postgres_fails" ] && exit 1
+        exit 0 ;;
     *"up -d --no-build"*)
         # The exact-image restore. Recorded so a test can tell it from a
         # rebuild, which is a different operation with a different verdict.
@@ -1224,6 +1235,62 @@ check "a successful lookup finding nothing warns of real absence" \
 check "and it is not reported as undetermined" \
     "$(grep -qi 'could not query systemd' "$SANDBOX/out" && echo yes || echo no)" "no"
 rm -rf "$SANDBOX"
+
+echo "== migrations are one step, run once, before anything is recreated =="
+# #125. The application entrypoint used to run `alembic upgrade head`, and the
+# backend and the scheduler share that file, so `up -d` started two migrators
+# against one database at the same moment. These cases are about the three
+# properties the replacement has: once, first, and fatal.
+
+new_sandbox
+run_guard
+check "the migration step ran" \
+    "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" "1"
+# Exactly once, not at least once. Two migrators is the defect.
+check "and no more than once" \
+    "$(grep -c 'run --rm --build migrate' "$STUB_DIR/calls")" "1"
+rm -rf "$SANDBOX"
+
+new_sandbox
+run_guard
+# Line numbers in the recorded call log, so this is about order in time and not
+# about the order the two greps happen to appear in.
+MIG_LINE="$(grep -n 'run --rm --build migrate' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+UP_LINE="$(grep -n 'up -d --build --remove-orphans' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+check "the migration is recorded before the containers are recreated" \
+    "$([ -n "$MIG_LINE" ] && [ -n "$UP_LINE" ] && [ "$MIG_LINE" -lt "$UP_LINE" ] && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+new_sandbox
+touch "$STUB_DIR/migrate_fails"
+run_guard
+refused_because "a failed migration refuses the deployment" "alembic upgrade head failed"
+# The point of moving it out of the entrypoint: a failure stops the deploy
+# instead of restarting a container until it works.
+check "and nothing was recreated" \
+    "$(grep -c 'up -d --build --remove-orphans' "$STUB_DIR/calls")" "0"
+check "and no manifest was written" \
+    "$(ls "$SANDBOX/manifests" 2>/dev/null | wc -l | tr -d ' ')" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+touch "$STUB_DIR/postgres_fails"
+run_guard
+refused_because "a database that will not start refuses the deployment" "postgres would not start"
+check "and the migration was not attempted against nothing" \
+    "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" "0"
+rm -rf "$SANDBOX"
+
+echo "== the application containers do not migrate =="
+# A static read of the shipped entrypoint, because the property is "this file
+# contains no DDL command" and running it would need a database.
+ENTRYPOINT="$(cd "$(dirname "$0")/.." && pwd)/entrypoint.sh"
+check "entrypoint.sh exists" \
+    "$([ -f "$ENTRYPOINT" ] && echo yes || echo no)" "yes"
+check "and does not run alembic upgrade" \
+    "$(grep -cE '^[^#]*alembic[[:space:]]+upgrade' "$ENTRYPOINT")" "0"
+check "and does verify the schema version instead" \
+    "$(grep -cE '^[^#]*verify_schema_head' "$ENTRYPOINT")" "1"
 
 echo
 echo "  passed: $PASS   failed: $FAIL"

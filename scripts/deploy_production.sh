@@ -680,6 +680,36 @@ PHASE=mutating
 # the mutation succeeded records nothing about the case it exists for.
 journal_write mutating
 
+# One migrator, before anything is recreated (#125).
+#
+# The application entrypoint used to run `alembic upgrade head`, and the backend
+# and the scheduler share that file, so `up -d` started two migrators against
+# one database at the same moment. Alembic takes no lock spanning that: the
+# loser died, `restart: unless-stopped` brought it back, and by then the
+# migration had usually been applied. That converged; it was never designed to.
+#
+# Three properties this arrangement has and that one did not:
+#
+#   once      `run --rm migrate` is a single container, and the `migration`
+#             profile keeps the service out of `up` so it cannot become a third
+#             migrator.
+#   first     the schema is at head before any application container starts.
+#             The entrypoint now verifies and refuses rather than migrating, so
+#             an out-of-order deploy stops here instead of crash-looping.
+#   fatal     a failed migration ends the deployment through the same rollback
+#             as any other refusal, rather than restarting a container until it
+#             works.
+#
+# `--build` because the migration has to come from the image being deployed, not
+# from whatever was cached. The service connects to `postgres` directly: the
+# pooler runs `pool_mode = transaction`, where session state does not survive
+# between transactions.
+"${DC[@]}" up -d postgres \
+    || fail "postgres would not start, so migrations cannot run"
+
+"${DC[@]}" run --rm --build migrate \
+    || fail "alembic upgrade head failed; nothing has been recreated"
+
 "${DC[@]}" up -d --build --remove-orphans
 
 # nginx is recreated, not restarted. Its configuration is a bind-mounted single

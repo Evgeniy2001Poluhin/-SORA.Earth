@@ -37,6 +37,42 @@ services:
     volumes:
       - redisdata:/data
 
+  # The single migration owner (#125).
+  #
+  # backend and scheduler shared one entrypoint that ran `alembic upgrade head`,
+  # so `up -d` started two migrators against one database at once. Alembic takes
+  # no lock spanning that; whichever lost the race died, `restart:
+  # unless-stopped` brought it back, and by then the migration had usually been
+  # applied. A restart loop is not a synchronisation mechanism -- it happened to
+  # converge, which is a different thing from being designed to.
+  #
+  # `profiles` keeps it out of `docker compose up` entirely. Without it this
+  # service would be a third migrator rather than the only one; it is reached
+  # only by `docker compose run --rm migrate`, from scripts/deploy_production.sh,
+  # before either application service is recreated.
+  #
+  # It talks to `postgres` directly, not `pgbouncer`. The pooler runs
+  # `pool_mode = transaction`, where session-scoped state does not survive
+  # between transactions -- a migration using an advisory lock, a temp table or
+  # `SET LOCAL` outside its own transaction would find that out in production.
+  migrate:
+    profiles: ["migration"]
+    user: "1000:1000"
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+      target: runtime
+    entrypoint: ["alembic", "upgrade", "head"]
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ENV: production
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   backend:
     user: "1000:1000"
     volumes:
