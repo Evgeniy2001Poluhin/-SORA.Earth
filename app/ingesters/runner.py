@@ -8,7 +8,9 @@ import asyncio
 import logging
 from sqlalchemy import text
 
-from app.ingesters.classification import classify_run, required_action
+from app.ingesters.classification import (
+    classify_run, freshness_status, required_action,
+)
 from datetime import datetime, timezone
 
 from app.ingesters.base import Signal
@@ -115,7 +117,7 @@ VINTAGE_UNKNOWN = "unknown"                 # nothing stored, or the query faile
 
 
 def source_vintage(source: str):
-    """(age_seconds, basis) for the newest observation this source holds.
+    """(vintage_seconds, basis) for the newest observation this source holds.
 
     The axis is chosen per `temporal_kind`, which is the whole point of #121:
 
@@ -175,7 +177,8 @@ def source_vintage(source: str):
     return None, VINTAGE_UNKNOWN
 
 
-def _audit_finish(rid, verdict, action=None, age_seconds=None):
+def _audit_finish(rid, verdict, action=None, vintage_seconds=None,
+                  freshness=None, max_vintage_seconds=None):
     """Record the verdict, not a hand-picked word.
 
     The status used to be passed in by the caller, which is how every run that
@@ -183,7 +186,8 @@ def _audit_finish(rid, verdict, action=None, age_seconds=None):
     nothing. It is now derived by classify_run() from what the run actually
     achieved, and this function has no opinion about it.
 
-    `required_action` and `source_age_seconds` are stored alongside for the same
+    `required_action` and every input it was derived from are stored alongside
+    for the same
     reason the split verdict was: an operator reading `degraded` still cannot
     tell whether to wait, retry, or page anyone (#74). They are derived too --
     nothing here decides them.
@@ -200,7 +204,9 @@ def _audit_finish(rid, verdict, action=None, age_seconds=None):
                 "execution_status=:ex, primary_source_status=:ps, "
                 "data_outcome=:do, records_received=:rr, records_accepted=:ra, "
                 "records_rejected=:rj, failure_reason=:fr, "
-                "reason_code=:rc, required_action=:act, source_age_seconds=:age "
+                "reason_code=:rc, required_action=:act, "
+                "source_vintage_seconds=:vintage, freshness_status=:fresh, "
+                "max_vintage_seconds=:maxv "
                 "WHERE id=:id"),
                 {"st": verdict.status,
                  "rw": verdict.records_accepted,
@@ -214,7 +220,9 @@ def _audit_finish(rid, verdict, action=None, age_seconds=None):
                  "fr": verdict.failure_reason,
                  "rc": verdict.reason_code,
                  "act": action,
-                 "age": age_seconds,
+                 "vintage": vintage_seconds,
+                 "fresh": freshness,
+                 "maxv": max_vintage_seconds,
                  "id": rid})
             db.commit()
         finally:
@@ -224,28 +232,29 @@ def _audit_finish(rid, verdict, action=None, age_seconds=None):
 
 
 def _decide(ing, verdict):
-    """(required_action, source_age_seconds) for one finished run.
+    """(action, vintage_seconds, freshness, max_vintage_seconds) for one run.
 
-    The tolerance is the ingester's own `default_ttl_hours` -- 1 hour for
-    openmeteo, 180 days for rosstat. A source is not stale because some global
-    threshold says so; it is stale against the cadence it declares for itself.
+    Every input to the verdict is returned, not just the verdict. A threshold
+    can be changed after the fact, so a row holding only `escalate` and 590 days
+    cannot be re-read a month later: nobody can tell whether it escalated
+    because the data was old or because the tolerance moved.
 
-    Freshness is measured for **every** outcome, including a clean one. An
-    earlier version skipped it when the run succeeded, to save a round trip on
-    the common path. That made a successful write of a 2017 snapshot report
-    `none` -- a working pipeline over a dead source, described as nothing to do,
-    which is the exact conflation #74 exists to undo.
+    The tolerance is `max_vintage_hours`, which most sources do not declare.
+    That is not an oversight to paper over -- see BaseIngester. It is emphatically
+    **not** `default_ttl_hours`, which says when to poll: reusing it made every
+    clean rosstat run escalate forever, 590 days of vintage against a 180-day
+    poll of an annual statistic.
     """
-    age, basis = source_vintage(ing.name)
-    tolerance = getattr(ing, "default_ttl_hours", None)
-    tolerance = None if tolerance is None else float(tolerance) * 3600.0
-    action = required_action(
-        verdict,
-        age_seconds=age,
-        tolerance_seconds=tolerance,
-        freshness_applies=(basis != VINTAGE_NOT_APPLICABLE),
+    vintage, basis = source_vintage(ing.name)
+    max_hours = getattr(ing, "max_vintage_hours", None)
+    max_vintage = None if max_hours is None else float(max_hours) * 3600.0
+
+    freshness = freshness_status(
+        vintage,
+        has_axis=(basis != VINTAGE_NOT_APPLICABLE),
+        max_vintage_seconds=max_vintage,
     )
-    return action, age
+    return required_action(verdict, freshness=freshness), vintage, freshness, max_vintage
 
 
 async def run_all_ingesters() -> dict:
@@ -273,10 +282,14 @@ async def run_all_ingesters() -> dict:
                 rejected=persist_result.get("rejected", 0),
                 write_failed=persist_result.get("write_failed", False),
             )
-            action, age = _decide(ing, verdict)
+            action, vintage, freshness, max_vintage = _decide(ing, verdict)
             stats["ingesters"][ing.name].update(verdict.as_dict())
-            stats["ingesters"][ing.name]["required_action"] = action
-            stats["ingesters"][ing.name]["source_age_seconds"] = age
+            stats["ingesters"][ing.name].update({
+                "required_action": action,
+                "source_vintage_seconds": vintage,
+                "freshness_status": freshness,
+                "max_vintage_seconds": max_vintage,
+            })
             if verdict.status == "success":
                 log.info("[runner] %s: %d signals", ing.name, len(signals))
             else:
@@ -284,22 +297,26 @@ async def run_all_ingesters() -> dict:
                 # from working. A degraded run is not an error and must not be
                 # logged as one, but it cannot pass in silence either.
                 log.warning(
-                    "[runner] %s: %s [%s] action=%s -- %s "
-                    "(received=%d accepted=%d age=%s)",
+                    "[runner] %s: %s [%s] action=%s freshness=%s -- %s "
+                    "(received=%d accepted=%d vintage=%s)",
                     ing.name, verdict.status, verdict.reason_code, action,
-                    verdict.failure_reason, verdict.records_received,
-                    verdict.records_accepted,
-                    "unknown" if age is None else int(age))
-            _audit_finish(rid, verdict, action=action, age_seconds=age)
+                    freshness, verdict.failure_reason,
+                    verdict.records_received, verdict.records_accepted,
+                    "unmeasured" if vintage is None else int(vintage))
+            _audit_finish(rid, verdict, action=action, vintage_seconds=vintage,
+                          freshness=freshness, max_vintage_seconds=max_vintage)
         except Exception as e:
             verdict = classify_run(raised=e)
-            action, age = _decide(ing, verdict)
+            action, vintage, freshness, max_vintage = _decide(ing, verdict)
             stats["ingesters"][ing.name] = {"status": "error", "error": str(e),
                                             "required_action": action,
-                                            "source_age_seconds": age,
+                                            "source_vintage_seconds": vintage,
+                                            "freshness_status": freshness,
+                                            "max_vintage_seconds": max_vintage,
                                             **verdict.as_dict()}
             log.exception("[runner] %s failed: %s", ing.name, e)
-            _audit_finish(rid, verdict, action=action, age_seconds=age)
+            _audit_finish(rid, verdict, action=action, vintage_seconds=vintage,
+                          freshness=freshness, max_vintage_seconds=max_vintage)
 
     try:
         from app.services.esg_aggregator import recalc_all_regions

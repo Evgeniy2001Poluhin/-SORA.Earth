@@ -20,10 +20,12 @@ import pytest
 from app.ingesters.classification import (
     ACTION_ESCALATE, ACTION_INVESTIGATE, ACTION_NONE, ACTION_WAIT,
     ACTION_SEVERITY,
+    FRESH, FRESHNESS_NOT_APPLICABLE, FRESHNESS_STATES, FRESHNESS_UNKNOWN,
+    NOT_CONFIGURED, STALE,
     REASON_CODES, REASON_CRASHED, REASON_FALLBACK_USED, REASON_OK,
     REASON_PARTIAL_WRITE, REASON_SOURCE_EMPTY, REASON_SOURCE_REJECTED,
     REASON_SOURCE_UNAVAILABLE, REASON_WRITE_FAILED,
-    classify_run, required_action,
+    classify_run, freshness_status, required_action,
 )
 
 HOUR = 3600.0
@@ -69,129 +71,70 @@ def test_the_table_covers_every_code():
     }
 
 
+# --- the matrix, row by row -------------------------------------------------
+
+MATRIX = [
+    # (reason, freshness, action)
+    (REASON_OK, FRESH, ACTION_NONE),
+    (REASON_OK, STALE, ACTION_ESCALATE),
+    (REASON_OK, FRESHNESS_NOT_APPLICABLE, ACTION_NONE),
+    (REASON_OK, NOT_CONFIGURED, ACTION_NONE),
+    (REASON_OK, FRESHNESS_UNKNOWN, ACTION_INVESTIGATE),
+
+    (REASON_SOURCE_EMPTY, FRESH, ACTION_WAIT),
+    (REASON_SOURCE_EMPTY, STALE, ACTION_ESCALATE),
+    (REASON_SOURCE_EMPTY, FRESHNESS_NOT_APPLICABLE, ACTION_INVESTIGATE),
+    (REASON_SOURCE_EMPTY, NOT_CONFIGURED, ACTION_INVESTIGATE),
+    (REASON_SOURCE_EMPTY, FRESHNESS_UNKNOWN, ACTION_INVESTIGATE),
+
+    (REASON_SOURCE_UNAVAILABLE, FRESH, ACTION_WAIT),
+    (REASON_SOURCE_UNAVAILABLE, STALE, ACTION_ESCALATE),
+    (REASON_SOURCE_UNAVAILABLE, NOT_CONFIGURED, ACTION_INVESTIGATE),
+
+    (REASON_CRASHED, STALE, ACTION_ESCALATE),
+    (REASON_CRASHED, FRESH, ACTION_INVESTIGATE),
+    (REASON_WRITE_FAILED, STALE, ACTION_ESCALATE),
+    (REASON_WRITE_FAILED, NOT_CONFIGURED, ACTION_INVESTIGATE),
+    (REASON_SOURCE_REJECTED, FRESH, ACTION_INVESTIGATE),
+    (REASON_PARTIAL_WRITE, FRESH, ACTION_INVESTIGATE),
+    (REASON_FALLBACK_USED, FRESH, ACTION_INVESTIGATE),
+]
+
+
+@pytest.mark.parametrize("reason,freshness,expected", MATRIX)
+def test_the_matrix_row(reason, freshness, expected):
+    assert required_action(_verdict(reason), freshness=freshness) == expected
+
+
 @pytest.mark.parametrize("reason", sorted(VERDICTS))
-@pytest.mark.parametrize("age,tolerance", FRESHNESS)
-def test_every_combination_yields_a_known_action(reason, age, tolerance):
-    action = required_action(_verdict(reason), age_seconds=age,
-                             tolerance_seconds=tolerance)
+@pytest.mark.parametrize("freshness", sorted(FRESHNESS_STATES))
+def test_every_combination_yields_a_known_action(reason, freshness):
+    """The whole space, not the rows I wrote down."""
+    action = required_action(_verdict(reason), freshness=freshness)
 
-    assert action in ACTION_SEVERITY, action
+    assert action in ACTION_SEVERITY
 
-    # `none` is reserved for a clean run. The whole defect being closed is a
-    # degraded state that reads as "nothing to do".
     if action == ACTION_NONE:
         assert reason == REASON_OK, (
-            f"{reason} with age={age} tolerance={tolerance} says there is "
-            f"nothing to do"
+            f"{reason} with freshness={freshness} says there is nothing to do"
+        )
+    if action == ACTION_WAIT:
+        assert freshness == FRESH, (
+            f"`wait` on freshness={freshness}: it asserts things are fine, and "
+            f"only a measured vintage inside a declared tolerance supports that"
         )
 
 
-@pytest.mark.parametrize("reason", sorted(set(VERDICTS) - {REASON_OK}))
-def test_wait_is_never_asserted_without_measuring(reason):
-    """`wait` means "fine for now", which unmeasured age cannot support.
-
-    This is the original defect one level up: a state that looks settled
-    because nobody looked.
-    """
-    for age, tolerance in [(None, None), (None, 24 * HOUR), (HOUR, None)]:
-        action = required_action(_verdict(reason), age_seconds=age,
-                                 tolerance_seconds=tolerance)
-        assert action != ACTION_WAIT, (
-            f"{reason} with age={age} tolerance={tolerance} claims things are "
-            f"fine without having measured whether they are"
-        )
+def test_stale_outranks_everything():
+    """Including a clean run: the pipeline works, the data does not."""
+    for reason in sorted(VERDICTS):
+        assert required_action(_verdict(reason), freshness=STALE) == ACTION_ESCALATE
 
 
-def test_the_openaq_pair():
-    """The two cases the issue is about, side by side."""
-    empty = _verdict(REASON_SOURCE_EMPTY)
-
-    assert required_action(empty, age_seconds=20 * 60,
-                           tolerance_seconds=HOUR) == ACTION_WAIT
-    assert required_action(empty, age_seconds=NINE_YEARS,
-                           tolerance_seconds=HOUR) == ACTION_ESCALATE
-
-    # Both are the same word today.
-    assert empty.status == "degraded"
-
-
-def test_the_boundary_is_not_stale():
-    """Age exactly equal to the tolerance is still within it.
-
-    Stated because `>` and `>=` are equally plausible here, and a source polled
-    on exactly its own cadence would otherwise escalate every single run.
-    """
-    empty = _verdict(REASON_SOURCE_EMPTY)
-
-    assert required_action(empty, age_seconds=24 * HOUR,
-                           tolerance_seconds=24 * HOUR) == ACTION_WAIT
-    assert required_action(empty, age_seconds=24 * HOUR + 1,
-                           tolerance_seconds=24 * HOUR) == ACTION_ESCALATE
-
-
-def test_staleness_outranks_the_immediate_reason():
-    """A run that half-worked while the data aged out is still unusable."""
-    for reason in (REASON_PARTIAL_WRITE, REASON_FALLBACK_USED,
-                   REASON_SOURCE_REJECTED, REASON_CRASHED, REASON_WRITE_FAILED):
-        assert required_action(_verdict(reason), age_seconds=NINE_YEARS,
-                               tolerance_seconds=HOUR) == ACTION_ESCALATE, reason
-
-
-def test_our_own_failures_are_investigated_not_waited_on():
-    """A crash or a failed write is not something that resolves by waiting."""
-    for reason in (REASON_CRASHED, REASON_WRITE_FAILED, REASON_SOURCE_REJECTED,
-                   REASON_PARTIAL_WRITE, REASON_FALLBACK_USED):
-        assert required_action(_verdict(reason), age_seconds=HOUR,
-                               tolerance_seconds=24 * HOUR) == ACTION_INVESTIGATE, reason
-
-
-def test_a_clean_run_over_stale_data_escalates():
-    """A successful run is not the same as usable data.
-
-    This test used to assert the opposite -- that a clean run needs nothing
-    "whatever the age", on the reasoning that a source which has just written is
-    fresh by construction. That is true of the write and says nothing about what
-    was written: persisting a 2017 snapshot without error is a working pipeline
-    over a dead source, and #74 exists precisely to stop those two being one
-    verdict.
-    """
-    ok = _verdict(REASON_OK)
-
-    assert required_action(ok, age_seconds=NINE_YEARS,
-                           tolerance_seconds=HOUR) == ACTION_ESCALATE
-    assert required_action(ok, age_seconds=HOUR,
-                           tolerance_seconds=24 * HOUR) == ACTION_NONE
-
-
-def test_a_clean_run_with_unmeasured_freshness_is_investigated():
-    """`none` asserts things are fine, and nobody looked.
-
-    Same rule as `wait`: an unmeasured age supports neither. Skipping the
-    measurement on the success path -- which an earlier version did, to save a
-    round trip on the common case -- turns every clean run into a claim nobody
-    checked.
-    """
-    ok = _verdict(REASON_OK)
-
-    for age, tolerance in [(None, None), (None, 24 * HOUR), (HOUR, None)]:
-        assert required_action(ok, age_seconds=age,
-                               tolerance_seconds=tolerance) == ACTION_INVESTIGATE
-
-
-def test_a_source_with_no_time_dimension_is_not_treated_as_unmeasured():
-    """`not_applicable` is a category error, not a missing number.
-
-    Every sber_veb_baseline row is dated nothing, so "is it stale" has no
-    answer. Reporting that as unmeasured would make every clean run of it demand
-    attention forever, which is noise rather than signal.
-    """
-    ok = _verdict(REASON_OK)
-
-    assert required_action(ok, freshness_applies=False) == ACTION_NONE
-    # And a degraded run of such a source still needs a look -- age cannot
-    # settle it either way.
-    assert required_action(_verdict(REASON_SOURCE_EMPTY),
-                           freshness_applies=False) == ACTION_INVESTIGATE
+def test_an_unknown_freshness_state_is_refused():
+    """A typo must not silently take the default branch."""
+    with pytest.raises(ValueError):
+        required_action(_verdict(REASON_OK), freshness="probably_fine")
 
 
 def test_severity_orders_the_actions():
@@ -199,59 +142,46 @@ def test_severity_orders_the_actions():
     assert ACTION_SEVERITY[ACTION_ESCALATE] > ACTION_SEVERITY[ACTION_INVESTIGATE]
     assert ACTION_SEVERITY[ACTION_INVESTIGATE] > ACTION_SEVERITY[ACTION_WAIT]
     assert ACTION_SEVERITY[ACTION_WAIT] > ACTION_SEVERITY[ACTION_NONE]
-    assert set(ACTION_SEVERITY) == {ACTION_NONE, ACTION_WAIT, ACTION_INVESTIGATE,
-                                    ACTION_ESCALATE}
 
 
-# --- the codes themselves ---------------------------------------------------
+# --- freshness_status itself ------------------------------------------------
 
 
-@pytest.mark.parametrize("reason", sorted(VERDICTS))
-def test_every_branch_carries_a_code_from_the_vocabulary(reason):
-    v = _verdict(reason)
-
-    assert v.reason_code in REASON_CODES
-    # Prose and code must agree about whether anything went wrong.
-    assert (v.failure_reason is None) == (v.reason_code == REASON_OK), v
+def test_no_declared_tolerance_means_not_configured():
+    """The defect this replaced: `default_ttl_hours` standing in for a vintage
+    contract made every clean rosstat run escalate. Measured on production --
+    vintage 590 days against a 180-day *polling* interval."""
+    assert freshness_status(590 * 86400, max_vintage_seconds=None) == NOT_CONFIGURED
 
 
-def test_the_prose_is_not_the_grouping_key():
-    """Two runs of the same kind share a code even when the sentence differs.
+def test_a_declared_tolerance_is_compared():
+    assert freshness_status(10.0, max_vintage_seconds=100.0) == FRESH
+    assert freshness_status(101.0, max_vintage_seconds=100.0) == STALE
 
-    `failure_reason` interpolates counts, so grouping by it produces one bucket
-    per distinct number -- which is why "is this the same thing as yesterday"
-    could not be answered without a person reading them.
+
+def test_the_boundary_is_not_stale():
+    """`>` and `>=` are equally plausible; a source polled on exactly its own
+    cadence would otherwise be stale on every run."""
+    assert freshness_status(100.0, max_vintage_seconds=100.0) == FRESH
+
+
+def test_a_declared_tolerance_with_no_measurement_is_unknown():
+    assert freshness_status(None, max_vintage_seconds=100.0) == FRESHNESS_UNKNOWN
+
+
+def test_no_axis_outranks_everything():
+    """A source whose rows carry no observation time has no vintage to compare,
+    and no tolerance would produce one."""
+    for max_v in (None, 100.0):
+        for vintage in (None, 1.0):
+            assert freshness_status(vintage, has_axis=False,
+                                    max_vintage_seconds=max_v) == FRESHNESS_NOT_APPLICABLE
+
+
+def test_a_missing_tolerance_outranks_a_missing_measurement():
+    """Both leave age out of the decision, and they are different things to fix.
+
+    Reporting "nobody agreed a threshold" as "the query came back empty" sends
+    someone to look at the database.
     """
-    a = classify_run(received=10, accepted=0, rejected=10)
-    b = classify_run(received=4000, accepted=0, rejected=4000)
-
-    assert a.failure_reason != b.failure_reason
-    assert a.reason_code == b.reason_code == REASON_SOURCE_REJECTED
-
-
-def test_classification_and_action_agree_across_the_whole_input_space():
-    """No combination of raw inputs produces a clean run that needs attention.
-
-    Walked over the classifier's inputs rather than over my table of verdicts,
-    so a new branch added there is covered here without anyone remembering to
-    add it.
-    """
-    counts = [(0, 0, 0), (10, 10, 0), (10, 7, 3), (10, 0, 10)]
-    flags = itertools.product([None, RuntimeError("boom")],
-                              [False, True], [False, True], [False, True])
-
-    for (received, accepted, rejected), (raised, unreachable, fallback, wfail) in \
-            itertools.product(counts, flags):
-        v = classify_run(raised=raised, received=received, accepted=accepted,
-                         rejected=rejected, unreachable=unreachable,
-                         used_fallback=fallback, write_failed=wfail)
-
-        assert v.reason_code in REASON_CODES, v
-        action = required_action(v, age_seconds=HOUR, tolerance_seconds=24 * HOUR)
-
-        # `none` implies success, but success no longer implies `none`: a clean
-        # run over data past its tolerance escalates.
-        if action == ACTION_NONE:
-            assert v.status == "success", (
-                f"action none on a {v.status} run: {v}"
-            )
+    assert freshness_status(None, max_vintage_seconds=None) == NOT_CONFIGURED

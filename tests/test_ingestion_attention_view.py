@@ -37,7 +37,7 @@ def _add(db, source, action, *, reason="source_empty", status="degraded",
         started_at=now - timedelta(minutes=minutes_ago + 1),
         finished_at=(now - timedelta(minutes=minutes_ago)) if finished else None,
         status=status, reason_code=reason, required_action=action,
-        source_age_seconds=age, records_received=0, records_accepted=0,
+        source_vintage_seconds=age, records_received=0, records_accepted=0,
         records_rejected=0,
     ))
     db.commit()
@@ -126,12 +126,13 @@ def test_the_row_carries_what_the_decision_was_made_from(client, runs):
 
     row = client.get("/api/v1/ingestion/attention").json()["sources"][0]
 
-    for field in ("reason_code", "source_age_seconds", "records_received",
+    for field in ("reason_code", "source_vintage_seconds", "max_vintage_seconds",
+                  "freshness_status", "records_received",
                   "records_accepted", "records_rejected", "status",
                   "finished_at"):
         assert field in row, field
     assert row["reason_code"] == "source_empty"
-    assert row["source_age_seconds"] == pytest.approx(9 * 365 * 86400)
+    assert row["source_vintage_seconds"] == pytest.approx(9 * 365 * 86400)
 
 
 def test_the_last_run_to_finish_wins_not_the_largest_id(client, runs):
@@ -148,7 +149,7 @@ def test_the_last_run_to_finish_wins_not_the_largest_id(client, runs):
         source="openaq", started_at=now - timedelta(minutes=30),
         finished_at=now - timedelta(minutes=1),
         status="degraded", reason_code="source_empty",
-        required_action="escalate", source_age_seconds=9 * 365 * 86400,
+        required_action="escalate", source_vintage_seconds=9 * 365 * 86400,
         records_received=0, records_accepted=0, records_rejected=0))
     runs.commit()
 
@@ -157,7 +158,7 @@ def test_the_last_run_to_finish_wins_not_the_largest_id(client, runs):
         source="openaq", started_at=now - timedelta(minutes=20),
         finished_at=now - timedelta(minutes=10),
         status="success", reason_code="ok",
-        required_action="none", source_age_seconds=60,
+        required_action="none", source_vintage_seconds=60,
         records_received=10, records_accepted=10, records_rejected=0))
     runs.commit()
 
@@ -184,7 +185,7 @@ def test_a_tie_on_finished_at_resolves_deterministically(client, runs):
         runs.add(IngesterRun(
             source="rosstat", started_at=now - timedelta(minutes=10),
             finished_at=same, status="degraded", reason_code="source_empty",
-            required_action=action, source_age_seconds=1,
+            required_action=action, source_vintage_seconds=1,
             records_received=0, records_accepted=0, records_rejected=0))
         runs.commit()
 
@@ -193,3 +194,41 @@ def test_a_tie_on_finished_at_resolves_deterministically(client, runs):
     assert body["count"] == 1, f"{body['count']} rows for one source"
     # The larger id breaks the tie, and it is the one added last.
     assert body["sources"][0]["required_action"] == "none"
+
+
+def test_a_none_without_a_declared_tolerance_says_so(client, runs):
+    """`none` must not read as proven freshness.
+
+    A clean run of a source nobody has given a `max_vintage_hours` is healthy
+    as a run, and says nothing about whether the data is current. Without the
+    status on the row, an operator sees `none` and infers the second.
+    """
+    _add(runs, "rosstat", "none", reason="ok", status="success",
+         age=590 * 86400)
+    runs.query(IngesterRun).filter(IngesterRun.source == "rosstat").update(
+        {"freshness_status": "not_configured", "max_vintage_seconds": None})
+    runs.commit()
+
+    row = client.get("/api/v1/ingestion/attention").json()["sources"][0]
+
+    assert row["required_action"] == "none"
+    assert row["freshness_status"] == "not_configured"
+    assert row["max_vintage_seconds"] is None
+    assert row["source_vintage_seconds"] == pytest.approx(590 * 86400)
+
+
+def test_the_threshold_in_force_is_recorded_beside_the_verdict(client, runs):
+    """A tolerance can be changed after the run.
+
+    Without it, a row holding `escalate` and 590 days cannot be re-read: nobody
+    can tell whether the data was old or the threshold moved.
+    """
+    _add(runs, "openaq", "escalate", reason="source_empty", age=9 * 365 * 86400)
+    runs.query(IngesterRun).filter(IngesterRun.source == "openaq").update(
+        {"freshness_status": "stale", "max_vintage_seconds": 30 * 86400.0})
+    runs.commit()
+
+    row = client.get("/api/v1/ingestion/attention").json()["sources"][0]
+
+    assert row["freshness_status"] == "stale"
+    assert row["max_vintage_seconds"] == pytest.approx(30 * 86400)

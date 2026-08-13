@@ -6,9 +6,13 @@ operator still cannot tell whether to wait, retry, page someone, or ignore it.
 Three columns, all derived by app/ingesters/classification.py and none set by
 hand:
 
-    reason_code          closed vocabulary; `failure_reason` stays as prose
-    source_age_seconds   how old the newest signal was when the run finished
-    required_action      none | wait | investigate | escalate
+    reason_code             closed vocabulary; `failure_reason` stays as prose
+    source_vintage_seconds  age of the newest observation, from event_time or
+                            period_end -- never from when the row was written
+    max_vintage_seconds     the tolerance in force at the time of the run
+    freshness_status        fresh | stale | not_applicable | not_configured |
+                            unknown
+    required_action         none | wait | investigate | escalate
 
 The pair that motivates it: an empty source whose data is twenty minutes old is
 `wait`; an empty source whose data is nine years old is `escalate`. Both are
@@ -38,7 +42,16 @@ INDEX = "ix_ingester_runs_required_action"
 COLUMNS = (
     ("reason_code", sa.Text()),
     ("required_action", sa.Text()),
-    ("source_age_seconds", sa.Float()),
+    # The action and every input it was derived from. A threshold can move
+    # after the fact, so a row holding `escalate` and a vintage of 590 days is
+    # unreadable a month later without the tolerance that was in force.
+    #
+    # `source_vintage_seconds`, not `source_age_seconds`: age reads as ingestion
+    # or cache age, which is the conflation #121 existed to remove. Renamed
+    # before release -- this revision has never run anywhere.
+    ("source_vintage_seconds", sa.Float()),
+    ("max_vintage_seconds", sa.Float()),
+    ("freshness_status", sa.Text()),
 )
 
 

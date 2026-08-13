@@ -335,7 +335,13 @@ def ingestion_attention():
                 "required_action": r.required_action,
                 "reason_code": r.reason_code,
                 "status": r.status,
-                "source_age_seconds": r.source_age_seconds,
+                # The verdict and its inputs. `none` beside
+                # freshness_status="not_configured" says the run was healthy and
+                # nobody has declared how old this source's data may be -- which
+                # is not the same claim as proven freshness (#74).
+                "source_vintage_seconds": r.source_vintage_seconds,
+                "max_vintage_seconds": r.max_vintage_seconds,
+                "freshness_status": r.freshness_status,
                 "records_received": r.records_received,
                 "records_accepted": r.records_accepted,
                 "records_rejected": r.records_rejected,
@@ -351,7 +357,7 @@ def ingestion_attention():
         def key(row):
             severity = ACTION_SEVERITY.get(row["required_action"])
             return (0 if severity is None else 1, -(severity or 0),
-                    -(row["source_age_seconds"] or 0))
+                    -(row["source_vintage_seconds"] or 0))
 
         rows.sort(key=key)
 

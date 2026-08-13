@@ -101,6 +101,19 @@ class OpenAQIngester(BaseIngester):
     """
     name = "openaq"
     default_ttl_hours = 1  # Air quality data changes frequently
+
+    # The only source whose acceptable vintage is written down anywhere.
+    # app/ingesters/source_register.py records the condition for putting openaq
+    # back into scheduled ingestion: data "no older than
+    # SORA_OPENAQ_MIN_FRESHNESS_DAYS (default 30), confirmed by a read against
+    # the live API" (#57).
+    #
+    # Declared here rather than invented: 30 days is that written criterion, not
+    # a number chosen to make a test pass. It has no live effect today -- openaq
+    # is stood down and its jobs are not registered -- so this is the contract
+    # travelling with the adapter until someone reinstates it. Every other
+    # source stays `not_configured` until its own tolerance is agreed.
+    max_vintage_hours = 30 * 24
     max_retries = 3
     timeout_s = 30.0
 

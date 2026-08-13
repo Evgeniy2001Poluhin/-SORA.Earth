@@ -172,10 +172,23 @@ class IngesterRun(Base):
     # Both are derived (app/ingesters/classification.py), never set by hand.
     reason_code = Column(Text, nullable=True)
     required_action = Column(Text, nullable=True)
-    # Age of the newest signal for this source at the moment the run finished.
-    # NULL means it was not measured, which is why `required_action` will not
-    # say "wait" -- that is a claim about being fine, and it needs a number.
-    source_age_seconds = Column(Float, nullable=True)
+    # Every input the action was derived from, not just the action.
+    #
+    # `source_vintage_seconds` -- age of the newest *observation* this source
+    # holds, measured from event_time or period_end depending on temporal_kind.
+    # Not named `age`, which reads as ingestion or cache age and is exactly the
+    # confusion #121 was about.
+    #
+    # `max_vintage_seconds` is the tolerance that was in force *at the time of
+    # the run*. A threshold can be changed afterwards, and without recording it
+    # a row holding `escalate` and 590 days cannot be re-read: nobody can tell
+    # whether the data was old or the tolerance moved.
+    #
+    # `freshness_status` says which comparison was possible at all:
+    # fresh | stale | not_applicable | not_configured | unknown.
+    source_vintage_seconds = Column(Float, nullable=True)
+    max_vintage_seconds = Column(Float, nullable=True)
+    freshness_status = Column(Text, nullable=True)
 
     __table_args__ = (
         Index("ix_ingester_runs_source_status",

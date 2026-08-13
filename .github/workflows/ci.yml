@@ -333,6 +333,18 @@ jobs:
           DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
           TEST_DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
 
+      # What the runner stores, read back. The attention-view tests fill these
+      # columns in by hand, so without this the write path has no coverage and a
+      # dropped field passes every check.
+      - name: Run record write path against PostgreSQL
+        run: |
+          python -m pytest \
+            tests/test_run_record_is_written_postgres.py \
+            -v --tb=short --timeout=300
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+          TEST_DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
       - name: Ingester write path against PostgreSQL
         run: |
           python -m pytest \

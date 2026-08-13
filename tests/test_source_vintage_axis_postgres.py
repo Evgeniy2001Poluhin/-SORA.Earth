@@ -212,3 +212,75 @@ def test_legacy_rows_do_not_hide_a_not_applicable_source(db):
         f"row of this source carries no date"
     )
     assert age is None
+
+
+# --- the tolerance is a separate contract from the polling interval ----------
+
+
+@requires_postgres
+def test_rosstat_2024_is_not_stale_without_a_declared_tolerance(db):
+    """The production case that stopped this being merged.
+
+    rosstat polls every 180 days (`default_ttl_hours = 24 * 180`) and publishes
+    annually, so its newest observation is 590 days old -- measured on
+    production, 2026-08 against a period ending 2024-12-31. Treating the polling
+    interval as a vintage tolerance made every clean run escalate, forever, over
+    a snapshot that is exactly as current as rosstat has published.
+
+    No `max_vintage_hours` is declared for it, so the age takes no part in the
+    verdict.
+    """
+    from app.ingesters.classification import (
+        NOT_CONFIGURED, REASON_OK, classify_run, freshness_status,
+        required_action,
+    )
+    from app.ingesters.rosstat import RosstatIngester
+
+    _add(db, "rosstat", "period", rid="v1",
+         period_start=datetime(2024, 1, 1, tzinfo=timezone.utc),
+         period_end=datetime(2024, 12, 31, tzinfo=timezone.utc))
+
+    vintage, basis = source_vintage("rosstat")
+    assert basis == VINTAGE_MEASURED and vintage > 400 * DAY
+
+    ingester = RosstatIngester()
+    assert getattr(ingester, "max_vintage_hours", None) is None, (
+        "a tolerance has been declared for rosstat; this test is about the "
+        "case where none has, and the number must not be guessed"
+    )
+    # The polling interval exists and is deliberately not used here.
+    assert ingester.default_ttl_hours == 24 * 180
+
+    status = freshness_status(vintage, max_vintage_seconds=None)
+    assert status == NOT_CONFIGURED
+
+    clean = classify_run(received=425, accepted=425, rejected=0)
+    assert clean.reason_code == REASON_OK
+    assert required_action(clean, freshness=status) == "none", (
+        "a clean run over the newest data rosstat has published is not an "
+        "escalation"
+    )
+
+
+@requires_postgres
+def test_the_same_rosstat_data_is_stale_once_a_tolerance_is_declared(db):
+    """And the mechanism still works when someone does agree a number.
+
+    The point is not that rosstat is never stale -- it is that nobody has said
+    when. Given a contract, the same rows produce the same verdict the polling
+    interval was wrongly producing on its own.
+    """
+    from app.ingesters.classification import (
+        STALE, classify_run, freshness_status, required_action,
+    )
+
+    _add(db, "rosstat", "period", rid="v2",
+         period_start=datetime(2024, 1, 1, tzinfo=timezone.utc),
+         period_end=datetime(2024, 12, 31, tzinfo=timezone.utc))
+
+    vintage, _ = source_vintage("rosstat")
+    status = freshness_status(vintage, max_vintage_seconds=400 * DAY)
+
+    assert status == STALE
+    clean = classify_run(received=425, accepted=425, rejected=0)
+    assert required_action(clean, freshness=status) == "escalate"

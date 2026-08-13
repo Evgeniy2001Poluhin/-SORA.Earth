@@ -71,6 +71,45 @@ REASON_CODES = frozenset({
     REASON_FALLBACK_USED, REASON_CRASHED,
 })
 
+# freshness_status -- what is known about the age of the newest observation.
+#
+# Five states rather than a number, because the interesting distinctions are not
+# quantitative. `not_configured` and `unknown` both mean "no comparison was
+# made", and they mean it for opposite reasons: nobody declared a tolerance, or
+# nobody could measure the vintage. Collapsing them loses which one to fix.
+FRESH = "fresh"
+STALE = "stale"
+FRESHNESS_NOT_APPLICABLE = "not_applicable"   # the source has no time dimension
+NOT_CONFIGURED = "not_configured"             # no max_vintage_hours declared
+FRESHNESS_UNKNOWN = "unknown"                 # declared, but vintage unmeasured
+
+FRESHNESS_STATES = frozenset({
+    FRESH, STALE, FRESHNESS_NOT_APPLICABLE, NOT_CONFIGURED, FRESHNESS_UNKNOWN,
+})
+
+
+def freshness_status(vintage_seconds, *, has_axis=True,
+                     max_vintage_seconds=None) -> str:
+    """Compare a measured vintage against a declared tolerance, or say why not.
+
+    `has_axis=False` is a source whose rows carry no observation time at all
+    (`not_applicable`). That outranks everything: there is no vintage to compare,
+    and no tolerance would make one.
+
+    A missing tolerance outranks a missing measurement. Both leave the age out
+    of the decision, but "nobody agreed a threshold" is a different thing to fix
+    from "the query came back empty", and reporting the first as the second
+    sends someone looking at the database.
+    """
+    if not has_axis:
+        return FRESHNESS_NOT_APPLICABLE
+    if max_vintage_seconds is None:
+        return NOT_CONFIGURED
+    if vintage_seconds is None:
+        return FRESHNESS_UNKNOWN
+    return STALE if vintage_seconds > max_vintage_seconds else FRESH
+
+
 # required_action -- what the operator does next (#74).
 #
 # The field the issue is actually about. `degraded` is a display: reading it,
@@ -261,72 +300,66 @@ def _reason_code(outcome: str) -> str:
 _STALENESS_DECIDES = frozenset({REASON_SOURCE_EMPTY, REASON_SOURCE_UNAVAILABLE})
 
 
-def required_action(
-    verdict: RunVerdict,
-    *,
-    age_seconds: Optional[float] = None,
-    tolerance_seconds: Optional[float] = None,
-    freshness_applies: bool = True,
-) -> str:
+def required_action(verdict: RunVerdict, *, freshness: str = NOT_CONFIGURED) -> str:
     """What an operator does next. Derived, never set.
 
     #74: `degraded` is a display. Reading it, nobody can tell whether to wait,
     retry, page someone, or ignore it -- and that is the decision the record
     exists to support.
 
-    The distinction that carries the weight is between an empty source whose
-    data is still fresh and an empty source whose data is not:
+        run                       freshness        action
+        ------------------------- ---------------- -----------
+        success                   fresh            none
+        success                   stale            escalate
+        success                   not_applicable   none
+        success                   not_configured   none
+        success                   unknown          investigate
+        empty / unavailable       fresh            wait
+        empty / unavailable       stale            escalate
+        empty / unavailable       anything else    investigate
+        crash / write / rejected  stale            escalate
+        crash / write / rejected  anything else    investigate
 
-        openaq, empty, newest signal 20 minutes old      wait
-        openaq, empty, newest signal nine years old      escalate
+    Three things this arrangement is careful about.
 
-    Both are `degraded`. The second is #57, which ran for 333 consecutive runs
-    looking exactly like the first.
+    **A successful run is not the same as usable data.** Persisting a 2017
+    snapshot without error is a working pipeline over a dead source, so `stale`
+    escalates whatever the run did. An earlier version returned `none` for every
+    clean run without measuring anything, reasoning that a source which has just
+    written is fresh by construction -- true of the write, and silent about what
+    was written.
 
-    **A successful run is not the same as usable data**, and separating those
-    two is what #74 is for. Persisting a 2017 snapshot without error is a
-    working pipeline over a dead source: `reason_code == ok` with an age past
-    tolerance is `escalate`, not `none`. An earlier version returned `none` for
-    every clean run without measuring anything, on the reasoning that a source
-    which has just written is fresh by construction -- which is true of the
-    write and says nothing about what was written.
+    **A threshold nobody declared cannot certify or condemn.** `not_configured`
+    leaves the age out of the decision entirely. A clean run is then `none`,
+    because the run *is* healthy -- but the record carries the status, so nobody
+    reads that `none` as proven freshness. Inventing a tolerance instead would
+    have made every clean rosstat run escalate forever: measured on production,
+    vintage 590 days against the 180-day polling interval that was standing in
+    for a vintage contract.
 
-    `tolerance_seconds` comes from the ingester's own `default_ttl_hours`, which
-    every source already declares -- 1 hour for openmeteo, 180 days for rosstat.
-    A source is not stale because a wall-clock threshold says so; it is stale
-    against the cadence it claims for itself.
-
-    `freshness_applies=False` is for a source whose rows carry no time at all
-    (`not_applicable`). That is a category error rather than a missing
-    measurement: there is no answer to whether a dated-nothing snapshot is
-    stale, and treating it as unmeasured would make every clean sber run demand
-    attention forever.
-
-    When freshness applies and is *not* known, the answer is `investigate`,
-    never `wait` and never `none`. Both of those assert that things are fine,
-    and an unmeasured age does not support either -- that is the shape of the
-    original defect, one level up.
+    **An empty source cannot be waited on without one.** `wait` asserts things
+    are fine for now, and only a measured vintage inside a declared tolerance
+    supports that. Everything else about an empty source is `investigate`.
     """
-    measured = age_seconds is not None and tolerance_seconds is not None
+    if freshness not in FRESHNESS_STATES:
+        raise ValueError(f"unknown freshness status: {freshness!r}")
 
-    if freshness_applies and measured and age_seconds > tolerance_seconds:
-        # Regardless of the immediate reason, including a clean run. Data past
-        # the cadence its own source declares is data nobody can rely on.
+    if freshness == STALE:
+        # Whatever the run achieved. Data past the tolerance its own source
+        # declared is data nobody can rely on.
         return ACTION_ESCALATE
 
     if verdict.reason_code == REASON_OK:
-        if not freshness_applies:
-            return ACTION_NONE          # no time dimension; nothing to be stale
-        if measured:
-            return ACTION_NONE          # measured, and within tolerance
-        return ACTION_INVESTIGATE       # nobody looked; "fine" is unsupported
+        if freshness == FRESHNESS_UNKNOWN:
+            # A tolerance exists and the vintage could not be read. That is a
+            # gap in what we know, not a clean bill of health.
+            return ACTION_INVESTIGATE
+        return ACTION_NONE
 
     if verdict.reason_code in _STALENESS_DECIDES:
-        if not freshness_applies:
-            return ACTION_INVESTIGATE   # empty source, and age cannot settle it
-        if not measured:
-            return ACTION_INVESTIGATE
-        return ACTION_WAIT
+        if freshness == FRESH:
+            return ACTION_WAIT
+        return ACTION_INVESTIGATE
 
     # crashed, write_failed, source_rejected, partial_write, fallback_used:
     # something is wrong on a side somebody here controls.
