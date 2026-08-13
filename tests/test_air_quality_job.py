@@ -85,22 +85,18 @@ def test_a_source_that_returns_nothing_is_not_a_success():
 def test_it_runs_immediately_on_startup():
     """Otherwise the first rows arrive an hour after a deployment, and a restart
     to check the source is working shows nothing for an hour."""
-    import inspect
-    from app import scheduler as scheduler_module
+    # The list itself, not a slice of the source around it. This used to cut
+    # between `for _jid in (` and `):` -- careful, and still coupled to how the
+    # loop happens to be written, which is exactly what broke when #154 moved
+    # the ids into a named constant.
+    from app.scheduler import RUN_IMMEDIATELY_ON_STARTUP
 
-    src = inspect.getsource(scheduler_module)
-    # The tuple itself, delimited by the loop that consumes it. Slicing from the
-    # first occurrence of a job id instead picked up the add_job() calls further
-    # up, where every id appears -- so the assertion held with the job absent
-    # from the immediate-run set entirely.
-    start = src.index("for _jid in (")
-    immediate = src[start:src.index("):", start)]
-    assert '"auto_openmeteo_air_quality_ingestion"' in immediate, \
+    assert "auto_openmeteo_air_quality_ingestion" in RUN_IMMEDIATELY_ON_STARTUP, \
         "the air-quality job is not in the immediate-run set"
     # auto_openaq_ingestion is deliberately absent since #57: the job is not
     # registered unless SORA_OPENAQ_ENABLED is set, and an immediate run of a
     # job that does not exist is not something to arrange.
-    assert '"auto_openaq_ingestion"' not in immediate
+    assert "auto_openaq_ingestion" not in RUN_IMMEDIATELY_ON_STARTUP
 
 
 def test_a_write_failure_fails_the_job():

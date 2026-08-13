@@ -118,6 +118,49 @@ def should_run_scheduler() -> bool:
 
 scheduler = BackgroundScheduler(timezone="UTC")
 
+# Jobs that run once at startup, in addition to their schedule (#154).
+#
+# This is a contract, not a side effect, and it is stated here because nothing
+# outside this file used to say it. **Recreating the scheduler container runs
+# every job named here**, so an ordinary deployment -- and a rollback, which
+# also recreates containers -- writes to the database and calls an external API.
+#
+# Not an APScheduler default. Measured: `IntervalTrigger(hours=24)` returns a
+# first fire time a full interval away, so an interval job left alone does
+# nothing at startup. These are forced with `modify_job(next_run_time=now)`
+# below.
+#
+# The reason is that the alternative is worse for the operator: without it the
+# first air-quality rows arrive an hour after a deployment, and a restart made
+# specifically to check whether a source works produces nothing to look at for
+# an hour.
+#
+# What it costs, stated so the trade is visible:
+#
+#   auto_run_ingesters                    writes rosstat + sber rows (idempotent
+#                                         since #121: unchanged snapshots upsert
+#                                         to a zero row delta)
+#   auto_refresh_external_data            one call to the World Bank API per
+#                                         deployment, rollbacks included
+#   auto_openmeteo_ingestion              one Open-Meteo fetch
+#   auto_openmeteo_air_quality_ingestion  one Open-Meteo fetch
+#   refresh_forecast_metrics              reads only
+#
+# auto_openaq_ingestion is deliberately absent: the job is not registered unless
+# SORA_OPENAQ_ENABLED is set, and an immediate run of a job that does not exist
+# is not an error worth logging.
+#
+# tests/test_startup_jobs_contract.py pins the membership of this tuple. Adding
+# a sixth entry has to be a decision rather than something that happens while
+# editing nearby.
+RUN_IMMEDIATELY_ON_STARTUP = (
+    "auto_run_ingesters",
+    "auto_refresh_external_data",
+    "refresh_forecast_metrics",
+    "auto_openmeteo_ingestion",
+    "auto_openmeteo_air_quality_ingestion",
+)
+
 
 def retrain_models(trigger_source: str = "manual"):
     """Auto-retrain all ML models, invalidate cache, and persist retrain log to DB."""
@@ -972,19 +1015,7 @@ def init_scheduler(start: bool = True):
 
     from datetime import datetime, timezone
     _now = datetime.now(timezone.utc)
-    for _jid in (
-        "auto_run_ingesters",
-        "auto_refresh_external_data",
-        "refresh_forecast_metrics",
-        # auto_openaq_ingestion is deliberately absent: the job is not
-        # registered unless SORA_OPENAQ_ENABLED is set, and an immediate run
-        # of a job that does not exist is not an error worth logging.
-        "auto_openmeteo_ingestion",
-        # Without this the first air-quality rows arrive an hour after a
-        # deployment, and a restart to check the source is working produces
-        # nothing to look at for an hour.
-        "auto_openmeteo_air_quality_ingestion",
-    ):
+    for _jid in RUN_IMMEDIATELY_ON_STARTUP:
         try:
             scheduler.modify_job(_jid, next_run_time=_now)
             logger.info("Job %s scheduled to run immediately on startup", _jid)

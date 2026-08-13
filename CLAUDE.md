@@ -281,6 +281,30 @@ Optional:
 
 1. **Scheduler Architecture**: The scheduler runs in a separate Docker container (`scheduler` service). Do NOT set `RUN_SCHEDULER=true` in the `app` service or you'll have duplicate jobs. The scheduler shares the same codebase but runs `run_scheduler.py` instead of the FastAPI app.
 
+   **Recreating the scheduler container runs five jobs immediately**, in addition
+   to their schedule. This is deliberate and is listed in
+   `app/scheduler.py:RUN_IMMEDIATELY_ON_STARTUP`; it is not an APScheduler
+   default (an interval trigger left alone first fires a full interval later --
+   measured). So an ordinary deployment, **and a rollback**, writes to the
+   database and calls an external API:
+
+   | job | cost per deployment |
+   |---|---|
+   | `auto_run_ingesters` | writes rosstat + sber rows; idempotent since #121, so an unchanged snapshot upserts to a zero row delta |
+   | `auto_refresh_external_data` | one World Bank API call |
+   | `auto_openmeteo_ingestion` | one Open-Meteo fetch |
+   | `auto_openmeteo_air_quality_ingestion` | one Open-Meteo fetch |
+   | `refresh_forecast_metrics` | reads only |
+
+   The reason is that the alternative is worse for whoever is watching: without
+   it the first air-quality rows arrive an hour after a deployment, and a
+   restart made to check whether a source works shows nothing for an hour.
+
+   Consequence for acceptance: rows appearing during a deploy window are
+   **expected**, not evidence of something else. Observed on 2026-08-13 during
+   the #121 acceptance, where the scheduler ran both literal ingesters one
+   second after the container came up (#154).
+
 2. **Feature Count Consistency**: The RF model expects exactly 9 features in this order: `["budget", "co2_reduction", "social_impact", "duration_months", "budget_per_month", "co2_per_dollar", "efficiency_score", "year", "quarter"]`. Always use `make_features()` to construct feature DataFrames.
 
 3. **Model Versioning**: Models are loaded at app startup. To deploy a new model, replace files in `models/` directory and restart the `app` container. Old predictions remain cached in Redis until TTL expires or manual invalidation.
