@@ -112,3 +112,65 @@ def test_a_dense_series_is_not_held_back(monkeypatch):
     assert int(dense["is_observed"].sum()) == 40
 
     assert _lstm_weight_after_fit(dense, monkeypatch) > 0.0
+
+
+# --- what each model is actually handed --------------------------------------
+
+
+def _frames_each_model_received(frame, monkeypatch):
+    """Record the frame passed to every sub-model during one fit."""
+    from app.services.forecasting import ensemble as ens
+
+    seen = {}
+    forecaster = ens.EnsembleForecaster()
+    for name in ("lstm", "prophet", "linear"):
+        def _capture(df, target_col="y", _n=name, **kw):
+            seen[_n] = df.copy()
+        monkeypatch.setattr(getattr(forecaster, name), "fit", _capture)
+    forecaster.fit(frame, target_col="y")
+    return seen
+
+
+def test_lstm_is_given_every_day_and_prophet_only_the_measured_ones(monkeypatch):
+    """The row policy, asserted rather than left implicit.
+
+    Adding a provenance column while every model still trains on interpolated
+    rows would move the ambiguity instead of resolving it -- #132 asks for a
+    decision about what each consumer does with the flag, not just the flag.
+
+    LSTM slides a window over consecutive rows and cannot span a gap, so it
+    needs the dense frame. Prophet handles irregular timestamps natively and
+    LinearTrend regresses on a date axis, so neither needs manufactured points
+    and both are better without them: interpolation makes a straight-line guess
+    look like evidence.
+    """
+    frame = _sparse_but_wide(observations=40, span_days=60)
+    seen = _frames_each_model_received(frame, monkeypatch)
+
+    assert len(seen["lstm"]) == 60, "LSTM was given a frame with gaps in it"
+    assert len(seen["prophet"]) == 40, "Prophet was trained on invented points"
+    assert len(seen["linear"]) == 40, "LinearTrend was trained on invented points"
+
+
+def test_no_model_receives_the_provenance_column(monkeypatch):
+    """It marks rows; it is not a feature, and nothing should learn from it."""
+    seen = _frames_each_model_received(
+        _sparse_but_wide(observations=40, span_days=60), monkeypatch)
+
+    for name, frame in seen.items():
+        assert list(frame.columns) == ["ds", "y"], (
+            f"{name} received {list(frame.columns)}"
+        )
+
+
+def test_a_frame_without_provenance_reaches_every_model_whole(monkeypatch):
+    """Callers that never used the loader see no change at all."""
+    plain = pd.DataFrame({
+        "ds": pd.date_range("2026-01-01", periods=40, freq="D"),
+        "y": [float(i) for i in range(40)],
+    })
+
+    seen = _frames_each_model_received(plain, monkeypatch)
+
+    assert {name: len(f) for name, f in seen.items()} == {
+        "lstm": 40, "prophet": 40, "linear": 40}

@@ -146,12 +146,37 @@ def test_every_row_says_whether_it_was_observed():
     assert len(out) == 10, "the span is still filled; only its labelling changed"
 
 
+def test_an_empty_result_carries_the_provenance_column_too():
+    """Both empty paths, asserted directly.
+
+    The early returns produced ds and y while the populated path produced three
+    columns, so a caller doing df["is_observed"] got a KeyError on the one
+    input it is most likely to hit -- and the docstring was wrong about the
+    case nobody looks at. The existing empty-frame test passed throughout,
+    because it only checked ds and y.
+    """
+    no_rows = _load([])
+
+    assert list(no_rows.columns) == ["ds", "y", "is_observed"]
+    assert no_rows.empty
+
+    session = MagicMock()
+    session.query.return_value.order_by.return_value.all.return_value = [
+        SimpleNamespace(created_at="2026-01-01 12:00:00", total_score=None,
+                        co2_reduction=None, success_probability=None)
+    ]
+    no_values = load_time_series(session, "score")
+
+    assert list(no_values.columns) == ["ds", "y", "is_observed"]
+    assert no_values.empty
+
+
 def test_no_rows_yields_an_empty_frame_with_the_same_columns():
     session = MagicMock()
     session.query.return_value.order_by.return_value.all.return_value = []
     out = load_time_series(session, "score")
 
-    assert list(out.columns) == ["ds", "y"]
+    assert list(out.columns) == ["ds", "y", "is_observed"]
     assert len(out) == 0
 
 
@@ -187,7 +212,7 @@ def test_rows_with_no_values_for_the_metric_keep_the_schema(metric):
     out = load_time_series(_db_with_no_values(), metric)
 
     assert out.empty
-    assert list(out.columns) == ["ds", "y"], (
+    assert list(out.columns) == ["ds", "y", "is_observed"], (
         f"{metric}: empty result carries no schema, so downstream column "
         f"access raises instead of yielding nothing"
     )

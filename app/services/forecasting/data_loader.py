@@ -57,7 +57,7 @@ def load_time_series(db: Session, metric: MetricType) -> pd.DataFrame:
 
     rows = db.query(Evaluation).order_by(Evaluation.created_at.asc()).all()
     if not rows:
-        return pd.DataFrame(columns=["ds", "y"])
+        return pd.DataFrame(columns=["ds", "y", "is_observed"])
 
     # Extract metric values
     if metric == "score":
@@ -77,7 +77,12 @@ def load_time_series(db: Session, metric: MetricType) -> pd.DataFrame:
     # caller sees.
     df = pd.DataFrame(recs, columns=["ds", "y"]).dropna()
     if df.empty:
-        return df
+        # The same three columns as the populated path. An empty frame with a
+        # different shape is the defect this loader already had once: a caller
+        # doing df["is_observed"] would get a KeyError on the one input it is
+        # most likely to hit, and the docstring would be wrong about the case
+        # nobody looks at.
+        return df.assign(is_observed=pd.Series(dtype=bool))
 
     # Aggregate to daily mean
     df = df.set_index("ds").resample("D")["y"].mean().reset_index()
