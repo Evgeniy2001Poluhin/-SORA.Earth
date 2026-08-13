@@ -244,18 +244,36 @@ def test_the_docstring_leaves_readiness_to_the_ensemble():
     assert "no threshold of its own" in lowered
 
 
-def test_the_docstring_states_that_provenance_is_absent():
+def test_the_docstring_states_that_provenance_is_present():
+    """It said the opposite, correctly, while there was no flag.
+
+    The docstring had to warn that nothing marked observed rows apart. Now one
+    does, and a docstring still carrying the warning would send a consumer past
+    the column it should be reading -- which is how the old text kept being
+    obeyed after the behaviour changed.
+    """
     lowered = DOC.lower()
 
-    assert "no provenance" in lowered
-    assert "interpolated" in lowered
-    assert "nothing marks" in lowered
+    assert "is_observed" in DOC, "the provenance column is not documented"
+    assert "no provenance" not in lowered
+    for stale in ("nothing marks which", "no flag for which"):
+        assert stale not in lowered, f"the docstring still denies provenance: {stale!r}"
 
 
-def test_the_docstring_states_that_smoothing_touches_observed_values():
+def test_the_docstring_does_not_promise_smoothing():
+    """The rolling mean is gone, and the text must not keep offering it.
+
+    Asserted as a refutation rather than as the absence of a word: the
+    docstring mentions the removed step in order to say it was removed, and a
+    plain substring ban would trip on the sentence doing the correcting -- a
+    trap this repository has fallen into three times.
+    """
     lowered = DOC.lower()
 
-    assert "smoothing rewrites observed values" in lowered
+    assert "used to be applied" in lowered or "is now" in lowered, (
+        "the docstring does not say the smoothing was removed"
+    )
+    assert "returned as measured" in lowered or "not the measurement taken" not in lowered
 
 
 def test_the_docstring_states_that_length_is_a_span_not_evidence():

@@ -18,24 +18,27 @@ def load_time_series(db: Session, metric: MetricType) -> pd.DataFrame:
     1. evaluations sharing a date are aggregated into a daily mean;
     2. the series is reindexed onto every calendar day between the first and
        last observation, and interior gaps are filled by linear interpolation;
-    3. a centred 3-day rolling mean is applied to the result.
+    3. every row is marked `is_observed`: True where a value was recorded,
+       False where step 2 manufactured it.
 
     No row is produced outside the observed range: there is no backward or
     forward extension, and nothing is emitted before the first or after the last
     observation.
 
-    Limits the caller has to account for:
+    What the caller has to account for:
 
-    * **No provenance.** The frame is `ds` and `y` only. Nothing marks which
-      days were observed and which were interpolated, so no consumer can tell
-      them apart.
-    * **Smoothing rewrites observed values too.** Step 3 applies to the whole
-      column, so a returned value at an observed date is generally not the
-      measurement taken that day.
+    * **`is_observed` says which rows are real.** A row is True when a value was
+      recorded for that date and False when the interpolation manufactured it.
+      Both carry a `y`; only one is a measurement.
+    * **Observed values are returned as measured.** A centred rolling mean used
+      to be applied to the whole column, so a value at an observed date was not
+      the measurement taken that day. It is now.
     * **`len()` is a calendar span, not a count of observations.** Interpolation
       is what makes it large. A long, sparsely observed range and a short, fully
-      observed one can return the same number of rows, so the length of this
-      frame is not evidence that the data are sufficient for anything.
+      observed one return the same number of rows, so the length of this frame
+      is not evidence that the data are sufficient for anything. The count is
+      `int(df["is_observed"].sum())`; there is deliberately no second field
+      holding it, because two records of one fact drift apart.
 
     Readiness is not decided here. This loader applies no threshold of its own;
     whether a series supports a given model is ensemble policy, in
@@ -46,9 +49,9 @@ def load_time_series(db: Session, metric: MetricType) -> pd.DataFrame:
         metric: Target metric name (score/prob/co2_reduction)
 
     Returns:
-        DataFrame with columns ["ds", "y"] -- one row per calendar day from the
-        first to the last observation, with no flag for which rows were observed.
-        Empty (same columns) when there are no rows or no values for the metric.
+        DataFrame with columns ["ds", "y", "is_observed"] -- one row per calendar
+        day from the first to the last observation. Empty (same columns) when
+        there are no rows or no values for the metric.
     """
     from app.database import Evaluation
 

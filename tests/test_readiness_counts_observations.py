@@ -41,6 +41,22 @@ def _sparse_but_wide(observations, span_days):
     return frame
 
 
+def _lstm_weight_after_fit(frame, monkeypatch):
+    """The weight the ensemble itself assigns, with the models stubbed out.
+
+    Every readiness assertion goes through this. Computing the count in the
+    test instead would assert the test's own arithmetic: a regression inside
+    `EnsembleForecaster.fit` would leave it green.
+    """
+    from app.services.forecasting import ensemble as ens
+
+    forecaster = ens.EnsembleForecaster()
+    for name in ("lstm", "prophet", "linear"):
+        monkeypatch.setattr(getattr(forecaster, name), "fit", lambda *a, **k: None)
+    forecaster.fit(frame, target_col="y")
+    return forecaster.weights["lstm"]
+
+
 def test_the_fixture_is_the_shape_under_test():
     """Otherwise the assertions below could pass on a series that is not sparse."""
     frame = _sparse_but_wide(observations=14, span_days=51)
@@ -55,53 +71,44 @@ def test_the_fixture_is_the_shape_under_test():
 
 
 def test_a_wide_span_does_not_promote_a_sparse_series(monkeypatch):
-    """The defect in one assertion, read off the ensemble's own decision.
+    """The defect in one assertion, read off the ensemble's own decision."""
+    weight = _lstm_weight_after_fit(
+        _sparse_but_wide(observations=14, span_days=51), monkeypatch)
 
-    An earlier draft replaced `fit` with a stub that counted the rows itself
-    and asserted the stub got 14 -- which tested the stub. The real decision is
-    the weight the ensemble assigns, so the sub-models are stubbed instead and
-    `fit` runs for real.
-    """
-    from app.services.forecasting import ensemble as ens
-
-    forecaster = ens.EnsembleForecaster()
-    for name in ("lstm", "prophet", "linear"):
-        model = getattr(forecaster, name)
-        monkeypatch.setattr(model, "fit", lambda *a, **k: None)
-
-    forecaster.fit(_sparse_but_wide(observations=14, span_days=51), target_col="y")
-
-    assert forecaster.weights["lstm"] == 0.0, (
-        f"LSTM was given weight {forecaster.weights['lstm']} on a series of 14 "
-        f"observations; only the 51-day span could have put it there, and "
-        f"LSTM_MIN_ROWS is {LSTM_MIN_ROWS}"
+    assert weight == 0.0, (
+        f"LSTM was given weight {weight} on a series of 14 observations; only "
+        f"the 51-day span could have put it there, and LSTM_MIN_ROWS is "
+        f"{LSTM_MIN_ROWS}"
     )
 
 
-def test_a_frame_without_provenance_still_counts_rows():
-    """Nothing that never went through the loader changes behaviour.
+def test_a_frame_without_provenance_still_counts_rows(monkeypatch):
+    """Anything that never went through the loader behaves exactly as before.
 
-    A caller building a frame by hand, or an older test, has no is_observed
-    column and every row is a genuine sample. Falling back to len() keeps those
-    reading exactly as before.
+    Asserted through the ensemble rather than by recomputing the fallback here:
+    an earlier draft did the latter and would have stayed green through any
+    regression in `fit`.
     """
     plain = pd.DataFrame({
         "ds": pd.date_range("2026-01-01", periods=40, freq="D"),
         "y": [float(i) for i in range(40)],
     })
+    assert "is_observed" not in plain.columns
 
-    n = int(plain["is_observed"].sum()) if "is_observed" in plain.columns else len(plain)
+    assert _lstm_weight_after_fit(plain, monkeypatch) > 0.0, (
+        "40 rows without provenance are 40 samples, above LSTM_MIN_ROWS; "
+        "counting them differently would starve callers that never used the "
+        "loader"
+    )
 
-    assert n == 40
 
-
-def test_a_dense_series_is_not_held_back():
+def test_a_dense_series_is_not_held_back(monkeypatch):
     """The other direction: counting observations must not starve real data.
 
-    Without this, replacing len() with a count that happened to be wrong in the
-    conservative direction would look like a fix.
+    Without this, a count wrong in the conservative direction would look like a
+    fix -- everything sparse refused, and nothing to say it went too far.
     """
-    frame = _sparse_but_wide(observations=40, span_days=40)
+    dense = _sparse_but_wide(observations=40, span_days=40)
+    assert int(dense["is_observed"].sum()) == 40
 
-    assert int(frame["is_observed"].sum()) == 40
-    assert int(frame["is_observed"].sum()) >= LSTM_MIN_ROWS
+    assert _lstm_weight_after_fit(dense, monkeypatch) > 0.0
