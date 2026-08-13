@@ -2,6 +2,7 @@ from app.prom_metrics import sora_retrain_total, sora_refresh_total, sora_full_p
 from fastapi import APIRouter, HTTPException, Request, Depends
 from app.auth import require_admin
 from fastapi.responses import PlainTextResponse
+from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
 
 from app.batch import BatchRequest, generate_batch_id
 from app.database import get_db, BatchResultDB
@@ -205,62 +206,38 @@ async def get_system_metrics():
 
 @router.get("/metrics/prometheus")
 async def prometheus_metrics():
-    import time
+    """The Prometheus registry, same as `/metrics`.
 
-    METRICS["uptime_seconds"] = round(time.time() - START_TIME, 2)
-    m = METRICS
+    This used to assemble its own text from the in-process `METRICS` dict and
+    never touch the registry, so the two Prometheus surfaces of one process
+    disagreed about the same metric names. Measured in a single process at one
+    instant (#94):
 
-    lines = [
-        "# HELP sora_requests_total Total HTTP requests",
-        "# TYPE sora_requests_total counter",
-        f'sora_requests_total {m["requests_total"]}',
+        /metrics                     sora_predictions_total{model="rf"} 7.0
+        /api/v1/metrics/prometheus   sora_predictions_total 0
 
-        "# HELP sora_predictions_total Total predictions",
-        "# TYPE sora_predictions_total counter",
-        f'sora_predictions_total {m["predictions_total"]}',
+    Four names collided that way -- sora_predictions_total, sora_retrain_total,
+    sora_refresh_total, sora_full_pipeline_total -- and none of the 22 metrics
+    declared in app/prom_metrics.py appeared here at all. Setting a forecast
+    gauge or a drift counter had no effect on this path, ever, while both paths
+    returned 200 and plausible Prometheus text. The README, CLAUDE.md, the API
+    catalogue and the Grafana notes all told the reader to curl this one and
+    grep for metrics it could not contain.
 
-        "# HELP sora_errors_total Total error responses",
-        "# TYPE sora_errors_total counter",
-        f'sora_errors_total {m["errors_total"]}',
+    Serving the registry rather than deleting the route: nothing in the
+    repository consumes this path, but eight documents name it, and every
+    dashboard query already reads registry metrics, so the two agree by
+    construction now instead of by coincidence.
 
-        "# HELP sora_avg_response_time_ms Average response time in milliseconds",
-        "# TYPE sora_avg_response_time_ms gauge",
-        f'sora_avg_response_time_ms {m["avg_response_time_ms"]}',
-
-        "# HELP sora_total_response_time_ms Total accumulated response time in milliseconds",
-        "# TYPE sora_total_response_time_ms counter",
-        f'sora_total_response_time_ms {m.get("total_response_time_ms", 0)}',
-
-        "# HELP sora_evaluations_total Total ESG evaluations",
-        "# TYPE sora_evaluations_total counter",
-        f'sora_evaluations_total {m.get("evaluations_total", 0)}',
-
-        "# HELP sora_evaluations_avg_score Average ESG evaluation score",
-        "# TYPE sora_evaluations_avg_score gauge",
-        f'sora_evaluations_avg_score {m.get("evaluations_avg_score", 0.0)}',
-
-        "# HELP sora_uptime_seconds Application uptime in seconds",
-        "# TYPE sora_uptime_seconds gauge",
-        f'sora_uptime_seconds {m.get("uptime_seconds", 0.0)}',
-    ]
-
-    for ep, count in m["requests_by_endpoint"].items():
-        ep_escaped = str(ep).replace("\\", "\\\\").replace('"', '\\"')
-        lines += [
-            "# HELP sora_requests_by_endpoint Requests count by HTTP endpoint",
-            "# TYPE sora_requests_by_endpoint gauge",
-            f'sora_requests_by_endpoint{{path="{ep_escaped}"}} {count}',
-        ]
-
-    for st, count in m["requests_by_status"].items():
-        st_escaped = str(st).replace("\\", "\\\\").replace('"', '\\"')
-        lines += [
-            "# HELP sora_requests_by_status Requests count by HTTP status code",
-            "# TYPE sora_requests_by_status gauge",
-            f'sora_requests_by_status{{status="{st_escaped}"}} {count}',
-        ]
-
-    return PlainTextResponse("\n".join(lines), media_type="text/plain; version=0.0.4")
+    The operational counters this used to publish -- request counts by endpoint
+    and status, uptime, average response time -- are unchanged on
+    `/api/v1/metrics` as JSON, which is what they always were. Prometheus never
+    saw them: infra/prometheus.yml scrapes `/metrics` and nothing else.
+    """
+    return PlainTextResponse(
+        generate_latest(REGISTRY).decode("utf-8"),
+        media_type=CONTENT_TYPE_LATEST,
+    )
 # --- Redis Cache ---
 from app.redis_cache import cache_stats as redis_stats, cache_get, cache_set, REDIS_AVAILABLE
 
