@@ -404,3 +404,59 @@ def test_a_revision_from_another_history_is_named_as_such(fresh_database):
     assert "run --rm migrate" not in message, (
         "this is not a missing migration and must not be described as one"
     )
+
+
+def test_the_check_disposes_its_engine(monkeypatch):
+    """`dispose` is called, on the success path and on the failure path.
+
+    The first version of this counted live `Pool` objects after a gc pass. It
+    passed with `dispose` deleted -- nothing holds the engine once the function
+    returns, so the collector reclaims it either way and the count never moves.
+    A check that cannot fail is worth less than none, so this watches the call
+    instead of a side effect that has another explanation.
+    """
+    import sqlalchemy
+
+    from scripts.verify_schema_head import check
+
+    disposed = []
+    real = sqlalchemy.create_engine
+
+    def spy(*args, **kwargs):
+        engine = real(*args, **kwargs)
+        original = engine.dispose
+
+        def record(*a, **k):
+            disposed.append(True)
+            return original(*a, **k)
+
+        engine.dispose = record
+        return engine
+
+    monkeypatch.setattr(sqlalchemy, "create_engine", spy)
+
+    check(url="postgresql://nobody@127.0.0.1:1/nothing")
+
+    assert disposed, "the engine was never disposed on the failure path"
+
+
+def test_the_failure_message_does_not_carry_the_password():
+    """Checked, not assumed. This text goes to a container log.
+
+    Three shapes of failure on SQLAlchemy 2.0.48: an unparseable URL, an
+    unreachable host, an unknown driver. If a future version starts embedding
+    the URL in its exception, this fails rather than quietly printing
+    credentials on every crash-loop.
+    """
+    from scripts.verify_schema_head import check
+
+    secret = "sup3rs3cr3t"
+    for url in (
+        f"not a url at all {secret}",
+        f"postgresql://sora:{secret}@127.0.0.1:1/nothing",
+        f"nosuchdriver://sora:{secret}@localhost/db",
+    ):
+        ok, message = check(url=url)
+
+        assert ok is False
+        assert secret not in message, f"the password reached the message: {url}"

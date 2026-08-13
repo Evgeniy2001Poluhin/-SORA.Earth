@@ -65,12 +65,24 @@ def check(url=_UNSET, script_location=None):
     script = ScriptDirectory.from_config(_config(script_location, url))
     expected = set(script.get_heads())
 
+    engine = None
     try:
         engine = create_engine(url)
         with engine.connect() as connection:
             actual = set(MigrationContext.configure(connection).get_current_heads())
     except Exception as exc:  # unreachable, wrong credentials, no such database
+        # The message carries the exception text. Checked rather than assumed,
+        # on SQLAlchemy 2.0.48, across an unparseable URL, an unreachable host
+        # and an unknown driver: none of the three reproduces the password. This
+        # runs in a container log, so a leak here would be a leak everywhere.
         return False, f"could not read the schema version: {type(exc).__name__}: {exc}"
+    finally:
+        # A connection pool per call. The entrypoint calls this once and exits,
+        # so it never mattered there -- but it is imported and called
+        # repeatedly by the tests, and a helper that leaks under repetition is
+        # one nobody can reuse.
+        if engine is not None:
+            engine.dispose()
 
     if actual == expected:
         return True, f"schema is at head ({', '.join(sorted(expected)) or 'none'})"
