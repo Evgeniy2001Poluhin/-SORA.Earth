@@ -136,9 +136,19 @@ case "$argv" in
         [ -f "$STUB_DIR/postgres_fails" ] && exit 1
         exit 0 ;;
     *"up -d --no-build --remove-orphans"*)
-        # The deployment start. `--no-build` because everything was built in one
-        # step above; recorded separately from the rollback's `up -d --no-build`,
-        # which carries no --remove-orphans.
+        # Both the deployment start and the rollback restore spell this the same
+        # way. They differ in one thing only: the restore passes a second `-f`,
+        # the generated image-pin override. Matching on the text alone swallowed
+        # the restore, so `no_build_fails` was never read, `rolled_back` was
+        # never set, and four rollback cases quietly stopped testing anything.
+        # Counted as tokens: `grep -c` counts matching lines, and argv is one
+        # line, so it answers 1 for both spellings and decides nothing.
+        if [ "$(printf '%s' "$argv" | tr ' ' '\n' | grep -c -- '^-f$')" -ge 2 ]; then
+            touch "$STUB_DIR/rolled_back"
+            [ -f "$STUB_DIR/no_build_fails" ] && exit 1
+            exit 0
+        fi
+        # The deployment start.
         [ -f "$STUB_DIR/slow_up" ] && sleep 6
         n=$(( $(cat "$STUB_DIR/up_calls" 2>/dev/null || echo 0) + 1 ))
         echo "$n" > "$STUB_DIR/up_calls"
@@ -1266,14 +1276,14 @@ check "the migration step ran" \
     "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" "1"
 # Exactly once, not at least once. Two migrators is the defect.
 check "and no more than once" \
-    "$(grep -c 'run --rm --build migrate' "$STUB_DIR/calls")" "1"
+    "$(grep -c 'run --rm --no-deps migrate' "$STUB_DIR/calls")" "1"
 rm -rf "$SANDBOX"
 
 new_sandbox
 run_guard
 # Line numbers in the recorded call log, so this is about order in time and not
 # about the order the two greps happen to appear in.
-MIG_LINE="$(grep -n 'run --rm --build migrate' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+MIG_LINE="$(grep -n 'run --rm --no-deps migrate' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
 UP_LINE="$(grep -n 'up -d --no-build --remove-orphans' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
 check "the migration is recorded before the containers are recreated" \
     "$([ -n "$MIG_LINE" ] && [ -n "$UP_LINE" ] && [ "$MIG_LINE" -lt "$UP_LINE" ] && echo yes || echo no)" "yes"
@@ -1287,8 +1297,14 @@ refused_because "a failed migration refuses the deployment" "alembic upgrade hea
 # instead of restarting a container until it works.
 check "and nothing was recreated" \
     "$(grep -c 'up -d --no-build --remove-orphans' "$STUB_DIR/calls")" "0"
+# A manifest, not "any file". `in-progress` lives in the same directory and is
+# supposed to be there: it is the journal saying the run was interrupted. The
+# first version of this counted it and reported a manifest that was never
+# written.
 check "and no manifest was written" \
-    "$(find "$SANDBOX/manifests" -type f 2>/dev/null | wc -l | tr -d ' ')" "0"
+    "$(find "$SANDBOX/manifests" -type f -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')" "0"
+check "but the journal records the interruption" \
+    "$([ -f "$SANDBOX/manifests/in-progress" ] && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
 
 new_sandbox
