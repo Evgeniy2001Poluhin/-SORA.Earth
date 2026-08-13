@@ -98,7 +98,17 @@ def test_environmental_observation_timezone_aware_fields():
 
 
 def test_environmental_observation_field_lengths():
-    """Test that string fields have appropriate length constraints."""
+    """Test that string fields have appropriate length constraints.
+
+    This is a change detector, not a correctness check. It compares a number to
+    a number, and it held `source_revision: 64` while the value the ingesters
+    produce is 71 characters long -- so both literal sources were unable to
+    write a single row on production and this test was green throughout (#146).
+
+    `tests/test_column_widths_hold_what_is_written.py` compares the declared
+    widths against the values the code actually produces, which is the check
+    this one cannot make.
+    """
     table = EnvironmentalObservation.__table__
 
     expected_lengths = {
@@ -108,7 +118,7 @@ def test_environmental_observation_field_lengths():
         'unit': 32,
         'source': 64,
         'source_record_id': 128,
-        'source_revision': 64,
+        'source_revision': 128,
     }
 
     for field, expected_length in expected_lengths.items():

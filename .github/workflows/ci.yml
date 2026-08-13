@@ -303,6 +303,33 @@ jobs:
           DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
           TEST_DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
 
+      # Added by #90 and never run anywhere until now: it was not listed here,
+      # and backend-tests skips it. Twelve tests that passed on a laptop and
+      # nowhere else. Found by tests/test_postgres_files_are_wired_into_ci.py.
+      - name: Point-in-time reads against PostgreSQL
+        run: |
+          python -m pytest \
+            tests/test_point_in_time_postgres.py \
+            -v --tb=short --timeout=300
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+          TEST_DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
+      # The write path #121 shipped with could not store a single row: a 71-char
+      # content revision into a VARCHAR(64). SQLite ignores the length, so the
+      # entire suite was green and production raised StringDataRightTruncation
+      # on the first run. This executes the real dict builder and the real
+      # upsert against a migrated PostgreSQL, which is the only place the width
+      # is enforced.
+      - name: Ingester write path against PostgreSQL
+        run: |
+          python -m pytest \
+            tests/test_ingest_write_postgres.py \
+            -v --tb=short --timeout=600
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+          TEST_DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
       - name: Run environmental persistence tests against PostgreSQL
         run: |
           python -m pytest \
