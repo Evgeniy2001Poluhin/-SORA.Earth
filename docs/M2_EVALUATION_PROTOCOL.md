@@ -975,6 +975,23 @@ Protocol failure:      prevented
 M3 eligibility:        allowed under the boundary in §10.6
 ```
 
+**The commit this verdict is attached to.** A closure that names no revision is
+a claim about a tree nobody can identify later.
+
+```text
+merged           e82d682d2ee102374680e93bf201c6693c88f1ac  (PR #158)
+protocol         v1.1, amended 2026-08-13 under §9
+push CI          7 of 7 jobs green: backend-tests, shell-scripts,
+                 environmental-postgres-tests, frontend-checks,
+                 migration-bootstrap, integration-tests, required-checks
+secret scan      green
+preceded by      91cf5f9 (PR #157, the run-record decision fields)
+```
+
+The §7 gate is executable at that revision --
+`app/services/forecasting/entry_conditions.py` -- so the condition this closure
+turns on can be re-run rather than re-read.
+
 **What was checked.** Every source in the observation layer, the country
 indicator series, and the score table itself — §10.4. The audit of the
 `Evaluation` target — §6. The score's temporal content over the eight days it
