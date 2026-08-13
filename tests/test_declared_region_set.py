@@ -28,9 +28,23 @@ from app.services.esg_aggregator import (
     DECLARED_REGIONS,
     DECLARED_REGIONS_V1,
     REGION_SET_VERSION,
-    UndeclaredRegionError,
     require_declared,
 )
+
+
+def _agg():
+    """The module as it is *now*.
+
+    `tests/test_esg_aggregator_reads_the_live_source.py` calls
+    `importlib.reload` on it, which rebinds every class it defines. An exception
+    class imported at file scope then stops matching the one actually raised,
+    and `pytest.raises` lets it through -- these two tests passed alone and
+    failed in the suite for exactly that reason. Fetching at call time keeps the
+    identity current whatever ran before.
+    """
+    from app.services import esg_aggregator
+
+    return esg_aggregator
 
 
 def test_the_set_is_versioned_and_enumerated():
@@ -79,17 +93,62 @@ def test_both_canonical_sources_cover_exactly_the_declared_set():
 # --- the boundary, from both sides ------------------------------------------
 
 
-def test_the_canonical_writer_refuses_an_undeclared_id():
-    """Refused, not filtered.
+class _SpyDb:
+    """Records every mutation, so "it refused" can be told from "it wrote".
 
-    Filtering makes the set follow the data: a region that stops reporting
-    leaves the denominator quietly and coverage looks unchanged.
+    An exception proves the call raised. It does not prove nothing reached the
+    database -- the write could have happened first.
     """
-    with pytest.raises(UndeclaredRegionError) as exc:
-        require_declared("DEU")
+
+    def __init__(self):
+        self.added = []
+        self.queried = []
+
+    def query(self, *a, **k):
+        self.queried.append(a)
+        result = _SpyDb._Query()
+        return result
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    class _Query:
+        def filter_by(self, **kw):
+            return self
+
+        def first(self):
+            return None
+
+
+def test_the_canonical_writer_refuses_an_undeclared_id():
+    """The writer, not the helper.
+
+    An earlier draft called `require_declared("DEU")` directly and was named
+    after the writer. The guard was defined, tested and called from nowhere: an
+    undeclared id would have been stored exactly as before, and this test would
+    still have been green.
+    """
+    agg = _agg()
+
+    db = _SpyDb()
+    with pytest.raises(agg.UndeclaredRegionError) as exc:
+        agg._write_score(db, "DEU", {"total_score": 50.0})
 
     assert "ru-regions-v1" in str(exc.value)
     assert "DEU" in str(exc.value)
+    assert db.added == [], "the row was written before the refusal"
+    assert db.queried == [], "the writer reached the database at all"
+
+
+def test_the_staleness_writer_refuses_one_too():
+    """The other path that touches a canonical row."""
+    agg = _agg()
+
+    db = _SpyDb()
+    with pytest.raises(agg.UndeclaredRegionError):
+        agg._mark_stale(db, "DEU", missing=["x"], stale=[])
+
+    assert db.queried == []
 
 
 def test_a_declared_id_passes_through_unchanged():
@@ -139,21 +198,127 @@ def test_the_observation_layer_still_accepts_the_other_population():
 # --- the denominator --------------------------------------------------------
 
 
-def test_coverage_is_measured_against_the_declared_set(monkeypatch):
-    """`|declared| x |days|`, never the regions that happen to have data.
+def test_coverage_walks_every_declared_region_including_empty_ones(monkeypatch):
+    """`|declared| x |days|`, measured by watching which ids are visited.
 
-    The aggregator already walks the declared set rather than the rows, which
-    is the property this pins: a region with nothing stays in the denominator
-    and is reported missing, instead of vanishing from both sides of the
-    fraction.
+    The earlier version grepped the source for the loop, which a comment or
+    dead code would satisfy. This records the ids the run actually classifies
+    and requires exactly the declared set -- so a region with no data stays in
+    the denominator and is reported missing, and an id that appears only in the
+    rows cannot add itself to it.
     """
-    import inspect
+    from app.services import esg_aggregator as agg
 
-    from app.services import esg_aggregator
+    visited = []
+    real = agg._classify_pairs
 
-    src = inspect.getsource(esg_aggregator.recalc_all_regions)
+    def _spy(metrics, limit):
+        return real(metrics, limit)
 
-    assert "for region_code in sorted(DECLARED_REGIONS)" in src, (
-        "the loop no longer walks the declared set, so a region with no data "
-        "would leave the denominator instead of being counted as missing"
+    monkeypatch.setattr(agg, "_classify_pairs", _spy)
+
+    seen_regions = []
+    real_get = dict.get
+
+    class _Latest(dict):
+        def get(self, key, default=None):
+            seen_regions.append(key)
+            return real_get(self, key, default)
+
+    # One region with data, one undeclared id in the rows, and the rest absent.
+    latest = _Latest({"RU-MOW": {}, "DEU": {}})
+    monkeypatch.setattr(agg, "_latest_by_region",
+                        lambda db: (latest, None, 0, {}))
+    monkeypatch.setattr(agg, "SessionLocal", lambda: _NullSession())
+
+    agg.recalc_all_regions()
+
+    assert set(seen_regions) == set(DECLARED_REGIONS_V1), {
+        "not visited": sorted(DECLARED_REGIONS_V1 - set(seen_regions)),
+        "visited but undeclared": sorted(set(seen_regions) - DECLARED_REGIONS_V1),
+    }
+    assert "DEU" not in seen_regions, (
+        "an id present only in the rows entered the denominator"
     )
+
+
+class _NullSession:
+    """Enough of a session for the loop to run without a database."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def query(self, *a, **k):
+        return self
+
+    def filter_by(self, **k):
+        return self
+
+    def first(self):
+        return None
+
+    def add(self, obj):
+        pass
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+# --- the membership itself --------------------------------------------------
+
+
+def test_the_membership_is_pinned_not_just_counted():
+    """A version and a count still allow one id to be swapped for another.
+
+    If both source dictionaries were edited in the same commit, the drift test
+    above would stay green and the population would have changed under an
+    unchanged version -- every figure measured before and after would be
+    comparable in appearance only.
+    """
+    import hashlib
+
+    from app.services.esg_aggregator import REGION_SET_FINGERPRINT
+
+    expected = "d11632909eea19d33181d274ed2692fb7fa8e35a41107ed07791edbc4f0a0895"
+
+    assert REGION_SET_FINGERPRINT == expected, (
+        f"the membership of {REGION_SET_VERSION} changed. That is a new "
+        f"region_set_version, not an edit: results measured under the old one "
+        f"are not comparable and are not recomputed."
+    )
+    assert REGION_SET_FINGERPRINT == hashlib.sha256(
+        "\n".join(sorted(DECLARED_REGIONS_V1)).encode()).hexdigest()
+
+
+def test_every_rosstat_map_covers_the_declared_set():
+    """All five, not one.
+
+    The drift test checked UNEMPLOYMENT alone. One correct map says nothing
+    about the other four, and a region missing from any of them is a hole in
+    the score for that region.
+    """
+    from data import rosstat_snapshot_2024 as snap
+
+    maps = {
+        "UNEMPLOYMENT": snap.UNEMPLOYMENT,
+        "INCOME": snap.INCOME,
+        "LIFE_EXP": snap.LIFE_EXP,
+        "BUDGET_TRANSPARENCY": snap.BUDGET_TRANSPARENCY,
+        "DIGITAL_GOV": snap.DIGITAL_GOV,
+    }
+
+    for name, mapping in maps.items():
+        assert set(mapping) == DECLARED_REGIONS_V1, {
+            "map": name,
+            "extra": sorted(set(mapping) - DECLARED_REGIONS_V1),
+            "missing": sorted(DECLARED_REGIONS_V1 - set(mapping)),
+        }

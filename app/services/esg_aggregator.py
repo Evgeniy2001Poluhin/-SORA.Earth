@@ -16,6 +16,7 @@ import logging
 import math
 import os
 from collections import defaultdict
+import hashlib
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -144,6 +145,14 @@ DECLARED_REGIONS = frozenset({
 #: The versioned name. `DECLARED_REGIONS` stays as the working alias so the
 #: existing call sites and their drift test keep reading as before.
 DECLARED_REGIONS_V1 = DECLARED_REGIONS
+
+#: Fingerprint of the membership, not of its size. A version string and a count
+#: together still allow one id to be swapped for another -- and if both source
+#: dictionaries were edited in the same commit, the drift test would stay green
+#: while the population silently changed under an unchanged version.
+REGION_SET_FINGERPRINT = hashlib.sha256(
+    "\n".join(sorted(DECLARED_REGIONS_V1)).encode()
+).hexdigest()
 
 
 def require_declared(region_id):
@@ -483,6 +492,35 @@ def _compute_one(metrics):
     }
 
 
+def _write_score(db, region_code, scores):
+    """The one place a canonical score reaches the database.
+
+    Extracted so the declared-set guard sits *on* the write rather than beside
+    it. An earlier draft had `require_declared` defined and tested and called
+    from nowhere: the test named after the writer exercised the helper, and an
+    undeclared id would have been stored exactly as before.
+
+    Returns what happened, so the caller's counters stay the caller's.
+    """
+    require_declared(region_code)
+
+    row = db.query(RegionESGScore).filter_by(region_code=region_code).first()
+    if row is None:
+        db.add(RegionESGScore(region_code=region_code, **scores))
+        return "written"
+
+    cleared = _clear_stale(row)
+    if any(getattr(row, k) != v for k, v in scores.items()):
+        for k, v in scores.items():
+            setattr(row, k, v)
+        return "written"
+    if cleared:
+        # The score is unchanged but the row is: it stopped being marked stale,
+        # and that is a change a reader acts on.
+        return "recovered"
+    return "unchanged"
+
+
 def _stale_reason(missing, stale) -> str:
     parts = []
     if missing:
@@ -505,6 +543,8 @@ def _mark_stale(db, region_code, missing, stale):
     than "as of this run". `updated_at` is left alone: it means "when the score
     last changed", and marking staleness does not change a score.
     """
+    require_declared(region_code)
+
     row = db.query(RegionESGScore).filter_by(region_code=region_code).first()
     if row is None:
         # Never written, so there is nothing that could be misread.
@@ -620,20 +660,11 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
                 continue
 
             computed += 1
-            row = db.query(RegionESGScore).filter_by(region_code=region_code).first()
-            if row:
-                cleared = _clear_stale(row)
-                if any(getattr(row, k) != v for k, v in scores.items()):
-                    for k, v in scores.items():
-                        setattr(row, k, v)
-                    written += 1
-                elif cleared:
-                    # The score is unchanged but the row is: it stopped being
-                    # marked stale, and that is a change a reader acts on.
-                    recovered += 1
-            else:
-                db.add(RegionESGScore(region_code=region_code, **scores))
+            outcome = _write_score(db, region_code, scores)
+            if outcome == "written":
                 written += 1
+            elif outcome == "recovered":
+                recovered += 1
         db.commit()
 
         undeclared = sorted(set(latest) - DECLARED_REGIONS)
