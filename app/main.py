@@ -962,6 +962,7 @@ if _SPA2.exists() and (_SPA2 / "assets").exists():
 # === SPA catch-all ===
 from fastapi.responses import FileResponse as _CA_File
 from pathlib import Path as _CA_Path
+from fastapi import Request as _CA_Request
 _CA_INDEX = _CA_Path(__file__).parent / "static" / "spa" / "index.html"
 _CA_RESERVED = ("api", "static", "health", "metrics", "docs", "redoc", "openapi.json", "ws", "v2", "favicon.svg", "favicon.ico")
 
@@ -977,3 +978,51 @@ def _spa_catchall(full_path: str):
     if _CA_INDEX.exists():
         return _CA_File(str(_CA_INDEX))
     raise HTTPException(status_code=404)
+
+
+@app.api_route(
+    "/{full_path:path}",
+    methods=["POST", "PUT", "PATCH", "DELETE"],
+    include_in_schema=False,
+)
+def _catchall_absent_is_not_wrong_method(full_path: str, request: _CA_Request):
+    """A path with no route is 404; a path with other verbs is still 405.
+
+    The SPA catch-all above is registered for GET only. Starlette matches a
+    route by path first, so an unmatched POST anywhere in the API found that
+    route, failed the method check, and got **405 Method Not Allowed** --
+    across the whole surface:
+
+        POST /api/v1/ab/compare          405     (no such route)
+        POST /api/v1/totally/made/up     405     (no such route)
+        GET  /api/v1/totally/made/up     404
+
+    405 says the resource exists and the verb is wrong. That is a different
+    claim from "no such thing", and it sent an investigation the wrong way:
+    issue #4 records `/api/v1/ab/compare` as "endpoint exists but doesn't
+    accept POST -- need to add POST handler". There is no such endpoint. The
+    router under /api/v1/ab has exactly predict, split and stats.
+
+    Answering 404 unconditionally would be the same defect mirrored -- POST to
+    the real GET-only `/api/v1/ab/stats` would then deny the path exists. So
+    the routing table is asked: if some other route matches this path with a
+    different method, the original 405 is the honest answer and is preserved.
+
+    Registered after every include_router, so a real route for this method
+    still wins on order.
+    """
+    from starlette.routing import Match
+
+    scope = dict(request.scope)
+    for route in app.routes:
+        if getattr(route, "path", None) == "/{full_path:path}":
+            continue  # the two catch-alls, including this one
+        try:
+            match, _ = route.matches(scope)
+        except Exception:
+            continue
+        if match is not Match.NONE:
+            # Path is real, this verb is not. That is what 405 is for.
+            raise HTTPException(status_code=405, detail="Method Not Allowed")
+
+    raise HTTPException(status_code=404, detail="Not Found")

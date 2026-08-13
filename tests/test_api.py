@@ -37,11 +37,22 @@ def test_countries():
     assert isinstance(data, dict)
     assert "Germany" in data
 
-@pytest.mark.xfail(reason="history empty after evaluate - flow needs investigation v0.2.2")
 def test_history():
+    """`/api/v1/history` is a page, not a list.
+
+    The xfail here read "history empty after evaluate - flow needs
+    investigation" (#5). Nothing was empty and nothing was unpersisted: the
+    endpoint returns `{items, total, limit, offset}` and this asserted
+    `isinstance(body, list)`. The frontend has typed it as `HistoryPage` since
+    the first commit -- the test was the only thing that disagreed.
+    """
     r = client.get("/api/v1/history")
     assert r.status_code == 200
-    assert isinstance(r.json(), list)
+
+    body = r.json()
+    assert set(body) >= {"items", "total", "limit", "offset"}, body
+    assert isinstance(body["items"], list)
+    assert isinstance(body["total"], int)
 
 # ---- Evaluate ----
 
