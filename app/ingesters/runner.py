@@ -8,7 +8,9 @@ import asyncio
 import logging
 from sqlalchemy import text
 
-from app.ingesters.classification import classify_run
+from app.ingesters.classification import (
+    REASON_OK, classify_run, required_action,
+)
 from datetime import datetime, timezone
 
 from app.ingesters.base import Signal
@@ -108,13 +110,47 @@ def _audit_start(source: str):
         return None
 
 
-def _audit_finish(rid, verdict):
+def source_age_seconds(source: str):
+    """How old the newest signal for this source is, in seconds.
+
+    None when nothing is stored for it, or when the query fails. `None` is a
+    real answer here and is treated as one: `required_action` refuses to say
+    "wait" without it, because "fine for now" is a claim that needs a
+    measurement (#74).
+
+    Measured against `event_time` where the row has one and `ingested_at`
+    otherwise. A `period` or `not_applicable` row has no event_time by
+    construction (#121), and using only event_time would report the two literal
+    sources as having no data at all.
+    """
+    try:
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            return db.execute(text(
+                "SELECT EXTRACT(EPOCH FROM (now() - max("
+                "  COALESCE(event_time, ingested_at)))) "
+                "FROM environmental_observations WHERE source = :s"),
+                {"s": source}).scalar()
+        finally:
+            db.close()
+    except Exception as e:
+        log.warning("[runner] source_age_seconds failed for %s: %s", source, e)
+        return None
+
+
+def _audit_finish(rid, verdict, action=None, age_seconds=None):
     """Record the verdict, not a hand-picked word.
 
     The status used to be passed in by the caller, which is how every run that
     did not raise came to be 'ok' -- including sixty-two openaq runs that wrote
     nothing. It is now derived by classify_run() from what the run actually
     achieved, and this function has no opinion about it.
+
+    `required_action` and `source_age_seconds` are stored alongside for the same
+    reason the split verdict was: an operator reading `degraded` still cannot
+    tell whether to wait, retry, or page anyone (#74). They are derived too --
+    nothing here decides them.
     """
     if rid is None:
         return
@@ -127,7 +163,9 @@ def _audit_finish(rid, verdict):
                 "rows_written=:rw, error=:err, "
                 "execution_status=:ex, primary_source_status=:ps, "
                 "data_outcome=:do, records_received=:rr, records_accepted=:ra, "
-                "records_rejected=:rj, failure_reason=:fr WHERE id=:id"),
+                "records_rejected=:rj, failure_reason=:fr, "
+                "reason_code=:rc, required_action=:act, source_age_seconds=:age "
+                "WHERE id=:id"),
                 {"st": verdict.status,
                  "rw": verdict.records_accepted,
                  "err": verdict.failure_reason,
@@ -138,12 +176,36 @@ def _audit_finish(rid, verdict):
                  "ra": verdict.records_accepted,
                  "rj": verdict.records_rejected,
                  "fr": verdict.failure_reason,
+                 "rc": verdict.reason_code,
+                 "act": action,
+                 "age": age_seconds,
                  "id": rid})
             db.commit()
         finally:
             db.close()
     except Exception as e:
         log.warning("[runner] audit_finish failed: %s", e)
+
+
+def _decide(ing, verdict):
+    """(required_action, source_age_seconds) for one finished run.
+
+    The tolerance is the ingester's own `default_ttl_hours` -- 1 hour for
+    openmeteo, 180 days for rosstat. A source is not stale because some global
+    threshold says so; it is stale against the cadence it declares for itself.
+
+    Freshness is only measured when the answer can change: a clean run is
+    `none` regardless, and a query per successful run would be a round trip
+    bought for nothing.
+    """
+    if verdict.reason_code == REASON_OK:
+        return required_action(verdict), None
+
+    age = source_age_seconds(ing.name)
+    tolerance = getattr(ing, "default_ttl_hours", None)
+    tolerance = None if tolerance is None else float(tolerance) * 3600.0
+    return required_action(verdict, age_seconds=age,
+                           tolerance_seconds=tolerance), age
 
 
 async def run_all_ingesters() -> dict:
@@ -171,23 +233,33 @@ async def run_all_ingesters() -> dict:
                 rejected=persist_result.get("rejected", 0),
                 write_failed=persist_result.get("write_failed", False),
             )
+            action, age = _decide(ing, verdict)
             stats["ingesters"][ing.name].update(verdict.as_dict())
+            stats["ingesters"][ing.name]["required_action"] = action
+            stats["ingesters"][ing.name]["source_age_seconds"] = age
             if verdict.status == "success":
                 log.info("[runner] %s: %d signals", ing.name, len(signals))
             else:
                 # Loud, because this is the case that used to be indistinguishable
                 # from working. A degraded run is not an error and must not be
                 # logged as one, but it cannot pass in silence either.
-                log.warning("[runner] %s: %s -- %s (received=%d accepted=%d)",
-                            ing.name, verdict.status, verdict.failure_reason,
-                            verdict.records_received, verdict.records_accepted)
-            _audit_finish(rid, verdict)
+                log.warning(
+                    "[runner] %s: %s [%s] action=%s -- %s "
+                    "(received=%d accepted=%d age=%s)",
+                    ing.name, verdict.status, verdict.reason_code, action,
+                    verdict.failure_reason, verdict.records_received,
+                    verdict.records_accepted,
+                    "unknown" if age is None else int(age))
+            _audit_finish(rid, verdict, action=action, age_seconds=age)
         except Exception as e:
             verdict = classify_run(raised=e)
+            action, age = _decide(ing, verdict)
             stats["ingesters"][ing.name] = {"status": "error", "error": str(e),
+                                            "required_action": action,
+                                            "source_age_seconds": age,
                                             **verdict.as_dict()}
             log.exception("[runner] %s failed: %s", ing.name, e)
-            _audit_finish(rid, verdict)
+            _audit_finish(rid, verdict, action=action, age_seconds=age)
 
     try:
         from app.services.esg_aggregator import recalc_all_regions

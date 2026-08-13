@@ -142,7 +142,14 @@ class IngesterRun(Base):
 
     __tablename__ = "ingester_runs"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # BigInteger on PostgreSQL, INTEGER on SQLite. SQLite only autoincrements a
+    # column declared exactly `INTEGER PRIMARY KEY`, so a plain BigInteger PK
+    # cannot be inserted through the ORM there -- which nobody had noticed,
+    # because until #74 gave the table a reader every write went through raw SQL
+    # in app/ingesters/runner.py against PostgreSQL. The variant leaves the
+    # PostgreSQL type unchanged.
+    id = Column(BigInteger().with_variant(Integer, "sqlite"),
+                primary_key=True, autoincrement=True)
     source = Column(Text, nullable=False)
     started_at = Column(DateTime(timezone=True), nullable=False,
                         server_default=func.now())
@@ -158,9 +165,24 @@ class IngesterRun(Base):
     records_rejected = Column(Integer, nullable=True)
     failure_reason = Column(Text, nullable=True)
 
+    # #74. `failure_reason` is prose for a person; `reason_code` is the same
+    # fact as a value, so runs can be grouped and counted without anyone
+    # reading them. `required_action` is what the record exists for -- reading
+    # `degraded`, nobody can tell whether to wait, retry or page someone.
+    # Both are derived (app/ingesters/classification.py), never set by hand.
+    reason_code = Column(Text, nullable=True)
+    required_action = Column(Text, nullable=True)
+    # Age of the newest signal for this source at the moment the run finished.
+    # NULL means it was not measured, which is why `required_action` will not
+    # say "wait" -- that is a claim about being fine, and it needs a number.
+    source_age_seconds = Column(Float, nullable=True)
+
     __table_args__ = (
         Index("ix_ingester_runs_source_status",
               "source", "status", started_at.desc()),
+        # The operator view sorts by action, not by time.
+        Index("ix_ingester_runs_required_action",
+              "required_action", started_at.desc()),
     )
 
 
