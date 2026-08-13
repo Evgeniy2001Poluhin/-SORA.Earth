@@ -106,3 +106,40 @@ class ForecastResponse(BaseModel):
 class ForecastCacheStats(BaseModel):
     cache_size: int
     invalidated: Optional[int] = None
+
+# --- ingestion attention (#74) ----------------------------------------------
+
+
+class IngestionAttentionRow(BaseModel):
+    """One source, and the verdict on its latest finished run.
+
+    Every input the action was derived from travels with it. A row holding
+    `escalate` and a vintage of 590 days cannot be re-read a month later
+    without the tolerance that was in force -- a threshold can move, and then
+    nobody can tell whether the data was old or the number changed.
+    """
+
+    source: str
+    required_action: Optional[str] = None
+    reason_code: Optional[str] = None
+    status: Optional[str] = None
+    source_vintage_seconds: Optional[float] = None
+    max_vintage_seconds: Optional[float] = None
+    freshness_status: Optional[str] = None
+    records_received: Optional[int] = None
+    records_accepted: Optional[int] = None
+    records_rejected: Optional[int] = None
+    failure_reason: Optional[str] = None
+    finished_at: Optional[str] = None
+
+
+class IngestionAttention(BaseModel):
+    """Sources ordered by what they need, not by when they last ran.
+
+    `needs_attention` counts everything that is not `none`, including rows whose
+    action is NULL: a record that cannot be read is not one to skip past.
+    """
+
+    count: int
+    needs_attention: int
+    sources: List[IngestionAttentionRow]

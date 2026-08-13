@@ -101,6 +101,25 @@ class OpenAQIngester(BaseIngester):
     """
     name = "openaq"
     default_ttl_hours = 1  # Air quality data changes frequently
+
+    # No `max_vintage_hours`. The one number written down for this source is
+    # not one.
+    #
+    # source_register.py holds `reenable_condition`: "at least one station in a
+    # declared region publishing data newer than SORA_OPENAQ_MIN_FRESHNESS_DAYS
+    # (default 30), confirmed by a read against the live API" (#57). Every part
+    # of that is a different quantity from a running staleness tolerance:
+    #
+    #   a precondition for putting the source back, not a continuous alarm
+    #   scoped to one station in one region, not the source's newest row
+    #   confirmed against the live API, not against what is stored
+    #   configurable, with 30 as the default rather than the value
+    #
+    # Encoding it as `max_vintage_hours = 30 * 24` is the same category error as
+    # using `default_ttl_hours` for it -- the error this change exists to
+    # remove, one field over. So openaq is `not_configured` like everything
+    # else, and the number stays where it belongs: as the condition for
+    # reinstating the source, checked live, by whoever reinstates it.
     max_retries = 3
     timeout_s = 30.0
 

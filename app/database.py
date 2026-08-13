@@ -142,7 +142,14 @@ class IngesterRun(Base):
 
     __tablename__ = "ingester_runs"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # BigInteger on PostgreSQL, INTEGER on SQLite. SQLite only autoincrements a
+    # column declared exactly `INTEGER PRIMARY KEY`, so a plain BigInteger PK
+    # cannot be inserted through the ORM there -- which nobody had noticed,
+    # because until #74 gave the table a reader every write went through raw SQL
+    # in app/ingesters/runner.py against PostgreSQL. The variant leaves the
+    # PostgreSQL type unchanged.
+    id = Column(BigInteger().with_variant(Integer, "sqlite"),
+                primary_key=True, autoincrement=True)
     source = Column(Text, nullable=False)
     started_at = Column(DateTime(timezone=True), nullable=False,
                         server_default=func.now())
@@ -158,9 +165,37 @@ class IngesterRun(Base):
     records_rejected = Column(Integer, nullable=True)
     failure_reason = Column(Text, nullable=True)
 
+    # #74. `failure_reason` is prose for a person; `reason_code` is the same
+    # fact as a value, so runs can be grouped and counted without anyone
+    # reading them. `required_action` is what the record exists for -- reading
+    # `degraded`, nobody can tell whether to wait, retry or page someone.
+    # Both are derived (app/ingesters/classification.py), never set by hand.
+    reason_code = Column(Text, nullable=True)
+    required_action = Column(Text, nullable=True)
+    # Every input the action was derived from, not just the action.
+    #
+    # `source_vintage_seconds` -- age of the newest *observation* this source
+    # holds, measured from event_time or period_end depending on temporal_kind.
+    # Not named `age`, which reads as ingestion or cache age and is exactly the
+    # confusion #121 was about.
+    #
+    # `max_vintage_seconds` is the tolerance that was in force *at the time of
+    # the run*. A threshold can be changed afterwards, and without recording it
+    # a row holding `escalate` and 590 days cannot be re-read: nobody can tell
+    # whether the data was old or the tolerance moved.
+    #
+    # `freshness_status` says which comparison was possible at all:
+    # fresh | stale | not_applicable | not_configured | unknown.
+    source_vintage_seconds = Column(Float, nullable=True)
+    max_vintage_seconds = Column(Float, nullable=True)
+    freshness_status = Column(Text, nullable=True)
+
     __table_args__ = (
         Index("ix_ingester_runs_source_status",
               "source", "status", started_at.desc()),
+        # The operator view sorts by action, not by time.
+        Index("ix_ingester_runs_required_action",
+              "required_action", started_at.desc()),
     )
 
 
