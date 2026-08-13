@@ -73,6 +73,12 @@ def test_every_id_is_a_job_the_scheduler_registers(monkeypatch):
 
     from app import scheduler as scheduler_module
 
+    # The singleton as other tests left it. Compared before and after, so the
+    # isolation claim is about *this* test rather than about the whole suite --
+    # the first version asserted the module scheduler was empty at the end and
+    # failed under the full run, because other files populate it legitimately.
+    before = {job.id for job in scheduler_module.scheduler.get_jobs()}
+
     isolated = BackgroundScheduler(timezone="UTC")
     monkeypatch.setattr(scheduler_module, "scheduler", isolated)
     monkeypatch.setenv("RUN_SCHEDULER", "true")
@@ -81,8 +87,16 @@ def test_every_id_is_a_job_the_scheduler_registers(monkeypatch):
         scheduler_module.init_scheduler(start=False)
         registered = {job.id for job in isolated.get_jobs()}
     finally:
-        isolated.shutdown(wait=False) if isolated.running else None
+        if isolated.running:
+            isolated.shutdown(wait=False)
 
+    monkeypatch.undo()
+    after = {job.id for job in scheduler_module.scheduler.get_jobs()}
+
+    assert after == before, (
+        f"this test changed the module scheduler: added {sorted(after - before)}, "
+        f"removed {sorted(before - after)}"
+    )
     assert registered, "no jobs were registered, so this proves nothing"
 
     unknown = [
@@ -92,23 +106,6 @@ def test_every_id_is_a_job_the_scheduler_registers(monkeypatch):
     assert unknown == [], (
         f"{unknown} are forced to run at startup but no job is registered under "
         f"those ids"
-    )
-
-
-def test_the_module_scheduler_is_left_alone_by_this_file():
-    """The isolation claim, asserted rather than trusted.
-
-    Ordered after the test above by position, which is how pytest runs a file by
-    default. If that test ever goes back to mutating the singleton, this fails
-    -- rather than some unrelated test failing later for a reason nobody traces
-    back here.
-    """
-    from app.scheduler import scheduler
-
-    assert not scheduler.running, "this file started the module scheduler"
-    assert scheduler.get_jobs() == [], (
-        f"this file left {[j.id for j in scheduler.get_jobs()]} on the module "
-        f"scheduler; the next test inherits them"
     )
 
 
