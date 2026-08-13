@@ -10,13 +10,17 @@ that an interval trigger fires once at startup. It does not:
 
     IntervalTrigger(hours=24).get_next_fire_time(None, now)  ->  now + 24h
 
-The behaviour is an explicit `modify_job(next_run_time=now)` over a named list,
-with a stated reason. So the answer to "declare it or remove it" is declare: the
-decision was made deliberately, and what was missing was its visibility.
+The behaviour is an explicit `modify_job(next_run_time=now)` over a named list.
+That establishes the mechanism as deliberate. It does not establish that each
+of the five members was chosen: archaeology found a written reason for exactly
+one (#82, air quality), while the other four arrived with commit messages that
+gave none. app/scheduler.py records which is which, and #156 carries the
+question of whether the four should stay.
 
-These tests pin the membership. Adding a sixth job to that tuple has to be a
-decision, not something that happens while editing nearby -- each entry costs a
-database write or an external API call on every deployment, rollbacks included.
+So these tests pin the *membership*, not its justification. Adding a sixth entry
+has to be a decision rather than something that happens while editing nearby --
+each one costs a database write or an external API call on every deployment,
+rollbacks included.
 """
 import pytest
 

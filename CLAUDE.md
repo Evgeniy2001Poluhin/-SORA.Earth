@@ -297,14 +297,38 @@ Optional:
    | `auto_openmeteo_air_quality_ingestion` | one Open-Meteo fetch, `observed` rows | **stated** (#82): otherwise the first rows arrive an hour after a deploy, and a restart to check the source shows nothing for an hour | same identity rule |
 
    One of the five has a written reason; four were inherited. Being in the tuple
-   is not the same as having been chosen, and whether the four should stay is an
-   open question — see #154.
+   is not the same as having been chosen — whether the four should stay is #156.
 
    **What this means for acceptance.** The listed startup jobs may write during
    the deployment window. Attribute any change through `ingester_runs`, `source`
    and `source_revision`; only rows explained by those runs are expected. A
    deployment window is not evidence that a write came from somewhere else, and
    it is not a licence to accept an unexplained delta either.
+
+2. **Feature Count Consistency**: The RF model expects exactly 9 features in this order: `["budget", "co2_reduction", "social_impact", "duration_months", "budget_per_month", "co2_per_dollar", "efficiency_score", "year", "quarter"]`. Always use `make_features()` to construct feature DataFrames.
+
+3. **Model Versioning**: Models are loaded at app startup. To deploy a new model, replace files in `models/` directory and restart the `app` container. Old predictions remain cached in Redis until TTL expires or manual invalidation.
+
+4. **Database Migrations**: Always create Alembic migrations for schema changes. The `migrations/` directory is mounted in Docker and runs on first `postgres` container startup.
+
+5. **CORS Configuration**: CORS origins hardcoded in `app/main.py:144-151`. Add new origins there if deploying to new domains.
+
+6. **Rate Limiting**: `SlowAPIMiddleware` in `app/rate_limit.py` counts every HTTP
+   request per caller address. 100 req/min by default; `/api/v1/model/retrain` gets
+   10 req/min in a bucket of its own **in addition to** the general one — a
+   request to it is charged to both, so the tighter figure restricts rather than
+   replaces. A refusal costs nothing: every budget is examined before any is
+   written to, so being turned away at one does not spend another. Health,
+   readiness, metrics and favicon paths are exempt — a probe on a schedule would
+   otherwise spend a shared budget and make the health check flap.
+
+   The counter lives in one process, so with several workers the effective budget
+   multiplies by the worker count. It is a brake on a single noisy caller, not a
+   defence against a distributed flood; that belongs at the edge.
+
+   This paragraph previously described the limits as enforced while the middleware
+   was a pass-through stub. Stating a control that does not exist is worse than
+   stating none, because someone relies on it.
 
 7. **Head Requests**: Custom middleware at `app/main.py:118-141` converts HEAD to GET internally. Do not set Content-Length manually in responses.
 

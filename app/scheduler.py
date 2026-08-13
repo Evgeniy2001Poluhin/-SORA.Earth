@@ -176,10 +176,10 @@ scheduler = BackgroundScheduler(timezone="UTC")
 # SORA_OPENAQ_ENABLED is set, and an immediate run of a job that does not exist
 # is not an error worth logging.
 #
-# Open question, deliberately left open rather than answered by whoever edits
-# this next: whether the four unstated entries should stay. Each costs a write
-# or an external call on every release, and "it was already in the tuple" is not
-# a reason. Deciding needs the operational intent, not archaeology.
+# Whether the four unstated entries should stay is #156, not a question for
+# whoever edits this next. Each costs a write or an external call on every
+# release, and "it was already in the tuple" is not a reason; deciding needs the
+# operational intent rather than more archaeology.
 #
 # tests/test_startup_jobs_contract.py pins the membership. Adding a sixth entry
 # has to be a decision rather than something that happens while editing nearby.
