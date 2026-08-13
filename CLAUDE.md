@@ -312,7 +312,19 @@ Optional:
 
 ## Monitoring & Observability
 
-- **Prometheus metrics**: `/api/v1/metrics/prometheus` (custom `sora_*` metrics + HTTP instrumentation)
+- **Prometheus metrics**: `/metrics` — the `prometheus_client` registry, custom
+  `sora_*` metrics plus HTTP instrumentation. This is the path
+  `infra/prometheus.yml` scrapes, and the only one configured.
+  `/api/v1/metrics/prometheus` serves the same registry and is kept because
+  several documents name it. `/metrics/prometheus` does not exist.
+
+  Until #94 the `/api/v1` path assembled its own text from an in-process dict
+  and carried **none** of the metrics declared in `app/prom_metrics.py`, while
+  disagreeing with `/metrics` about four names it did carry. This section said
+  otherwise, which is how the two were confused for months.
+
+- **Operational counters**: `/api/v1/metrics` (JSON) — request counts by
+  endpoint and status, uptime, response times. Never scraped by Prometheus.
 - **Grafana dashboards**: http://localhost:3000 (admin/sora2026). Dashboard: "SORA MLOps Overview"
 - **MLflow UI**: Tracking server at http://localhost:5000 (if running standalone MLflow)
 - **Health checks**: `/health`, `/api/v1/health` (detailed), `/api/v1/ready` (readiness probe)
