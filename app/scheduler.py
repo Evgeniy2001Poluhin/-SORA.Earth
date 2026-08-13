@@ -120,39 +120,69 @@ scheduler = BackgroundScheduler(timezone="UTC")
 
 # Jobs that run once at startup, in addition to their schedule (#154).
 #
-# This is a contract, not a side effect, and it is stated here because nothing
-# outside this file used to say it. **Recreating the scheduler container runs
-# every job named here**, so an ordinary deployment -- and a rollback, which
-# also recreates containers -- writes to the database and calls an external API.
+# **Recreating the scheduler container runs every job named here**, so an
+# ordinary deployment -- and a rollback, which also recreates containers --
+# writes to the database and calls external APIs.
 #
 # Not an APScheduler default. Measured: `IntervalTrigger(hours=24)` returns a
 # first fire time a full interval away, so an interval job left alone does
-# nothing at startup. These are forced with `modify_job(next_run_time=now)`
-# below.
+# nothing at startup. These are forced with `modify_job(next_run_time=now)`.
 #
-# The reason is that the alternative is worse for the operator: without it the
-# first air-quality rows arrive an hour after a deployment, and a restart made
-# specifically to check whether a source works produces nothing to look at for
-# an hour.
+# One of the five has a written reason. The other four were inherited: a6d5ede
+# added the first two under the message "scheduler: run interval
+# ingesters/refresh immediately on startup" with an empty body, and #11 added
+# two more without saying why. Being in the tuple is not the same as having
+# been chosen, and this table says which is which rather than presenting all
+# five as one deliberate contract.
 #
-# What it costs, stated so the trade is visible:
+#   auto_run_ingesters
+#     writes rosstat + sber rows.
+#     why at startup: NOT STATED (a6d5ede).
+#     repeat: safe, measured on production -- an unchanged snapshot yields the
+#     same revision, so the upsert reports inserted=0 and a zero row delta
+#     (#121, acceptance round 2).
 #
-#   auto_run_ingesters                    writes rosstat + sber rows (idempotent
-#                                         since #121: unchanged snapshots upsert
-#                                         to a zero row delta)
-#   auto_refresh_external_data            one call to the World Bank API per
-#                                         deployment, rollbacks included
-#   auto_openmeteo_ingestion              one Open-Meteo fetch
-#   auto_openmeteo_air_quality_ingestion  one Open-Meteo fetch
-#   refresh_forecast_metrics              reads only
+#   auto_refresh_external_data
+#     one World Bank API pass, plus one data_refresh_log row per run.
+#     why at startup: NOT STATED (a6d5ede) -- but the behaviour was known:
+#     app/external_data.py gates the full history pass behind
+#     SORA_HISTORY_REFRESH *because* this job runs at startup, so that "the
+#     first mass ingestion" is not a side effect of a deployment.
+#     repeat: the log row is appended by design; the heavy history pass is off
+#     by default. Quota impact per deploy is one pass, not one per country.
+#
+#   refresh_forecast_metrics
+#     reads, and sets Prometheus gauges.
+#     why at startup: NOT STATED (#11). Plausibly so a scraped dashboard is not
+#     empty for the first 30 seconds, but that is a guess and is labelled one.
+#     repeat: safe -- gauges are set, never incremented.
+#
+#   auto_openmeteo_ingestion
+#     one Open-Meteo fetch, writes `observed` rows.
+#     why at startup: NOT STATED (#11).
+#     repeat: derived, not measured -- an observed row's identity is
+#     `{region}_{metric}_{event_time}`, and Open-Meteo timestamps an hour to a
+#     fixed instant, so a second run inside the same hour upserts rather than
+#     inserts.
+#
+#   auto_openmeteo_air_quality_ingestion
+#     one Open-Meteo fetch, writes `observed` rows.
+#     why at startup: STATED (#82) -- without it the first air-quality rows
+#     arrive an hour after a deployment, and a restart made specifically to
+#     check whether the source works shows nothing for an hour.
+#     repeat: same identity rule as above.
 #
 # auto_openaq_ingestion is deliberately absent: the job is not registered unless
 # SORA_OPENAQ_ENABLED is set, and an immediate run of a job that does not exist
 # is not an error worth logging.
 #
-# tests/test_startup_jobs_contract.py pins the membership of this tuple. Adding
-# a sixth entry has to be a decision rather than something that happens while
-# editing nearby.
+# Open question, deliberately left open rather than answered by whoever edits
+# this next: whether the four unstated entries should stay. Each costs a write
+# or an external call on every release, and "it was already in the tuple" is not
+# a reason. Deciding needs the operational intent, not archaeology.
+#
+# tests/test_startup_jobs_contract.py pins the membership. Adding a sixth entry
+# has to be a decision rather than something that happens while editing nearby.
 RUN_IMMEDIATELY_ON_STARTUP = (
     "auto_run_ingesters",
     "auto_refresh_external_data",

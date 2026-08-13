@@ -281,54 +281,30 @@ Optional:
 
 1. **Scheduler Architecture**: The scheduler runs in a separate Docker container (`scheduler` service). Do NOT set `RUN_SCHEDULER=true` in the `app` service or you'll have duplicate jobs. The scheduler shares the same codebase but runs `run_scheduler.py` instead of the FastAPI app.
 
-   **Recreating the scheduler container runs five jobs immediately**, in addition
-   to their schedule. This is deliberate and is listed in
-   `app/scheduler.py:RUN_IMMEDIATELY_ON_STARTUP`; it is not an APScheduler
-   default (an interval trigger left alone first fires a full interval later --
-   measured). So an ordinary deployment, **and a rollback**, writes to the
-   database and calls an external API:
+   **Recreating the scheduler container runs five jobs immediately**, in
+   addition to their schedule. This is not an APScheduler default — an interval
+   trigger left alone first fires a full interval later (measured); the jobs are
+   forced with `modify_job(next_run_time=now)` over
+   `app/scheduler.py:RUN_IMMEDIATELY_ON_STARTUP`. So an ordinary deployment,
+   **and a rollback**, writes to the database and calls external APIs.
 
-   | job | cost per deployment |
-   |---|---|
-   | `auto_run_ingesters` | writes rosstat + sber rows; idempotent since #121, so an unchanged snapshot upserts to a zero row delta |
-   | `auto_refresh_external_data` | one World Bank API call |
-   | `auto_openmeteo_ingestion` | one Open-Meteo fetch |
-   | `auto_openmeteo_air_quality_ingestion` | one Open-Meteo fetch |
-   | `refresh_forecast_metrics` | reads only |
+   | job | side effect | why at startup | repeating it |
+   |---|---|---|---|
+   | `auto_run_ingesters` | rosstat + sber rows | **not stated** (a6d5ede) | safe, measured: same revision → `inserted=0`, zero row delta (#121) |
+   | `auto_refresh_external_data` | World Bank pass + one `data_refresh_log` row | **not stated** (a6d5ede); the behaviour was known — the full history pass is gated behind `SORA_HISTORY_REFRESH` *because* this runs at startup | log row appended by design; heavy history pass off by default |
+   | `refresh_forecast_metrics` | reads, sets Prometheus gauges | **not stated** (#11) | safe — gauges are set, never incremented |
+   | `auto_openmeteo_ingestion` | one Open-Meteo fetch, `observed` rows | **not stated** (#11) | derived: identity is `{region}_{metric}_{event_time}`, so a repeat inside the same hour upserts |
+   | `auto_openmeteo_air_quality_ingestion` | one Open-Meteo fetch, `observed` rows | **stated** (#82): otherwise the first rows arrive an hour after a deploy, and a restart to check the source shows nothing for an hour | same identity rule |
 
-   The reason is that the alternative is worse for whoever is watching: without
-   it the first air-quality rows arrive an hour after a deployment, and a
-   restart made to check whether a source works shows nothing for an hour.
+   One of the five has a written reason; four were inherited. Being in the tuple
+   is not the same as having been chosen, and whether the four should stay is an
+   open question — see #154.
 
-   Consequence for acceptance: rows appearing during a deploy window are
-   **expected**, not evidence of something else. Observed on 2026-08-13 during
-   the #121 acceptance, where the scheduler ran both literal ingesters one
-   second after the container came up (#154).
-
-2. **Feature Count Consistency**: The RF model expects exactly 9 features in this order: `["budget", "co2_reduction", "social_impact", "duration_months", "budget_per_month", "co2_per_dollar", "efficiency_score", "year", "quarter"]`. Always use `make_features()` to construct feature DataFrames.
-
-3. **Model Versioning**: Models are loaded at app startup. To deploy a new model, replace files in `models/` directory and restart the `app` container. Old predictions remain cached in Redis until TTL expires or manual invalidation.
-
-4. **Database Migrations**: Always create Alembic migrations for schema changes. The `migrations/` directory is mounted in Docker and runs on first `postgres` container startup.
-
-5. **CORS Configuration**: CORS origins hardcoded in `app/main.py:144-151`. Add new origins there if deploying to new domains.
-
-6. **Rate Limiting**: `SlowAPIMiddleware` in `app/rate_limit.py` counts every HTTP
-   request per caller address. 100 req/min by default; `/api/v1/model/retrain` gets
-   10 req/min in a bucket of its own **in addition to** the general one — a
-   request to it is charged to both, so the tighter figure restricts rather than
-   replaces. A refusal costs nothing: every budget is examined before any is
-   written to, so being turned away at one does not spend another. Health,
-   readiness, metrics and favicon paths are exempt — a probe on a schedule would
-   otherwise spend a shared budget and make the health check flap.
-
-   The counter lives in one process, so with several workers the effective budget
-   multiplies by the worker count. It is a brake on a single noisy caller, not a
-   defence against a distributed flood; that belongs at the edge.
-
-   This paragraph previously described the limits as enforced while the middleware
-   was a pass-through stub. Stating a control that does not exist is worse than
-   stating none, because someone relies on it.
+   **What this means for acceptance.** The listed startup jobs may write during
+   the deployment window. Attribute any change through `ingester_runs`, `source`
+   and `source_revision`; only rows explained by those runs are expected. A
+   deployment window is not evidence that a write came from somewhere else, and
+   it is not a licence to accept an unexplained delta either.
 
 7. **Head Requests**: Custom middleware at `app/main.py:118-141` converts HEAD to GET internally. Do not set Content-Length manually in responses.
 

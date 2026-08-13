@@ -58,21 +58,30 @@ def test_every_id_is_a_job_the_scheduler_registers(monkeypatch):
     on -- so a typo here is a job that never runs at startup and never says so
     louder than one line in a log nobody reads.
 
-    `start=False` registers without starting, so nothing fires: the docstring
+    On an isolated scheduler, not the module singleton. The first version
+    removed every job from `app.scheduler.scheduler` and re-registered them,
+    leaving the shared object in a state the next test inherits. It passed in
+    the current order, which is the least useful kind of passing.
+
+    `start=False` registers without starting, so nothing fires -- the docstring
     on init_scheduler says exactly why that argument exists. RUN_SCHEDULER is
-    false in the suite, which makes init_scheduler return before registering
-    anything -- the first version of this test asserted against an empty set
-    and was caught by its own denominator check.
+    false in the suite, and init_scheduler returns before registering anything
+    without it; the first version asserted against an empty set and was caught
+    by its own denominator check.
     """
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    from app import scheduler as scheduler_module
+
+    isolated = BackgroundScheduler(timezone="UTC")
+    monkeypatch.setattr(scheduler_module, "scheduler", isolated)
     monkeypatch.setenv("RUN_SCHEDULER", "true")
 
-    from app.scheduler import init_scheduler, scheduler
-
-    for job in list(scheduler.get_jobs()):
-        scheduler.remove_job(job.id)
-
-    init_scheduler(start=False)
-    registered = {job.id for job in scheduler.get_jobs()}
+    try:
+        scheduler_module.init_scheduler(start=False)
+        registered = {job.id for job in isolated.get_jobs()}
+    finally:
+        isolated.shutdown(wait=False) if isolated.running else None
 
     assert registered, "no jobs were registered, so this proves nothing"
 
@@ -83,6 +92,23 @@ def test_every_id_is_a_job_the_scheduler_registers(monkeypatch):
     assert unknown == [], (
         f"{unknown} are forced to run at startup but no job is registered under "
         f"those ids"
+    )
+
+
+def test_the_module_scheduler_is_left_alone_by_this_file():
+    """The isolation claim, asserted rather than trusted.
+
+    Ordered after the test above by position, which is how pytest runs a file by
+    default. If that test ever goes back to mutating the singleton, this fails
+    -- rather than some unrelated test failing later for a reason nobody traces
+    back here.
+    """
+    from app.scheduler import scheduler
+
+    assert not scheduler.running, "this file started the module scheduler"
+    assert scheduler.get_jobs() == [], (
+        f"this file left {[j.id for j in scheduler.get_jobs()]} on the module "
+        f"scheduler; the next test inherits them"
     )
 
 
