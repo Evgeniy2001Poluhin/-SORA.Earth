@@ -614,6 +614,55 @@ keeping the old name.
 
 ---
 
+## 8a. What the target is made of, and why air quality is not in it
+
+Decided 2026-08-13, closing #117. Recorded here rather than left in a code
+comment because the composition of the score is the thing a benchmark is a
+benchmark *of*: changing it silently later would invalidate every result
+measured before the change, and nobody would be able to tell which side of the
+change a number came from.
+
+**Air quality is not a component of the canonical target.**
+
+Two independent reasons, and the second is the one that settles it.
+
+**The measured source produces nothing.** `openaq` has written zero rows in
+every one of its 62 recorded runs, and was stood down from scheduling in #124
+because the stations reachable from this deployment publish nothing current.
+The formula read `openaq:pm25_ugm3`, so that term has been `None` for every
+score the platform has ever produced.
+
+**The available substitute does not cover the same regions.**
+`openmeteo_air_quality` is live and current, and it is *not* wired in. It covers
+21 regions, of which exactly two -- RU-MOW and RU-SPE -- appear in the 85 this
+index is defined over. Including it would make `env_score` mean a measured air
+quality for two regions and a baseline index for the other eighty-three, under
+one column name. That is not a partial improvement; it is two different
+quantities sharing a column, and no consumer could tell which one it received.
+
+It is also modelled rather than instrumental -- CAMS reanalysis, not a station
+reading -- so substituting it for the measured source would change what the
+component *is* as well as which regions have it.
+
+### The rule this fixes
+
+* the canonical target does **not** include air quality;
+* `openmeteo_air_quality` remains a modelled contextual signal and must not be
+  substituted for a measured one;
+* `openaq` returns only after a freshness canary defined **in advance** -- a
+  stated number of current rows across a stated set of regions, agreed before
+  the data is looked at, so the decision to re-include cannot be made by
+  inspecting whichever window happens to look best;
+* the component list is stated explicitly and versioned with
+  `calculation_version`; a change to it is an amendment under §9, not an edit.
+
+### What this does not decide
+
+Whether air quality *should* eventually be in the target. It should, if a source
+covering the declared regions with instrumental measurements becomes available.
+This records that today no such source exists, and that filling the gap with a
+different quantity is worse than leaving it visible.
+
 ## 9. Amendment rule
 
 This protocol may be amended at any time, **only as a new numbered version**,
