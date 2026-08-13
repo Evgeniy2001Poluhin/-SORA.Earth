@@ -145,18 +145,53 @@ def test_our_own_failures_are_investigated_not_waited_on():
                                tolerance_seconds=24 * HOUR) == ACTION_INVESTIGATE, reason
 
 
-def test_a_clean_run_asks_for_nothing_whatever_the_age():
-    """Freshness is not this run's business when this run worked.
+def test_a_clean_run_over_stale_data_escalates():
+    """A successful run is not the same as usable data.
 
-    A source that has just written is fresh by construction; an old age
-    alongside a successful primary write means the age was measured over
-    something else, and inventing an escalation from it would be noise.
+    This test used to assert the opposite -- that a clean run needs nothing
+    "whatever the age", on the reasoning that a source which has just written is
+    fresh by construction. That is true of the write and says nothing about what
+    was written: persisting a 2017 snapshot without error is a working pipeline
+    over a dead source, and #74 exists precisely to stop those two being one
+    verdict.
     """
     ok = _verdict(REASON_OK)
 
-    for age, tolerance in FRESHNESS:
+    assert required_action(ok, age_seconds=NINE_YEARS,
+                           tolerance_seconds=HOUR) == ACTION_ESCALATE
+    assert required_action(ok, age_seconds=HOUR,
+                           tolerance_seconds=24 * HOUR) == ACTION_NONE
+
+
+def test_a_clean_run_with_unmeasured_freshness_is_investigated():
+    """`none` asserts things are fine, and nobody looked.
+
+    Same rule as `wait`: an unmeasured age supports neither. Skipping the
+    measurement on the success path -- which an earlier version did, to save a
+    round trip on the common case -- turns every clean run into a claim nobody
+    checked.
+    """
+    ok = _verdict(REASON_OK)
+
+    for age, tolerance in [(None, None), (None, 24 * HOUR), (HOUR, None)]:
         assert required_action(ok, age_seconds=age,
-                               tolerance_seconds=tolerance) == ACTION_NONE
+                               tolerance_seconds=tolerance) == ACTION_INVESTIGATE
+
+
+def test_a_source_with_no_time_dimension_is_not_treated_as_unmeasured():
+    """`not_applicable` is a category error, not a missing number.
+
+    Every sber_veb_baseline row is dated nothing, so "is it stale" has no
+    answer. Reporting that as unmeasured would make every clean run of it demand
+    attention forever, which is noise rather than signal.
+    """
+    ok = _verdict(REASON_OK)
+
+    assert required_action(ok, freshness_applies=False) == ACTION_NONE
+    # And a degraded run of such a source still needs a look -- age cannot
+    # settle it either way.
+    assert required_action(_verdict(REASON_SOURCE_EMPTY),
+                           freshness_applies=False) == ACTION_INVESTIGATE
 
 
 def test_severity_orders_the_actions():
@@ -214,7 +249,9 @@ def test_classification_and_action_agree_across_the_whole_input_space():
         assert v.reason_code in REASON_CODES, v
         action = required_action(v, age_seconds=HOUR, tolerance_seconds=24 * HOUR)
 
-        assert (action == ACTION_NONE) == (v.status == "success"), (
-            f"action {action} and status {v.status} disagree about whether "
-            f"this run needs anything: {v}"
-        )
+        # `none` implies success, but success no longer implies `none`: a clean
+        # run over data past its tolerance escalates.
+        if action == ACTION_NONE:
+            assert v.status == "success", (
+                f"action none on a {v.status} run: {v}"
+            )

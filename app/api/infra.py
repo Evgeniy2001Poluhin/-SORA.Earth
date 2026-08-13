@@ -297,12 +297,33 @@ def ingestion_attention():
 
     db = SessionLocal()
     try:
-        # Latest run per source. Correlated max(id) rather than DISTINCT ON,
-        # which is PostgreSQL-only and would make this untestable on the
-        # engine the suite runs.
+        # The last run to *finish*, per source -- not the largest id.
+        #
+        # id follows start order, and two runs can finish in the reverse of the
+        # order they started: a long one begun first, a short one begun after
+        # and done sooner. Picking max(id) then reports the earlier verdict as
+        # current. Ordered by finished_at with id as the tie-break, so runs that
+        # finish within the same clock tick still resolve deterministically.
+        #
+        # A row per (source, finished_at) pair rather than DISTINCT ON, which is
+        # PostgreSQL-only and would make this untestable on the engine the suite
+        # runs.
+        newest = (
+            db.query(
+                IngesterRun.source.label("source"),
+                func.max(IngesterRun.finished_at).label("finished_at"),
+            )
+            .filter(IngesterRun.finished_at.isnot(None))
+            .group_by(IngesterRun.source)
+            .subquery()
+        )
         latest_ids = (
             db.query(func.max(IngesterRun.id))
-            .filter(IngesterRun.finished_at.isnot(None))
+            .join(
+                newest,
+                (IngesterRun.source == newest.c.source)
+                & (IngesterRun.finished_at == newest.c.finished_at),
+            )
             .group_by(IngesterRun.source)
             .scalar_subquery()
         )

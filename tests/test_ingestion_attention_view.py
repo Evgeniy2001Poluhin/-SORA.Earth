@@ -132,3 +132,64 @@ def test_the_row_carries_what_the_decision_was_made_from(client, runs):
         assert field in row, field
     assert row["reason_code"] == "source_empty"
     assert row["source_age_seconds"] == pytest.approx(9 * 365 * 86400)
+
+
+def test_the_last_run_to_finish_wins_not_the_largest_id(client, runs):
+    """id follows start order; two runs can finish in the reverse of it.
+
+    A long run begun first and a short one begun after it finish out of order,
+    and `max(id)` then reports the earlier verdict as current. This is the case
+    the query was written against, so it is the case that has to be in the file.
+    """
+    now = datetime.now(timezone.utc)
+
+    # id 1: started first, finished last.
+    runs.add(IngesterRun(
+        source="openaq", started_at=now - timedelta(minutes=30),
+        finished_at=now - timedelta(minutes=1),
+        status="degraded", reason_code="source_empty",
+        required_action="escalate", source_age_seconds=9 * 365 * 86400,
+        records_received=0, records_accepted=0, records_rejected=0))
+    runs.commit()
+
+    # id 2: started second, finished first.
+    runs.add(IngesterRun(
+        source="openaq", started_at=now - timedelta(minutes=20),
+        finished_at=now - timedelta(minutes=10),
+        status="success", reason_code="ok",
+        required_action="none", source_age_seconds=60,
+        records_received=10, records_accepted=10, records_rejected=0))
+    runs.commit()
+
+    body = client.get("/api/v1/ingestion/attention").json()
+
+    assert body["count"] == 1
+    assert body["sources"][0]["required_action"] == "escalate", (
+        "the run with the larger id finished earlier; its verdict is not the "
+        "current one"
+    )
+
+
+def test_a_tie_on_finished_at_resolves_deterministically(client, runs):
+    """Two runs finishing within the same clock tick still give one answer.
+
+    Without the id tie-break the query returns both rows for the source, and
+    the endpoint would report a source twice -- or pick whichever the database
+    happened to hand back first.
+    """
+    now = datetime.now(timezone.utc)
+    same = now - timedelta(minutes=5)
+
+    for action in ("escalate", "none"):
+        runs.add(IngesterRun(
+            source="rosstat", started_at=now - timedelta(minutes=10),
+            finished_at=same, status="degraded", reason_code="source_empty",
+            required_action=action, source_age_seconds=1,
+            records_received=0, records_accepted=0, records_rejected=0))
+        runs.commit()
+
+    body = client.get("/api/v1/ingestion/attention").json()
+
+    assert body["count"] == 1, f"{body['count']} rows for one source"
+    # The larger id breaks the tie, and it is the one added last.
+    assert body["sources"][0]["required_action"] == "none"

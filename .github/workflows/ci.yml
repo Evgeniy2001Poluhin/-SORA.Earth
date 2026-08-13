@@ -321,6 +321,18 @@ jobs:
       # on the first run. This executes the real dict builder and the real
       # upsert against a migrated PostgreSQL, which is the only place the width
       # is enforced.
+      # The axis freshness is measured from, per temporal_kind. PostgreSQL-only:
+      # the query uses EXTRACT(EPOCH ...) and an aggregate FILTER, and asserting
+      # it on SQLite would prove something about a database nobody deploys.
+      - name: Source vintage axis against PostgreSQL
+        run: |
+          python -m pytest \
+            tests/test_source_vintage_axis_postgres.py \
+            -v --tb=short --timeout=300
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+          TEST_DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
       - name: Ingester write path against PostgreSQL
         run: |
           python -m pytest \

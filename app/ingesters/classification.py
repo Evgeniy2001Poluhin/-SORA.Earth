@@ -266,6 +266,7 @@ def required_action(
     *,
     age_seconds: Optional[float] = None,
     tolerance_seconds: Optional[float] = None,
+    freshness_applies: bool = True,
 ) -> str:
     """What an operator does next. Derived, never set.
 
@@ -282,31 +283,48 @@ def required_action(
     Both are `degraded`. The second is #57, which ran for 333 consecutive runs
     looking exactly like the first.
 
+    **A successful run is not the same as usable data**, and separating those
+    two is what #74 is for. Persisting a 2017 snapshot without error is a
+    working pipeline over a dead source: `reason_code == ok` with an age past
+    tolerance is `escalate`, not `none`. An earlier version returned `none` for
+    every clean run without measuring anything, on the reasoning that a source
+    which has just written is fresh by construction -- which is true of the
+    write and says nothing about what was written.
+
     `tolerance_seconds` comes from the ingester's own `default_ttl_hours`, which
     every source already declares -- 1 hour for openmeteo, 180 days for rosstat.
     A source is not stale because a wall-clock threshold says so; it is stale
     against the cadence it claims for itself.
 
-    When freshness is unknown the answer is `investigate`, never `wait`. `wait`
-    is an assertion that things are fine for now, and an unmeasured age does not
-    support it -- that is the shape of the original defect, one level up.
-    """
-    if verdict.reason_code == REASON_OK:
-        return ACTION_NONE
+    `freshness_applies=False` is for a source whose rows carry no time at all
+    (`not_applicable`). That is a category error rather than a missing
+    measurement: there is no answer to whether a dated-nothing snapshot is
+    stale, and treating it as unmeasured would make every clean sber run demand
+    attention forever.
 
-    stale = (
-        age_seconds is not None
-        and tolerance_seconds is not None
-        and age_seconds > tolerance_seconds
-    )
-    if stale:
-        # Regardless of the immediate reason. A run that partially wrote while
-        # the data as a whole aged past its tolerance is still a source nobody
-        # can rely on.
+    When freshness applies and is *not* known, the answer is `investigate`,
+    never `wait` and never `none`. Both of those assert that things are fine,
+    and an unmeasured age does not support either -- that is the shape of the
+    original defect, one level up.
+    """
+    measured = age_seconds is not None and tolerance_seconds is not None
+
+    if freshness_applies and measured and age_seconds > tolerance_seconds:
+        # Regardless of the immediate reason, including a clean run. Data past
+        # the cadence its own source declares is data nobody can rely on.
         return ACTION_ESCALATE
 
+    if verdict.reason_code == REASON_OK:
+        if not freshness_applies:
+            return ACTION_NONE          # no time dimension; nothing to be stale
+        if measured:
+            return ACTION_NONE          # measured, and within tolerance
+        return ACTION_INVESTIGATE       # nobody looked; "fine" is unsupported
+
     if verdict.reason_code in _STALENESS_DECIDES:
-        if age_seconds is None or tolerance_seconds is None:
+        if not freshness_applies:
+            return ACTION_INVESTIGATE   # empty source, and age cannot settle it
+        if not measured:
             return ACTION_INVESTIGATE
         return ACTION_WAIT
 

@@ -8,9 +8,7 @@ import asyncio
 import logging
 from sqlalchemy import text
 
-from app.ingesters.classification import (
-    REASON_OK, classify_run, required_action,
-)
+from app.ingesters.classification import classify_run, required_action
 from datetime import datetime, timezone
 
 from app.ingesters.base import Signal
@@ -110,33 +108,62 @@ def _audit_start(source: str):
         return None
 
 
-def source_age_seconds(source: str):
-    """How old the newest signal for this source is, in seconds.
+# What a source's vintage is measured from, and when the question does not apply.
+VINTAGE_MEASURED = "measured"
+VINTAGE_NOT_APPLICABLE = "not_applicable"   # the source has no time dimension
+VINTAGE_UNKNOWN = "unknown"                 # nothing stored, or the query failed
 
-    None when nothing is stored for it, or when the query fails. `None` is a
-    real answer here and is treated as one: `required_action` refuses to say
-    "wait" without it, because "fine for now" is a claim that needs a
-    measurement (#74).
 
-    Measured against `event_time` where the row has one and `ingested_at`
-    otherwise. A `period` or `not_applicable` row has no event_time by
-    construction (#121), and using only event_time would report the two literal
-    sources as having no data at all.
+def source_vintage(source: str):
+    """(age_seconds, basis) for the newest observation this source holds.
+
+    The axis is chosen per `temporal_kind`, which is the whole point of #121:
+
+        observed        event_time      -- a real observation instant
+        period          period_end      -- the end of the period it covers
+        not_applicable  no axis         -- the source has no time dimension
+        legacy_*        excluded        -- its event_time is a stamped
+                                           ingestion time, the defect #121 fixed
+
+    It used to be `COALESCE(event_time, ingested_at)`. A `period` row has no
+    event_time by construction, so rosstat's 2024 snapshot was aged from when it
+    was last written -- and re-upserting it made it "fresh today". That is #121
+    returning under a different name, in the field that decides what an operator
+    is told to do.
+
+    Three outcomes, not two. `not_applicable` is a category error rather than a
+    missing measurement: asking whether a dated-nothing snapshot is stale has no
+    answer, and reporting it as unmeasured would make every clean sber run
+    demand attention forever. `unknown` is the honest "nobody looked", and
+    `required_action` refuses to say "fine" on it.
     """
     try:
         from app.database import SessionLocal
         db = SessionLocal()
         try:
-            return db.execute(text(
-                "SELECT EXTRACT(EPOCH FROM (now() - max("
-                "  COALESCE(event_time, ingested_at)))) "
+            row = db.execute(text(
+                "SELECT "
+                "  EXTRACT(EPOCH FROM (now() - max(CASE "
+                "     WHEN temporal_kind = 'observed' THEN event_time "
+                "     WHEN temporal_kind = 'period'   THEN period_end "
+                "  END))) AS age, "
+                "  count(*) FILTER (WHERE temporal_kind = 'not_applicable') AS na, "
+                "  count(*) AS total "
                 "FROM environmental_observations WHERE source = :s"),
-                {"s": source}).scalar()
+                {"s": source}).one()
         finally:
             db.close()
     except Exception as e:
-        log.warning("[runner] source_age_seconds failed for %s: %s", source, e)
-        return None
+        log.warning("[runner] source_vintage failed for %s: %s", source, e)
+        return None, VINTAGE_UNKNOWN
+
+    age, not_applicable, total = row
+    if age is not None:
+        return float(age), VINTAGE_MEASURED
+    if total and not_applicable == total:
+        # Every row the source has is dated-nothing. Staleness does not apply.
+        return None, VINTAGE_NOT_APPLICABLE
+    return None, VINTAGE_UNKNOWN
 
 
 def _audit_finish(rid, verdict, action=None, age_seconds=None):
@@ -194,18 +221,22 @@ def _decide(ing, verdict):
     openmeteo, 180 days for rosstat. A source is not stale because some global
     threshold says so; it is stale against the cadence it declares for itself.
 
-    Freshness is only measured when the answer can change: a clean run is
-    `none` regardless, and a query per successful run would be a round trip
-    bought for nothing.
+    Freshness is measured for **every** outcome, including a clean one. An
+    earlier version skipped it when the run succeeded, to save a round trip on
+    the common path. That made a successful write of a 2017 snapshot report
+    `none` -- a working pipeline over a dead source, described as nothing to do,
+    which is the exact conflation #74 exists to undo.
     """
-    if verdict.reason_code == REASON_OK:
-        return required_action(verdict), None
-
-    age = source_age_seconds(ing.name)
+    age, basis = source_vintage(ing.name)
     tolerance = getattr(ing, "default_ttl_hours", None)
     tolerance = None if tolerance is None else float(tolerance) * 3600.0
-    return required_action(verdict, age_seconds=age,
-                           tolerance_seconds=tolerance), age
+    action = required_action(
+        verdict,
+        age_seconds=age,
+        tolerance_seconds=tolerance,
+        freshness_applies=(basis != VINTAGE_NOT_APPLICABLE),
+    )
+    return action, age
 
 
 async def run_all_ingesters() -> dict:
