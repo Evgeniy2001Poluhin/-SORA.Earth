@@ -190,6 +190,10 @@ seq_file="$STUB_DIR/http_code"
 n_file="$STUB_DIR/http_calls"
 n=$(( $(cat "$n_file" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$n_file"
+# Recorded so a test can assert the probe identifies itself. Without this the
+# marker could be dropped and every acceptance query would silently go back to
+# counting the deployment's own retries as user traffic.
+printf '%s\n' "$*" >> "$STUB_DIR/curl_args"
 total=$(wc -l < "$seq_file")
 line=$(( n <= total ? n : total ))
 code="$(sed -n "${line}p" "$seq_file")"
@@ -686,6 +690,50 @@ refused_because "the second run fails smoke" "returned 502"
 check "latest still names the good deployment" \
     "$(readlink "$SANDBOX/manifests/latest")" "$GOOD_MAN"
 check "and no manifest was added"   "$(find "$SANDBOX/manifests" -name '*.txt' | wc -l | tr -d ' ')" "1"
+rm -rf "$SANDBOX"
+
+echo "== the readiness probe identifies itself =="
+# nginx has just been recreated and the backend may still be accepting its first
+# connections, so the probe is meant to start early, get a 502 and retry. That
+# 502 lands in the same access log as user traffic. On release 4cd7232 the
+# acceptance query counted it and reported a user-facing failure; there was
+# none, and the release before reported zero only because the probe arrived
+# after the backend was listening (#142).
+
+new_sandbox
+run_guard
+check "the deploy succeeded" "$RC" "0"
+# The denominator first: an empty file would make both sides of the next two
+# comparisons 0 and they would pass having measured nothing.
+check "the probe ran at all" \
+    "$([ -s "$STUB_DIR/curl_args" ] && echo yes || echo no)" "yes"
+check "every probe carries the marker" \
+    "$(grep -c 'sora-deploy-healthcheck/1' "$STUB_DIR/curl_args")" \
+    "$(wc -l < "$STUB_DIR/curl_args" | tr -d ' ')"
+check "and the marker is not merely mentioned somewhere" \
+    "$(grep -c -- '-A sora-deploy-healthcheck/1' "$STUB_DIR/curl_args")" \
+    "$(wc -l < "$STUB_DIR/curl_args" | tr -d ' ')"
+check "the run reports probe attempts separately" \
+    "$(grep -c 'probe attempts' "$SANDBOX/out")" "1"
+check "and says what acceptance must exclude" \
+    "$(grep -c 'exclude only User-Agent' "$SANDBOX/out")" "1"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# One 502 then 200 on each path: the shape a healthy deployment produces.
+printf '502\n200\n200\n200\n' > "$STUB_DIR/http_code"
+run_guard
+check "an intermediate 502 does not fail the deployment" "$RC" "0"
+check "and it is reported as a retry, not an outage" \
+    "$(grep -c 'retrying' "$SANDBOX/out")" "1"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# Never recovers. The final result is what decides, and a timeout is still a
+# deployment failure -- marking the probe must not soften that.
+printf '502\n' > "$STUB_DIR/http_code"
+run_guard
+refused_because "a probe that never reaches 200" "after"
 rm -rf "$SANDBOX"
 
 echo "== the rollback compares the journal against what is checked out =="

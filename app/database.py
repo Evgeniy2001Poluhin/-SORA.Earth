@@ -368,7 +368,12 @@ class EnvironmentalObservation(Base):
     # Provenance
     source = Column(String(64), nullable=False, index=True)
     source_record_id = Column(String(128), nullable=True)
-    source_revision = Column(String(64), nullable=True)
+    # 128, matching source_record_id. A content-hash revision is
+    # `rev:v1:` plus a 64-character sha256 -- 71 characters, which did not fit
+    # in 64 and made both literal ingesters unable to write anything at all.
+    # PostgreSQL enforces the length; SQLite ignores it, so every test passed
+    # and only production refused (#121).
+    source_revision = Column(String(128), nullable=True)
 
     # Temporal tracking (all UTC-aware)
     #
