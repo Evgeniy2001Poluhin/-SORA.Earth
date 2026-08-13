@@ -15,24 +15,41 @@ PROJECT: Dict[str, Any] = {
 }
 
 
-@pytest.mark.xfail(reason="history empty after evaluate - flow needs investigation v0.2.2")
 def test_evaluate_and_history_flow(client):
-    # 1) Оценка проекта
+    """Оценка сохраняется и читается обратно.
+
+    Маркер xfail здесь гласил «history empty after evaluate — either evaluate
+    doesn't persist, or history reads from a different source» (#5). Ни то, ни
+    другое: `/api/v1/history` отдаёт страницу `{items, total, limit, offset}`, а
+    тест требовал `isinstance(rows, list)`. Измерено на этом же прогоне: после
+    одной оценки `total == 1`, и запись лежит в `items`.
+
+    Проверка теперь идёт по дельте, а не по «хотя бы одна»: набор не изолирован
+    по базе между тестами, и непустая история могла бы остаться от соседа.
+    """
+    before = client.get("/api/v1/history")
+    assert before.status_code == 200
+    total_before = before.json()["total"]
+
     resp = client.post("/api/v1/evaluate", json=PROJECT)
     assert resp.status_code == 200
     data = resp.json()
-    # базовые поля контракта
     assert "total_score" in data
     assert "risk_level" in data
     assert "success_probability" in data
 
-    # 2) История оценок
     hist = client.get("/api/v1/history")
     assert hist.status_code == 200
-    rows = hist.json()
-    assert isinstance(rows, list)
-    # проверяем, что есть хотя бы одна запись; детали можно ужесточить позже
-    assert len(rows) >= 1
+    page = hist.json()
+
+    assert page["total"] == total_before + 1, (
+        f"{total_before} -> {page['total']}: оценка не доехала до истории"
+    )
+    assert page["items"], "total вырос, а страница пуста"
+    assert page["items"][0]["total_score"] == pytest.approx(data["total_score"]), (
+        "первая запись страницы — не та оценка, которую только что сделали "
+        "(порядок по created_at desc)"
+    )
 
 
 def test_countries_and_benchmarks(client):
