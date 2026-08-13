@@ -1,14 +1,17 @@
 # M2 Forecasting — evaluation protocol (pre-registration)
 
 ```text
-Protocol            preregistered, version 1.0
+Protocol            preregistered, version 1.1 (amended 2026-08-13 under §9)
 Target readiness    FAILED
-M2 status           BLOCKED -- no temporal target
-Reason              the regional ESG score is a structural index computed
-                    from versioned static snapshots; it carries no temporal
-                    signal, so an evidential 7/30-day backtest is impossible
-                    regardless of how many repeated records accumulate
-Model runs          none performed
+M2 outcome          CLOSED -- NEGATIVE RESULT: no qualifying temporal target
+Reason              every candidate the platform holds is either subject-level
+                    and constant, or time-varying and not subject-level. No
+                    source is both, so an evidential 7/30-day backtest is
+                    impossible regardless of how many records accumulate
+Benchmark executed  no
+Engineering failure no
+Protocol failure    prevented -- see §7.1 and §10.4
+M3 eligibility      allowed under the boundary in §10.6
 ```
 
 **This is a preregistered negative feasibility result.** M2 is not a failed
@@ -506,6 +509,50 @@ can never satisfy §1 regardless of volume.
 | weighting | one weight per region-day | one weight per region-day |
 | declared region set (§1.4) | fixed by version bump | fixed by version bump |
 
+### 7.1 Movement — added in v1.1
+
+| condition | h=7 | h=30 |
+|---|---:|---:|
+| the target takes a different value in ≥2 distinct **source periods**, per declared region, in **every** window | required | required |
+
+Every condition in the table above counts records. §10.2 recorded what that
+leaves open: twelve non-overlapping windows at ≥80% coverage is a test of record
+count, and repeated writes of a constant pass it. Measured at the time, 1.00
+distinct values per region across eight days.
+
+Four things that look like new information and are not, and none of which may
+be counted as movement:
+
+- **a repeated write of the same period and value** — the upsert of #121, whose
+  point is that an unchanged snapshot produces no new observation
+- **a different `ingested_at`** — when the row was written, which is the
+  conflation #121 removed
+- **a new `source_revision` carrying the same value** — the content was
+  restated, not changed
+- **an interpolated point** — #132: resampling fills every calendar day, so a
+  date being present stops meaning something was observed
+
+No threshold on magnitude is set, deliberately: a minimum size of change would
+be a tuned parameter smuggled into a pre-registration. The condition is that the
+value differs between two source periods inside the window, nothing more.
+
+The consequence is a real constraint rather than a technicality, and it is the
+finding of §10.3 in a form the gate can check: **a target cannot be evaluated at
+a horizon shorter than its own cadence.** A quantity published quarterly does
+not move inside a 7-day window.
+
+`app/services/forecasting/entry_conditions.py` implements all seven conditions;
+`tests/test_m2_entry_gate.py` holds them, including each of the four
+non-movements above.
+
+**Amendment record (§9).** Registered 2026-08-13, reason: the v1.0 gate could be
+satisfied by a series containing no observation, which §10.2 measured rather
+than supposed. No result existed under v1.0 — no model has been run — so nothing
+is recomputed and nothing is rewritten. The amendment tightens the gate; it
+cannot admit anything v1.0 refused.
+
+---
+
 Twelve is not a mathematical guarantee. It is a minimum operational gate chosen
 in advance, sufficient to estimate the spread of loss across origins. Five
 30-day folds were considered and rejected as too fragile to support a verdict.
@@ -872,3 +919,104 @@ in the observation layer proved to be two populations rather than one
 incomplete set, so the choice was between kinds and not between members. The
 canonical score of §1 still does not exist -- declaring the population is a
 precondition for building it, not the building.
+
+### 10.4 Every candidate, measured — added in v1.1
+
+§10.2 measured the score. This measures **everything the platform holds**, so
+the negative result rests on an exhausted set rather than on the one target that
+was audited first. Read from production 2026-08-13, legacy rows excluded (their
+`event_time` is a stamped ingestion time, removed by #121).
+
+| candidate | granularity | of the 85 declared | distinct source periods | distinct values per region | moves |
+|---|---|---:|---:|---:|:--:|
+| `rosstat` × 5 metrics | federal subject | **85** | 1 | **1.00** | no |
+| `sber_veb_baseline` | federal subject | **85** | 0 | **1.00** | no |
+| `openmeteo` × 10 metrics | city | **2** | 14 | 60 – 165 | yes |
+| `openmeteo_air_quality` × 6 | city | **2** | 9 | 76 – 143 | yes |
+| `country_indicator_history` (World Bank) × 7 | **country** | **0** | 66 for RUS | 179 for RUS | yes |
+| `region_esg_scores` (the §1 target) | federal subject | 85 | — | upserted in place, one `updated_at` | no |
+
+**The two properties are mutually exclusive across the whole set.** Everything
+that covers the declared region set is constant; everything that moves covers
+two of eighty-five, or none at all. Not one candidate is both subject-level and
+time-varying.
+
+The gap is not marginal. §7 requires **all** declared regions in every window;
+the varying sources reach 2 of 85, short by a factor of 42. No accumulation of
+history closes it, because it is a property of what the sources publish and not
+of how long they have been publishing it.
+
+Each of the seven measurements the closure requires:
+
+- **Regions** — coverage of `ru-regions-v1`: 85 for the constant sources, 2 for
+  the varying ones, 0 for the country series.
+- **Periods** — distinct source periods: 1 for rosstat (the 2024 annual
+  snapshot), 0 for sber (`not_applicable`, no time dimension at all).
+- **Values** — distinct target values per region: exactly 1.00 for every
+  subject-level candidate.
+- **Movement** — inter-period variation: none, for every subject-level
+  candidate.
+- **Vintage** — source time rather than load time: available since #121
+  (`period_start`/`period_end`, `source_revision`), and measured off that axis
+  here.
+- **Provenance** — revision and source: present, and deliberately *not* counted
+  as movement (§7.1).
+- **Artificial points** — interpolation excluded (#132), and excluded again by
+  the gate.
+
+### 10.5 Closure — added in v1.1
+
+```text
+M2 outcome:            CLOSED — NEGATIVE RESULT
+Reason:                no qualifying temporal target
+Benchmark executed:    no
+Engineering failure:   no
+Protocol failure:      prevented
+M3 eligibility:        allowed under the boundary in §10.6
+```
+
+**What was checked.** Every source in the observation layer, the country
+indicator series, and the score table itself — §10.4. The audit of the
+`Evaluation` target — §6. The score's temporal content over the eight days it
+existed — §10.2. The entry gate's own soundness — §7.1.
+
+**Why the existing data cannot answer the question.** A forecast is a claim
+about a quantity that changes. Every subject-level series the platform holds
+takes exactly one value per region: rosstat publishes an annual 2024 snapshot,
+sber a static baseline with no time dimension. The series that do change are
+weather and air quality at two city coordinates, and country aggregates. There
+is no overlap.
+
+**Why MAE = 0 is not a success.** Against a constant, the §4 last-value baseline
+carries the previous value forward and is exact. Every model that also carries
+the value forward ties it, and nothing can beat it. A results table reading
+`MAE = 0` would record that the target does not move — a fact about the data,
+presented in the shape of a fact about a method. That is the specific misreading
+this closure exists to prevent.
+
+**What would unblock a re-attempt.** A source that is all of: genuinely varying
+between its own publication periods; published at least monthly or quarterly;
+covering the 85 ids of `ru-regions-v1`; carrying its own source periods and
+vintage rather than an ingestion timestamp; and not a re-publication of a static
+snapshot. The §7 clock starts at the first observation of such a target — not
+before — and runs 90 days plus twelve windows for h=7.
+
+**What remains separately open.** #84 (`environmental_observations` has no
+reader for a score layer) and #75 (point-in-time provenance, against leakage)
+are prerequisites for a strict real-time backtest under §2.1. Neither lifts this
+blocker, and neither is a reason to hold M2 open: they are conditions on a
+future run, not on this verdict.
+
+### 10.6 The boundary M3 inherits — added in v1.1
+
+> **M3 does not claim that M2 demonstrated a forecastable temporal ESG target.
+> M2 is closed with a negative result, because no such target exists in the data
+> available.**
+
+M3 may begin. What it may not do is cite M2 as validation of a model: nothing
+was benchmarked, and the one number a benchmark would have produced —
+`MAE = 0` against a constant — is a property of the data.
+
+The prohibition in §10.3 stands unchanged: forecasting `openmeteo` and air
+quality over their 21 entities is a legitimate separate product, and it may not
+be renamed an ESG forecast.
