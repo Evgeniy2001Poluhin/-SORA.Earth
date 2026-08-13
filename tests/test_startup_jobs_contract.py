@@ -85,7 +85,13 @@ def test_every_id_is_a_job_the_scheduler_registers(monkeypatch):
 
     isolated = BackgroundScheduler(timezone="UTC")
     monkeypatch.setattr(scheduler_module, "scheduler", isolated)
+    # Both gates, not just the one that bit locally. init_scheduler returns
+    # early on either RUN_SCHEDULER != true or SORA_SCHEDULER != "1", and this
+    # test inherited both from the process environment -- so under
+    # SORA_SCHEDULER=0 it would fail on its own denominator assertion instead of
+    # testing the contract it names.
     monkeypatch.setenv("RUN_SCHEDULER", "true")
+    monkeypatch.setenv("SORA_SCHEDULER", "1")
 
     try:
         scheduler_module.init_scheduler(start=False)
