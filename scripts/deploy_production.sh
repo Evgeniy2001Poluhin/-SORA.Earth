@@ -919,14 +919,36 @@ fi
 
 step "the site answers"
 
+PROBE_ATTEMPTS=0
+PROBE_RETRIES=0
+
 # `code="$(curl ... || echo 000)"` looked defensive and was not: on a connection
 # failure curl prints its own "000" and exits non-zero, so the fallback appended
 # a second one and the variable became "000000" -- never equal to 200, so the
 # refusal still happened, but the message reported a status that does not exist.
 # Captured explicitly instead.
+# Every probe identifies itself, so acceptance can tell this deployment's own
+# readiness retries from a user request that failed.
+#
+# The retries below are deliberate: nginx has just been recreated and the
+# backend may still be accepting its first connections, so the probe is
+# *expected* to start early and get a 502 before it gets a 200. That 502 lands
+# in the same nginx access log as real traffic. On the 4cd7232 release the
+# acceptance query counted it and reported one user-facing failure; there was
+# none. The release before happened to report zero only because the probe
+# arrived after the backend was already listening -- the measurement could
+# never tell "no user was affected" from "our probe missed the window" (#142).
+#
+# Matched on this exact string, not on `curl`, not on `/health`, not on the
+# host's own address: each of those would also hide an external monitor or an
+# operator's own check, and a filter that removes evidence is worse than the
+# noise it removes.
+DEPLOY_PROBE_UA="sora-deploy-healthcheck/1"
+
 http_code() {
     local code
-    if ! code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$1" 2>/dev/null)"; then
+    if ! code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 \
+                      -A "$DEPLOY_PROBE_UA" "$1" 2>/dev/null)"; then
         code=000
     fi
     printf '%s' "$code"
@@ -949,8 +971,18 @@ for path in /health /api/v1/health /; do
         attempt=$((attempt + 1))
     done
     [ "$code" = "200" ] || fail "$SITE$path returned $code after $HEALTH_ATTEMPTS attempts"
+    PROBE_ATTEMPTS=$((PROBE_ATTEMPTS + attempt))
+    PROBE_RETRIES=$((PROBE_RETRIES + attempt - 1))
     printf '  %-18s %s\n' "$path" "$code"
 done
+
+# Reported as its own figure. A retry here is the probe working, not an outage,
+# and the two must not share a number: "502 count in the window" cannot be a
+# useful acceptance criterion while a healthy deployment contributes to it.
+# The final result is what matters, and it is already enforced above -- a
+# timeout is still a deployment failure.
+echo "  probe attempts $PROBE_ATTEMPTS, of which retried $PROBE_RETRIES; final 200 on every path"
+echo "  acceptance: exclude only User-Agent $DEPLOY_PROBE_UA when counting user-facing 5xx"
 
 # ------------------------------------------------------------------- the record
 
