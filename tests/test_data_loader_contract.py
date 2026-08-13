@@ -88,16 +88,26 @@ def test_a_long_gap_manufactures_a_day_for_every_date_it_spans():
     assert len([d for d in out["ds"] if d not in observed]) == 20
 
 
-def test_smoothing_also_rewrites_the_observed_values():
-    """A returned value at an observed date is not the measurement taken that day.
+def test_an_observed_value_is_returned_as_measured():
+    """The measurement comes back as itself.
 
-    Recorded because it compounds the missing provenance: a caller could not
-    recover the measurements even if it knew which days were real.
+    This asserted the opposite while a centred 3-day rolling mean was applied
+    to the whole column: 10, 100, 10 came back as 55, 40, 55, so a measured
+    peak of 100 was reported as 40. It was described as light smoothing to
+    reduce noise, and measurement showed it could not be that -- on an
+    interpolated stretch the values are already linear and a centred mean is
+    the identity there, shift exactly 0.000000. The only rows it could change
+    were the observed ones (#132).
+
+    Kept as a test rather than deleted: what mattered then still matters, with
+    the sign reversed.
     """
     out = _load([("2026-01-01", 10.0), ("2026-01-02", 100.0), ("2026-01-03", 10.0)])
-    observed_day = dict(zip(out["ds"], out["y"]))[pd.Timestamp("2026-01-02")]
+    by_day = dict(zip(out["ds"], out["y"]))
 
-    assert observed_day != pytest.approx(100.0)
+    assert by_day[pd.Timestamp("2026-01-02")] == pytest.approx(100.0)
+    assert by_day[pd.Timestamp("2026-01-01")] == pytest.approx(10.0)
+    assert by_day[pd.Timestamp("2026-01-03")] == pytest.approx(10.0)
 
 
 def test_same_day_evaluations_collapse_to_their_mean():
@@ -115,15 +125,50 @@ def test_same_day_evaluations_collapse_to_their_mean():
     assert out["y"].iloc[0] == pytest.approx(30.0)
 
 
-def test_the_output_carries_no_observed_or_interpolated_flag():
-    """Two columns and nothing else: no consumer can tell the two apart.
+def test_every_row_says_whether_it_was_observed():
+    """The provenance the frame used to lack.
 
-    Asserted as an exact list -- adding provenance is a deliberate decision and
-    should break this test rather than slip in.
+    It asserted the columns were exactly ds and y, so a consumer had no way to
+    tell a measurement from a day the interpolation manufactured -- and
+    therefore treated them alike, because it could not do otherwise. That is
+    how a 14-observation series was presented to the ensemble as 51 samples.
+
+    The flag is asserted against the dates that were actually supplied, not
+    against a count: a column of all True would satisfy a count and answer
+    nothing.
     """
     out = _load([("2026-01-01", 10.0), ("2026-01-10", 100.0)])
 
-    assert list(out.columns) == ["ds", "y"]
+    assert list(out.columns) == ["ds", "y", "is_observed"]
+    observed = {d.date().isoformat() for d in out[out["is_observed"]]["ds"]}
+    assert observed == {"2026-01-01", "2026-01-10"}
+    assert int(out["is_observed"].sum()) == 2
+    assert len(out) == 10, "the span is still filled; only its labelling changed"
+
+
+def test_an_empty_result_carries_the_provenance_column_too():
+    """Both empty paths, asserted directly.
+
+    The early returns produced ds and y while the populated path produced three
+    columns, so a caller doing df["is_observed"] got a KeyError on the one
+    input it is most likely to hit -- and the docstring was wrong about the
+    case nobody looks at. The existing empty-frame test passed throughout,
+    because it only checked ds and y.
+    """
+    no_rows = _load([])
+
+    assert list(no_rows.columns) == ["ds", "y", "is_observed"]
+    assert no_rows.empty
+
+    session = MagicMock()
+    session.query.return_value.order_by.return_value.all.return_value = [
+        SimpleNamespace(created_at="2026-01-01 12:00:00", total_score=None,
+                        co2_reduction=None, success_probability=None)
+    ]
+    no_values = load_time_series(session, "score")
+
+    assert list(no_values.columns) == ["ds", "y", "is_observed"]
+    assert no_values.empty
 
 
 def test_no_rows_yields_an_empty_frame_with_the_same_columns():
@@ -131,7 +176,7 @@ def test_no_rows_yields_an_empty_frame_with_the_same_columns():
     session.query.return_value.order_by.return_value.all.return_value = []
     out = load_time_series(session, "score")
 
-    assert list(out.columns) == ["ds", "y"]
+    assert list(out.columns) == ["ds", "y", "is_observed"]
     assert len(out) == 0
 
 
@@ -167,7 +212,7 @@ def test_rows_with_no_values_for_the_metric_keep_the_schema(metric):
     out = load_time_series(_db_with_no_values(), metric)
 
     assert out.empty
-    assert list(out.columns) == ["ds", "y"], (
+    assert list(out.columns) == ["ds", "y", "is_observed"], (
         f"{metric}: empty result carries no schema, so downstream column "
         f"access raises instead of yielding nothing"
     )
@@ -224,18 +269,36 @@ def test_the_docstring_leaves_readiness_to_the_ensemble():
     assert "no threshold of its own" in lowered
 
 
-def test_the_docstring_states_that_provenance_is_absent():
+def test_the_docstring_states_that_provenance_is_present():
+    """It said the opposite, correctly, while there was no flag.
+
+    The docstring had to warn that nothing marked observed rows apart. Now one
+    does, and a docstring still carrying the warning would send a consumer past
+    the column it should be reading -- which is how the old text kept being
+    obeyed after the behaviour changed.
+    """
     lowered = DOC.lower()
 
-    assert "no provenance" in lowered
-    assert "interpolated" in lowered
-    assert "nothing marks" in lowered
+    assert "is_observed" in DOC, "the provenance column is not documented"
+    assert "no provenance" not in lowered
+    for stale in ("nothing marks which", "no flag for which"):
+        assert stale not in lowered, f"the docstring still denies provenance: {stale!r}"
 
 
-def test_the_docstring_states_that_smoothing_touches_observed_values():
+def test_the_docstring_does_not_promise_smoothing():
+    """The rolling mean is gone, and the text must not keep offering it.
+
+    Asserted as a refutation rather than as the absence of a word: the
+    docstring mentions the removed step in order to say it was removed, and a
+    plain substring ban would trip on the sentence doing the correcting -- a
+    trap this repository has fallen into three times.
+    """
     lowered = DOC.lower()
 
-    assert "smoothing rewrites observed values" in lowered
+    assert "used to be applied" in lowered or "is now" in lowered, (
+        "the docstring does not say the smoothing was removed"
+    )
+    assert "returned as measured" in lowered or "not the measurement taken" not in lowered
 
 
 def test_the_docstring_states_that_length_is_a_span_not_evidence():

@@ -100,14 +100,50 @@ class EnsembleForecaster(BaseForecastModel):
         Raises:
             RuntimeError: If all models fail
         """
-        n_samples = len(df)
+        # Observations, not calendar days. `load_time_series` reindexes onto
+        # every day between the first and last reading and fills the interior
+        # by interpolation, so `len(df)` is the span. On the production series
+        # that was 14 observations across 51 days: the ensemble saw n=51,
+        # landed in the 50..100 tier and switched LSTM on, although
+        # LSTM_MIN_ROWS is 33 and the series has 14 real points. The
+        # interpolation was doing the promoting (#132).
+        #
+        # `len(df)` remains the fallback for a frame carrying no provenance --
+        # a caller building one by hand, or a test -- so anything that never
+        # went through the loader reads exactly as before.
+        n_samples = (int(df["is_observed"].sum())
+                     if "is_observed" in df.columns else len(df))
+
+        # What each model is given, decided per model rather than left to
+        # whatever the loader happened to return (#132).
+        #
+        #   dense_df     every calendar day, interior filled by interpolation
+        #   observed_df  only the days a value was actually recorded
+        #
+        # LSTM gets dense: it slides a window of `seq_length` over consecutive
+        # rows and cannot span a gap, so contiguity is structural for it.
+        #
+        # Prophet and LinearTrend get observed. Prophet models irregular
+        # timestamps natively, and LinearTrend regresses on
+        # `(ds - t0).dt.days` -- a date axis, not a row index -- so dropping
+        # manufactured rows leaves both of them fitting the same shape with
+        # fewer invented points. Feeding them interpolation makes a
+        # straight-line guess look like evidence and narrows their intervals
+        # against data that was never measured.
+        #
+        # Both frames carry only ds and the target: the provenance column must
+        # not reach a model as if it were a feature.
+        dense_df = df[["ds", target_col]]
+        observed_df = (df.loc[df["is_observed"], ["ds", target_col]]
+                       if "is_observed" in df.columns else dense_df)
+
         self._active_models = []
 
         # Cold-start: very small data — augment for Prophet, always include LinearTrend
         if n_samples < 10:
             log.info(f"Cold-start mode (n={n_samples}): using LinearTrend + bootstrap Prophet")
             self.weights = {"lstm": 0.0, "prophet": 0.6, "linear": 0.4}
-            df_aug = self._bootstrap_augment(df, target_col, target_size=30)
+            df_aug = self._bootstrap_augment(observed_df, target_col, target_size=30)
             try:
                 self.prophet.fit(df_aug, target_col, **kwargs)
                 self._active_models.append(("prophet", self.prophet))
@@ -118,7 +154,7 @@ class EnsembleForecaster(BaseForecastModel):
                 self._normalize_weights()
 
             try:
-                self.linear.fit(df, target_col)
+                self.linear.fit(observed_df, target_col)
                 self._active_models.append(("linear", self.linear))
             except Exception as e:
                 log.warning(f"LinearTrend failed: {e}")
@@ -150,7 +186,7 @@ class EnsembleForecaster(BaseForecastModel):
         if not skip_lstm:
             try:
                 log.info("Fitting LSTM...")
-                self.lstm.fit(df, target_col, **kwargs)
+                self.lstm.fit(dense_df, target_col, **kwargs)
                 self._active_models.append(("lstm", self.lstm))
                 log.info("LSTM fitted successfully")
             except Exception as e:
@@ -163,7 +199,7 @@ class EnsembleForecaster(BaseForecastModel):
         # Fit Prophet
         try:
             log.info("Fitting Prophet...")
-            self.prophet.fit(df, target_col, **kwargs)
+            self.prophet.fit(observed_df, target_col, **kwargs)
             self._active_models.append(("prophet", self.prophet))
             log.info("Prophet fitted successfully")
         except Exception as e:
@@ -177,7 +213,7 @@ class EnsembleForecaster(BaseForecastModel):
 
         # LinearTrend as safety net
         try:
-            self.linear.fit(df, target_col)
+            self.linear.fit(observed_df, target_col)
             self._active_models.append(("linear", self.linear))
         except Exception:
             pass
