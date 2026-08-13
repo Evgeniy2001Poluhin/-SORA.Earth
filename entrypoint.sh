@@ -17,8 +17,13 @@ set -e
 #     docker compose run --rm migrate
 #
 # scripts/deploy_production.sh does that before it recreates anything, and a
-# failure there stops the deployment instead of restarting a container until it
-# works.
+# failure there stops the deployment and rolls the containers back instead of
+# restarting one until it works.
+#
+# It does not roll the schema back. A migration that failed partway, or one
+# whose statements are not transactional, leaves the schema where it left it --
+# what this arrangement buys is that the schema is never changed by two
+# processes at once and never changed after the new code is already serving.
 #
 # The check below is read-only -- one SELECT of alembic_version, no lock, no
 # DDL -- so every replica can run it. A container that starts against a database

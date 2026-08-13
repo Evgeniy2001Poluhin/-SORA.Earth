@@ -114,7 +114,14 @@ def test_no_proxy_pass_targets_a_bare_hostname():
 def test_the_deploy_script_recreates_nginx_after_the_backend():
     """The ordering is the guarantee. nginx must re-resolve *after* the new
     backend exists, or it caches the address that is about to be replaced."""
-    up = DEPLOY.index("up -d --build --remove-orphans", DEPLOY.index('step "deploying"'))
+    # Either build form: since #125 the application image is built once, in its
+    # own step, and the start uses --no-build so it cannot differ from the image
+    # the migration ran from. What this test is about is the order, and pinning
+    # the flag made it fail on a change that did not touch the order at all.
+    start = re.search(r"up -d --(?:no-)?build --remove-orphans",
+                      DEPLOY[DEPLOY.index('step "deploying"'):])
+    assert start, "the deployment no longer starts the services"
+    up = DEPLOY.index('step "deploying"') + start.start()
     recreate = DEPLOY.index("up -d --force-recreate nginx", up)
 
     assert recreate > up, (

@@ -112,19 +112,37 @@ case "$argv" in
         # assertion held for the wrong reason -- an unconditional
         # `docker stop $now` would have passed it too.
         [ -f "$STUB_DIR/pre_cids" ] && cat "$STUB_DIR/pre_cids"
-        [ -f "$STUB_DIR/calls" ] && grep -q 'up -d --build' "$STUB_DIR/calls" \
+        [ -f "$STUB_DIR/calls" ] && grep -qE 'up -d (--build|--no-build) --remove-orphans' "$STUB_DIR/calls" \
             && echo "cid-created-by-this-run"
         exit 0 ;;
     # Before every other `up`/`run` branch: the migration step must be
     # distinguishable from a container start, or "migrated once, first" cannot
     # be told from "started something".
-    *"run --rm --build migrate"*|*"run --rm migrate"*)
+    # The tag's id, and a way for a test to make the running container disagree
+    # with it. Without a branch here the id comes back empty and the identity
+    # check refuses every deployment for the wrong reason.
+    *"image inspect"*)
+        cat "$STUB_DIR/app_image_id" 2>/dev/null || echo "sha256:image"
+        exit 0 ;;
+    *"build backend"*)
+        [ -f "$STUB_DIR/build_fails" ] && exit 1
+        exit 0 ;;
+    *"run --rm --no-deps migrate"*|*"run --rm --build migrate"*|*"run --rm migrate"*)
         n=$(( $(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0) + 1 ))
         echo "$n" > "$STUB_DIR/migrate_calls"
         [ -f "$STUB_DIR/migrate_fails" ] && exit 1
         exit 0 ;;
     *"up -d postgres"*)
         [ -f "$STUB_DIR/postgres_fails" ] && exit 1
+        exit 0 ;;
+    *"up -d --no-build --remove-orphans"*)
+        # The deployment start. `--no-build` because everything was built in one
+        # step above; recorded separately from the rollback's `up -d --no-build`,
+        # which carries no --remove-orphans.
+        [ -f "$STUB_DIR/slow_up" ] && sleep 6
+        n=$(( $(cat "$STUB_DIR/up_calls" 2>/dev/null || echo 0) + 1 ))
+        echo "$n" > "$STUB_DIR/up_calls"
+        if [ -f "$STUB_DIR/up_fails_after_first" ] && [ "$n" -gt 1 ]; then exit 1; fi
         exit 0 ;;
     *"up -d --no-build"*)
         # The exact-image restore. Recorded so a test can tell it from a
@@ -1256,7 +1274,7 @@ run_guard
 # Line numbers in the recorded call log, so this is about order in time and not
 # about the order the two greps happen to appear in.
 MIG_LINE="$(grep -n 'run --rm --build migrate' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
-UP_LINE="$(grep -n 'up -d --build --remove-orphans' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+UP_LINE="$(grep -n 'up -d --no-build --remove-orphans' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
 check "the migration is recorded before the containers are recreated" \
     "$([ -n "$MIG_LINE" ] && [ -n "$UP_LINE" ] && [ "$MIG_LINE" -lt "$UP_LINE" ] && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
@@ -1268,9 +1286,9 @@ refused_because "a failed migration refuses the deployment" "alembic upgrade hea
 # The point of moving it out of the entrypoint: a failure stops the deploy
 # instead of restarting a container until it works.
 check "and nothing was recreated" \
-    "$(grep -c 'up -d --build --remove-orphans' "$STUB_DIR/calls")" "0"
+    "$(grep -c 'up -d --no-build --remove-orphans' "$STUB_DIR/calls")" "0"
 check "and no manifest was written" \
-    "$(ls "$SANDBOX/manifests" 2>/dev/null | wc -l | tr -d ' ')" "0"
+    "$(find "$SANDBOX/manifests" -type f 2>/dev/null | wc -l | tr -d ' ')" "0"
 rm -rf "$SANDBOX"
 
 new_sandbox
@@ -1279,6 +1297,42 @@ run_guard
 refused_because "a database that will not start refuses the deployment" "postgres would not start"
 check "and the migration was not attempted against nothing" \
     "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" "0"
+rm -rf "$SANDBOX"
+
+echo "== the migration and the application are one image, not two builds =="
+# `migrate`, `backend` and `scheduler` share one tag and only `backend` builds
+# it, so "migrated from the image being deployed" is a fact rather than a
+# resemblance. These cases are about the script honouring that.
+
+new_sandbox
+run_guard
+check "the image is built once, explicitly" \
+    "$(grep -c 'build backend' "$STUB_DIR/calls")" "1"
+# --no-build on the start: a rebuild there could produce a different image than
+# the one just migrated from, which is the gap the shared tag closes.
+check "and the containers start without rebuilding" \
+    "$(grep -c 'up -d --no-build --remove-orphans' "$STUB_DIR/calls")" "1"
+BUILD_LINE="$(grep -n 'build backend' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+MIG_LINE="$(grep -n 'run --rm --no-deps migrate' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+check "and the build comes before the migration" \
+    "$([ -n "$BUILD_LINE" ] && [ -n "$MIG_LINE" ] && [ "$BUILD_LINE" -lt "$MIG_LINE" ] && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+new_sandbox
+touch "$STUB_DIR/build_fails"
+run_guard
+refused_because "an image that will not build refuses the deployment" "would not build"
+check "and no migration was attempted" \
+    "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# The tag resolves to one id; the running container reports another. Whatever
+# the cause -- something rebuilt behind the script, the tag moved -- the
+# migration belongs to a build nobody is serving.
+echo "sha256:a-different-image" > "$STUB_DIR/app_image_id"
+run_guard
+refused_because "a container running a different image than the migration" "not the sha256:a-different-image the migration ran from"
 rm -rf "$SANDBOX"
 
 echo "== the application containers do not migrate =="

@@ -58,17 +58,20 @@ services:
   migrate:
     profiles: ["migration"]
     user: "1000:1000"
-    build:
-      context: .
-      dockerfile: Dockerfile.prod
-      target: runtime
+    # No `build:` of its own. Three services with the same Dockerfile are three
+    # build invocations and formally three results; the claim "migrated from the
+    # image being deployed" needs identity, not similarity. One tag, built once
+    # by `backend`, referenced by all three.
+    image: ${SORA_APP_IMAGE:-sora_earth_app:current}
     entrypoint: ["alembic", "upgrade", "head"]
     restart: "no"
+    # DATABASE_URL and nothing else. Measured: `alembic upgrade head` takes a
+    # fresh database to head with no JWT_SECRET and no ADMIN_API_KEY -- env.py
+    # imports app.database, which reaches no other app module and never touches
+    # app.secret_validation. A one-shot schema owner has no use for either.
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       ENV: production
-      JWT_SECRET: ${JWT_SECRET}
-      ADMIN_API_KEY: ${ADMIN_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -77,6 +80,10 @@ services:
     user: "1000:1000"
     volumes:
       - ./models:/app/models
+    # The one place the application image is built. `migrate` and `scheduler`
+    # reference the same tag, so all three are the same image by construction
+    # rather than by resemblance.
+    image: ${SORA_APP_IMAGE:-sora_earth_app:current}
     build:
       context: .
       dockerfile: Dockerfile.prod
@@ -104,10 +111,7 @@ services:
     user: "1000:1000"
     volumes:
       - ./models:/app/models
-    build:
-      context: .
-      dockerfile: Dockerfile.prod
-      target: runtime
+    image: ${SORA_APP_IMAGE:-sora_earth_app:current}
     restart: unless-stopped
     command: python3 -u run_scheduler.py
     environment:

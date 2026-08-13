@@ -46,6 +46,78 @@ def _host(url):
 # --- one owner --------------------------------------------------------------
 
 
+def test_the_three_services_are_one_image(compose):
+    """Identity, not resemblance.
+
+    Three services with the same Dockerfile are three build invocations and
+    formally three results, so "the migration ran from the image being
+    deployed" would have been a hope. One tag, built by `backend` alone and
+    referenced by the other two, makes it a fact.
+    """
+    services = compose["services"]
+    images = {n: services[n].get("image") for n in ("backend", "scheduler", "migrate")}
+
+    assert all(images.values()), images
+    assert len(set(images.values())) == 1, images
+
+    builders = [n for n in ("backend", "scheduler", "migrate") if "build" in services[n]]
+    assert builders == ["backend"], (
+        f"{builders} each build the shared tag; more than one builder is more "
+        f"than one image"
+    )
+
+
+def test_the_deploy_script_and_the_compose_file_name_the_same_image():
+    """The script captures the tag's id; the compose file resolves the tag.
+
+    Two defaults written in two files drift, and the failure would be a
+    deployment refusing because it inspected an image nobody built.
+    """
+    source = open(DEPLOY).read()
+    compose_text = open(COMPOSE).read()
+
+    match = re.search(r'APP_IMAGE="\$\{SORA_APP_IMAGE:-([^}"]+)\}"', source)
+    assert match, "the deploy script no longer defines APP_IMAGE with a default"
+
+    assert ("${SORA_APP_IMAGE:-%s}" % match.group(1)) in compose_text, (
+        f"the script defaults to {match.group(1)}, which the compose file does "
+        f"not reference"
+    )
+
+
+def test_the_deployment_starts_without_rebuilding():
+    """A rebuild at start could differ from the image just migrated from."""
+    source = open(DEPLOY).read()
+
+    phase_at = source.find("journal_write mutating")
+    build_at = source.find('"${DC[@]}" build backend', phase_at)
+    start_at = source.find("up -d --no-build --remove-orphans", phase_at)
+
+    assert build_at != -1, "the explicit build step is gone"
+    assert start_at != -1, (
+        "the deployment start rebuilds; it must reuse the image that was "
+        "migrated from"
+    )
+    assert build_at < start_at
+
+
+def test_the_migrator_carries_no_secrets_it_does_not_need(compose):
+    """Measured, not assumed: `alembic upgrade head` takes a fresh database to
+    head with DATABASE_URL alone. env.py imports app.database, which reaches no
+    other app module and never touches app.secret_validation.
+
+    A one-shot schema owner holding JWT_SECRET and ADMIN_API_KEY is a wider
+    blast radius bought for nothing.
+    """
+    env = compose["services"]["migrate"]["environment"]
+
+    assert "DATABASE_URL" in env
+    for secret in ("JWT_SECRET", "ADMIN_API_KEY", "HF_API_TOKEN", "OPENAQ_API_KEY"):
+        assert secret not in env, (
+            f"the migrator is given {secret}, which alembic does not use"
+        )
+
+
 def test_the_migrate_service_exists_and_runs_alembic(compose):
     service = compose["services"]["migrate"]
 
@@ -155,8 +227,8 @@ def test_the_deploy_script_migrates_before_it_recreates():
     # the migration against the rollback's call and failed for a reason that
     # had nothing to do with the order it names.
     phase_at = source.find("journal_write mutating")
-    migrate_at = source.find("run --rm --build migrate", phase_at)
-    recreate_at = source.find("up -d --build --remove-orphans", phase_at)
+    migrate_at = source.find("run --rm --no-deps migrate", phase_at)
+    recreate_at = source.find("up -d --no-build --remove-orphans", phase_at)
 
     assert phase_at != -1, "the mutating phase is no longer marked"
     assert migrate_at != -1, "the deploy script no longer runs the migrator"
