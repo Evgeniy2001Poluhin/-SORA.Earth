@@ -12,14 +12,46 @@ try:
 except ImportError:
     pass
 
+# PostgreSQL, or a refusal. There is no SQLite fallback.
+#
+# There was one -- `os.getenv("DATABASE_URL", "sqlite:///data/sora.db")` -- and
+# it made `alembic upgrade head` with no DATABASE_URL do something worse than
+# fail: it built part of a schema in a stray file and then died inside a
+# revision on `to_regclass`, a PostgreSQL function, with an error about SQL
+# syntax rather than about the database being the wrong one.
+#
+# The migration chain is PostgreSQL-only by construction: named CHECK
+# constraints, partial unique indexes, `EXTRACT(EPOCH ...)`, `to_regclass`,
+# transactional DDL. The suite reflects that -- every migration test carries
+# `requires_postgres` and skips elsewhere. So the honest behaviour on any other
+# backend is to say so before running anything.
+db_url = os.getenv("DATABASE_URL", "")
+if not db_url:
+    raise SystemExit(
+        "DATABASE_URL is not set. The migrations are PostgreSQL-specific and "
+        "this command will not guess a database; set DATABASE_URL to the "
+        "PostgreSQL instance you mean to migrate."
+    )
+if not db_url.startswith("postgres"):
+    raise SystemExit(
+        f"DATABASE_URL points at {db_url.split('://', 1)[0]}, and the "
+        f"migrations are PostgreSQL-specific -- named CHECK constraints, "
+        f"partial indexes, to_regclass. Running them elsewhere produces a "
+        f"partial schema and an error about syntax rather than about the "
+        f"backend."
+    )
+
+# Checked here, above `from app.database import Base`, and not below it.
+# app.database builds its engine at import time from the same variable, so a
+# non-PostgreSQL URL raised there first -- `ModuleNotFoundError: No module
+# named 'MySQLdb'` at env.py line 15 -- and this refusal was never reached. A
+# guard placed after the thing it guards is decoration.
 from app.database import Base
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# DATABASE_URL from env, fallback to sqlite
-db_url = os.getenv("DATABASE_URL", "sqlite:///data/sora.db")
 config.set_main_option("sqlalchemy.url", db_url)
 target_metadata = Base.metadata
 

@@ -3,7 +3,7 @@ import asyncio, logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable
+from typing import Optional, Iterable
 import httpx
 
 log = logging.getLogger(__name__)
@@ -34,6 +34,26 @@ class Signal:
 class BaseIngester(ABC):
     name: str = "base"
     default_ttl_hours: int = 720
+    """How long a fetched value stays usable before this source is polled again.
+
+    A cache and scheduling concern. It is **not** how old the newest observation
+    may be: for openmeteo the two coincide (hourly polls, hourly observations),
+    and for rosstat they do not (a 180-day poll of an annual statistic, whose
+    newest observation is legitimately over a year old). Reusing this as a
+    vintage tolerance made every clean rosstat run escalate forever -- measured
+    on production, vintage 590 days against a 180-day ttl (#74).
+    """
+
+    max_vintage_hours: Optional[int] = None
+    """How old the newest *observation* may be before the source is unusable.
+
+    `None` means no contract has been declared, and freshness then takes no part
+    in the verdict: it can neither raise an action nor certify one. That is
+    deliberate -- a threshold nobody wrote down is a threshold nobody agreed to,
+    and inventing one produces alerts that are noise and silences that are
+    unearned. The run record carries `freshness_status="not_configured"` so a
+    `none` is never read as proven freshness.
+    """
     max_retries: int = 3
     timeout_s: float = 30.0
 

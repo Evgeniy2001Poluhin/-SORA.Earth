@@ -14,7 +14,7 @@ from app.drift_detection import drift_detector
 from app.mlflow_tracking import get_experiment_stats
 from app.rate_limit import rate_limiter
 from app.middleware import METRICS, START_TIME
-from app.schemas import ProjectInput as Project
+from app.schemas import IngestionAttention, ProjectInput as Project
 
 import time
 
@@ -272,6 +272,112 @@ def invalidate_cache_prefix(prefix: str):
         redis_client.delete(*keys)
     return {'cleared': len(keys), 'prefix': prefix, 'keys': keys}
 
+
+
+@router.get("/ingestion/attention", tags=["infrastructure"],
+            response_model=IngestionAttention)
+def ingestion_attention(_admin=Depends(require_admin)):
+    """The current state of every source, ordered by what it needs.
+
+    #74. `ingester_runs` had no reader at all: the table was written on every
+    run and nothing in the API, the frontend or any dashboard could see it. A
+    verdict nobody can read is the same as no verdict, which is how 333
+    consecutive empty openaq runs went unnoticed (#56, #57).
+
+    Sorted by `required_action`, not by time. An `escalate` from yesterday
+    outranks a `wait` from a minute ago, and a list sorted by time buries
+    exactly the row an operator is looking for.
+
+    One row per source -- its latest finished run. An operator asks what the
+    state is now; the history is a different question and a different endpoint.
+
+    Admin-only. `failure_reason` carries the text of whatever exception the run
+    raised, which for a database failure is infrastructure detail -- host,
+    user, driver -- that has no business on an unauthenticated endpoint. The
+    neighbouring routes in this module are public; that is not a reason to add
+    one more that leaks more than they do.
+    """
+    from sqlalchemy import func
+
+    from app.database import IngesterRun, SessionLocal
+    from app.ingesters.classification import ACTION_SEVERITY
+
+    db = SessionLocal()
+    try:
+        # The last run to *finish*, per source -- not the largest id.
+        #
+        # id follows start order, and two runs can finish in the reverse of the
+        # order they started: a long one begun first, a short one begun after
+        # and done sooner. Picking max(id) then reports the earlier verdict as
+        # current. Ordered by finished_at with id as the tie-break, so runs that
+        # finish within the same clock tick still resolve deterministically.
+        #
+        # A row per (source, finished_at) pair rather than DISTINCT ON, which is
+        # PostgreSQL-only and would make this untestable on the engine the suite
+        # runs.
+        newest = (
+            db.query(
+                IngesterRun.source.label("source"),
+                func.max(IngesterRun.finished_at).label("finished_at"),
+            )
+            .filter(IngesterRun.finished_at.isnot(None))
+            .group_by(IngesterRun.source)
+            .subquery()
+        )
+        latest_ids = (
+            db.query(func.max(IngesterRun.id))
+            .join(
+                newest,
+                (IngesterRun.source == newest.c.source)
+                & (IngesterRun.finished_at == newest.c.finished_at),
+            )
+            .group_by(IngesterRun.source)
+            .scalar_subquery()
+        )
+        runs = db.query(IngesterRun).filter(IngesterRun.id.in_(latest_ids)).all()
+
+        rows = [
+            {
+                "source": r.source,
+                "required_action": r.required_action,
+                "reason_code": r.reason_code,
+                "status": r.status,
+                # The verdict and its inputs. `none` beside
+                # freshness_status="not_configured" says the run was healthy and
+                # nobody has declared how old this source's data may be -- which
+                # is not the same claim as proven freshness (#74).
+                "source_vintage_seconds": r.source_vintage_seconds,
+                "max_vintage_seconds": r.max_vintage_seconds,
+                "freshness_status": r.freshness_status,
+                "records_received": r.records_received,
+                "records_accepted": r.records_accepted,
+                "records_rejected": r.records_rejected,
+                "failure_reason": r.failure_reason,
+                "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            }
+            for r in runs
+        ]
+
+        # An unrecognised or absent action sorts to the top rather than the
+        # bottom. A row whose action nobody can read is not a row to skip past;
+        # it is the one case where the record itself is broken.
+        def key(row):
+            severity = ACTION_SEVERITY.get(row["required_action"])
+            return (0 if severity is None else 1, -(severity or 0),
+                    -(row["source_vintage_seconds"] or 0))
+
+        rows.sort(key=key)
+
+        return {
+            "count": len(rows),
+            "needs_attention": sum(
+                1 for r in rows
+                if r["required_action"] not in ("none",)
+            ),
+            "sources": rows,
+        }
+    finally:
+        db.close()
 
 
 @router.get("/infra/data-refresh-status", tags=["infrastructure"])
