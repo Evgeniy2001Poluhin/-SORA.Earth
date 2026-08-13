@@ -148,7 +148,14 @@ def source_vintage(source: str):
                 "     WHEN temporal_kind = 'period'   THEN period_end "
                 "  END))) AS age, "
                 "  count(*) FILTER (WHERE temporal_kind = 'not_applicable') AS na, "
-                "  count(*) AS total "
+                # Legacy rows are excluded from the denominator as well as from
+                # the axis. Counting them made `na == total` false for every
+                # real source: sber_veb_baseline holds 85 not_applicable rows
+                # beside 2040 legacy ones, so the state introduced for exactly
+                # that source never fired and every clean run of it reported
+                # `unknown` -> investigate. Measured on production.
+                "  count(*) FILTER (WHERE temporal_kind <> 'legacy_ingestion_time') "
+                "    AS datable_total "
                 "FROM environmental_observations WHERE source = :s"),
                 {"s": source}).one()
         finally:
@@ -157,11 +164,13 @@ def source_vintage(source: str):
         log.warning("[runner] source_vintage failed for %s: %s", source, e)
         return None, VINTAGE_UNKNOWN
 
-    age, not_applicable, total = row
+    age, not_applicable, datable_total = row
     if age is not None:
         return float(age), VINTAGE_MEASURED
-    if total and not_applicable == total:
-        # Every row the source has is dated-nothing. Staleness does not apply.
+    if datable_total and not_applicable == datable_total:
+        # Every row that is not a legacy artefact is dated-nothing. Staleness
+        # does not apply -- there is no answer, rather than an answer nobody
+        # measured.
         return None, VINTAGE_NOT_APPLICABLE
     return None, VINTAGE_UNKNOWN
 

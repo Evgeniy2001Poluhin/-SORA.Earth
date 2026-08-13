@@ -66,10 +66,34 @@ def upgrade() -> None:
         if name not in existing:
             op.add_column(TABLE, sa.Column(name, type_, nullable=True))
 
-    op.create_index(INDEX, TABLE, ["required_action", sa.text("started_at DESC")])
+    # Checked, like the columns above. The index is also declared in the model's
+    # __table_args__, so on a database where `Base.metadata.create_all()` built
+    # the tables -- the converged path production actually took, and the one
+    # tests/test_schema_is_migrated.py exercises -- it already exists, and an
+    # unconditional CREATE INDEX fails the whole revision with DuplicateTable.
+    #
+    # Half-idempotent is the worst of both: it works on a fresh install, where
+    # nobody notices, and refuses on the deployment shape that already has data.
+    if not _index_exists(conn):
+        op.create_index(INDEX, TABLE, ["required_action", sa.text("started_at DESC")])
+
+
+def _index_exists(conn):
+    return conn.execute(sa.text(
+        "SELECT 1 FROM pg_indexes WHERE tablename = :t AND indexname = :i"),
+        {"t": TABLE, "i": INDEX}).scalar() is not None
 
 
 def downgrade() -> None:
-    op.drop_index(INDEX, table_name=TABLE)
+    conn = op.get_bind()
+
+    # Same reasoning in reverse: the index may have been created by the models
+    # rather than by this revision, and dropping what is not there is an error
+    # rather than a no-op.
+    if _index_exists(conn):
+        op.drop_index(INDEX, table_name=TABLE)
+
+    existing = _existing(conn)
     for name, _type in reversed(COLUMNS):
-        op.drop_column(TABLE, name)
+        if name in existing:
+            op.drop_column(TABLE, name)

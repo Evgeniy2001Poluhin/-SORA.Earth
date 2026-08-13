@@ -188,3 +188,27 @@ def test_a_mixed_source_takes_the_newest_row_that_has_an_axis(db):
     assert age == pytest.approx(2 * DAY, rel=0.01), (
         "the newest datable row is the observed one, two days old"
     )
+
+
+@requires_postgres
+def test_legacy_rows_do_not_hide_a_not_applicable_source(db):
+    """The state has to fire on the source it was introduced for.
+
+    Measured on production: sber_veb_baseline holds 85 `not_applicable` rows
+    beside 2040 `legacy_ingestion_time` ones. Counting legacy in the
+    denominator made `na == total` false, so the source reported `unknown` and
+    every clean run of it asked for an investigation -- the third state existed
+    and never once applied.
+    """
+    _add(db, "sber_veb_baseline", "not_applicable", rid="i")
+    for n in range(3):
+        _add(db, "sber_veb_baseline", "legacy_ingestion_time", rid=f"legacy{n}",
+             event_time=datetime.now(timezone.utc) - timedelta(days=n + 1))
+
+    age, basis = source_vintage("sber_veb_baseline")
+
+    assert basis == VINTAGE_NOT_APPLICABLE, (
+        f"basis={basis}: legacy rows are hiding the fact that every datable "
+        f"row of this source carries no date"
+    )
+    assert age is None
