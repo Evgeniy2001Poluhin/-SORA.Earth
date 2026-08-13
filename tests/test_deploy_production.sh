@@ -112,8 +112,47 @@ case "$argv" in
         # assertion held for the wrong reason -- an unconditional
         # `docker stop $now` would have passed it too.
         [ -f "$STUB_DIR/pre_cids" ] && cat "$STUB_DIR/pre_cids"
-        [ -f "$STUB_DIR/calls" ] && grep -q 'up -d --build' "$STUB_DIR/calls" \
+        [ -f "$STUB_DIR/calls" ] && grep -qE 'up -d (--build|--no-build) --remove-orphans' "$STUB_DIR/calls" \
             && echo "cid-created-by-this-run"
+        exit 0 ;;
+    # Before every other `up`/`run` branch: the migration step must be
+    # distinguishable from a container start, or "migrated once, first" cannot
+    # be told from "started something".
+    # The tag's id, and a way for a test to make the running container disagree
+    # with it. Without a branch here the id comes back empty and the identity
+    # check refuses every deployment for the wrong reason.
+    *"image inspect"*)
+        cat "$STUB_DIR/app_image_id" 2>/dev/null || echo "sha256:image"
+        exit 0 ;;
+    *"build backend"*)
+        [ -f "$STUB_DIR/build_fails" ] && exit 1
+        exit 0 ;;
+    *"run --rm --no-deps migrate"*|*"run --rm --build migrate"*|*"run --rm migrate"*)
+        n=$(( $(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0) + 1 ))
+        echo "$n" > "$STUB_DIR/migrate_calls"
+        [ -f "$STUB_DIR/migrate_fails" ] && exit 1
+        exit 0 ;;
+    *"up -d postgres"*)
+        [ -f "$STUB_DIR/postgres_fails" ] && exit 1
+        exit 0 ;;
+    *"up -d --no-build --remove-orphans"*)
+        # Both the deployment start and the rollback restore spell this the same
+        # way. They differ in one thing only: the restore passes a second `-f`,
+        # the generated image-pin override. Matching on the text alone swallowed
+        # the restore, so `no_build_fails` was never read, `rolled_back` was
+        # never set, and four rollback cases quietly stopped testing anything.
+        # Counted as tokens: `grep -c` counts matching lines, and argv is one
+        # line, so it answers 1 for both spellings and decides nothing.
+        if [ "$(printf '%s' "$argv" | tr ' ' '\n' | grep -c -- '^-f$')" -ge 2 ]; then
+            touch "$STUB_DIR/rolled_back"
+            [ -f "$STUB_DIR/no_build_fails" ] && exit 1
+            exit 0
+        fi
+        # The deployment start.
+        [ -f "$STUB_DIR/slow_up" ] && sleep 6
+        n=$(( $(cat "$STUB_DIR/up_calls" 2>/dev/null || echo 0) + 1 ))
+        echo "$n" > "$STUB_DIR/up_calls"
+        if [ -f "$STUB_DIR/up_fails_after_first" ] && [ "$n" -gt 1 ]; then exit 1; fi
         exit 0 ;;
     *"up -d --no-build"*)
         # The exact-image restore. Recorded so a test can tell it from a
@@ -1224,6 +1263,104 @@ check "a successful lookup finding nothing warns of real absence" \
 check "and it is not reported as undetermined" \
     "$(grep -qi 'could not query systemd' "$SANDBOX/out" && echo yes || echo no)" "no"
 rm -rf "$SANDBOX"
+
+echo "== migrations are one step, run once, before anything is recreated =="
+# #125. The application entrypoint used to run `alembic upgrade head`, and the
+# backend and the scheduler share that file, so `up -d` started two migrators
+# against one database at the same moment. These cases are about the three
+# properties the replacement has: once, first, and fatal.
+
+new_sandbox
+run_guard
+check "the migration step ran" \
+    "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" "1"
+# Exactly once, not at least once. Two migrators is the defect.
+check "and no more than once" \
+    "$(grep -c 'run --rm --no-deps migrate' "$STUB_DIR/calls")" "1"
+rm -rf "$SANDBOX"
+
+new_sandbox
+run_guard
+# Line numbers in the recorded call log, so this is about order in time and not
+# about the order the two greps happen to appear in.
+MIG_LINE="$(grep -n 'run --rm --no-deps migrate' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+UP_LINE="$(grep -n 'up -d --no-build --remove-orphans' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+check "the migration is recorded before the containers are recreated" \
+    "$([ -n "$MIG_LINE" ] && [ -n "$UP_LINE" ] && [ "$MIG_LINE" -lt "$UP_LINE" ] && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+new_sandbox
+touch "$STUB_DIR/migrate_fails"
+run_guard
+refused_because "a failed migration refuses the deployment" "alembic upgrade head failed"
+# The point of moving it out of the entrypoint: a failure stops the deploy
+# instead of restarting a container until it works.
+check "and nothing was recreated" \
+    "$(grep -c 'up -d --no-build --remove-orphans' "$STUB_DIR/calls")" "0"
+# A manifest, not "any file". `in-progress` lives in the same directory and is
+# supposed to be there: it is the journal saying the run was interrupted. The
+# first version of this counted it and reported a manifest that was never
+# written.
+check "and no manifest was written" \
+    "$(find "$SANDBOX/manifests" -type f -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')" "0"
+check "but the journal records the interruption" \
+    "$([ -f "$SANDBOX/manifests/in-progress" ] && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+new_sandbox
+touch "$STUB_DIR/postgres_fails"
+run_guard
+refused_because "a database that will not start refuses the deployment" "postgres would not start"
+check "and the migration was not attempted against nothing" \
+    "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" "0"
+rm -rf "$SANDBOX"
+
+echo "== the migration and the application are one image, not two builds =="
+# `migrate`, `backend` and `scheduler` share one tag and only `backend` builds
+# it, so "migrated from the image being deployed" is a fact rather than a
+# resemblance. These cases are about the script honouring that.
+
+new_sandbox
+run_guard
+check "the image is built once, explicitly" \
+    "$(grep -c 'build backend' "$STUB_DIR/calls")" "1"
+# --no-build on the start: a rebuild there could produce a different image than
+# the one just migrated from, which is the gap the shared tag closes.
+check "and the containers start without rebuilding" \
+    "$(grep -c 'up -d --no-build --remove-orphans' "$STUB_DIR/calls")" "1"
+BUILD_LINE="$(grep -n 'build backend' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+MIG_LINE="$(grep -n 'run --rm --no-deps migrate' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+check "and the build comes before the migration" \
+    "$([ -n "$BUILD_LINE" ] && [ -n "$MIG_LINE" ] && [ "$BUILD_LINE" -lt "$MIG_LINE" ] && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+new_sandbox
+touch "$STUB_DIR/build_fails"
+run_guard
+refused_because "an image that will not build refuses the deployment" "would not build"
+check "and no migration was attempted" \
+    "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# The tag resolves to one id; the running container reports another. Whatever
+# the cause -- something rebuilt behind the script, the tag moved -- the
+# migration belongs to a build nobody is serving.
+echo "sha256:a-different-image" > "$STUB_DIR/app_image_id"
+run_guard
+refused_because "a container running a different image than the migration" "not the sha256:a-different-image the migration ran from"
+rm -rf "$SANDBOX"
+
+echo "== the application containers do not migrate =="
+# A static read of the shipped entrypoint, because the property is "this file
+# contains no DDL command" and running it would need a database.
+ENTRYPOINT="$(cd "$(dirname "$0")/.." && pwd)/entrypoint.sh"
+check "entrypoint.sh exists" \
+    "$([ -f "$ENTRYPOINT" ] && echo yes || echo no)" "yes"
+check "and does not run alembic upgrade" \
+    "$(grep -cE '^[^#]*alembic[[:space:]]+upgrade' "$ENTRYPOINT")" "0"
+check "and does verify the schema version instead" \
+    "$(grep -cE '^[^#]*verify_schema_head' "$ENTRYPOINT")" "1"
 
 echo
 echo "  passed: $PASS   failed: $FAIL"

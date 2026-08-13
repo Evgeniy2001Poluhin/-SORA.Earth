@@ -37,10 +37,53 @@ services:
     volumes:
       - redisdata:/data
 
+  # The single migration owner (#125).
+  #
+  # backend and scheduler shared one entrypoint that ran `alembic upgrade head`,
+  # so `up -d` started two migrators against one database at once. Alembic takes
+  # no lock spanning that; whichever lost the race died, `restart:
+  # unless-stopped` brought it back, and by then the migration had usually been
+  # applied. A restart loop is not a synchronisation mechanism -- it happened to
+  # converge, which is a different thing from being designed to.
+  #
+  # `profiles` keeps it out of `docker compose up` entirely. Without it this
+  # service would be a third migrator rather than the only one; it is reached
+  # only by `docker compose run --rm migrate`, from scripts/deploy_production.sh,
+  # before either application service is recreated.
+  #
+  # It talks to `postgres` directly, not `pgbouncer`. The pooler runs
+  # `pool_mode = transaction`, where session-scoped state does not survive
+  # between transactions -- a migration using an advisory lock, a temp table or
+  # `SET LOCAL` outside its own transaction would find that out in production.
+  migrate:
+    profiles: ["migration"]
+    user: "1000:1000"
+    # No `build:` of its own. Three services with the same Dockerfile are three
+    # build invocations and formally three results; the claim "migrated from the
+    # image being deployed" needs identity, not similarity. One tag, built once
+    # by `backend`, referenced by all three.
+    image: ${SORA_APP_IMAGE:-sora_earth_app:current}
+    entrypoint: ["alembic", "upgrade", "head"]
+    restart: "no"
+    # DATABASE_URL and nothing else. Measured: `alembic upgrade head` takes a
+    # fresh database to head with no JWT_SECRET and no ADMIN_API_KEY -- env.py
+    # imports app.database, which reaches no other app module and never touches
+    # app.secret_validation. A one-shot schema owner has no use for either.
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   backend:
     user: "1000:1000"
     volumes:
       - ./models:/app/models
+    # The one place the application image is built. `migrate` and `scheduler`
+    # reference the same tag, so all three are the same image by construction
+    # rather than by resemblance.
+    image: ${SORA_APP_IMAGE:-sora_earth_app:current}
     build:
       context: .
       dockerfile: Dockerfile.prod
@@ -68,10 +111,7 @@ services:
     user: "1000:1000"
     volumes:
       - ./models:/app/models
-    build:
-      context: .
-      dockerfile: Dockerfile.prod
-      target: runtime
+    image: ${SORA_APP_IMAGE:-sora_earth_app:current}
     restart: unless-stopped
     command: python3 -u run_scheduler.py
     environment:

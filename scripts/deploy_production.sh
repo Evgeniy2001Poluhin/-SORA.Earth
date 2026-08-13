@@ -37,6 +37,10 @@ SITE="${SITE_URL:-https://sora-earth.online}"
 MANIFEST_DIR="${MANIFEST_DIR:-/var/lib/sora/deployments}"
 HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-5}"
 HEALTH_DELAY="${HEALTH_DELAY:-3}"
+# The single application image. backend, scheduler and migrate all reference it
+# in docker-compose.prod.yml; tests/test_migration_owner.py asserts the default
+# here and the default there have not drifted apart.
+APP_IMAGE="${SORA_APP_IMAGE:-sora_earth_app:current}"
 DC=(docker compose -p "$PROJECT" -f "$COMPOSE")
 
 cd "$REPO"
@@ -680,7 +684,61 @@ PHASE=mutating
 # the mutation succeeded records nothing about the case it exists for.
 journal_write mutating
 
-"${DC[@]}" up -d --build --remove-orphans
+# One migrator, before anything is recreated (#125).
+#
+# The application entrypoint used to run `alembic upgrade head`, and the backend
+# and the scheduler share that file, so `up -d` started two migrators against
+# one database at the same moment. Alembic takes no lock spanning that: the
+# loser died, `restart: unless-stopped` brought it back, and by then the
+# migration had usually been applied. That converged; it was never designed to.
+#
+# Three properties this arrangement has and that one did not:
+#
+#   once      `run --rm migrate` is a single container, and the `migration`
+#             profile keeps the service out of `up` so it cannot become a third
+#             migrator.
+#   first     the schema is at head before any application container starts.
+#             The entrypoint now verifies and refuses rather than migrating, so
+#             an out-of-order deploy stops here instead of crash-looping.
+#   fatal     a failed migration ends the deployment through the same rollback
+#             as any other refusal, rather than restarting a container until it
+#             works.
+#
+# `--build` because the migration has to come from the image being deployed, not
+# from whatever was cached. The service connects to `postgres` directly: the
+# pooler runs `pool_mode = transaction`, where session state does not survive
+# between transactions.
+# Built once, here, and not again. backend, scheduler and migrate all reference
+# ${SORA_APP_IMAGE}, so the image the migration runs from and the image the
+# application starts from are the same by construction. Two `--build`
+# invocations of the same Dockerfile are two build results, and "the migration
+# came from the deployed image" would have been a resemblance rather than a
+# fact.
+"${DC[@]}" build backend \
+    || fail "the application image would not build"
+
+APP_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null || true)"
+[ -n "$APP_IMAGE_ID" ] \
+    || fail "built $APP_IMAGE but cannot read its id, so nothing below can be verified against it"
+
+"${DC[@]}" up -d postgres \
+    || fail "postgres would not start, so migrations cannot run"
+
+# One migrator, from that exact image, before anything is recreated.
+#
+# A failure here stops the deployment and rolls the *containers* back. It does
+# not undo DDL: a migration that failed partway, or one whose statements are not
+# transactional, leaves the schema where it left it. What this buys is that the
+# schema is never changed by two processes at once and never changed after the
+# new code is already serving -- not that a half-applied migration repairs
+# itself.
+"${DC[@]}" run --rm --no-deps migrate \
+    || fail "alembic upgrade head failed; nothing has been recreated. The schema is wherever the migration left it -- inspect it before retrying."
+
+# --no-build, because everything that builds was built above. A rebuild here
+# could produce a different image than the one just migrated from, which is the
+# gap this arrangement closes.
+"${DC[@]}" up -d --no-build --remove-orphans
 
 # nginx is recreated, not restarted. Its configuration is a bind-mounted single
 # file, so the container stays pinned to the inode that existed when it was
@@ -691,6 +749,21 @@ journal_write mutating
 # ---------------------------------------------------------------- verification
 
 step "verifying what is actually running"
+
+# The application is running the image the migration ran from.
+#
+# Everything above arranges for that -- one tag, one build, --no-build on the
+# start -- but arrangement is not evidence. If backend came up on a different
+# image than $APP_IMAGE_ID, then either something rebuilt behind this script or
+# the tag moved, and the migration that just ran belonged to a build nobody is
+# serving.
+for svc in backend scheduler; do
+    _cid="$("${DC[@]}" ps -q "$svc" 2>/dev/null || true)"
+    [ -n "$_cid" ] || fail "$svc has no container, so its image cannot be checked"
+    _img="$(docker inspect -f '{{.Image}}' "$_cid" 2>/dev/null || true)"
+    [ "$_img" = "$APP_IMAGE_ID" ] || fail \
+        "$svc is running image $_img, not the $APP_IMAGE_ID the migration ran from"
+done
 
 RUNNING="$("${DC[@]}" ps --format '{{.Service}}' | sort | tr '\n' ' ')"
 for svc in "${DECLARED[@]}"; do
