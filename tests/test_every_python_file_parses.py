@@ -18,6 +18,8 @@ lived.
 """
 import ast
 import os
+import subprocess
+import tokenize
 
 import pytest
 
@@ -31,41 +33,100 @@ SKIP_DIRS = {
 }
 
 
-def _python_files():
+def _skipped(relative):
+    return any(part in SKIP_DIRS for part in relative.split(os.sep))
+
+
+def _walked_files():
+    """What this test will parse."""
+    found = []
     for root, dirs, files in os.walk(REPO_ROOT):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for name in files:
             if name.endswith(".py"):
-                yield os.path.join(root, name)
+                found.append(os.path.join(root, name))
+    return found
+
+
+def _tracked_files():
+    """What git says is in the repository -- an independent list.
+
+    Compared against the walk rather than against a hard-coded count. Review
+    asked for `== 334`, and that is a number someone bumps when it fails; this
+    updates itself with the tree and still catches a walk that silently stops
+    reaching a directory.
+    """
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.py"],
+        cwd=REPO_ROOT, capture_output=True, timeout=60,
+    )
+    if result.returncode != 0:
+        pytest.skip("git ls-files unavailable; no independent manifest to compare against")
+
+    return {
+        p for p in result.stdout.decode().split("\0")
+        if p and not _skipped(p)
+    }
 
 
 def _relative(path):
     return os.path.relpath(path, REPO_ROOT)
 
 
-def test_the_sweep_actually_reaches_the_tree():
-    """A denominator, so "0 unparseable" cannot come from an empty walk.
+def test_the_sweep_reaches_exactly_what_git_tracks():
+    """A denominator from a source other than the thing being measured.
 
-    A wrong REPO_ROOT, or one skip pattern too many, would make every assertion
-    below pass by finding nothing.
+    `len(found) > 250` -- the first version -- would pass on a walk that had
+    stopped reaching eighty files. Comparing sets says which ones.
+
+    Untracked files are allowed in the walk (a new file before `git add`); a
+    tracked file the walk misses is not.
     """
-    found = {_relative(p) for p in _python_files()}
+    walked = {_relative(p) for p in _walked_files()}
+    tracked = _tracked_files()
 
-    assert len(found) > 250, f"only {len(found)} files walked; the sweep is not reaching the tree"
-    assert "app/main.py" in found
-    assert "tests/conftest.py" in found
-    assert any(f.startswith("scripts/") for f in found), (
+    assert tracked, "git tracks no .py files, so this comparison proves nothing"
+    missed = sorted(tracked - walked)
+
+    assert missed == [], (
+        f"{len(missed)} tracked Python file(s) are not reached by the walk, so "
+        f"they are never checked: {missed[:10]}"
+    )
+    assert "app/main.py" in walked and "tests/conftest.py" in walked
+    assert any(f.startswith("scripts/") for f in walked), (
         "scripts/ is not being walked -- that is where #54 lived, and pytest "
         "never imports it"
     )
-    assert any(f.startswith("alembic/versions/") for f in found), (
+    assert any(f.startswith("alembic/versions/") for f in walked), (
         "migrations are not being walked"
     )
 
 
-@pytest.mark.parametrize("path", sorted(_python_files()), ids=_relative)
+def test_no_python_file_is_a_symlink():
+    """A symlinked .py would be read through, possibly from outside the tree.
+
+    `os.walk(followlinks=False)` controls only whether *directories* are
+    followed; a symlinked file is still yielded and still opened. There are
+    none today (the two symlinks in the repo are app/static/assets and
+    app/static/index.html), so this states the assumption the parse loop makes
+    rather than hardening against a case that exists.
+    """
+    links = sorted(_relative(p) for p in _walked_files() if os.path.islink(p))
+
+    assert links == [], (
+        f"{links} are symlinks; the parse loop would read whatever they point "
+        f"at, which need not be in this repository"
+    )
+
+
+@pytest.mark.parametrize("path", sorted(_walked_files()), ids=_relative)
 def test_the_file_parses(path):
-    source = open(path, encoding="utf-8").read()
+    # tokenize.open, not open(encoding="utf-8"): PEP 263 lets a file declare its
+    # own encoding, and a `# coding: latin-1` header would raise
+    # UnicodeDecodeError here -- a failure about this test's assumptions rather
+    # than a verdict on the file.
+    with tokenize.open(path) as handle:
+        source = handle.read()
 
     try:
         ast.parse(source, filename=path)
