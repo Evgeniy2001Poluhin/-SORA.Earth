@@ -32,7 +32,7 @@ SORA.Earth AI Platform — полнофункциональная платфор
 - **Operations / Admin*тформу и инициирует действия. [file:892]
 
 - **Наблюдаемость и прод**
-  - Prometheus‑метрики (`/api/v1/metrics/prometheus`), HTTP + доменные `sora_*` метрики. [file:892][web:1033]
+  - Prometheus‑метрики на `/metrics` — реестр `prometheus_client`, HTTP + доменные `sora_*`. Это тот путь, который скрейпит `infra/prometheus.yml`. `/api/v1/metrics/prometheus` отдаёт тот же реестр. [file:892][web:1033]
   - Grafana‑дашборд “SORA MLOps Overview” и 5 алертов (drift, retrain fail, AUC drop, latency, app down). [file:892]
   - Nginx reverse proxy (порт 80) с rate limiting, security‑заголовками, gzip и WebSocket‑проксированием. [file:892]
 

@@ -112,10 +112,16 @@ JSON login.
 ## Monitoring API
 
 ### GET `/api/v1/metrics`
-Базовые метрики.
+Операционные счётчики процесса в JSON: запросы по эндпоинтам и статусам,
+uptime, времена ответа. Prometheus их не скрейпит.
+
+### GET `/metrics`
+Реестр `prometheus_client`: доменные `sora_*` и HTTP-инструментация. Это тот
+путь, который настроен в `infra/prometheus.yml`.
 
 ### GET `/api/v1/metrics/prometheus`
-Метрики в формате Prometheus.
+Тот же реестр, что и `/metrics`. До #94 собирался вручную из словаря процесса и
+не содержал ни одной из метрик, объявленных в `app/prom_metrics.py`.
 
 ### GET `/api/v1/system-metrics`
 Системные метрики.
