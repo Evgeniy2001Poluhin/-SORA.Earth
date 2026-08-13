@@ -15,6 +15,21 @@ import pytest
 from app.database import IngesterRun, SessionLocal
 
 
+@pytest.fixture(autouse=True)
+def as_admin(client):
+    """The endpoint is admin-only: `failure_reason` carries exception text.
+
+    Overriding the dependency rather than minting a token keeps these tests
+    about the view. tests/test_ingestion_attention_auth.py covers the refusal.
+    """
+    from app.auth import require_admin
+    from app.main import app
+
+    app.dependency_overrides[require_admin] = lambda: {"username": "t", "role": "admin"}
+    yield
+    app.dependency_overrides.pop(require_admin, None)
+
+
 @pytest.fixture
 def runs():
     """Rows written directly, so the view is tested and not the runner."""

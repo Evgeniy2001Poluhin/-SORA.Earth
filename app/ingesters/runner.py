@@ -307,7 +307,22 @@ async def run_all_ingesters() -> dict:
                           freshness=freshness, max_vintage_seconds=max_vintage)
         except Exception as e:
             verdict = classify_run(raised=e)
-            action, vintage, freshness, max_vintage = _decide(ing, verdict)
+            # Defensively, because this is already the failure path.
+            #
+            # `_decide` reads the ingester's own attributes and calls float() on
+            # one of them. If that raises here, the exception escapes
+            # run_all_ingesters entirely: _audit_finish never runs, this run
+            # stays at `running` forever -- and the attention view filters
+            # unfinished runs, so the source silently disappears from the one
+            # place an operator would look -- and every remaining ingester is
+            # skipped. A verdict with unknown inputs is worth more than that.
+            try:
+                action, vintage, freshness, max_vintage = _decide(ing, verdict)
+            except Exception as decide_error:
+                log.warning("[runner] could not decide for %s: %s",
+                            ing.name, decide_error)
+                action, vintage, freshness, max_vintage = (
+                    required_action(verdict), None, None, None)
             stats["ingesters"][ing.name] = {"status": "error", "error": str(e),
                                             "required_action": action,
                                             "source_vintage_seconds": vintage,

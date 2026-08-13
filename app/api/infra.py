@@ -14,7 +14,7 @@ from app.drift_detection import drift_detector
 from app.mlflow_tracking import get_experiment_stats
 from app.rate_limit import rate_limiter
 from app.middleware import METRICS, START_TIME
-from app.schemas import ProjectInput as Project
+from app.schemas import IngestionAttention, ProjectInput as Project
 
 import time
 
@@ -274,8 +274,9 @@ def invalidate_cache_prefix(prefix: str):
 
 
 
-@router.get("/ingestion/attention", tags=["infrastructure"])
-def ingestion_attention():
+@router.get("/ingestion/attention", tags=["infrastructure"],
+            response_model=IngestionAttention)
+def ingestion_attention(_admin=Depends(require_admin)):
     """The current state of every source, ordered by what it needs.
 
     #74. `ingester_runs` had no reader at all: the table was written on every
@@ -289,6 +290,12 @@ def ingestion_attention():
 
     One row per source -- its latest finished run. An operator asks what the
     state is now; the history is a different question and a different endpoint.
+
+    Admin-only. `failure_reason` carries the text of whatever exception the run
+    raised, which for a database failure is infrastructure detail -- host,
+    user, driver -- that has no business on an unauthenticated endpoint. The
+    neighbouring routes in this module are public; that is not a reason to add
+    one more that leaks more than they do.
     """
     from sqlalchemy import func
 

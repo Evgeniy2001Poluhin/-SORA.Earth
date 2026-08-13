@@ -92,3 +92,66 @@ def test_within_tolerance_is_fresh(monkeypatch):
 
     assert freshness == FRESH
     assert action == "none"
+
+
+# --- the failure path ---------------------------------------------------------
+
+
+def test_a_decide_that_raises_does_not_abandon_the_run(monkeypatch):
+    """`_decide` is called from inside the `except` handler.
+
+    If it raises there, the exception escapes `run_all_ingesters`: this run's
+    row stays at `running` forever -- and the attention view filters unfinished
+    runs, so the source vanishes from the one place an operator would look --
+    and every remaining ingester is skipped. A verdict with unknown inputs is
+    worth more than that.
+
+    Mutation-checked: removing the guard makes this fail, and nothing else did.
+    """
+    import asyncio
+
+    finished = []
+
+    class _Boom:
+        name = "boom"
+        default_ttl_hours = 1
+
+        async def fetch_with_retry(self):
+            raise RuntimeError("the source exploded")
+
+    class _After:
+        name = "after"
+        default_ttl_hours = 1
+
+        async def fetch_with_retry(self):
+            return []
+
+    monkeypatch.setattr(runner, "INGESTERS", [_Boom, _After])
+    monkeypatch.setattr(runner, "_audit_start", lambda source: 1)
+    monkeypatch.setattr(runner, "_audit_finish",
+                        lambda rid, verdict, **kw: finished.append(
+                            (verdict.reason_code, kw.get("action"))))
+    monkeypatch.setattr(runner, "_persist_signals",
+                        lambda signals, source: {"received": 0, "accepted": 0,
+                                                 "rejected": 0})
+    def _vintage(name):
+        # Only for the ingester that already failed. Making it raise for both
+        # would exercise the success path instead, which has its own handling
+        # and is not what this test is about.
+        if name == "boom":
+            raise RuntimeError("vintage lookup exploded")
+        return None, runner.VINTAGE_UNKNOWN
+
+    monkeypatch.setattr(runner, "source_vintage", _vintage)
+    monkeypatch.setattr("app.services.esg_aggregator.recalc_all_regions",
+                        lambda: {}, raising=False)
+
+    stats = asyncio.run(runner.run_all_ingesters())
+
+    assert [name for name, _a in finished] == ["crashed", "source_empty"], (
+        f"{finished}: the crashed run was not recorded, or the ingester after "
+        f"it never ran"
+    )
+    assert "boom" in stats["ingesters"] and "after" in stats["ingesters"]
+    # The verdict survives even though its inputs could not be measured.
+    assert finished[0][1] in ("investigate", "escalate")
