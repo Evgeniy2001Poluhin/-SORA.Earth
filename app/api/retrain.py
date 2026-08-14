@@ -355,6 +355,12 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
             # becomes possible, and a comparison across that boundary would be
             # a comparison of two different measurements.
             "split_kind": SPLIT_KIND,
+            # The class counts of the test set, not only its size. A confidence
+            # bound on AUC needs both -- the estimate's precision depends on how
+            # many of each there were, and 171 rows split 120/51 is a different
+            # measurement from 171 split 5/166.
+            "test_positive": int((y_test == 1).sum()),
+            "test_negative": int((y_test == 0).sum()),
         }
         with open(os.path.join(MODELS_DIR, "metrics.json"), "w") as f:
             json.dump(new_metrics, f, indent=2)
