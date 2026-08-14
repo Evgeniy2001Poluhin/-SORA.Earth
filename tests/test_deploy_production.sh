@@ -127,6 +127,17 @@ case "$argv" in
         # comparison alone cannot reject.
         cat "$STUB_DIR/container_created" 2>/dev/null || echo "2026-08-14T03:39:28.100020191Z"
         exit 0 ;;
+    *"exec -T backend python3 -"*)
+        # The post-deploy behaviour probe. Reads its own route table from the
+        # running app, so the stub answers with a route table and the codes a
+        # correct deployment produces; a case that wants a defect overwrites
+        # `probe_json`.
+        if [ -f "$STUB_DIR/probe_json" ]; then
+            cat "$STUB_DIR/probe_json"
+        else
+            printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":404,"get_only_path":"/api/v1/ab/stats","get_only":405,"post_path":"/api/v1/auth/login","post":422}'
+        fi
+        exit 0 ;;
     *"verify_schema_head.py"*)
         [ -f "$STUB_DIR/schema_behind" ] && {
             echo "REFUSING TO START: the database is behind" >&2; exit 1; }
@@ -244,6 +255,18 @@ echo "$n" > "$n_file"
 # marker could be dropped and every acceptance query would silently go back to
 # counting the deployment's own retries as user traffic.
 printf '%s\n' "$*" >> "$STUB_DIR/curl_args"
+# The behaviour probe asks about three specific paths and must not consume the
+# health sequence: those codes are about a different question, and letting the
+# probe eat them made the health retry cases fail for a reason that had nothing
+# to do with health.
+case "$*" in
+    *__deploy_probe_absent__*)
+        printf '%s' "$(cat "$STUB_DIR/probe_ext_absent" 2>/dev/null || echo 404)"; exit 0 ;;
+    *"/api/v1/ab/stats"*)
+        printf '%s' "$(cat "$STUB_DIR/probe_ext_get_only" 2>/dev/null || echo 405)"; exit 0 ;;
+    *"/api/v1/auth/login"*)
+        printf '%s' "$(cat "$STUB_DIR/probe_ext_post" 2>/dev/null || echo 422)"; exit 0 ;;
+esac
 total=$(wc -l < "$seq_file")
 line=$(( n <= total ? n : total ))
 code="$(sed -n "${line}p" "$seq_file")"
@@ -1615,3 +1638,82 @@ rm -rf "$SANDBOX"
 echo
 echo "  passed: $PASS   failed: $FAIL"
 [ "$FAIL" -eq 0 ]
+
+echo "== the deployed code is asked how it behaves, not only whether it answers =="
+# The class this covers is "CI and the image build different applications", and
+# no test suite can see it: on 2026-08-14 a catch-all registered only where the
+# SPA has been built made every absent path answer 404 in CI and 405 on
+# production, on the same commit, with every health check green (#177).
+#
+# Each case below reproduces that shape and asserts the deployment stops --
+# without rolling back, and without recording itself.
+
+new_sandbox
+run_guard
+check "a correct deployment passes the behaviour probe" "$RC" "0"
+check "and says so" \
+    "$(grep -qc 'behaviour matches inside the container and through nginx' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "and records itself" \
+    "$(find "$SANDBOX/manifests" -type f -name '*.txt' | wc -l | tr -d ' ')" "1"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# The #177 defect exactly: an absent path claims the verb is the problem.
+printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":405,"get_only_path":"/api/v1/ab/stats","get_only":405,"post_path":"/api/v1/auth/login","post":422}' \
+    > "$STUB_DIR/probe_json"
+run_guard
+refused_because "an absent path answering 405 stops the deployment" "expected 404"
+check "and nothing was rolled back" \
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo rolled || echo untouched)" "untouched"
+check "and no manifest was written" \
+    "$(find "$SANDBOX/manifests" -type f -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')" "0"
+check "and the journal is left for a human" \
+    "$([ -f "$SANDBOX/manifests/in-progress" ] && echo present || echo gone)" "present"
+check "and both recoveries are named" \
+    "$(grep -qc -- '--rollback' "$SANDBOX/out" && grep -qc -- '--finalize' "$SANDBOX/out" && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# The mirror defect: answering 404 everywhere denies that real endpoints exist.
+printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":404,"get_only_path":"/api/v1/ab/stats","get_only":404,"post_path":"/api/v1/auth/login","post":422}' \
+    > "$STUB_DIR/probe_json"
+run_guard
+refused_because "a real GET-only route answering 404 stops the deployment" "expected 405 for a GET-only route"
+check "and nothing was rolled back" \
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo rolled || echo untouched)" "untouched"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# A published POST route denying its own verb.
+printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":404,"get_only_path":"/api/v1/ab/stats","get_only":405,"post_path":"/api/v1/auth/login","post":405}' \
+    > "$STUB_DIR/probe_json"
+run_guard
+refused_because "a published POST route denying POST stops the deployment" "must not deny it"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# nginx and the container disagreeing is itself the finding: a layer between the
+# caller and the application is answering, and no test sees that layer.
+echo "405" > "$STUB_DIR/probe_ext_absent"
+run_guard
+refused_because "nginx and the container disagreeing stops the deployment" "disagree about the same request"
+check "and nothing was rolled back" \
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo rolled || echo untouched)" "untouched"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# A route table that cannot be read is not a pass. The check must refuse rather
+# than skip: "could not look" and "looked and found nothing wrong" are different.
+printf '%s\n' '{"error":"URLError"}' > "$STUB_DIR/probe_json"
+run_guard
+refused_because "an unreadable route table stops the deployment" "would not serve its own route table"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# And the probe choosing nothing is the same: an application with no GET-only
+# or POST route to ask about leaves this check reporting on nothing.
+printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":404,"get_only_path":null,"get_only":null,"post_path":null,"post":null}' \
+    > "$STUB_DIR/probe_json"
+run_guard
+refused_because "no probeable routes stops the deployment" "cannot report on an application it could not read"
+rm -rf "$SANDBOX"
