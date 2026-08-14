@@ -1,4 +1,3 @@
-import uuid
 import pytest
 from starlette.testclient import TestClient
 from app.main import app
@@ -30,25 +29,9 @@ def test_login_wrong_password():
     r = c.post("/api/v1/auth/login-json", json={"username": "admin", "password": "wrong"})
     assert r.status_code in (401, 403)
 
-def test_register():
-    c = TestClient(app, raise_server_exceptions=False)
-    token = _get_token(c, ADMIN_CREDS)
-    assert token
-    unique = f"testuser_{uuid.uuid4().hex[:8]}"
-    r = c.post("/api/v1/auth/register",
-        json={"username": unique, "password": "StrongPass1!", "role": "viewer"},
-        headers={"Authorization": f"Bearer {token}"})
-    assert r.status_code in (200, 201), f"Register failed: {r.status_code} {r.text[:300]}"
-    assert r.json()["username"] == unique
-
-def test_register_duplicate():
-    c = TestClient(app, raise_server_exceptions=False)
-    token = _get_token(c, ADMIN_CREDS)
-    assert token
-    r = c.post("/api/v1/auth/register",
-        json={"username": "admin", "password": "StrongPass1!", "role": "viewer"},
-        headers={"Authorization": f"Bearer {token}"})
-    assert r.status_code in (409, 422, 400)
+# test_register and test_register_duplicate were here. The endpoint they
+# exercised was removed in #169: it answered 200 and lost the account on the
+# next restart. Its absence is asserted in tests/test_accounts_are_not_persisted.py.
 
 def test_me_without_token():
     c = TestClient(app, raise_server_exceptions=False)

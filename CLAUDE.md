@@ -211,10 +211,31 @@ SQLAlchemy models in `app/database.py`:
 - `PredictionLog` - Prediction logs with features + latency metrics
 - `DriftLog` - Drift detection results (drift_detected, p_values, features)
 - `RetrainLog` - Model retrain decisions (trigger, outcome, auc_old, auc_new)
-- `User` - Auth users (hashed passwords with bcrypt)
 - `RefreshJob` - External data refresh job status
 
 **Connection:** PostgreSQL via SQLAlchemy async engine. Pool size: 10, max overflow: 20.
+
+**There is no `User` table, and user accounts are not persisted.** This list
+named one, "Auth users (hashed passwords with bcrypt)"; both halves were wrong,
+and the second is the kind of error that gets repeated into a security review.
+
+```
+USERS_DB      in-memory, module-level dict in app/auth.py, rebuilt on every
+              import from SORA_DEFAULT_{ADMIN,ANALYST,VIEWER}_PASSWORD.
+              Production refuses to start if those are unset; the literal dev
+              passwords apply only outside production.
+hashing       Argon2id (argon2-cffi), not bcrypt. Two legacy SHA-256 verify
+              paths remain in the code and are unreachable: all five writes of
+              `hashed_password` go through _hash_password, and nothing loads a
+              hash from anywhere else.
+accounts      three roles, and only those three. POST /auth/register was
+              removed in #169 -- it answered 200 and lost the account on the
+              next restart.
+```
+
+`legacy_hash_count()` therefore cannot return anything but zero. That is a
+property of the architecture, not evidence that a migration finished, and it is
+why the removal plan in #25 has nothing to measure.
 
 ### API Organization
 

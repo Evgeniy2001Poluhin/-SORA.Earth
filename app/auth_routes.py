@@ -4,8 +4,8 @@ from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from app.auth import (
-    Token, UserCreate, UserInfo, USERS_DB,
-    _hash_password, verify_password, authenticate,
+    Token, UserInfo, USERS_DB,
+    verify_password, authenticate,
     create_access_token, create_refresh_token,
     validate_refresh_token, revoke_refresh_token,
     require_auth, require_admin, require_api_key, require_admin_apikey,
@@ -69,19 +69,20 @@ def refresh_token(request: Request, body: RefreshRequest):
                  request.client.host if request.client else "unknown")
     return Token(access_token=access, refresh_token=refresh)
 
-@router.post("/auth/register", tags=["auth"])
-def register_user(request: Request, user_data: UserCreate,
-                  current_user: UserInfo = Depends(require_admin)):
-    if user_data.username in USERS_DB:
-        raise HTTPException(status_code=409, detail="Username already exists")
-    USERS_DB[user_data.username] = {
-        "username": user_data.username, "hashed_password": _hash_password(user_data.password),
-        "role": user_data.role, "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    record_audit(current_user.username, "register_user", "/auth/register", "POST",
-                 request.client.host if request.client else "unknown",
-                 details=f"created '{user_data.username}' role='{user_data.role}'")
-    return {"username": user_data.username, "role": user_data.role}
+# POST /auth/register was here and is gone (#169).
+#
+# It answered 200 and lost the account on the next restart. `USERS_DB` is a
+# module-level dict rebuilt at import from SORA_DEFAULT_*_PASSWORD; there is no
+# `users` table and no external load path, so an account created through this
+# route existed for the lifetime of one process and no longer.
+#
+# Nothing called it -- not the frontend, not the documentation, only tests. So
+# the choice was between removing it and labelling it, and a label does not
+# change what an endpoint does: the false expectation of durability comes from
+# the successful response, not from the absence of a caveat.
+#
+# Restoring it means giving user accounts somewhere to live first. Until then
+# the platform has exactly three roles, supplied by the environment, and says so.
 
 @router.get("/auth/me", tags=["auth"])
 def get_me(user: UserInfo = Depends(require_auth)):
