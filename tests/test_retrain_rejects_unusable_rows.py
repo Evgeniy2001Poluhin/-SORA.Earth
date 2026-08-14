@@ -85,14 +85,24 @@ def test_a_row_with_a_missing_feature_is_dropped(dataset):
 
 
 def test_an_infinite_derived_feature_is_dropped(dataset):
-    """`co2_per_dollar` is a division, and a large enough numerator overflows.
+    """A **finite** input that overflows when the feature is derived.
+
+    The first version of this assigned `np.inf` to `co2_reduction`, which tests
+    an infinite raw value -- a different and easier case, and not the one the
+    docstring claimed. `efficiency_score` is
+    `co2_reduction * social_impact / duration_months`, so 1e308 times a
+    single-digit impact exceeds float64 while every stored value is finite.
 
     The denominators are clipped, so a zero divisor is already impossible --
     which is why the guard is on the result and not on the inputs.
     """
     df = _frame(40)
-    df.loc[7, "co2_reduction"] = np.inf
+    df.loc[7, "co2_reduction"] = 1e308
+    df.loc[7, "social_impact"] = 9.0
+    df.loc[7, "duration_months"] = 3.0
     dataset(df)
+
+    assert np.isfinite(df.loc[7, "co2_reduction"]), "the input must be finite"
 
     assert _retrain(min_samples=10)["status"] in ("success", "accepted")
 
@@ -194,3 +204,42 @@ def test_the_background_job_does_not_raise_into_the_server(dataset):
     dataset(_frame(40, successes=[1] * 40))   # one class: _do_retrain refuses
 
     retrain._retrain_in_background(10)        # must return, not raise
+
+
+# --- labels are checked, not coerced -----------------------------------------
+
+
+def test_a_fractional_label_is_refused_not_truncated(dataset):
+    """`astype(int)` turns 0.9 into 0 and 1.9 into 1.
+
+    The model would then be trained on a value nobody wrote, differing from
+    the CSV it came from, with nothing anywhere saying so.
+    """
+    df = _frame(40)
+    df["success"] = df["success"].astype(float)
+    df.loc[9, "success"] = 0.9
+    dataset(df)
+
+    with pytest.raises(HTTPException) as exc:
+        _retrain(min_samples=10)
+
+    assert exc.value.status_code == 400
+    assert "not 0 or 1" in str(exc.value.detail)
+
+
+def test_a_split_that_leaves_one_class_on_a_side_is_refused(dataset):
+    """The split is temporal and does not shuffle.
+
+    A dataset ordered by outcome passes the global two-class check and still
+    puts every failure in the first 80% and every success in the last 20%.
+    `rf.fit` then trains a one-class model and `predict_proba(...)[:, 1]`
+    indexes a column that does not exist -- an IndexError far from its cause.
+    """
+    df = _frame(40, successes=[0] * 32 + [1] * 8)
+    dataset(df)
+
+    with pytest.raises(HTTPException) as exc:
+        _retrain(min_samples=10)
+
+    assert exc.value.status_code == 400
+    assert "one outcome class in" in str(exc.value.detail)

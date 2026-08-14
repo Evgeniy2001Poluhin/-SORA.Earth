@@ -214,10 +214,22 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
             )
 
         X = df[feature_cols].values
-        # int, not whatever read_csv inferred. A `success` column holding one
+
+        # Checked, not coerced. `astype(int)` on its own turns 0.9 into 0 and
+        # 1.9 into 1, so a mislabelled row trains the model on a value nobody
+        # wrote -- silently, and differently from the CSV it came from.
+        labels = df["success"]
+        off_scale = labels[~labels.isin([0, 1])]
+        if len(off_scale) > 0:
+            raise HTTPException(
+                400,
+                f"{len(off_scale)} rows have a success value that is not 0 or 1 "
+                f"(first: {off_scale.iloc[0]!r})",
+            )
+        # int, not whatever read_csv inferred: a `success` column holding one
         # NaN is read as float64, and the classifier then trains on 0.0/1.0
         # labels while `stratify` and the metrics expect discrete classes.
-        y = df["success"].values.astype(int)
+        y = labels.values.astype(int)
 
         # One class cannot be scored. `roc_auc_score` raises "Only one class
         # present in y_true", which reads as a bug in the metric rather than as
@@ -235,6 +247,23 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
         X_train, y_train = X[:split_idx], y[:split_idx]
         X_test, y_test = X[split_idx:], y[split_idx:]
         logger.info("Temporal split: train=%d, test=%d", len(X_train), len(X_test))
+
+        # Both classes on both sides, checked after the split rather than only
+        # over the whole set.
+        #
+        # The split is temporal and does not shuffle, so a dataset ordered by
+        # outcome satisfies the global check and still puts every failure in
+        # the first 80% and every success in the last 20%. `rf.fit` then trains
+        # a one-class model and `predict_proba(...)[:, 1]` indexes a column
+        # that does not exist -- an IndexError far from the cause.
+        for part, labels_part in (("train", y_train), ("test", y_test)):
+            if len(set(labels_part.tolist())) < 2:
+                raise HTTPException(
+                    400,
+                    f"The temporal split leaves one outcome class in {part} "
+                    f"({sorted(set(labels_part.tolist()))}); the data is "
+                    f"ordered by outcome and cannot be split this way",
+                )
 
         # Walk-forward cross-validation
         wf = walk_forward_validate(RandomForestClassifier, X, y)
