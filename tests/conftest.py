@@ -623,3 +623,38 @@ def no_scheduler_left_running():
         raise AssertionError(
             "Test left the APScheduler running; shut it down in a finally block."
         )
+
+
+def pytest_report_header(config):
+    """Say the required Python version before anything fails because of it.
+
+    On an interpreter older than 3.11 the `app` package does not import at all:
+    `app/rate_limit.py` and `app/secret_validation.py` annotate with `X | None`,
+    which is evaluated at run time and is a TypeError before 3.10. Forty-two
+    test files then stop collecting, each reporting a TypeError from a file
+    that has nothing to do with the test being run.
+
+    A header rather than a hard refusal. The version is a real requirement --
+    CI and the Dockerfile both pin 3.11 -- but the modules that do not import
+    `app` run correctly on 3.9, and refusing the whole suite would take away
+    the part that works to enforce a rule about the part that does not.
+
+    What was missing was not enforcement. It was anyone saying which version,
+    where a person would see it.
+    """
+    import sys
+
+    required = (3, 11)
+    running = sys.version_info[:2]
+    line = "python: %d.%d (required >=%d.%d, see pyproject.toml)" % (
+        running + required)
+    if running >= required:
+        return line
+    return [
+        line,
+        "WARNING: this interpreter is older than the project requires.",
+        "  The `app` package will not import; expect collection errors that",
+        "  name app/rate_limit.py or app/secret_validation.py and have nothing",
+        "  to do with the test being collected. Tests that do not import `app`",
+        "  still run.",
+    ]

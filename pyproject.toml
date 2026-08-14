@@ -1,0 +1,19 @@
+# The required Python version, said out loud.
+#
+# This is a declaration, not a packaging change: nothing installs this project
+# as a package -- CI and the Dockerfile both work from requirements.txt, and
+# pytest reads pytest.ini, which wins over any [tool.pytest.ini_options] here.
+#
+# It exists because 3.11 was enforced in four places a machine reads (the CI
+# workflow, twice in the Dockerfile) and stated in none that a person reads.
+# `app/rate_limit.py` and `app/secret_validation.py` use `X | None` in
+# annotations evaluated at run time, so on 3.9 the whole `app` package fails to
+# import and 42 test files stop collecting -- with a TypeError from a file that
+# has nothing to do with the test being run.
+#
+# tests/test_python_version_is_declared.py holds this in step with the workflow.
+[project]
+name = "sora-earth-platform"
+version = "0.2.2"
+description = "ESG evaluation and ML prediction platform"
+requires-python = ">=3.11"
