@@ -1,9 +1,18 @@
 # SORA.Earth AI Platform
 
-[![Tests](https://img.shields.io/badge/tests-375%2F384%20passing-brightgreen)](https://github.com/Evgeniy2001Poluhin/-SORA.Earth)
-[![Version](https://img.shields.io/badge/version-v0.2.1-blue)](https://github.com/Evgeniy2001Poluhin/-SORA.Earth/releases)
-[![CI](https://img.shields.io/badge/CI-passing-success)](https://github.com/Evgeniy2001Poluhin/-SORA.Earth/actions)
+[![CI](https://github.com/Evgeniy2001Poluhin/-SORA.Earth/actions/workflows/ci.yml/badge.svg)](https://github.com/Evgeniy2001Poluhin/-SORA.Earth/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Evgeniy2001Poluhin/-SORA.Earth)](https://github.com/Evgeniy2001Poluhin/-SORA.Earth/releases)
 [![License](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+
+<!-- Badges here report; they do not assert.
+     Three of the four that used to be here were hand-written images:
+       tests-375/384 passing   the suite has run 2025 tests for months
+       version-v0.2.1          the latest release is v0.3.0
+       CI-passing-success      a static picture of the word "passing", shown
+                               whether or not CI passes
+     The last is the one that mattered: a badge that cannot fail is decoration
+     claiming to be evidence. tests/test_readme_badges_report.py keeps them
+     honest. -->
 
 
 SORA.Earth AI Platform — полнофункциональная платформа для ESG‑оценки проектов, объяснимых ML‑предсказаний, страновой аналитики и автономного MLOps‑контурa с мониторингом и алертингом. [file:892]
@@ -104,5 +113,4 @@ C4-style диаграммы в `docs/diagrams/` (Mermaid, рендерятся �
 
 9 thesis-grade артефактов с подписями: [docs/screenshots/README.md](docs/screenshots/README.md).
 
-![CI](https://github.com/Evgeniy2001Poluhin/-SORA.Earth/actions/workflows/ci.yml/badge.svg)
-![Production](https://img.shields.io/badge/production-live-brightgreen)
+Production: <https://sora-earth.online> — health at `/health`.
