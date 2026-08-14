@@ -121,6 +121,17 @@ case "$argv" in
     # The tag's id, and a way for a test to make the running container disagree
     # with it. Without a branch here the id comes back empty and the identity
     # check refuses every deployment for the wrong reason.
+    *"inspect -f {{.Created}}"*)
+        # Container age. `container_created` lets a test place a container
+        # before the interrupted run began, which is the case an image
+        # comparison alone cannot reject.
+        cat "$STUB_DIR/container_created" 2>/dev/null || echo "2026-08-14T03:39:28.100020191Z"
+        exit 0 ;;
+    *"verify_schema_head.py"*)
+        [ -f "$STUB_DIR/schema_behind" ] && {
+            echo "REFUSING TO START: the database is behind" >&2; exit 1; }
+        echo "schema check: schema is at head"
+        exit 0 ;;
     *"image inspect"*)
         cat "$STUB_DIR/app_image_id" 2>/dev/null || echo "sha256:image"
         exit 0 ;;
@@ -1489,6 +1500,54 @@ else
 fi
 check "and the journal is cleared after the manifest is published, not before" \
     "$ORDER" "after"
+rm -rf "$SANDBOX"
+
+echo "== finalize proves the deployment happened, not merely that images match =="
+# A tag is a pointer and `docker inspect` describes what is running now. Neither
+# says *when* it started, so containers predating the interrupted run -- on the
+# same tag, because it had not moved yet -- satisfy an image comparison. The age
+# is the discriminator.
+
+new_sandbox
+write_journal "$SECOND"
+echo "2026-08-14T03:00:00.000000000Z" > "$STUB_DIR/container_created"
+run_guard --finalize
+refused_because "containers older than the interrupted run" "before the interrupted run started"
+check "and no manifest was written" \
+    "$(find "$SANDBOX/manifests" -type f -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')" "0"
+check "and the journal is left in place" \
+    "$([ -f "$SANDBOX/manifests/in-progress" ] && echo present || echo gone)" "present"
+rm -rf "$SANDBOX"
+
+new_sandbox
+write_journal "$SECOND"
+touch "$STUB_DIR/schema_behind"
+run_guard --finalize
+refused_because "a schema the running code does not accept" "cannot be confirmed"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# `rollback-failed` describes a run that refused and tried to undo itself. What
+# is running then is whatever the rollback managed, which is the one state
+# nobody may write a manifest for.
+write_journal "$SECOND"
+sed -i.bak 's/^state          mutating/state          rollback-failed/' "$SANDBOX/manifests/in-progress"
+run_guard --finalize
+refused_because "a journal that is not in state mutating" "not 'mutating'"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# The retry shape: finalize twice. The second must not write a second manifest.
+write_journal "$SECOND"
+run_guard --finalize
+check "the first finalize succeeds" "$RC" "0"
+FIRST_COUNT="$(find "$SANDBOX/manifests" -type f -name '*.txt' | wc -l | tr -d ' ')"
+run_guard --finalize
+check "the second says it is already done" "$RC" "0"
+check "and says so rather than sounding like a fault" \
+    "$(grep -qc 'already finalized' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "and writes no second manifest" \
+    "$(find "$SANDBOX/manifests" -type f -name '*.txt' | wc -l | tr -d ' ')" "$FIRST_COUNT"
 rm -rf "$SANDBOX"
 
 echo

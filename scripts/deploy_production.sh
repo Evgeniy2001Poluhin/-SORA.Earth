@@ -407,7 +407,19 @@ step "what may be deployed"
 if [ "$MODE" = finalize ]; then
     # The journal is the input here, not an obstacle. Without one there is
     # nothing to reconcile, and finalising anyway would invent a record.
-    [ -f "$JOURNAL" ] || fail "no unfinished deployment is recorded in $JOURNAL; nothing to finalize"
+    if [ ! -f "$JOURNAL" ]; then
+        # A second --finalize is the expected shape of a retry, so it says what
+        # is true rather than sounding like a fault.
+        if [ -L "$MANIFEST_DIR/latest" ] || [ -e "$MANIFEST_DIR/latest" ]; then
+            _last="$MANIFEST_DIR/$(readlink "$MANIFEST_DIR/latest" 2>/dev/null || true)"
+            if grep -q '^finalized      yes' "$_last" 2>/dev/null; then
+                echo "  already finalized: $(basename "$_last")"
+                echo "  nothing to do; no journal remains and the record exists"
+                exit 0
+            fi
+        fi
+        fail "no unfinished deployment is recorded in $JOURNAL; nothing to finalize"
+    fi
     echo "  reconciling the record of an interrupted run:"
     sed 's/^/    /' "$JOURNAL"
     # Everything below is read from what that run wrote, so the record names
@@ -419,6 +431,21 @@ if [ "$MODE" = finalize ]; then
         || fail "the journal records no target commit; it cannot be reconciled automatically"
     [ "$JOURNAL_MODE" = deploy ] \
         || fail "the interrupted run was '$JOURNAL_MODE', and only a deploy can be finalized"
+    # `mutating` is the only state a finished-but-unrecorded run can be left in.
+    # `rollback-impossible` or `rollback-failed` describe a run that refused and
+    # tried to undo itself: what is running then is whatever the rollback
+    # managed, which is exactly the state nobody may write a manifest for.
+    JOURNAL_STATE="$(awk '/^state /{print $2}' "$JOURNAL")"
+    [ "$JOURNAL_STATE" = mutating ] \
+        || fail "the journal is in state '$JOURNAL_STATE', not 'mutating'; only a run interrupted while deploying can be finalized"
+    JOURNAL_STARTED="$(awk '/^started /{print $2}' "$JOURNAL")"
+    JOURNAL_PREVIOUS="$(awk '/^previous /{print $2}' "$JOURNAL")"
+    [ -n "$JOURNAL_STARTED" ] \
+        || fail "the journal records no start time; container ages cannot be checked against it"
+    echo "  run       ${FINALIZED_RUN:-unknown}"
+    echo "  started   $JOURNAL_STARTED"
+    echo "  target    $TARGET"
+    echo "  previous  ${JOURNAL_PREVIOUS:-none}"
 elif [ -f "$JOURNAL" ]; then
     echo "  an unfinished deployment is recorded:" >&2
     sed 's/^/    /' "$JOURNAL" >&2
@@ -729,6 +756,34 @@ if [ "$MODE" = finalize ]; then
     APP_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null || true)"
     [ -n "$APP_IMAGE_ID" ] \
         || fail "$APP_IMAGE does not exist, so what is running cannot be checked against it"
+
+    # A tag is a pointer and `docker inspect` describes whatever is running now.
+    # Neither says *when* it started, so containers predating the interrupted
+    # run -- on the same tag, because it had not moved yet -- would satisfy an
+    # image comparison and let this write a manifest for a deployment that never
+    # happened. The age is the discriminator.
+    _started_epoch="$(date -u -d "$JOURNAL_STARTED" +%s 2>/dev/null \
+        || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$JOURNAL_STARTED" +%s 2>/dev/null || true)"
+    [ -n "$_started_epoch" ] \
+        || fail "could not parse the journal start time '$JOURNAL_STARTED'"
+    for _svc in backend scheduler; do
+        _cid="$("${DC[@]}" ps -q "$_svc" 2>/dev/null || true)"
+        [ -n "$_cid" ] || fail "$_svc has no container; the deployment did not complete"
+        _created="$(docker inspect -f '{{.Created}}' "$_cid" 2>/dev/null || true)"
+        _created_epoch="$(date -u -d "$_created" +%s 2>/dev/null \
+            || date -u -j -f '%Y-%m-%dT%H:%M:%S' "${_created%%.*}" +%s 2>/dev/null || true)"
+        [ -n "$_created_epoch" ] \
+            || fail "could not read when $_svc was created; its age cannot be checked"
+        [ "$_created_epoch" -ge "$_started_epoch" ] || fail \
+            "$_svc was created at $_created, before the interrupted run started at $JOURNAL_STARTED; it is not part of that deployment"
+        echo "  $_svc created $_created, after the run began"
+    done
+
+    # The schema, asked of the code that is running rather than of the tree.
+    # Read-only -- one SELECT of alembic_version, no lock, no DDL -- and it is
+    # the same check the entrypoint makes on every start (#125).
+    "${DC[@]}" exec -T backend python3 ./scripts/verify_schema_head.py \
+        || fail "the running backend does not consider the schema to be at head; the migration this run applied cannot be confirmed"
 else
 PHASE=mutating
 # Written before the first change, not after: a journal that appears only once
@@ -1167,6 +1222,10 @@ TMP_MANIFEST="$MANIFEST.tmp"
     echo "previous_images:"
     printf '%s\n' "$PREV_IMAGES" | sed 's/^/  /'
 } > "$TMP_MANIFEST"
+# The file's own contents first: a rename makes the name durable, not the bytes
+# behind it. Without this a crash can leave a manifest that exists and is empty,
+# which reads as "this deployment recorded nothing" rather than as a loss.
+sync "$TMP_MANIFEST" 2>/dev/null || sync
 mv "$TMP_MANIFEST" "$MANIFEST"
 
 # The pointer moves last, and atomically. Everything above can refuse, and every
@@ -1190,6 +1249,11 @@ mv -Tf "$MANIFEST_DIR/.latest.$$" "$LATEST"
 # `cat` would happily show.
 sync "$MANIFEST_DIR" 2>/dev/null || sync
 journal_clear
+# And again, because the removal is itself a directory entry. Without it a crash
+# here leaves the journal on disk beside a manifest that already describes the
+# same run -- the next deployment then refuses, pointing at a run that is fully
+# recorded.
+sync "$MANIFEST_DIR" 2>/dev/null || sync
 
 cat "$MANIFEST"
 echo
