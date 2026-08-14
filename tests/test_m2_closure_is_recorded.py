@@ -123,7 +123,12 @@ def test_the_verdict_names_the_commit_it_is_attached_to(protocol):
     The gate is executable at that commit, so the condition the verdict turns on
     can be re-run rather than taken on the document's word.
     """
-    assert "e82d682d2ee102374680e93bf201c6693c88f1ac" in protocol
-    assert "PR #158" in protocol
+    # The combined record, not three separate strings. Each of them could match
+    # somewhere unrelated -- "PR #158" appears wherever that PR is discussed,
+    # and a bare "entry_conditions.py" matches any path ending in it -- so the
+    # assertion would hold with the SHA and the PR number in different
+    # paragraphs, describing different things.
+    assert ("merged e82d682d2ee102374680e93bf201c6693c88f1ac (PR #158)"
+            in protocol)
     assert "7 of 7 jobs green" in protocol
-    assert "entry_conditions.py" in protocol
+    assert "app/services/forecasting/entry_conditions.py" in protocol
