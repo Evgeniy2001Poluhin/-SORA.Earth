@@ -156,7 +156,7 @@ case "$argv" in
         if [ -f "$STUB_DIR/probe_json" ]; then
             cat "$STUB_DIR/probe_json"
         else
-            printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":404,"get_only_path":"/api/v1/ab/stats","get_only":405,"post_path":"/api/v1/auth/login","post":422}'
+            printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":404,"get_only_path":"/api/v1/ab/stats","get_only":405}'
         fi
         exit 0 ;;
     *"verify_schema_head.py"*)
@@ -1675,7 +1675,7 @@ rm -rf "$SANDBOX"
 
 new_sandbox
 # The #177 defect exactly: an absent path claims the verb is the problem.
-printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":405,"get_only_path":"/api/v1/ab/stats","get_only":405,"post_path":"/api/v1/auth/login","post":422}' \
+printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":405,"get_only_path":"/api/v1/ab/stats","get_only":405}' \
     > "$STUB_DIR/probe_json"
 run_guard
 refused_because "an absent path answering 405 stops the deployment" "expected 404"
@@ -1691,7 +1691,7 @@ rm -rf "$SANDBOX"
 
 new_sandbox
 # The mirror defect: answering 404 everywhere denies that real endpoints exist.
-printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":404,"get_only_path":"/api/v1/ab/stats","get_only":404,"post_path":"/api/v1/auth/login","post":422}' \
+printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":404,"get_only_path":"/api/v1/ab/stats","get_only":404}' \
     > "$STUB_DIR/probe_json"
 run_guard
 refused_because "a real GET-only route answering 404 stops the deployment" "expected 405 for a GET-only route"
@@ -1699,13 +1699,11 @@ check "and nothing was rolled back" \
     "$([ -f "$STUB_DIR/rolled_back" ] && echo rolled || echo untouched)" "untouched"
 rm -rf "$SANDBOX"
 
-new_sandbox
-# A published POST route denying its own verb.
-printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":404,"get_only_path":"/api/v1/ab/stats","get_only":405,"post_path":"/api/v1/auth/login","post":405}' \
-    > "$STUB_DIR/probe_json"
-run_guard
-refused_because "a published POST route denying POST stops the deployment" "must not deny it"
-rm -rf "$SANDBOX"
+# There is no case for "a published POST route denies POST". The probe no
+# longer sends one: measured against production, the first sorted candidate is
+# /api/v1/ab/predict, which writes to prediction_log -- so the check would have
+# manufactured a prediction on every deployment, into the table the platform's
+# own analytics read. A verification step must not change what it verifies.
 
 new_sandbox
 # nginx and the container disagreeing is itself the finding: a layer between the
@@ -1728,7 +1726,7 @@ rm -rf "$SANDBOX"
 new_sandbox
 # And the probe choosing nothing is the same: an application with no GET-only
 # or POST route to ask about leaves this check reporting on nothing.
-printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":404,"get_only_path":null,"get_only":null,"post_path":null,"post":null}' \
+printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":404,"get_only_path":null,"get_only":null}' \
     > "$STUB_DIR/probe_json"
 run_guard
 refused_because "no probeable routes stops the deployment" "cannot report on an application it could not read"

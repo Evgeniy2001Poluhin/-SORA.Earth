@@ -1234,7 +1234,7 @@ halt_without_rollback() {
     echo "  what this run deployed, and the journal still says so." >&2
     echo >&2
     echo "  Two ways out, and this run takes neither:" >&2
-    echo "    $0 --rollback $PREV_COMMIT" >&2
+    echo "    $0 --rollback ${PREV_COMMIT:-<the commit that was running before>}" >&2
     echo "        if the behaviour above is wrong" >&2
     echo "    $0 --finalize" >&2
     echo "        if it is right and only this check is mistaken" >&2
@@ -1281,17 +1281,32 @@ except Exception as exc:
 paths = spec.get("paths", {})
 # Sorted, so two runs against the same image choose the same routes and a
 # difference in the result is a difference in behaviour.
-verbs = {p: {v.lower() for v in paths[p]} for p in sorted(paths)}
+# Only the API surface. Unconstrained, the first sorted GET-only path is "/",
+# the SPA root -- a 405 from it says nothing about the API, which is where the
+# #177 defect lived.
+verbs = {p: {v.lower() for v in paths[p]} for p in sorted(paths)
+         if p.startswith("/api/")}
 get_only = next((p for p in verbs if verbs[p] == {"get"} and "{" not in p), None)
-takes_post = next((p for p in verbs if "post" in verbs[p] and "{" not in p), None)
 
+# No POST route is probed, and that is a deliberate departure from the plan
+# this step was written to.
+#
+# The check would have been "a published POST route does not deny POST", with
+# the route discovered rather than listed. Measured against production's own
+# document, the first sorted candidate is /api/v1/ab/predict -- which writes
+# a row to prediction_log. The verification step would have manufactured a
+# prediction on every deployment, into the table the platform's analytics read,
+# and the ordering is alphabetical: tomorrow's first candidate is whatever is
+# added under an earlier name.
+#
+# A verification step must not change what it verifies. The two questions left
+# are the ones the #177 class turns on -- an absent path and a wrong verb --
+# and routing answers both before any handler runs.
 print(json.dumps({
     "absent_path": "/api/v1/__deploy_probe_absent__",
     "absent": code("/api/v1/__deploy_probe_absent__"),
     "get_only_path": get_only,
     "get_only": code(get_only),
-    "post_path": takes_post,
-    "post": code(takes_post),
 }))
 PROBE
 )
@@ -1314,26 +1329,30 @@ fi
 
 ABSENT_PATH="$(_probe_field absent_path)"
 GET_ONLY_PATH="$(_probe_field get_only_path)"
-POST_PATH="$(_probe_field post_path)"
 
 # `if`, not `A && B || C`. That chain reads as if-then-else and is not one --
 # a lesson this file already carries twice.
-if [ -z "$GET_ONLY_PATH" ] || [ -z "$POST_PATH" ]; then
-    halt_without_rollback "the route table offers no GET-only and POST routes to probe; this check cannot report on an application it could not read"
+if [ -z "$GET_ONLY_PATH" ]; then
+    halt_without_rollback "the route table offers no GET-only /api/ route to probe; this check cannot report on an application it could not read"
 fi
 
 echo "  probing, chosen from the running route table:"
 echo "    absent    $ABSENT_PATH"
 echo "    GET-only  $GET_ONLY_PATH"
-echo "    POST      $POST_PATH"
 
 # Through nginx as well as inside the container. The two disagreeing is itself
 # the finding: it means a layer between the caller and the application is
 # answering, and the tests never see that layer at all.
 _external_code() {
-    curl -s -o /dev/null -w '%{http_code}' -X POST \
+    # No `|| echo 000`. curl already writes `000` when it cannot connect *and*
+    # exits non-zero, so the fallback appended a second one: the function
+    # returned `000000`, matching neither an expected code nor an unexpected
+    # one, and an unreachable site would have passed.
+    local out
+    out="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
         -H 'Content-Type: application/json' -A "$DEPLOY_PROBE_UA" \
-        -d '{}' "$SITE$1" 2>/dev/null || echo 000
+        -d '{}' "$SITE$1" 2>/dev/null)"
+    printf '%s' "${out:-000}"
 }
 
 _behaviour_row() {
@@ -1345,14 +1364,11 @@ _behaviour_row() {
 
 INSIDE_ABSENT="$(_probe_field absent)"
 INSIDE_GET_ONLY="$(_probe_field get_only)"
-INSIDE_POST="$(_probe_field post)"
 OUTSIDE_ABSENT="$(_external_code "$ABSENT_PATH")"
 OUTSIDE_GET_ONLY="$(_external_code "$GET_ONLY_PATH")"
-OUTSIDE_POST="$(_external_code "$POST_PATH")"
 
 _behaviour_row absent "$ABSENT_PATH" "$INSIDE_ABSENT" "$OUTSIDE_ABSENT" "expected 404"
 _behaviour_row get-only "$GET_ONLY_PATH" "$INSIDE_GET_ONLY" "$OUTSIDE_GET_ONLY" "expected 405"
-_behaviour_row post "$POST_PATH" "$INSIDE_POST" "$OUTSIDE_POST" "expected neither 404 nor 405"
 
 # An absent path must say it is absent. 405 asserts the resource exists and the
 # verb is wrong, which is a different claim and was false everywhere (#177).
@@ -1364,15 +1380,6 @@ _behaviour_row post "$POST_PATH" "$INSIDE_POST" "$OUTSIDE_POST" "expected neithe
 # that its own endpoints exist.
 [ "$INSIDE_GET_ONLY" = "405" ] \
     || halt_without_rollback "POST $GET_ONLY_PATH answered $INSIDE_GET_ONLY inside the container, expected 405 for a GET-only route"
-
-# A real POST route may answer 401, 403 or 422 depending on what guards it; what
-# it may not do is deny that it exists or that it takes POST.
-case "$INSIDE_POST" in
-    404|405|000|"") halt_without_rollback "POST $POST_PATH answered $INSIDE_POST inside the container; a route the application publishes as accepting POST must not deny it" ;;
-esac
-case "$OUTSIDE_POST" in
-    404|405|000|"") halt_without_rollback "POST $POST_PATH answered $OUTSIDE_POST through nginx; a route the application publishes as accepting POST must not deny it" ;;
-esac
 
 # Before the external assertions, because it is the more precise finding. If
 # nginx answers 405 where the container answered 404, "expected 404 through
