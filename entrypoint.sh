@@ -32,6 +32,36 @@ set -e
 echo "Verifying schema version..."
 python3 ./scripts/verify_schema_head.py
 
+# The models are a bind mount, not part of the image (#50).
+#
+# `Dockerfile.prod` copies app/, data/, alembic/, run_scheduler.py and this
+# file; `docker-compose.prod.yml` supplies models/ to both services as
+# `./models:/app/models`. That is deliberate -- the artefacts are large and
+# versioned separately -- but it means the image cannot start alone, and
+# `app/main.py` opens `models/scaler.pkl` at import with no guard.
+#
+# Without this check the symptom is:
+#
+#     FileNotFoundError: [Errno 2] No such file or directory:
+#         '/app/models/scaler.pkl'
+#     gunicorn.errors.HaltServer: <HaltServer 'Worker failed to boot.' 3>
+#
+# and what an operator sees in `docker compose ps` is a restart loop. "Worker
+# failed to boot" leads nobody to a missing volume.
+#
+# Before the override branch, because compose mounts models/ into the scheduler
+# too and `run_scheduler.py` reaches the same imports.
+MODELS_DIR="${SORA_MODELS_DIR:-/app/models}"
+for _required in scaler.pkl model.pkl; do
+    if [ ! -f "$MODELS_DIR/$_required" ]; then
+        echo "REFUSING TO START: $MODELS_DIR/$_required is missing." >&2
+        echo "  The image does not contain models/. docker-compose.prod.yml" >&2
+        echo "  supplies it as a bind mount: ./models:/app/models" >&2
+        echo "  Check that the directory exists on the host and is not empty." >&2
+        exit 1
+    fi
+done
+
 # If docker-compose passed an override command (e.g. "python3 run_scheduler.py"),
 # execute it instead of the default gunicorn server.
 if [ "$#" -gt 0 ]; then
