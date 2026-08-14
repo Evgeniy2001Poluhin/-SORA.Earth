@@ -262,7 +262,15 @@ STUB
 case "$*" in
     *%Y%m%dT%H%M%SZ*)      echo "20260803T120000Z" ;;
     *%Y-%m-%dT%H:%M:%SZ*)  echo "2026-08-03T12:00:00Z" ;;
-    *)                     command date "$@" ;;
+    # `command date` is not an escape from this file. `command` bypasses
+    # functions and aliases; it does not bypass PATH, and PATH begins with the
+    # directory this stub lives in -- so it re-executed itself, forked
+    # exponentially, and the runner killed the job with SIGTERM at 87 seconds.
+    # Nothing reached this branch until --finalize asked for `date -d ... +%s`,
+    # so the recursion sat here unfired for as long as the stub has existed.
+    *)  real="$(PATH=/usr/bin:/bin command -v date)"
+        [ -n "$real" ] || { echo "stub date: no system date found" >&2; exit 127; }
+        exec "$real" "$@" ;;
 esac
 STUB
     cat > "$STUB_DIR/bin/systemctl" <<'STUB'
@@ -305,6 +313,24 @@ new_sandbox
 check "the stubbed docker answers" \
     "$( export STUB_DIR; PATH="$STUB_DIR/bin:$PATH" docker compose config --services | tr '\n' ' ' )" \
     "nginx backend "
+# And that a stub which does not handle a call reaches the real tool rather than
+# itself. `date` freezes two formats and passes everything else through; it did
+# so with `command date`, which bypasses functions and aliases but not PATH --
+# and PATH begins with the stub. It re-executed itself without bound.
+#
+# The failure had no failing assertion. The job died at 87 seconds with SIGTERM
+# and printed no verdict at all, which is why it is worth a case of its own:
+# `timeout` turns the hang into an answer. The two frozen formats are asserted
+# beside it, because a pass-through that forgot to freeze would be the other way
+# to make this line green.
+# shellcheck disable=SC2031
+check "an unhandled date falls through to the system date, not to itself" \
+    "$( export STUB_DIR; PATH="$STUB_DIR/bin:$PATH" timeout 10 date -u -d @86400 +%Y-%m-%d 2>/dev/null || echo "recursed or hung" )" \
+    "1970-01-02"
+# shellcheck disable=SC2031
+check "and the run-id format is still frozen" \
+    "$( export STUB_DIR; PATH="$STUB_DIR/bin:$PATH" date -u +%Y%m%dT%H%M%SZ )" \
+    "20260803T120000Z"
 rm -rf "$SANDBOX"
 
 echo "== it refuses to deploy anything but current, clean main =="
