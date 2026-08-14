@@ -145,6 +145,47 @@ class IngestionAttention(BaseModel):
     sources: List[IngestionAttentionRow]
 
 
+class CoverageGap(BaseModel):
+    """One day a point did not supply enough observations to be usable.
+
+    The M3 declaration binds the target to a daily mean computed only when at
+    least 80% of the expected hourly observations are present. A day below that
+    is absent, and an absent day is one fewer window the §7 gate can use --
+    which moves the earliest evidential date.
+
+    Nothing watched this. `/ingestion/attention` reports the verdict of each
+    source's latest *run*: it sees "the ingester stopped", and only weakly,
+    since openmeteo declares no `max_vintage_hours`. A day where 18 of 24
+    hourly observations arrived leaves every run successful and every freshness
+    check content.
+    """
+
+    day: str
+    region_id: str
+    indicator: str
+    observations: int
+    required: int
+
+
+class ObservationCoverage(BaseModel):
+    """Days that fall short, and what was asked to find them.
+
+    `complete_days` is reported beside `gaps` on purpose. A response holding an
+    empty list means either "nothing fell short" or "nothing was looked at",
+    and those are different facts about a deployment -- the denominator tells
+    them apart.
+    """
+
+    source: str
+    indicator: str
+    required_per_day: int
+    days_examined: int
+    points_examined: int
+    complete_days: int
+    gap_count: int
+    gaps: List[CoverageGap]
+
+
 class ObservationRow(BaseModel):
     """One environmental observation, with its provenance in typed fields.
 
