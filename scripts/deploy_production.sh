@@ -610,6 +610,23 @@ if [ "$MODE" = finalize ]; then
     [ -n "$PREV_IMAGES" ] || PREV_IMAGES="(not recorded by the interrupted run)"
     PRE_CIDS="$(awk '/^pre_containers /{$1=""; print}' "$JOURNAL" | sed 's/^ //')"
     PREV_IMAGE_IDS=""
+    # And the commit from the same place, for the same reason.
+    #
+    # It was read above from the last published manifest, which is right for a
+    # deploy and only accidentally right here: the manifest chain and the
+    # journal agree about what was running exactly while nothing has gone wrong
+    # between them. Taking the images from one source and the commit from
+    # another leaves a record whose two halves can describe different states.
+    #
+    # A disagreement is not reconciled to either side. It means the manifest
+    # moved after the interrupted run recorded what it was replacing, and
+    # nothing here can tell which of the two describes what is serving.
+    if [ -n "$JOURNAL_PREVIOUS" ]; then
+        if [ -n "$PREV_COMMIT" ] && [ "$PREV_COMMIT" != "$JOURNAL_PREVIOUS" ]; then
+            fail "the interrupted run recorded $JOURNAL_PREVIOUS as the commit it replaced, but the last manifest names $PREV_COMMIT as deployed; they disagree about what was running and the record cannot be reconciled automatically"
+        fi
+        PREV_COMMIT="$JOURNAL_PREVIOUS"
+    fi
 else
 PREV_IMAGES="$(docker ps -a --filter "label=com.docker.compose.project=$PROJECT" \
     --format '{{.Label "com.docker.compose.service"}} {{.Image}} {{.ID}}' | sort || true)"

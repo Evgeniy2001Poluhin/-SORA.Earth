@@ -1439,8 +1439,32 @@ check "it did not build" "$(grep -c 'build backend' "$STUB_DIR/calls")" "0"
 check "it did not migrate" "$(grep -c 'run --rm --no-deps migrate' "$STUB_DIR/calls")" "0"
 check "it did not recreate the services" \
     "$(grep -c 'up -d --no-build --remove-orphans' "$STUB_DIR/calls")" "0"
+# The value, not the presence of the field. There is no earlier manifest in this
+# sandbox, so a run reading the commit from the manifest chain -- as a deploy
+# correctly does -- writes `none-recorded` here and still has the line.
 check "and it recorded what the interrupted run replaced, not itself" \
-    "$(grep -qc 'previous_commit' "$SANDBOX/manifests"/*.txt && echo yes || echo no)" "yes"
+    "$(awk '/^previous_commit /{print $2}' "$SANDBOX/manifests"/*.txt)" "$FIRST"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# The two sources of "what was running" disagree. The journal was written before
+# the interrupted run touched anything; the manifest was published by whatever
+# ran last. Nothing here can tell which describes what is serving, so the record
+# is not written from either.
+write_journal "$SECOND"
+mkdir -p "$SANDBOX/manifests"
+# A literal rather than a commit of this sandbox: the only property needed is
+# "not the one the journal names", and borrowing a variable set inside an
+# earlier case would tie this to the order those cases happen to run in.
+printf 'commit %s\n' "0000000000000000000000000000000000000042" \
+    > "$SANDBOX/manifests/prev.txt"
+ln -sf prev.txt "$SANDBOX/manifests/latest"
+run_guard --finalize
+refused_because "a journal and a manifest that disagree about what was replaced" "they disagree about what was running"
+check "and no manifest was written" \
+    "$(find "$SANDBOX/manifests" -type f -name '*.txt' ! -name 'prev.txt' 2>/dev/null | wc -l | tr -d ' ')" "0"
+check "and the journal is left for a human" \
+    "$([ -f "$SANDBOX/manifests/in-progress" ] && echo present || echo gone)" "present"
 rm -rf "$SANDBOX"
 
 new_sandbox
