@@ -195,15 +195,61 @@ def rate_limit_status(request: Request):
 
 
 # ===== UNIFIED METRICS =====
-@router.get("/metrics")
-async def get_metrics():
+
+#: Keys that name individual endpoints. Aggregates are public; a breakdown is
+#: not, because a breakdown is a list of what the deployment has been asked
+#: for and how often.
+_PER_ENDPOINT_KEYS = ("requests_by_endpoint", "requests_by_status")
+
+
+def _caller_is_admin(authorization) -> bool:
+    """True for a valid admin token, False for anything else.
+
+    Deliberately not a dependency: these two routes must keep answering an
+    anonymous caller. The admin dashboard reads them with a plain `fetch` and
+    uses four aggregate numbers, so requiring a token would take a working page
+    away to protect data that page never asked for.
+    """
+    if not authorization:
+        return False
+    try:
+        from app.auth import require_auth
+        return require_auth(authorization).role == "admin"
+    except Exception:
+        return False
+
+
+def _metrics_view(authorization) -> dict:
+    """The metrics an anonymous caller may have, and the rest for an admin.
+
+    `requests_by_endpoint` was keyed by the concrete request path, so it held
+    every identifier that had ever appeared in a URL. That keying is fixed in
+    app/middleware.py; this is the second line, because a future key could
+    carry something again and because "how often was each endpoint called" is
+    operational detail either way.
+
+    The omission is stated rather than silent. A caller that receives no
+    breakdown and no note would reasonably conclude the map is empty -- which
+    is a different and wrong fact about the deployment.
+    """
     METRICS["uptime_seconds"] = round(time.time() - START_TIME, 2)
-    return METRICS
+    if _caller_is_admin(authorization):
+        return METRICS
+    view = {k: v for k, v in METRICS.items() if k not in _PER_ENDPOINT_KEYS}
+    view["detail_withheld"] = list(_PER_ENDPOINT_KEYS)
+    return view
+
+
+@router.get("/metrics")
+async def get_metrics(authorization: str = Header(None)):
+    """Aggregate metrics. The per-endpoint breakdown requires an admin token."""
+    return _metrics_view(authorization)
 
 
 @router.get("/system/metrics")
-async def get_system_metrics():
-    return METRICS
+async def get_system_metrics(authorization: str = Header(None)):
+    """Same content as `/metrics`; kept because the admin page calls both."""
+    return _metrics_view(authorization)
 
 
 @router.get("/metrics/prometheus")
