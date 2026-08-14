@@ -131,14 +131,30 @@ def test_the_declared_metrics_actually_appear(client):
 def test_the_operational_dict_is_still_served_as_json(client):
     """What the old endpoint published has not been dropped, only relabelled.
 
-    Prometheus never scraped it -- infra/prometheus.yml reads `/metrics` and
-    nothing else -- so this data was only ever JSON in Prometheus clothing.
+    Prometheus never scraped this -- infra/prometheus.yml reads `/metrics` at
+    the root, which serves the registry; verified against production, where
+    that path returns the text exposition and not this dict. So the data here
+    was only ever JSON in Prometheus clothing.
+
+    The per-endpoint breakdown moved behind an admin token in #49 -- it held
+    one key per concrete request path, and nine routes embed an identifier. It
+    is asserted below rather than dropped from this list, because "not
+    published anonymously" and "gone" are different outcomes and this test
+    exists to tell them apart.
     """
     body = client.get("/api/v1/metrics").json()
 
-    for field in ("requests_total", "requests_by_endpoint", "requests_by_status",
-                  "uptime_seconds", "avg_response_time_ms"):
+    for field in ("requests_total", "uptime_seconds", "avg_response_time_ms"):
         assert field in body, f"{field} disappeared with the hand-built exporter"
+
+    from app.auth import create_access_token
+
+    token = create_access_token({"sub": "admin", "role": "admin"})
+    admin_body = client.get(
+        "/api/v1/metrics", headers={"Authorization": f"Bearer {token}"}).json()
+
+    for field in ("requests_by_endpoint", "requests_by_status"):
+        assert field in admin_body, f"{field} disappeared, rather than moving"
 
 
 def test_the_scrape_config_still_points_at_the_registry_path():
