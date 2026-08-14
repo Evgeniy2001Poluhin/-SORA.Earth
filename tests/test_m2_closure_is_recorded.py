@@ -115,3 +115,20 @@ def test_the_open_prerequisites_are_named_and_not_treated_as_blockers(protocol):
     assert "#84" in protocol and "#75" in protocol
     section = protocol[protocol.index("What remains separately open"):][:800]
     assert "Neither lifts this" in section
+
+
+def test_the_verdict_names_the_commit_it_is_attached_to(protocol):
+    """A closure with no revision is a claim about a tree nobody can identify.
+
+    The gate is executable at that commit, so the condition the verdict turns on
+    can be re-run rather than taken on the document's word.
+    """
+    # The combined record, not three separate strings. Each of them could match
+    # somewhere unrelated -- "PR #158" appears wherever that PR is discussed,
+    # and a bare "entry_conditions.py" matches any path ending in it -- so the
+    # assertion would hold with the SHA and the PR number in different
+    # paragraphs, describing different things.
+    assert ("merged e82d682d2ee102374680e93bf201c6693c88f1ac (PR #158)"
+            in protocol)
+    assert "7 of 7 jobs green" in protocol
+    assert "app/services/forecasting/entry_conditions.py" in protocol
