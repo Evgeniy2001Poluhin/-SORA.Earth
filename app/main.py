@@ -20,6 +20,7 @@ import pickle, numpy as np, math, os, json, logging, shap
 import pandas as pd
 from datetime import datetime
 import platform
+import re
 import torch
 import torch.nn as tnn
 import warnings
@@ -980,6 +981,27 @@ def _spa_catchall(full_path: str):
     raise HTTPException(status_code=404)
 
 
+#: A route that matches every path: `/{anything:path}` and nothing else.
+#:
+#: Matched by shape rather than by name, and that is the whole point. This
+#: skipped `"/{full_path:path}"` as a literal string, so it saw the SPA
+#: catch-all and itself and missed a third registered a few lines above under
+#: `if _SPA_INDEX.exists()` -- spelled `/{spa_path:path}`.
+#:
+#: That route exists only where the SPA has been built. It is absent in CI and
+#: present in the image, so every absent path answered 404 in the test suite
+#: and 405 on production. Measured 2026-08-14: `POST /api/v1/definitely-not-here`
+#: returned 405 from the container while the suite was green.
+#:
+#: Anchored, so a real route like `/app/{path:path}` is not skipped -- it
+#: matches only under its prefix and a match there is a genuine one.
+_GLOBAL_CATCHALL = re.compile(r"^/\{[A-Za-z_][A-Za-z0-9_]*:path\}$")
+
+
+def _is_global_catchall(path) -> bool:
+    return bool(path) and bool(_GLOBAL_CATCHALL.match(path))
+
+
 @app.api_route(
     "/{full_path:path}",
     methods=["POST", "PUT", "PATCH", "DELETE"],
@@ -1015,8 +1037,8 @@ def _catchall_absent_is_not_wrong_method(full_path: str, request: _CA_Request):
 
     scope = dict(request.scope)
     for route in app.routes:
-        if getattr(route, "path", None) == "/{full_path:path}":
-            continue  # the two catch-alls, including this one
+        if _is_global_catchall(getattr(route, "path", None)):
+            continue  # every catch-all, including this one
         try:
             match, _ = route.matches(scope)
         except Exception:
