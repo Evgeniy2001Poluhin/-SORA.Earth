@@ -39,25 +39,37 @@ from sqlalchemy import text
 # observation of "no value", and letting one shadow the real value beneath it
 # would report absence where the system did hold something.
 
-_VALUE_AS_OF = text(
-    """
+#
+# The `source` filter is optional and, when given, is part of the answer rather
+# than a convenience. `country_indicator_history` holds measured figures beside
+# whatever a fallback chain wrote under the same indicator code, and a caller
+# that must not train on a stand-in has to say so here -- the guarantee cannot
+# come from what the table happens to contain today (#86).
+#
+# Two statements rather than one with `(:source IS NULL OR source = :source)`:
+# PostgreSQL cannot infer the type of a parameter that appears only in `IS
+# NULL`, and the fragment below is a fixed literal, never caller text.
+
+_VALUE_SQL = """
     SELECT value
       FROM country_indicator_history
      WHERE country_iso3 = :iso3
        AND indicator_code = :code
        AND fetched_at <= :as_of
        AND value IS NOT NULL
+       {source_filter}
      ORDER BY fetched_at DESC, id DESC
      LIMIT 1
-    """
-)
+"""
+
+_VALUE_AS_OF = text(_VALUE_SQL.format(source_filter=""))
+_VALUE_AS_OF_FROM = text(_VALUE_SQL.format(source_filter="AND source = :source"))
 
 # row_number() rather than PostgreSQL's DISTINCT ON: the production database is
 # PostgreSQL, but this has to keep working under the SQLite the test suite runs
 # on, and a read path that silently changes shape between them is worse than a
 # slightly longer query.
-_SERIES_AS_OF = text(
-    """
+_SERIES_SQL = """
     SELECT as_of_date, value
       FROM (
             SELECT as_of_date,
@@ -72,11 +84,14 @@ _SERIES_AS_OF = text(
                AND fetched_at <= :as_of
                AND as_of_date IS NOT NULL
                AND value IS NOT NULL
+               {source_filter}
            ) ranked
      WHERE rn = 1
      ORDER BY as_of_date
-    """
-)
+"""
+
+_SERIES_AS_OF = text(_SERIES_SQL.format(source_filter=""))
+_SERIES_AS_OF_FROM = text(_SERIES_SQL.format(source_filter="AND source = :source"))
 
 
 def value_as_of(
@@ -84,20 +99,30 @@ def value_as_of(
     country_iso3: str,
     indicator_code: str,
     as_of: datetime,
+    source: Optional[str] = None,
 ) -> Optional[float]:
     """The value this system held for (country, indicator) at `as_of`.
 
     `as_of` is inclusive: a value fetched at exactly that moment was known.
 
+    `source`, when given, restricts the answer to figures from that source.
+    Omitting it answers from whatever is stored, which is right for a reader
+    that wants the system's best knowledge and wrong for one that must not
+    read a fallback value as if it were measured.
+
     Returns None when nothing had been fetched yet. **Not 0.0** -- a caller
     that cannot tell "no data" from "zero" is how the gdp_growth regressor
     looked like working data for its entire life (#86).
     """
-    row = db.execute(_VALUE_AS_OF, {
+    params = {
         "iso3": country_iso3.upper(),
         "code": indicator_code,
         "as_of": as_of,
-    }).first()
+    }
+    if source is None:
+        row = db.execute(_VALUE_AS_OF, params).first()
+    else:
+        row = db.execute(_VALUE_AS_OF_FROM, dict(params, source=source)).first()
     return None if row is None else row[0]
 
 
@@ -106,6 +131,7 @@ def series_as_of(
     country_iso3: str,
     indicator_code: str,
     as_of: datetime,
+    source: Optional[str] = None,
 ) -> Dict[datetime, float]:
     """Each observation period, carrying the value in force at `as_of`.
 
@@ -116,11 +142,17 @@ def series_as_of(
     Rows with no `as_of_date` are excluded: they have no period to attach a
     value to, and much of the table carries none (#58).
 
+    `source` restricts the series to one source; see `value_as_of`.
+
     Ordered oldest period first.
     """
-    rows = db.execute(_SERIES_AS_OF, {
+    params = {
         "iso3": country_iso3.upper(),
         "code": indicator_code,
         "as_of": as_of,
-    }).all()
+    }
+    if source is None:
+        rows = db.execute(_SERIES_AS_OF, params).all()
+    else:
+        rows = db.execute(_SERIES_AS_OF_FROM, dict(params, source=source)).all()
     return {period: value for period, value in rows}

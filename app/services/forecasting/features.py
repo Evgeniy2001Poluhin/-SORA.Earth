@@ -1,9 +1,11 @@
 """Time series feature engineering for forecasting models."""
 
-import pandas as pd
-import numpy as np
+from datetime import datetime
 from typing import List, Optional
 import logging
+
+import pandas as pd
+import numpy as np
 
 log = logging.getLogger(__name__)
 
@@ -89,7 +91,9 @@ class FeatureEngineer:
         df["is_weekend"] = (df["dow"] >= 5).astype(int)
         return df
 
-    def add_external_regressors(self, df: pd.DataFrame, country: Optional[str] = None) -> pd.DataFrame:
+    def add_external_regressors(self, df: pd.DataFrame,
+                               country: Optional[str] = None,
+                               as_of: Optional[datetime] = None) -> pd.DataFrame:
         """Add external time series data from database tables.
 
         One regressor, not three. `air_quality` and `carbon_price` were
@@ -118,6 +122,9 @@ class FeatureEngineer:
         Args:
             df: Input DataFrame with 'ds' column
             country: Country/region code for data lookup
+            as_of: read the regressor as this system held it at this moment.
+                Defaults to now. A backtest must pass the date it scores; see
+                `_fetch_gdp_growth` and #75.
 
         Returns:
             DataFrame with the gdp_growth column added
@@ -135,7 +142,7 @@ class FeatureEngineer:
             return df
 
         try:
-            gdp_series = self._fetch_gdp_growth(country)
+            gdp_series = self._fetch_gdp_growth(country, as_of)
             if not gdp_series.empty:
                 df = self._merge_regressor(df, gdp_series, "gdp_growth")
         except Exception as e:
@@ -153,54 +160,61 @@ class FeatureEngineer:
         return df
 
     @staticmethod
-    def _fetch_gdp_growth(country: str) -> pd.Series:
-        """Fetch GDP growth time series from CountryIndicatorHistory."""
+    def _fetch_gdp_growth(country: str,
+                          as_of: Optional[datetime] = None) -> pd.Series:
+        """GDP growth for `country`, as this system held it at `as_of`.
+
+        `as_of` defaults to now, which is right for a live forecast: predicting
+        forward from the newest figures reads nothing it could not know.
+
+        A backtest must pass the date it is scoring, and this is why (#75).
+        Reading today's figures to score a model at a past date credits it with
+        values published after that date -- a value it could not have had, which
+        is a different and worse failure than a wrong one, because the error
+        flatters the model instead of showing up as one.
+        """
         try:
-            from app.database import SessionLocal, CountryIndicatorHistory
+            from app.database import SessionLocal
+            from app.services.point_in_time import series_as_of
         except ImportError:
             return pd.Series(dtype=float)
 
         db = SessionLocal()
         try:
             # One indicator, not two. Both annual growth series share a date,
-            # and the series is built as a dict keyed by date, so a second code
-            # would overwrite the first -- leaving the column as GDP growth or
-            # per-capita growth depending on row order. They are different
-            # quantities; only the one this regressor is named after belongs.
+            # and the series is keyed by date, so a second code would overwrite
+            # the first -- leaving the column as GDP growth or per-capita growth
+            # depending on row order. They are different quantities; only the
+            # one this regressor is named after belongs.
             #
-            # Undated rows are excluded rather than kept: as_of_date is
-            # nullable and much of the table carries no period (#58), and
+            # `source` is passed rather than left to the table's contents. The
+            # fallback chain writes static benchmark figures under the same
+            # indicator code when a fetch fails, and a model must not silently
+            # train on a stand-in. No such row exists today -- gdp_growth is in
+            # neither BENCHMARKS nor GLOBAL_AVG, and refresh_indicator_history
+            # writes source='world_bank' unconditionally -- but that is a
+            # property of two things a future edit could change without
+            # noticing (#86).
+            #
+            # Undated rows are dropped by series_as_of: they have no period to
+            # attach a value to, much of the table carries none (#58), and
             # pd.to_datetime(None) is NaT, so every undated row would collapse
-            # onto a single NaT key and merge against nothing.
-            rows = db.query(CountryIndicatorHistory).filter(
-                CountryIndicatorHistory.country_iso3 == country.upper(),
-                CountryIndicatorHistory.indicator_code == GDP_GROWTH_INDICATOR,
-                # Measured values only. The fallback chain writes static
-                # benchmark figures under the same indicator code when a fetch
-                # fails, and a model must not silently train on a stand-in.
-                #
-                # No such row exists today -- gdp_growth is in neither
-                # BENCHMARKS nor GLOBAL_AVG, so the chain cannot produce one,
-                # and refresh_indicator_history writes source='world_bank'
-                # unconditionally. That is a property of two things a future
-                # edit could change without noticing. Adding the key to
-                # BENCHMARKS would be enough. Stated here so the guarantee is
-                # the query's, not an accident of configuration elsewhere.
-                CountryIndicatorHistory.source == "world_bank",
-                CountryIndicatorHistory.as_of_date.isnot(None),
-                CountryIndicatorHistory.value.isnot(None),
-            ).order_by(
-                CountryIndicatorHistory.as_of_date.asc(),
-                CountryIndicatorHistory.fetched_at.asc(),
-            ).all()
-
-            if not rows:
+            # onto one key and merge against nothing.
+            series = series_as_of(
+                db,
+                country,
+                GDP_GROWTH_INDICATOR,
+                as_of if as_of is not None else datetime.utcnow(),
+                source="world_bank",
+            )
+            if not series:
                 return pd.Series(dtype=float)
 
-            # Same date twice means the value was revised; ordering by
-            # fetched_at above makes the most recently fetched one win, rather
-            # than whichever row the database happened to return last.
-            data = {pd.to_datetime(r.as_of_date): r.value for r in rows}
+            # A period fetched twice is a revision; series_as_of keeps the one
+            # in force at `as_of`, broken by id rather than by whichever row the
+            # database happened to return (#86).
+            data = {pd.to_datetime(period): value
+                    for period, value in series.items()}
             return pd.Series(data, name="gdp_growth").sort_index()
         finally:
             db.close()
@@ -241,7 +255,8 @@ class FeatureEngineer:
         df: pd.DataFrame,
         target_col: str,
         date_col: str = "ds",
-        country: Optional[str] = None
+        country: Optional[str] = None,
+        as_of: Optional[datetime] = None,
     ) -> pd.DataFrame:
         """Apply full feature engineering pipeline.
 
@@ -253,6 +268,9 @@ class FeatureEngineer:
             target_col: Name of target column
             date_col: Name of date column (default: 'ds')
             country: Country code for external data (optional)
+            as_of: read external regressors as of this moment rather than now.
+                A backtest passes the date it scores, so the frame carries the
+                figures that were knowable then (#75).
 
         Returns:
             DataFrame with all engineered features, NaN rows dropped
@@ -274,7 +292,7 @@ class FeatureEngineer:
         df = self.add_lags(df, target_col, lags=lags)
         df = self.add_rolling_stats(df, target_col, windows=windows)
         df = self.add_seasonality(df, date_col)
-        df = self.add_external_regressors(df, country)
+        df = self.add_external_regressors(df, country, as_of)
 
         # Drop rows with NaN from lag/rolling operations
         initial_rows = len(df)
