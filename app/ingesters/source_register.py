@@ -47,6 +47,14 @@ class SourceFacts:
 
     name: str
     measurement_kind: str
+    #: The named model behind a `modelled` value.
+    #:
+    #: None where the source names none, which is not the same as "we did not
+    #: bother". `openmeteo` calls /v1/forecast without a `models=` parameter, so
+    #: Open-Meteo selects per location and there is no single name to record --
+    #: writing one would be a claim the source never made. A reader that needs
+    #: the distinction gets None and can tell it from "CAMS reanalysis".
+    model: Optional[str]
     status: str
     coverage: str
     #: The most recent data this source is known to have published, from a
@@ -63,6 +71,7 @@ SOURCE_REGISTER: Dict[str, SourceFacts] = {
     "openaq": SourceFacts(
         name="openaq",
         measurement_kind=MEASURED,
+        model=None,
         status=STATUS_DISABLED_NO_CURRENT_STATIONS,
         coverage="none for the declared regions",
         last_verified_data="2017-09-11",
@@ -84,6 +93,7 @@ SOURCE_REGISTER: Dict[str, SourceFacts] = {
     "openmeteo_air_quality": SourceFacts(
         name="openmeteo_air_quality",
         measurement_kind=MODELLED,
+        model="CAMS reanalysis via Open-Meteo",
         status=STATUS_ACTIVE,
         coverage="21 declared regions, hourly",
         last_verified_data=None,
@@ -99,6 +109,7 @@ SOURCE_REGISTER: Dict[str, SourceFacts] = {
     "openmeteo": SourceFacts(
         name="openmeteo",
         measurement_kind=MODELLED,
+        model=None,
         status=STATUS_ACTIVE,
         coverage="21 declared regions, hourly",
         last_verified_data=None,
@@ -108,6 +119,7 @@ SOURCE_REGISTER: Dict[str, SourceFacts] = {
     "rosstat": SourceFacts(
         name="rosstat",
         measurement_kind=ADMINISTRATIVE_SNAPSHOT,
+        model=None,
         status=STATUS_ACTIVE,
         coverage="85 declared regions, 5 metrics",
         last_verified_data="2024",
@@ -124,6 +136,7 @@ SOURCE_REGISTER: Dict[str, SourceFacts] = {
     "sber_veb_baseline": SourceFacts(
         name="sber_veb_baseline",
         measurement_kind=STATIC_BASELINE,
+        model=None,
         status=STATUS_ACTIVE,
         coverage="85 declared regions, 1 metric",
         last_verified_data=None,

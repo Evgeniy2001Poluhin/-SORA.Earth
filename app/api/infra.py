@@ -1,5 +1,5 @@
 from app.prom_metrics import sora_retrain_total, sora_refresh_total, sora_full_pipeline_total
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from app.auth import require_admin
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
@@ -8,13 +8,15 @@ from app.batch import BatchRequest, generate_batch_id
 from app.database import get_db, BatchResultDB
 from sqlalchemy.orm import Session
 from datetime import datetime
+from typing import Optional
 from app.websocket import manager, WebSocket, WebSocketDisconnect
 from app.cache import cache
 from app.drift_detection import drift_detector
 from app.mlflow_tracking import get_experiment_stats
 from app.rate_limit import rate_limiter
 from app.middleware import METRICS, START_TIME
-from app.schemas import IngestionAttention, ProjectInput as Project
+from app.schemas import (IngestionAttention, ObservationPage, ObservationRow,
+                         ProjectInput as Project)
 
 import time
 
@@ -564,3 +566,161 @@ def data_refresh_run():
     finally:
         db.close()
 
+
+
+@router.get("/observations", tags=["infrastructure"],
+            response_model=ObservationPage)
+def observations(
+    _admin=Depends(require_admin),
+    region: Optional[str] = Query(None, description="region_id, exact match"),
+    indicator: Optional[str] = Query(None, description="indicator, exact match"),
+    source: Optional[str] = Query(None, description="source, exact match"),
+    measurement_kind: Optional[str] = Query(
+        None,
+        description="measured | modelled | administrative_snapshot | "
+                    "static_baseline. Selects the sources declared as that kind.",
+    ),
+    since: Optional[datetime] = Query(
+        None, description="lower bound on event_time, inclusive"),
+    until: Optional[datetime] = Query(
+        None, description="upper bound on event_time, exclusive"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """What the ingesters have actually written.
+
+    #84. `environmental_observations` was written by three ingesters and read
+    by no API at all: 160 published endpoints, none of them about observations.
+    So the one thing the air-quality work took care to record -- that a CAMS
+    reanalysis is a model's estimate and not an instrument's reading -- had
+    nobody to tell. The provenance was correct and invisible.
+
+    **The measured/modelled filter selects sources, not rows.**
+    `measurement_kind` is a property of the source, declared once in
+    `app/ingesters/source_register.py`. Reading it per row out of
+    `metadata_json` would let a row disagree with the declaration, and then two
+    answers to one question exist with nothing to choose between them.
+
+    An unknown `measurement_kind` is a 400, not an empty page. An empty page is
+    what a caller sees when a kind exists and nothing matches, and a typo must
+    not be indistinguishable from a true negative -- that is how a filter comes
+    to be trusted for excluding something it never excluded.
+
+    **The two times stay apart.** `event_time` is when the thing happened and is
+    NULL where the source has no observation time; `ingested_at` is when this
+    system read it. The range filter applies to `event_time`, because a
+    question about the world is not a question about our fetch schedule. Rows
+    with no `event_time` therefore fall outside any range -- stated here rather
+    than discovered, since `not_applicable` sources have none by construction.
+
+    Admin-only, like `/ingestion/attention`: this is operator surface, and the
+    rows carry coordinates and source detail that the public routes beside it
+    do not.
+    """
+    from sqlalchemy import case
+
+    from app.database import EnvironmentalObservation, SessionLocal
+    from app.ingesters.source_register import SOURCE_REGISTER
+
+    kinds = {facts.measurement_kind for facts in SOURCE_REGISTER.values()}
+    if measurement_kind is not None and measurement_kind not in kinds:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"unknown measurement_kind '{measurement_kind}'; "
+                f"declared kinds are {sorted(kinds)}"
+            ),
+        )
+
+    db = SessionLocal()
+    try:
+        q = db.query(EnvironmentalObservation)
+        if region:
+            q = q.filter(EnvironmentalObservation.region_id == region)
+        if indicator:
+            q = q.filter(EnvironmentalObservation.indicator == indicator)
+        if source:
+            q = q.filter(EnvironmentalObservation.source == source)
+        if measurement_kind is not None:
+            named = [n for n, f in SOURCE_REGISTER.items()
+                     if f.measurement_kind == measurement_kind]
+            # A declared kind with no source is still that kind. `in_([])` is
+            # false for every row, which is the right answer: no source of this
+            # kind exists, so nothing can be of it.
+            q = q.filter(EnvironmentalObservation.source.in_(named))
+        if since is not None:
+            q = q.filter(EnvironmentalObservation.event_time >= since)
+        if until is not None:
+            q = q.filter(EnvironmentalObservation.event_time < until)
+
+        # One more than asked for, to answer `has_more` without a second COUNT
+        # over the same predicate. A count and a page taken separately can
+        # disagree while rows are being written, and this endpoint reads a table
+        # an hourly job appends to.
+        # NULLS LAST written as a CASE rather than `.nullslast()`.
+        #
+        # The default differs by engine -- PostgreSQL sorts NULLs first on
+        # DESC, SQLite sorts them last -- so leaving it implicit gives the two
+        # databases different pages for the same request. `NULLS LAST` itself
+        # needs SQLite 3.30, which is a property of whichever interpreter
+        # happens to run the suite. The CASE holds on both without asking.
+        undated = case(
+            (EnvironmentalObservation.event_time.is_(None), 1), else_=0)
+        rows = (
+            q.order_by(undated,
+                       EnvironmentalObservation.event_time.desc(),
+                       EnvironmentalObservation.id.desc())
+             .offset(offset)
+             .limit(limit + 1)
+             .all()
+        )
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+
+        def _iso(value):
+            return value.isoformat() if value is not None else None
+
+        out = []
+        for row in rows:
+            # A source absent from the register is not given a kind. It means
+            # something wrote rows under a name nobody declared, and inventing
+            # `measured` for it would be the substitution this whole register
+            # exists to prevent.
+            facts = SOURCE_REGISTER.get(row.source)
+            out.append(ObservationRow(
+                id=row.id,
+                region_id=row.region_id,
+                country_code=row.country_code,
+                latitude=row.latitude,
+                longitude=row.longitude,
+                indicator=row.indicator,
+                value=row.value,
+                unit=row.unit,
+                source=row.source,
+                measurement_kind=facts.measurement_kind if facts else "undeclared",
+                model=facts.model if facts else None,
+                event_time=_iso(row.event_time),
+                ingested_at=_iso(row.ingested_at),
+                temporal_kind=row.temporal_kind,
+                period_start=_iso(row.period_start),
+                period_end=_iso(row.period_end),
+                is_valid=bool(row.is_valid),
+            ))
+
+        return ObservationPage(
+            count=len(out),
+            limit=limit,
+            offset=offset,
+            has_more=has_more,
+            filters={
+                "region": region,
+                "indicator": indicator,
+                "source": source,
+                "measurement_kind": measurement_kind,
+                "since": _iso(since),
+                "until": _iso(until),
+            },
+            observations=out,
+        )
+    finally:
+        db.close()

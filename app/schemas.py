@@ -143,3 +143,72 @@ class IngestionAttention(BaseModel):
     count: int
     needs_attention: int
     sources: List[IngestionAttentionRow]
+
+
+class ObservationRow(BaseModel):
+    """One environmental observation, with its provenance in typed fields.
+
+    #84. The table was written by three ingesters and read by no API at all, so
+    the one thing the air-quality work was careful to record -- that a CAMS
+    reanalysis is a model's estimate and not an instrument's reading -- had
+    nobody to tell.
+
+    `measurement_kind` and `model` are not columns and are not parsed out of
+    `metadata_json` per row. They come from `app/ingesters/source_register.py`,
+    which states them once per source: a per-row copy can disagree with the
+    declaration, and then two answers to one question exist with nothing to
+    choose between them.
+
+    `metadata_json` itself is never handed to the caller. It is free-form text
+    that happens to hold JSON today, and publishing it would make every key any
+    ingester ever wrote part of this contract.
+    """
+
+    id: int
+    region_id: str
+    country_code: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+    indicator: str
+    value: Optional[float] = None
+    unit: Optional[str] = None
+
+    source: str
+    #: measured | modelled | administrative_snapshot | static_baseline
+    measurement_kind: str
+    #: The named model behind a `modelled` value; None for every other kind.
+    model: Optional[str] = None
+
+    #: When the thing happened. NULL where the source has no observation time,
+    #: which is a fact about the source and not a gap to fill (#121).
+    event_time: Optional[str] = None
+    #: When this system read it. Never a substitute for the above: writing the
+    #: fetch time into `event_time` is what stamped 12,240 rows as observed on
+    #: the day they were ingested.
+    ingested_at: Optional[str] = None
+    #: observed | period | not_applicable | legacy_ingestion_time
+    temporal_kind: Optional[str] = None
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+
+    is_valid: bool
+
+
+class ObservationPage(BaseModel):
+    """A page of observations, and what was asked for to get it.
+
+    The filters travel back with the rows. A page of 50 modelled readings looks
+    identical to a page of 50 measured ones, and a caller that lost track of
+    which it requested cannot recover it from the rows alone -- every row would
+    agree with either belief.
+    """
+
+    count: int
+    limit: int
+    offset: int
+    #: True when more rows match the filter than this page carries.
+    has_more: bool
+    #: Echoed exactly as applied, including the defaults the caller did not set.
+    filters: dict
+    observations: List[ObservationRow]
