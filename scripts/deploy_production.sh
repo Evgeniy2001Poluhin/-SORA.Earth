@@ -304,6 +304,12 @@ while [ $# -gt 0 ]; do
             MODE=rollback
             [ $# -ge 2 ] || fail "--rollback needs a commit"
             TARGET="$2"; shift 2 ;;
+        --finalize)
+            # Reconcile the ledger after a run that did everything and died
+            # before recording it. Changes nothing: no build, no migration, no
+            # `up`, no checkout. It proves the end state and writes the record
+            # that is missing, or it refuses (#160).
+            MODE=finalize; shift ;;
         *) fail "unknown argument '$1'" ;;
     esac
 done
@@ -398,10 +404,25 @@ step "what may be deployed"
 # its verdict. What is running then is whatever that run left, and this one
 # cannot know whether it is safe to build on -- so it refuses and names the
 # operator's next move rather than deploying on top of an unknown state.
-if [ -f "$JOURNAL" ]; then
+if [ "$MODE" = finalize ]; then
+    # The journal is the input here, not an obstacle. Without one there is
+    # nothing to reconcile, and finalising anyway would invent a record.
+    [ -f "$JOURNAL" ] || fail "no unfinished deployment is recorded in $JOURNAL; nothing to finalize"
+    echo "  reconciling the record of an interrupted run:"
+    sed 's/^/    /' "$JOURNAL"
+    # Everything below is read from what that run wrote, so the record names
+    # the commit it actually deployed rather than whatever origin/main is now.
+    TARGET="$(awk '/^target /{print $2}' "$JOURNAL")"
+    FINALIZED_RUN="$(awk '/^run /{print $2}' "$JOURNAL")"
+    JOURNAL_MODE="$(awk '/^mode /{print $2}' "$JOURNAL")"
+    [ -n "$TARGET" ] && [ "$TARGET" != unset ] \
+        || fail "the journal records no target commit; it cannot be reconciled automatically"
+    [ "$JOURNAL_MODE" = deploy ] \
+        || fail "the interrupted run was '$JOURNAL_MODE', and only a deploy can be finalized"
+elif [ -f "$JOURNAL" ]; then
     echo "  an unfinished deployment is recorded:" >&2
     sed 's/^/    /' "$JOURNAL" >&2
-    fail "a previous run did not finish; inspect the state, then remove $JOURNAL to proceed"
+    fail "a previous run did not finish. Inspect the state, then either run --finalize (which proves the deployment completed and writes the missing record) or remove $JOURNAL to deploy over it"
 fi
 
 # A local edit is exactly how the nginx upstream came to differ from the
@@ -412,7 +433,15 @@ DIRTY="$(git status --porcelain)"
 git fetch --quiet origin main
 ORIGIN_MAIN="$(git rev-parse origin/main)"
 
-if [ "$MODE" = deploy ]; then
+if [ "$MODE" = finalize ]; then
+    # Nothing is chosen here -- the target came from the journal. What is
+    # checked is that the checkout still is what that run deployed. If somebody
+    # moved it since, this run cannot describe what is running.
+    HEAD_SHA="$(git rev-parse HEAD)"
+    [ "$HEAD_SHA" = "$TARGET" ] \
+        || fail "the checkout is at $HEAD_SHA and the interrupted run targeted $TARGET; the record cannot be reconciled from a tree that has moved"
+    echo "  finalizing the record for ${TARGET:0:12}"
+elif [ "$MODE" = deploy ]; then
     BRANCH="$(git rev-parse --abbrev-ref HEAD)"
     [ "$BRANCH" = "main" ] || fail "on branch '$BRANCH'; production is deployed from main only"
     HEAD_SHA="$(git rev-parse HEAD)"
@@ -532,6 +561,17 @@ else
     echo "  no previous deployment recorded in $MANIFEST_DIR"
 fi
 
+# In finalize the containers running now are the *new* ones, so reading them
+# here would record the deployment as having replaced itself. The interrupted
+# run wrote what it replaced into the journal before it touched anything; that
+# is the only honest source, and if it is absent the field says so rather than
+# guessing.
+if [ "$MODE" = finalize ]; then
+    PREV_IMAGES="$(sed -n '/^images$/,$p' "$JOURNAL" | tail -n +2 | sed 's/^  //')"
+    [ -n "$PREV_IMAGES" ] || PREV_IMAGES="(not recorded by the interrupted run)"
+    PRE_CIDS="$(awk '/^pre_containers /{$1=""; print}' "$JOURNAL" | sed 's/^ //')"
+    PREV_IMAGE_IDS=""
+else
 PREV_IMAGES="$(docker ps -a --filter "label=com.docker.compose.project=$PROJECT" \
     --format '{{.Label "com.docker.compose.service"}} {{.Image}} {{.ID}}' | sort || true)"
 
@@ -569,6 +609,7 @@ if [ -n "$PREV_IMAGE_IDS" ]; then
 else
     echo "  no running image ids recorded; a rollback will have to rebuild"
 fi
+fi   # end of the finalize / normal split for the state being replaced
 
 # Declared services come from `docker compose config`, not from parsing the YAML
 # here: it resolves interpolation, overrides and extends, so what is checked is
@@ -679,6 +720,16 @@ step "deploying"
 # abort_deployment. Set immediately before `up` rather than earlier: a refusal
 # during the preflight has nothing to roll back, and rolling back anyway would
 # rebuild the previous state for no reason.
+if [ "$MODE" = finalize ]; then
+    # Nothing below this point in the deployment section runs. finalize does not
+    # build, does not migrate, does not `up`, does not recreate: the deployment
+    # already happened, and repeating any of it would be a second deployment
+    # wearing the name of a bookkeeping fix.
+    echo "  skipped: finalize changes nothing, it records what is already running"
+    APP_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null || true)"
+    [ -n "$APP_IMAGE_ID" ] \
+        || fail "$APP_IMAGE does not exist, so what is running cannot be checked against it"
+else
 PHASE=mutating
 # Written before the first change, not after: a journal that appears only once
 # the mutation succeeded records nothing about the case it exists for.
@@ -745,6 +796,7 @@ APP_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null
 # created; a git pull replaces the file and the container keeps reading the old
 # one. Observed, with `nginx -s reload` re-reading the stale copy.
 "${DC[@]}" up -d --force-recreate nginx
+fi   # end of the mutating section, which finalize skips entirely
 
 # ---------------------------------------------------------------- verification
 
@@ -1063,9 +1115,6 @@ echo "  acceptance: exclude only User-Agent $DEPLOY_PROBE_UA when counting user-
 # state that is meant to be running, and a failure while writing the record is
 # not a reason to undo it.
 PHASE=committed
-# Closed only here. Everything above this line is a state somebody has to look
-# at; past it, the deployment is the one that is meant to be running.
-journal_clear
 
 step "recording what was deployed"
 
@@ -1105,6 +1154,14 @@ TMP_MANIFEST="$MANIFEST.tmp"
     docker ps --filter "label=com.docker.compose.project=$PROJECT" \
         --format '  {{.Names}} {{.Ports}}' | grep -- '->' || echo "  (none)"
     echo
+    if [ "$MODE" = finalize ]; then
+        echo "finalized      yes"
+        echo "finalized_run  ${FINALIZED_RUN:-unknown}"
+        echo "note           the deploying run completed and was interrupted"
+        echo "               before it wrote this record; nothing was rebuilt,"
+        echo "               migrated or recreated to produce it (#160)"
+        echo
+    fi
     echo "--- state replaced by this run ---"
     echo "previous_commit ${PREV_COMMIT:-none-recorded}"
     echo "previous_images:"
@@ -1118,6 +1175,21 @@ mv "$TMP_MANIFEST" "$MANIFEST"
 # to. `ln -sfn` alone is not atomic; the rename is.
 ln -sfn "$(basename "$MANIFEST")" "$MANIFEST_DIR/.latest.$$"
 mv -Tf "$MANIFEST_DIR/.latest.$$" "$LATEST"
+
+# Durable before the journal goes, and in that order.
+#
+# `journal_clear` used to run *before* the manifest was written. A run
+# interrupted between the two left neither -- no record of what is deployed and
+# no sign that anything was unfinished, which is strictly worse than the case
+# the journal exists for. Measured on 2026-08-14: the interruption fell on the
+# other side of that line, so the journal survived and the manifest was never
+# written (#160).
+#
+# fsync of the directory, not just the file: a rename is durable only once the
+# directory entry is. Without it a crash here can lose a manifest that
+# `cat` would happily show.
+sync "$MANIFEST_DIR" 2>/dev/null || sync
+journal_clear
 
 cat "$MANIFEST"
 echo

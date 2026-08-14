@@ -1362,6 +1362,135 @@ check "and does not run alembic upgrade" \
 check "and does verify the schema version instead" \
     "$(grep -cE '^[^#]*verify_schema_head' "$ENTRYPOINT")" "1"
 
+echo "== a run that finished everything and died before recording it =="
+# #160. The deploying run built, migrated, recreated and verified, then its SSH
+# session was killed at a ten-minute timeout. Production was correct and
+# unrecorded: journal present, no manifest. --finalize proves the end state and
+# writes what is missing; it does not deploy anything again.
+
+# The journal a deploy leaves behind at the moment of interruption.
+write_journal() {
+    local target="$1" mode="${2:-deploy}"
+    mkdir -p "$SANDBOX/manifests"
+    {
+        echo "run            20260814T032941Z-1038993"
+        echo "state          mutating"
+        echo "started        2026-08-14T03:29:41Z"
+        echo "updated        2026-08-14T03:29:41Z"
+        echo "mode           $mode"
+        echo "target         $target"
+        echo "previous       $FIRST"
+        echo "pre_containers cid-old-1 cid-old-2"
+        echo "images"
+        echo "  backend	sha256:old-backend"
+        echo "  nginx	sha256:old-nginx"
+    } > "$SANDBOX/manifests/in-progress"
+}
+
+new_sandbox
+write_journal "$SECOND"
+run_guard --finalize
+check "it finalizes the interrupted run" "$RC" "0"
+check "and writes exactly one manifest" \
+    "$(find "$SANDBOX/manifests" -type f -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')" "1"
+check "and marks it as a reconciliation, not a deployment" \
+    "$(grep -qc '^finalized      yes' "$SANDBOX/manifests"/*.txt && echo yes || echo no)" "yes"
+check "and removes the journal" \
+    "$([ -f "$SANDBOX/manifests/in-progress" ] && echo present || echo gone)" "gone"
+# The whole point: nothing was deployed a second time.
+check "it did not build" "$(grep -c 'build backend' "$STUB_DIR/calls")" "0"
+check "it did not migrate" "$(grep -c 'run --rm --no-deps migrate' "$STUB_DIR/calls")" "0"
+check "it did not recreate the services" \
+    "$(grep -c 'up -d --no-build --remove-orphans' "$STUB_DIR/calls")" "0"
+check "and it recorded what the interrupted run replaced, not itself" \
+    "$(grep -qc 'previous_commit' "$SANDBOX/manifests"/*.txt && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+new_sandbox
+run_guard --finalize
+refused_because "finalize with no journal refuses" "nothing to finalize"
+check "and writes no manifest" \
+    "$(find "$SANDBOX/manifests" -type f -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')" "0"
+rm -rf "$SANDBOX"
+
+echo "== finalize refuses whatever it cannot prove =="
+
+new_sandbox
+# Interrupted before the migration: the checkout is still the old commit, so
+# what is running is not what the journal targeted.
+write_journal "$SECOND"
+git -C "$REPO" checkout --quiet --detach "$FIRST"
+run_guard --finalize
+refused_because "a checkout that has moved" "cannot be reconciled from a tree that has moved"
+check "and no manifest was written" \
+    "$(find "$SANDBOX/manifests" -type f -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')" "0"
+check "and the journal is left for a human" \
+    "$([ -f "$SANDBOX/manifests/in-progress" ] && echo present || echo gone)" "present"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# Interrupted after the migration and before the recreate: the containers are
+# still on the previous image, so they do not match the tag.
+write_journal "$SECOND"
+echo "sha256:a-different-image" > "$STUB_DIR/app_image_id"
+run_guard --finalize
+refused_because "containers not running the deployed image" "not the sha256:a-different-image the migration ran from"
+check "and no manifest was written" \
+    "$(find "$SANDBOX/manifests" -type f -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# Interrupted after the recreate and before verification: finalize runs the
+# verification now, and a service that is missing is still a refusal.
+write_journal "$SECOND"
+echo "nginx" > "$STUB_DIR/services"
+echo "backend" >> "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+run_guard --finalize
+refused_because "a declared service that is not running" "is not running"
+rm -rf "$SANDBOX"
+
+new_sandbox
+write_journal "$SECOND"
+echo 500 > "$STUB_DIR/http_code"
+run_guard --finalize
+check "an unhealthy site refuses" "$([ "$RC" = 0 ] && echo no || echo yes)" "yes"
+check "and writes no manifest" \
+    "$(find "$SANDBOX/manifests" -type f -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# A rollback that was interrupted is not something this path may finish: the
+# checkout is detached and the record it would write is a different shape.
+write_journal "$SECOND" rollback
+run_guard --finalize
+refused_because "an interrupted rollback is not finalized" "only a deploy can be finalized"
+rm -rf "$SANDBOX"
+
+echo "== the journal outlives the manifest, not the other way round =="
+# It used to be cleared *before* the manifest was written, so an interruption
+# between the two left neither: no record of what is deployed, and no sign that
+# anything was unfinished.
+new_sandbox
+run_guard
+check "a normal deploy still ends with a manifest and no journal" \
+    "$([ -f "$SANDBOX/manifests/in-progress" ] && echo present || echo gone)" "gone"
+MANIFEST_COUNT="$(find "$SANDBOX/manifests" -type f -name '*.txt' | wc -l | tr -d ' ')"
+check "and exactly one manifest" "$MANIFEST_COUNT" "1"
+# Ordering, read from the script. The behavioural half cannot observe it --
+# both orders leave the same end state on a run that is not interrupted -- and
+# the order is the whole fix.
+CLEAR_LINE="$(grep -n '^journal_clear$' "$SCRIPT" | tail -1 | cut -d: -f1)"
+LATEST_LINE="$(grep -n 'mv -Tf .*LATEST' "$SCRIPT" | head -1 | cut -d: -f1)"
+if [ -n "$CLEAR_LINE" ] && [ -n "$LATEST_LINE" ] && [ "$CLEAR_LINE" -gt "$LATEST_LINE" ]; then
+    ORDER=after
+else
+    ORDER=before
+fi
+check "and the journal is cleared after the manifest is published, not before" \
+    "$ORDER" "after"
+rm -rf "$SANDBOX"
+
 echo
 echo "  passed: $PASS   failed: $FAIL"
 [ "$FAIL" -eq 0 ]
