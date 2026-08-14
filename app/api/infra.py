@@ -15,7 +15,8 @@ from app.drift_detection import drift_detector
 from app.mlflow_tracking import get_experiment_stats
 from app.rate_limit import rate_limiter
 from app.middleware import METRICS, START_TIME
-from app.schemas import (IngestionAttention, ObservationPage, ObservationRow,
+from app.schemas import (CoverageGap, IngestionAttention, ObservationCoverage,
+                         ObservationPage, ObservationRow,
                          ProjectInput as Project)
 
 import time
@@ -767,6 +768,84 @@ def observations(
                 "until": _iso(until),
             },
             observations=out,
+        )
+    finally:
+        db.close()
+
+
+#: Hourly sources are expected to supply 24 observations per point per day.
+#: The M3 declaration binds usability to 80% of that, reusing MIN_COVERAGE from
+#: the entry gate rather than introducing a second number that could drift.
+EXPECTED_PER_DAY = 24
+
+
+@router.get("/observations/coverage", tags=["infrastructure"],
+            response_model=ObservationCoverage)
+def observation_coverage(
+    _admin=Depends(require_admin),
+    source: str = Query("openmeteo"),
+    indicator: str = Query("temperature"),
+    days: int = Query(30, ge=1, le=400,
+                      description="how far back to look, in whole UTC days"),
+):
+    """Days a point did not supply enough observations to be usable.
+
+    The M3 target is a daily mean computed only where at least 80% of the
+    expected hourly observations are present. A day below that is absent, and
+    an absent day is one fewer window the §7 gate can use -- so a quiet dip in
+    coverage moves the earliest evidential date, currently 2027-02-04.
+
+    Nothing watched for that. `/ingestion/attention` reports the verdict of
+    each source's latest run: it catches "the ingester stopped", and weakly,
+    since openmeteo declares no `max_vintage_hours`. A day where 18 of 24
+    observations arrived leaves every run successful and every freshness check
+    content, and the loss is invisible until someone counts windows.
+
+    Today's UTC day is excluded. It is incomplete by construction, and
+    reporting it would put one guaranteed gap in every response -- an alert
+    that fires every day is one nobody reads.
+    """
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.services.forecasting.entry_conditions import MIN_COVERAGE
+
+    required = int(EXPECTED_PER_DAY * MIN_COVERAGE)
+
+    db = SessionLocal()
+    try:
+        rows = db.execute(text(
+            """
+            SELECT to_char(event_time::date, 'YYYY-MM-DD') AS day,
+                   region_id,
+                   count(*) AS observations
+              FROM environmental_observations
+             WHERE source = :source
+               AND indicator = :indicator
+               AND temporal_kind = 'observed'
+               AND event_time IS NOT NULL
+               AND event_time >= (now() at time zone 'utc')::date
+                                 - make_interval(days => :days)
+               AND event_time <  (now() at time zone 'utc')::date
+             GROUP BY 1, 2
+             ORDER BY 1 DESC, 2
+            """
+        ), {"source": source, "indicator": indicator, "days": days}).all()
+
+        gaps = [
+            CoverageGap(day=day, region_id=region, indicator=indicator,
+                        observations=int(count), required=required)
+            for day, region, count in rows if int(count) < required
+        ]
+        return ObservationCoverage(
+            source=source,
+            indicator=indicator,
+            required_per_day=required,
+            days_examined=len({r[0] for r in rows}),
+            points_examined=len({r[1] for r in rows}),
+            complete_days=len(rows) - len(gaps),
+            gap_count=len(gaps),
+            gaps=gaps,
         )
     finally:
         db.close()
