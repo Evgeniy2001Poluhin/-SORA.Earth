@@ -71,10 +71,31 @@ END $$;
 """
 
 
+def _existing() -> set:
+    """Columns retrain_log already has.
+
+    There are two paths to head: this migration chain, and `create_all()` from
+    the model, which the test stand exercises to prove the two agree. On the
+    second path the columns arrive with the table, and an unconditional
+    `add_column` then raises DuplicateColumn -- the same shape that broke
+    d3a71c0f5e26 on the converged path.
+    """
+    bind = op.get_bind()
+    return {c["name"] for c in sa.inspect(bind).get_columns("retrain_log")}
+
+
+def _has_index(name: str) -> bool:
+    bind = op.get_bind()
+    return name in {i["name"] for i in sa.inspect(bind).get_indexes("retrain_log")}
+
+
 def upgrade() -> None:
+    present = _existing()
     for name, kind in COLUMNS:
-        op.add_column("retrain_log", sa.Column(name, kind, nullable=True))
-    op.create_index("ix_retrain_log_roc_auc", "retrain_log", ["roc_auc"])
+        if name not in present:
+            op.add_column("retrain_log", sa.Column(name, kind, nullable=True))
+    if not _has_index("ix_retrain_log_roc_auc"):
+        op.create_index("ix_retrain_log_roc_auc", "retrain_log", ["roc_auc"])
     op.execute(BACKFILL)
 
 
@@ -84,6 +105,9 @@ def downgrade() -> None:
     That is the reason the blob is kept and still written rather than migrated
     away: it makes this reversible without a second backfill.
     """
-    op.drop_index("ix_retrain_log_roc_auc", table_name="retrain_log")
+    if _has_index("ix_retrain_log_roc_auc"):
+        op.drop_index("ix_retrain_log_roc_auc", table_name="retrain_log")
+    present = _existing()
     for name, _kind in reversed(COLUMNS):
-        op.drop_column("retrain_log", name)
+        if name in present:
+            op.drop_column("retrain_log", name)
