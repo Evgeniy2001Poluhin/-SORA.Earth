@@ -427,8 +427,18 @@ if [ "$MODE" = finalize ]; then
     TARGET="$(awk '/^target /{print $2}' "$JOURNAL")"
     FINALIZED_RUN="$(awk '/^run /{print $2}' "$JOURNAL")"
     JOURNAL_MODE="$(awk '/^mode /{print $2}' "$JOURNAL")"
-    [ -n "$TARGET" ] && [ "$TARGET" != unset ] \
-        || fail "the journal records no target commit; it cannot be reconciled automatically"
+    # A journal with no run id was not written by this script. Reconciling it
+    # would publish a manifest whose provenance field reads `unknown`, which is
+    # a record that cannot be traced back to anything.
+    if [ -z "$FINALIZED_RUN" ]; then
+        fail "the journal records no run id; it was not written by this script and cannot be reconciled automatically"
+    fi
+    # `if`, not `A && B || C`. The chain reads as if-then-else and is not one:
+    # this file already carries that lesson a few hundred lines down, where the
+    # same shape swallowed a failure under `set -e`.
+    if [ -z "$TARGET" ] || [ "$TARGET" = unset ]; then
+        fail "the journal records no target commit; it cannot be reconciled automatically"
+    fi
     [ "$JOURNAL_MODE" = deploy ] \
         || fail "the interrupted run was '$JOURNAL_MODE', and only a deploy can be finalized"
     # `mutating` is the only state a finished-but-unrecorded run can be left in.

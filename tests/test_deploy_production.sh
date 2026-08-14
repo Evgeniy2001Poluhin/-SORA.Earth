@@ -1521,6 +1521,18 @@ rm -rf "$SANDBOX"
 
 new_sandbox
 write_journal "$SECOND"
+# A journal with no run id was not written by this script; reconciling it would
+# publish a manifest whose provenance reads `unknown`.
+grep -v '^run ' "$SANDBOX/manifests/in-progress" > "$SANDBOX/j.tmp"
+mv "$SANDBOX/j.tmp" "$SANDBOX/manifests/in-progress"
+run_guard --finalize
+refused_because "a journal with no run id" "no run id"
+check "and no manifest was written" \
+    "$(find "$SANDBOX/manifests" -type f -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+write_journal "$SECOND"
 touch "$STUB_DIR/schema_behind"
 run_guard --finalize
 refused_because "a schema the running code does not accept" "cannot be confirmed"
