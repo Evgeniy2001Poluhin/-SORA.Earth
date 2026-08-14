@@ -124,7 +124,9 @@ def test_trends_and_prediction_history(client):
     assert isinstance(h_data, list)
 
 
-@pytest.mark.xfail(reason="csv export endpoint returns 404 - implementation pending v0.2.2")
+# The xfail here read "csv export endpoint returns 404 - implementation
+# pending". Both routes exist: app/api/evaluate.py:287 and
+# app/api/predict.py:233. The marker outlived the gap it described.
 def test_export_csv_endpoints(client):
     # общий экспорт
     r1 = client.get("/api/v1/export/csv")

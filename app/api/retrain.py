@@ -178,14 +178,92 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
                         "budget_per_month", "co2_per_dollar", "efficiency_score",
                         "year", "quarter"]
 
+        # NaN and inf are removed before anything is fitted (#1).
+        #
+        # Without this the failure is `ValueError: Input y contains NaN` from
+        # deep inside sklearn, which names neither the row nor the column. A
+        # missing `success` is the common case -- projects.csv is appended to
+        # by more than the validated upload path -- and inf arrives from the
+        # derived features when a value is large enough to overflow the
+        # division rather than from a zero denominator, which the clips above
+        # already prevent.
+        #
+        # The count is reported rather than dropped quietly. Training on fewer
+        # rows than the operator supplied is a fact about the model, and a
+        # silent filter is how a dataset shrinks over releases with nobody
+        # noticing.
+        before = len(df)
+        df = df.replace([np.inf, -np.inf], np.nan).dropna(
+            subset=feature_cols + ["success"])
+        dropped = before - len(df)
+        if dropped:
+            logger.warning(
+                "retrain: dropped %d of %d rows carrying NaN or inf in a "
+                "feature or the label", dropped, before,
+            )
+
+        # Re-checked after the drop, not only before it. The count that matters
+        # is how many rows can be trained on, and the earlier check was made
+        # against rows that included the unusable ones.
+        if len(df) < min_samples:
+            raise HTTPException(
+                400,
+                f"Need at least {min_samples} usable samples, have {len(df)}"
+                + (f" ({dropped} of {before} rows carried NaN or inf)"
+                   if dropped else ""),
+            )
+
         X = df[feature_cols].values
-        y = df["success"].values
+
+        # Checked, not coerced. `astype(int)` on its own turns 0.9 into 0 and
+        # 1.9 into 1, so a mislabelled row trains the model on a value nobody
+        # wrote -- silently, and differently from the CSV it came from.
+        labels = df["success"]
+        off_scale = labels[~labels.isin([0, 1])]
+        if len(off_scale) > 0:
+            raise HTTPException(
+                400,
+                f"{len(off_scale)} rows have a success value that is not 0 or 1 "
+                f"(first: {off_scale.iloc[0]!r})",
+            )
+        # int, not whatever read_csv inferred: a `success` column holding one
+        # NaN is read as float64, and the classifier then trains on 0.0/1.0
+        # labels while `stratify` and the metrics expect discrete classes.
+        y = labels.values.astype(int)
+
+        # One class cannot be scored. `roc_auc_score` raises "Only one class
+        # present in y_true", which reads as a bug in the metric rather than as
+        # a description of the training set.
+        classes = sorted(set(y.tolist()))
+        if len(classes) < 2:
+            raise HTTPException(
+                400,
+                f"Training data has only one outcome class ({classes}); "
+                f"a classifier needs both successes and failures",
+            )
 
         # Temporal split — no shuffling for time series data
         split_idx = int(len(X) * 0.8)
         X_train, y_train = X[:split_idx], y[:split_idx]
         X_test, y_test = X[split_idx:], y[split_idx:]
         logger.info("Temporal split: train=%d, test=%d", len(X_train), len(X_test))
+
+        # Both classes on both sides, checked after the split rather than only
+        # over the whole set.
+        #
+        # The split is temporal and does not shuffle, so a dataset ordered by
+        # outcome satisfies the global check and still puts every failure in
+        # the first 80% and every success in the last 20%. `rf.fit` then trains
+        # a one-class model and `predict_proba(...)[:, 1]` indexes a column
+        # that does not exist -- an IndexError far from the cause.
+        for part, labels_part in (("train", y_train), ("test", y_test)):
+            if len(set(labels_part.tolist())) < 2:
+                raise HTTPException(
+                    400,
+                    f"The temporal split leaves one outcome class in {part} "
+                    f"({sorted(set(labels_part.tolist()))}); the data is "
+                    f"ordered by outcome and cannot be split this way",
+                )
 
         # Walk-forward cross-validation
         wf = walk_forward_validate(RandomForestClassifier, X, y)
@@ -297,12 +375,68 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
         )
         raise
 
+def _preflight_retrain(min_samples: int) -> int:
+    """Refuse, before accepting, what can be refused without training (#2).
+
+    These are the same checks `_do_retrain` makes; the difference is when. In
+    the background they arrive after the caller has been told `accepted` and
+    the response has been sent -- so the 400 has nobody to reach, and raising
+    it there produced `RuntimeError: Caught handled exception, but response
+    already started` in the ASGI layer.
+
+    Returns the clamped `min_samples` so the caller and the job agree on the
+    number the refusal was measured against.
+    """
+    if not os.path.exists(PROJECTS_CSV):
+        raise HTTPException(400, "No training data (projects.csv) found")
+
+    clamped = max(10, min(min_samples, 100000))
+    try:
+        df = pd.read_csv(PROJECTS_CSV)
+    except Exception as e:
+        raise HTTPException(400, f"projects.csv is unreadable: {type(e).__name__}")
+
+    required = ["budget", "co2_reduction", "social_impact", "duration_months", "success"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise HTTPException(400, f"Missing columns in projects.csv: {missing}")
+    if len(df) < clamped:
+        raise HTTPException(400, f"Need at least {clamped} samples, have {len(df)}")
+    return clamped
+
+
+def _retrain_in_background(min_samples: int) -> None:
+    """Run the job with nothing left to raise into.
+
+    A background task has no response to attach a status to. `HTTPException`
+    from here is a category error -- there is nobody to receive a 400 -- and
+    Starlette turns it into a RuntimeError that reads as a server fault rather
+    than as a refused retrain.
+
+    `_do_retrain` already logs the reason and closes its RetrainLog row on the
+    way out, so the outcome is recorded where an operator looks for it. What
+    this adds is that it stops here.
+    """
+    try:
+        _do_retrain(min_samples, trigger_source="manual")
+    except HTTPException as exc:
+        logger.error("background retrain refused: %s", exc.detail)
+    except Exception:
+        logger.exception("background retrain failed")
+
+
 @router.post("/retrain")
 def retrain_model(background_tasks: BackgroundTasks, current_user=Depends(require_admin), min_samples: int = 50, sync: bool = False):
-    """Retrain RF. Default=async, ?sync=true for synchronous."""
+    """Retrain RF. Default=async, ?sync=true for synchronous.
+
+    The cheap preconditions are checked before the job is accepted, so a
+    request that cannot succeed is refused to the caller rather than accepted
+    and abandoned (#2).
+    """
+    clamped = _preflight_retrain(min_samples)
     if sync:
-        return _do_retrain(min_samples)
-    background_tasks.add_task(_do_retrain, min_samples)
+        return _do_retrain(clamped)
+    background_tasks.add_task(_retrain_in_background, clamped)
     return {
         "status": "accepted",
         "message": "Retrain started in background",
