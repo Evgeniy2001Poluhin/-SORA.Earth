@@ -13,7 +13,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, classification_report
 import torch
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import (APIRouter, BackgroundTasks, Depends, File, HTTPException,
+                     UploadFile)
 from app.auth import require_api_key
 from app.paths import data_dir, models_dir
 
@@ -545,43 +546,14 @@ def _dataset_lock():
         os.close(fd)
 
 
-@router.post("/data/bulk-upload")
-def data_bulk_upload(
-    file_path: str,
-    auto_retrain: bool = False,
-    _admin=Depends(require_admin),
-):
-    """Upload CSV with columns: budget,co2_reduction,social_impact,duration_months,success
+def _ingest_frame(df_new, auto_retrain: bool, _audit) -> dict:
+    """Validate, merge and persist -- the half that does not depend on how the
+    bytes arrived.
 
-    Appends to the training set and can trigger a retrain, so it is admin-only,
-    reads only from UPLOADS_DIR, and replaces the dataset atomically under an
-    interprocess lock. Every outcome is audited.
+    Shared by both upload routes on purpose. When this was inlined in one of
+    them, adding the second meant copying the validation, and a copy is how two
+    endpoints come to disagree about what a valid row is.
     """
-    actor = _safe_for_log(str(getattr(_admin, "username", None) or "admin"), 64)
-    safe_name = _safe_for_log(file_path)
-    started = datetime.utcnow().isoformat()
-
-    def _audit(outcome: str, rows: int = 0, detail: str = "") -> None:
-        # Deliberately no server paths: the caller only ever learns the name it
-        # supplied, never where the uploads directory lives.
-        logger.info(
-            "bulk_upload actor=%s action=data_bulk_upload file=%s rows=%d "
-            "auto_retrain=%s result=%s started_at=%s%s",
-            actor, safe_name, rows, auto_retrain, outcome, started,
-            f" detail={detail}" if detail else "",
-        )
-
-    fd = _open_upload(file_path)
-    try:
-        with os.fdopen(fd, "rb") as handle:
-            try:
-                df_new = pd.read_csv(handle)
-            except Exception as e:
-                _audit("rejected_unparseable", detail=type(e).__name__)
-                raise HTTPException(400, f"CSV parse error: {type(e).__name__}")
-    except HTTPException:
-        raise
-
     required = ["budget", "co2_reduction", "social_impact", "duration_months", "success"]
     missing = [c for c in required if c not in df_new.columns]
     if missing:
@@ -624,3 +596,165 @@ def data_bulk_upload(
             result["retrain_error"] = type(e).__name__
             _audit("retrain_failed", rows=len(df_new), detail=type(e).__name__)
     return result
+
+
+#: Read size for the upload stream. Small enough that the limit below is
+#: overshot by at most this much, large enough not to syscall per byte.
+UPLOAD_CHUNK_BYTES = 64 * 1024
+
+
+def _stream_to_temp(upload: UploadFile) -> str:
+    """Write an uploaded body to a file this process names, and stop at the limit.
+
+    #26. The endpoint below takes a *path on the server* from the caller.
+    PR #24 made that path safe -- admin-only, anchored on a directory
+    descriptor, O_NOFOLLOW, size-checked, atomic, locked, audited -- but the
+    shape stayed: the API asks a remote caller to name a file in a filesystem
+    the caller cannot see, which means the bytes had to arrive by some other
+    channel that nothing here audits.
+
+    Two properties this has and that one could not:
+
+    the caller names nothing
+        `tempfile.mkstemp` chooses the name, in a directory this module owns.
+        There is no component of the path the request can influence, so
+        symlink resolution, `..`, and the shared uploads directory all stop
+        being questions.
+
+    the limit is enforced while reading
+        `os.fstat` could only reject a file that had already arrived. Here the
+        counter is checked per chunk and the read stops, so the disk holds at
+        most `MAX_UPLOAD_BYTES + UPLOAD_CHUNK_BYTES` before the refusal -- not
+        whatever the client chose to send.
+
+    The partial file is removed on every failure path. Returning the name of a
+    file that may not exist is worse than raising.
+    """
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=UPLOADS_DIR, prefix=".upload-", suffix=".csv")
+    written = 0
+    try:
+        with os.fdopen(fd, "wb") as sink:
+            while True:
+                chunk = upload.file.read(UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        413,
+                        f"Upload exceeds the {MAX_UPLOAD_BYTES} byte limit",
+                    )
+                sink.write(chunk)
+        if written == 0:
+            raise HTTPException(400, "Upload is empty")
+    except BaseException:
+        # Includes the 413 above: a refused upload must not leave its prefix
+        # behind for the next caller to find under a name nobody recorded.
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise
+    return tmp_path
+
+
+@router.post("/data/bulk-upload", deprecated=True)
+def data_bulk_upload(
+    file_path: str,
+    auto_retrain: bool = False,
+    _admin=Depends(require_admin),
+):
+    """**Deprecated.** Use `POST /model/data/bulk-upload/content` instead.
+
+    Upload CSV with columns: budget,co2_reduction,social_impact,duration_months,success
+
+    Takes a path on the server, which means the bytes had to arrive by some
+    other channel first -- one nothing here audits. PR #24 made the path safe
+    to open; it could not make the shape safe, because the shape is "a remote
+    caller names a file in a filesystem it cannot see".
+
+    Kept, and marked, for one release: the audit line this writes is what will
+    show whether anyone is still calling it (#26). Removal is on that evidence,
+    not on a guess.
+
+    Appends to the training set and can trigger a retrain, so it is admin-only,
+    reads only from UPLOADS_DIR, and replaces the dataset atomically under an
+    interprocess lock. Every outcome is audited.
+    """
+    actor = _safe_for_log(str(getattr(_admin, "username", None) or "admin"), 64)
+    safe_name = _safe_for_log(file_path)
+    started = datetime.utcnow().isoformat()
+
+    def _audit(outcome: str, rows: int = 0, detail: str = "") -> None:
+        # Deliberately no server paths: the caller only ever learns the name it
+        # supplied, never where the uploads directory lives.
+        logger.info(
+            "bulk_upload actor=%s action=data_bulk_upload file=%s rows=%d "
+            "auto_retrain=%s result=%s started_at=%s%s",
+            actor, safe_name, rows, auto_retrain, outcome, started,
+            f" detail={detail}" if detail else "",
+        )
+
+    fd = _open_upload(file_path)
+    try:
+        with os.fdopen(fd, "rb") as handle:
+            try:
+                df_new = pd.read_csv(handle)
+            except Exception as e:
+                _audit("rejected_unparseable", detail=type(e).__name__)
+                raise HTTPException(400, f"CSV parse error: {type(e).__name__}")
+    except HTTPException:
+        raise
+
+    return _ingest_frame(df_new, auto_retrain, _audit)
+
+@router.post("/data/bulk-upload/content")
+def data_bulk_upload_content(
+    file: UploadFile = File(...),
+    auto_retrain: bool = False,
+    _admin=Depends(require_admin),
+):
+    """Upload CSV content, not a path to it (#26).
+
+    The body carries the bytes. Nothing in the request names a location on the
+    server, so the whole class of question the deprecated route raised --
+    which directory, whose symlink, how did the file get there -- does not
+    arise. The limit is enforced while the stream is read rather than after it
+    has landed.
+
+    Validation, atomic replacement, the interprocess lock and the audit line
+    are the same as the deprecated route: they are one function, not a copy.
+
+    The client's filename is recorded for traceability and is never used to
+    open anything. It is attacker-controlled text, so it goes through the same
+    sanitiser as everything else that reaches a log line.
+    """
+    actor = _safe_for_log(str(getattr(_admin, "username", None) or "admin"), 64)
+    safe_name = _safe_for_log(file.filename or "(unnamed)")
+    started = datetime.utcnow().isoformat()
+
+    def _audit(outcome: str, rows: int = 0, detail: str = "") -> None:
+        logger.info(
+            "bulk_upload actor=%s action=data_bulk_upload_content file=%s rows=%d "
+            "auto_retrain=%s result=%s started_at=%s%s",
+            actor, safe_name, rows, auto_retrain, outcome, started,
+            f" detail={detail}" if detail else "",
+        )
+
+    try:
+        tmp_path = _stream_to_temp(file)
+    except HTTPException as exc:
+        _audit("rejected_upload", detail=str(exc.status_code))
+        raise
+
+    try:
+        try:
+            df_new = pd.read_csv(tmp_path)
+        except Exception as e:
+            _audit("rejected_unparseable", detail=type(e).__name__)
+            raise HTTPException(400, f"CSV parse error: {type(e).__name__}")
+        return _ingest_frame(df_new, auto_retrain, _audit)
+    finally:
+        # The temporary file has no reader after this call. Leaving it would
+        # rebuild the shared mutable directory this endpoint exists to remove.
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
