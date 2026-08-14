@@ -360,7 +360,28 @@ Optional:
    deployment window is not evidence that a write came from somewhere else, and
    it is not a licence to accept an unexplained delta either.
 
-2. **Feature Count Consistency**: The RF model expects exactly 9 features in this order: `["budget", "co2_reduction", "social_impact", "duration_months", "budget_per_month", "co2_per_dollar", "efficiency_score", "year", "quarter"]`. Always use `make_features()` to construct feature DataFrames.
+2. **Feature Count Consistency**: The RF model expects exactly 9 columns in this
+   order: `["budget", "co2_reduction", "social_impact", "duration_months",
+   "budget_per_month", "co2_per_dollar", "efficiency_score", "year", "quarter"]`.
+   Always use `make_features()` to construct feature DataFrames.
+
+   **Nine columns, seven of which carry information.** `year` and `quarter` are
+   computed in `_do_retrain` as `datetime.utcnow().year` and the quarter of the
+   same moment — the retrain's own clock, identical for every row in the frame.
+   A constant column cannot separate anything, so the model fits on seven.
+   Measured 2026-08-14; the shape of the defect is the same as
+   `legacy_hash_count()`, which returns a number that cannot be other than
+   zero: code that exists, looks like a feature, and does not do what its name
+   says.
+
+   They are left in place rather than removed: `models/model.pkl` was fitted
+   with nine columns and would refuse eight, so dropping them is a retrain, not
+   an edit. What must not happen is the count being read as nine working
+   signals.
+
+   Three columns in `data/projects.csv` are **not** features: `category`,
+   `region`, `country_gdp_per_capita`. They are stored and unused by this
+   model. Whether that is a decision or an oversight has not been recorded.
 
 3. **Model Versioning**: Models are loaded at app startup. To deploy a new model, replace files in `models/` directory and restart the `app` container. Old predictions remain cached in Redis until TTL expires or manual invalidation.
 
