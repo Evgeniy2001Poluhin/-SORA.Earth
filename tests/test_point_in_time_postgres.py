@@ -7,9 +7,10 @@ path deletes. So a point-in-time answer needs no new table; it needs a query
 that asks for one, a guarantee that the property keeps holding, and an index.
 
 What these tests pin is the *reading* semantics, which nothing expressed
-before. `app/services/forecasting/features.py` takes whatever the table
-returns, which is the latest vintage -- so a backtest over a past date silently
-uses values published after that date.
+before. `app/services/forecasting/features.py` used to take whatever the table
+returned, which is the latest vintage, so a backtest over a past date silently
+used values published after it; it now reads through `series_as_of` and
+tests/test_regressor_is_point_in_time.py holds it there.
 
 They run against a real migrated PostgreSQL: the table carries CHECK
 constraints on the period columns, and a query written against a mock would
@@ -213,3 +214,69 @@ def test_a_tie_on_fetched_at_is_broken_deterministically(db):
         assert value_as_of(db, "RUS", CODE, datetime(2026, 7, 1)) == first
     # Last row inserted is the later write, so it is the one in force.
     assert first == pytest.approx(2.00)
+
+
+# --- restricting the answer to one source ------------------------------------
+#
+# `country_indicator_history` is written by one refresh today, but the fallback
+# chain in app/external_data.py can store a static benchmark figure under a real
+# indicator code when a fetch fails. A caller that must not train on a stand-in
+# has to be able to say so; leaving the guarantee to what the table happens to
+# contain makes it a property of configuration elsewhere (#86).
+
+INSERT_SOURCED = text(
+    "INSERT INTO country_indicator_history "
+    "  (country_iso3, indicator_code, source, value, as_of_date, fetched_at) "
+    "VALUES (:iso3, :code, :source, :value, :as_of_date, :fetched_at)"
+)
+
+
+def _write_sourced(db, rows, iso3="RUS", code=CODE):
+    """rows: (period, value, fetched_at, source)."""
+    for period, value, fetched_at, source in rows:
+        db.execute(INSERT_SOURCED, {
+            "iso3": iso3, "code": code, "value": value, "source": source,
+            "as_of_date": period, "fetched_at": fetched_at,
+        })
+    db.commit()
+
+
+def test_a_named_source_excludes_a_newer_row_from_another(db):
+    """The fallback is newer, so without the filter it wins on every axis."""
+    _write_sourced(db, [
+        (datetime(2024, 1, 1), 4.92, datetime(2026, 6, 1), "world_bank"),
+        (datetime(2024, 1, 1), 9.99, datetime(2026, 7, 1), "benchmark_fallback"),
+    ])
+    as_of = datetime(2026, 8, 1)
+
+    assert value_as_of(db, "RUS", CODE, as_of,
+                       source="world_bank") == pytest.approx(4.92)
+    assert series_as_of(db, "RUS", CODE, as_of,
+                        source="world_bank")[datetime(2024, 1, 1)] == pytest.approx(4.92)
+
+
+def test_omitting_the_source_answers_from_everything_stored(db):
+    """The filter is opt-in, and the default has to stay what it was.
+
+    Silently restricting to one source would change every existing caller's
+    answer without any of them saying anything.
+    """
+    _write_sourced(db, [
+        (datetime(2024, 1, 1), 4.92, datetime(2026, 6, 1), "world_bank"),
+        (datetime(2024, 1, 1), 9.99, datetime(2026, 7, 1), "benchmark_fallback"),
+    ])
+    as_of = datetime(2026, 8, 1)
+
+    assert value_as_of(db, "RUS", CODE, as_of) == pytest.approx(9.99)
+    assert series_as_of(db, "RUS", CODE, as_of)[datetime(2024, 1, 1)] == pytest.approx(9.99)
+
+
+def test_a_source_with_nothing_stored_answers_nothing(db):
+    """Not the value from another source, which is the failure that matters."""
+    _write_sourced(db, [
+        (datetime(2024, 1, 1), 4.92, datetime(2026, 6, 1), "world_bank"),
+    ])
+    as_of = datetime(2026, 8, 1)
+
+    assert value_as_of(db, "RUS", CODE, as_of, source="rosstat") is None
+    assert series_as_of(db, "RUS", CODE, as_of, source="rosstat") == {}
