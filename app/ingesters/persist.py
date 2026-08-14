@@ -121,6 +121,65 @@ def _as_utc(value):
     return value
 
 
+def _coordinates(metadata):
+    """The point this observation was taken at, or nothing.
+
+    `latitude` and `longitude` were NULL on every row of every source (#84).
+    The columns existed, the two geographic ingesters knew where they were
+    reading, and the value never crossed from one to the other -- so a reader
+    had to parse free-form JSON, and only for the sources that happened to
+    record it there.
+
+    NULL keeps a meaning after this: rosstat and sber_veb_baseline publish
+    region-level figures that are not taken anywhere, and a coordinate invented
+    for them would be a claim about where a number was measured.
+
+    Three ways to refuse, each a real shape:
+
+    - one coordinate without the other is not a location. Storing the half
+      that arrived puts the row on the equator or the prime meridian, which
+      are places.
+    - a value outside the valid range is not a coordinate. It cannot be
+      clamped -- clamping moves a broken reading to a real point on the map,
+      where it is indistinguishable from a good one.
+    - a value that is not a number at all, which is what a source returning
+      `"unknown"` or `null` produces.
+    """
+    if not metadata:
+        return None, None
+
+    lat, lon = metadata.get("latitude"), metadata.get("longitude")
+    if lat is None or lon is None:
+        return None, None
+
+    # Before the float(), not after: `bool` is a subclass of `int`, so
+    # `float(True)` is 1.0 and `float(False)` is 0.0. A source answering
+    # `{"latitude": true, "longitude": false}` would land in the Gulf of
+    # Guinea, in range and indistinguishable from a reading.
+    #
+    # The backfill already refuses these -- PostgreSQL will not cast the text
+    # `true` to double precision -- so without this the two ends of the same
+    # rule disagree about the same input.
+    if isinstance(lat, bool) or isinstance(lon, bool):
+        return None, None
+
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None, None
+
+    # NaN fails every comparison, so it passes a range check written as
+    # `not (lat < -90 or lat > 90)`. Asked positively it is excluded.
+    if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+        log.warning(
+            "coordinates out of range for %s: (%s, %s); stored as absent",
+            metadata.get("source") or "an observation", lat, lon,
+        )
+        return None, None
+
+    return lat, lon
+
+
 def _signal_to_observation_dict(signal: Signal, source: str) -> Dict[str, Any]:
     """Convert Signal to EnvironmentalObservation dict for insert.
 
@@ -192,11 +251,13 @@ def _signal_to_observation_dict(signal: Signal, source: str) -> Dict[str, Any]:
     if signal.metadata and signal.metadata.get("quality") == "invalid":
         is_valid = False
 
+    latitude, longitude = _coordinates(signal.metadata)
+
     return {
         "region_id": signal.region_code,
         "country_code": signal.region_code[:3] if len(signal.region_code) >= 3 else None,
-        "latitude": None,  # TODO: Extract from Signal if available
-        "longitude": None,
+        "latitude": latitude,
+        "longitude": longitude,
         "indicator": signal.metric,
         "value": float(signal.value),
         "unit": signal.unit,
@@ -257,6 +318,12 @@ def _upsert_observations(
             "metadata_json": stmt.excluded.metadata_json,
             "value": stmt.excluded.value,  # Value may be updated/corrected
             "is_valid": stmt.excluded.is_valid,
+            # Without these, a row written before #84 keeps its NULL
+            # coordinates however many times the source re-states where the
+            # reading was taken -- the fix would apply only to rows nobody had
+            # ever seen, which is the smaller half of the problem.
+            "latitude": stmt.excluded.latitude,
+            "longitude": stmt.excluded.longitude,
         }
 
         # Use RETURNING with xmax check to distinguish INSERT vs UPDATE
@@ -303,6 +370,11 @@ def _upsert_observations(
                     existing.quality_score = obs["quality_score"]
                     existing.is_valid = obs["is_valid"]
                     existing.metadata_json = obs["metadata_json"]
+                    # Kept in step with the PostgreSQL update set above. The two
+                    # branches diverging is how a property holds in the tests
+                    # and not on the database anybody deploys.
+                    existing.latitude = obs["latitude"]
+                    existing.longitude = obs["longitude"]
                     existing.updated_at = obs["updated_at"]
                     updated += 1
                 else:

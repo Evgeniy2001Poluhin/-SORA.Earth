@@ -349,6 +349,7 @@ jobs:
         run: |
           python -m pytest \
             tests/test_ingest_write_postgres.py \
+            tests/test_coordinate_backfill_postgres.py \
             -v --tb=short --timeout=300
         env:
           DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"

@@ -130,6 +130,21 @@ class OpenMeteoIngester(BaseIngester):
                             value=float(value),
                             unit=unit,
                             observed_at=obs_time,
+                            # The point this reading was requested for (#84).
+                            #
+                            # These are the coordinates already sent to the API
+                            # a few lines above, so the row records where the
+                            # value came from rather than leaving it to be
+                            # looked up in REGION_CAPITALS by whoever reads it
+                            # later -- a lookup that answers with wherever the
+                            # constant points *now*, not where this request
+                            # went.
+                            #
+                            # It is the region's capital, not the region: a
+                            # weather reading is taken at a point, and calling
+                            # it "the region" would be a wider claim than the
+                            # source makes.
+                            metadata={"latitude": lat, "longitude": lon},
                         ))
 
                 except Exception as e:
