@@ -1,5 +1,4 @@
 """Coverage boost tests for calibration, ab_comparison, auth_routes, main."""
-import uuid
 import pytest
 from starlette.testclient import TestClient
 from app.main import app
@@ -95,35 +94,8 @@ class TestAuthRoutesDirect:
             refresh_token(req, body)
         assert exc.value.status_code == 401
 
-    def test_auth_routes_register(self):
-        from app.auth_routes import register_user
-        from app.auth import UserCreate, UserInfo, USERS_DB
-        from unittest.mock import MagicMock
-
-        req = MagicMock()
-        req.client = MagicMock()
-        req.client.host = "127.0.0.1"
-        unique = f"boost_{uuid.uuid4().hex[:6]}"
-        user_data = UserCreate(username=unique, password="StrongP1!", role="viewer")
-        admin = UserInfo(username="admin", role="admin")
-        result = register_user(req, user_data, admin)
-        assert result["username"] == unique
-        USERS_DB.pop(unique, None)
-
-    def test_auth_routes_register_dup(self):
-        from app.auth_routes import register_user
-        from app.auth import UserCreate, UserInfo
-        from fastapi import HTTPException
-        from unittest.mock import MagicMock
-
-        req = MagicMock()
-        req.client = MagicMock()
-        req.client.host = "127.0.0.1"
-        user_data = UserCreate(username="admin", password="StrongP1!", role="viewer")
-        admin = UserInfo(username="admin", role="admin")
-        with pytest.raises(HTTPException) as exc:
-            register_user(req, user_data, admin)
-        assert exc.value.status_code == 409
+    # test_auth_routes_register and _dup called register_user directly. The
+    # route was removed in #169; see tests/test_accounts_are_not_persisted.py.
 
 
 # === HTTP-level tests for endpoints needing auth ===
