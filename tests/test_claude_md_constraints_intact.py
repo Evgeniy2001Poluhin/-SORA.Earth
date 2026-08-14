@@ -86,3 +86,26 @@ def test_rate_limiting_still_says_what_it_enforces():
         "multiplies by workers, is gone -- that is the part that stops someone "
         "reading it as a defence against a distributed flood"
     )
+
+
+def test_the_product_is_still_told_apart_from_the_experiment():
+    """A readiness review measured the product against the experiment's
+    roadmap and reported "end of Phase 1 of 8" -- which reads as *one eighth
+    built*. The ESG platform is in production and serving.
+
+    The distinction is a paragraph, and paragraphs are exactly what the rest of
+    this file exists to stop losing. Pinned on the three claims that carry it,
+    not on the heading: a section renamed is fine, a section whose content
+    quietly reverts is not.
+    """
+    text = re.sub(r"\s+", " ", open(CLAUDE_MD, encoding="utf-8").read())
+
+    # The product is named as the product.
+    assert "Product SORA.Earth ESG platform" in text
+
+    # The roadmap is named as an experiment, with its outcome.
+    assert "Experiment Environmental crisis analytics" in text
+    assert "M2 closed as a negative result" in text
+
+    # And the relation, which is the part that was lost.
+    assert "neither replaces nor gates the product" in text

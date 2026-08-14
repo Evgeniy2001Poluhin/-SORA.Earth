@@ -6,6 +6,40 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 SORA.Earth AI Platform is a full-stack ESG (Environmental, Social, Governance) evaluation and ML prediction system for sustainable projects. The platform provides explainable ML predictions, drift detection, A/B testing, MLflow tracking, and autonomous MLOps with scheduled retraining.
 
+### The product, and an experiment beside it
+
+Two things live in this repository and they are not the same thing. Read this
+before measuring readiness against anything.
+
+```
+Product      SORA.Earth ESG platform -- this file and README.md
+             In production, 162 published endpoints.
+             Remaining work is a punch-list, not a roadmap phase.
+
+Experiment   Environmental crisis analytics -- ROADMAP_ENV_CRISIS_2026.md
+             Phase 1 done; M2 closed as a negative result (no forecastable
+             temporal target). Ingestion keeps accumulating labelled history
+             and promises nothing.
+
+Relation     The experiment neither replaces nor gates the product until it is
+             explicitly promoted, which has not happened.
+```
+
+`ROADMAP_ENV_CRISIS_2026.md` opens with "SORA.Earth **должна стать** платформой
+экологической аналитики" -- future tense. It is a proposal, never signed off as
+a replacement for the definition above.
+
+This paragraph exists because the distinction collapsed once already, on
+2026-08-14: a readiness review measured the project against that roadmap's
+phases and reported "end of Phase 1 of 8", which reads as *the product is one
+eighth built*. It is not; the ESG platform is in production and serving. The
+document being in the repository is not the same as it describing what the
+repository is.
+
+`docs/M2_EVALUATION_PROTOCOL.md` §10.3 states the one legitimate continuation
+of the experiment -- forecasting weather and air quality over their 21 regions
+-- and states equally that it may not be renamed an ESG forecast.
+
 **Tech Stack:**
 - Backend: FastAPI + PostgreSQL + Redis + SQLAlchemy + APScheduler
 - Frontend: React 19 + TypeScript + Vite + TanStack Query + Zustand
