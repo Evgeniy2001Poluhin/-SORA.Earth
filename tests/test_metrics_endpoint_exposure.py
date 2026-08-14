@@ -9,6 +9,8 @@ with a plain `fetch` and uses four aggregate numbers. Requiring a token would
 take a working page away to protect data that page never asked for. So the
 aggregates stay public and the breakdown does not.
 """
+import copy
+
 import pytest
 
 from app.middleware import METRICS
@@ -20,10 +22,18 @@ WITHHELD = ("requests_by_endpoint", "requests_by_status")
 
 @pytest.fixture(autouse=True)
 def a_populated_map():
+    """`METRICS` is a process-global. Restored whole, not key by key.
+
+    Removing only the injected endpoint left `requests_by_status["200"]`
+    behind, and every request these tests make moves the totals and timings
+    besides.
+    """
+    saved = copy.deepcopy(METRICS)
     METRICS["requests_by_endpoint"]["/api/v1/evaluations/{evaluation_id}"] = 3
     METRICS["requests_by_status"]["200"] = 3
     yield
-    METRICS["requests_by_endpoint"].pop("/api/v1/evaluations/{evaluation_id}", None)
+    METRICS.clear()
+    METRICS.update(saved)
 
 
 @pytest.mark.parametrize("path", ["/api/v1/metrics", "/api/v1/system/metrics"])

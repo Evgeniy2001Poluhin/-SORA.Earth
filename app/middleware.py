@@ -67,15 +67,25 @@ def endpoint_key(request) -> str:
     router = getattr(app, "router", None)
     if router is None:
         return UNMATCHED_KEY
+    # A path that matches but whose method does not returns PARTIAL, and that
+    # request becomes a 405. Keying it `<unmatched>` throws away a template the
+    # router just told us -- and a burst of method-mismatch requests against one
+    # route would then be indistinguishable from random URLs. Kept, but only
+    # used when no route claims the request outright, because FULL is the
+    # stronger answer and can appear later in the table.
+    partial = None
     for route in getattr(router, "routes", ()):
         try:
-            if route.matches(request.scope)[0] == Match.FULL:
-                return getattr(route, "path", None) or UNMATCHED_KEY
+            match = route.matches(request.scope)[0]
         except Exception:
             # A route that cannot answer must not take the request down with
             # it; metrics are not worth a 500.
             continue
-    return UNMATCHED_KEY
+        if match == Match.FULL:
+            return getattr(route, "path", None) or UNMATCHED_KEY
+        if match == Match.PARTIAL and partial is None:
+            partial = getattr(route, "path", None)
+    return partial or UNMATCHED_KEY
 
 
 def record_endpoint(key: str) -> None:

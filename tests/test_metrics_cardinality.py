@@ -17,6 +17,8 @@ These run against the real middleware over a small app rather than through the
 platform, because the property is about what the middleware writes, not about
 any particular route.
 """
+import copy
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -29,6 +31,25 @@ from app.middleware import (
     endpoint_key,
     record_endpoint,
 )
+
+
+@pytest.fixture(autouse=True)
+def pristine_metrics():
+    """`METRICS` is a process-global, and every test here writes to it.
+
+    Clearing `requests_by_endpoint` is not enough: a request through the
+    middleware also moves `requests_total`, the counters, the timings and
+    `requests_by_status`, so a later test reading any of those would be seeing
+    this file's traffic. Deep, because the values are dicts and a shallow copy
+    would restore references to the mutated ones.
+
+    The per-test clears below stay: they make each case start from a known map
+    rather than from whatever the previous one left, which is a different job.
+    """
+    saved = copy.deepcopy(METRICS)
+    yield
+    METRICS.clear()
+    METRICS.update(saved)
 
 
 @pytest.fixture
@@ -211,3 +232,33 @@ def test_an_endpoint_that_raises_is_still_counted():
         assert "secret-id" not in str(METRICS["requests_by_endpoint"])
     finally:
         METRICS["requests_by_endpoint"].clear()
+
+
+def test_a_method_mismatch_keeps_the_template(app_with_metrics):
+    """A 405 is `/items/{item_id}`, not `<unmatched>`.
+
+    `route.matches` answers PARTIAL when the path matches and the method does
+    not. Accepting only FULL threw that away, so a burst of method-mismatch
+    requests against one route was indistinguishable from random URLs -- and
+    the operator lost the one fact that would have identified the caller's
+    mistake.
+
+    Bounded either way: PARTIAL still yields a template from the fixed route
+    table, so this cannot be used to mint keys.
+    """
+    response = app_with_metrics.post("/items/abc")
+
+    assert response.status_code == 405
+    assert "/items/{item_id}" in METRICS["requests_by_endpoint"]
+    assert UNMATCHED_KEY not in METRICS["requests_by_endpoint"]
+
+
+def test_a_full_match_still_wins_over_an_earlier_partial(app_with_metrics):
+    """FULL can appear later in the table than a PARTIAL for the same path.
+
+    Taking the first partial and returning immediately would key a served
+    request as whatever route happened to be declared first.
+    """
+    app_with_metrics.get("/items/abc")
+
+    assert METRICS["requests_by_endpoint"] == {"/items/{item_id}": 1}
