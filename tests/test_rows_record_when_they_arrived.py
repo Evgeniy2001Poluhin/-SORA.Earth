@@ -49,7 +49,7 @@ def test_a_row_added_by_refresh_carries_the_moment(dataset):
 
     retrain.data_refresh(budget=1.0, co2_reduction=1.0, social_impact=1.0,
                          duration_months=1.0, success=1,
-                         auto_retrain_threshold=10**9, _admin=None)
+                         auto_retrain_threshold=10**9, current_user=None)
 
     df = _read(dataset)
     assert retrain.RECORDED_AT in df.columns
@@ -63,7 +63,7 @@ def test_the_rows_that_predate_it_stay_empty(dataset):
 
     retrain.data_refresh(budget=1.0, co2_reduction=1.0, social_impact=1.0,
                          duration_months=1.0, success=1,
-                         auto_retrain_threshold=10**9, _admin=None)
+                         auto_retrain_threshold=10**9, current_user=None)
 
     df = _read(dataset)
     assert df[retrain.RECORDED_AT].isna().sum() == 12
