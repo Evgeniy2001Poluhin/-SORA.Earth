@@ -215,6 +215,26 @@ class RetrainLog(Base):
     error_message = Column(Text, nullable=True)
     message = Column(Text, nullable=True)
 
+    # The quality of the run, in columns rather than inside a JSON string.
+    #
+    # These values were already written -- `metrics_json` has carried roc_auc,
+    # test_samples and the rest since the table existed. What did not exist was
+    # any way to ask a question across runs: "has AUC moved", "on how many test
+    # rows", "is 0.81 against 0.80 inside the noise". A blob answers none of
+    # those, so the promotion gate compares two point estimates and cannot know
+    # whether the difference is real.
+    #
+    # `metrics_json` is kept and still written. It holds whatever a run reports
+    # that has no column yet, and dropping it would lose fields nobody has
+    # promoted.
+    roc_auc = Column(Float, nullable=True, index=True)
+    accuracy = Column(Float, nullable=True)
+    f1_score = Column(Float, nullable=True)
+    #: The size the metrics above were measured on. Without it a comparison of
+    #: two AUCs is a comparison of two numbers.
+    test_samples = Column(Integer, nullable=True)
+    train_samples = Column(Integer, nullable=True)
+
 
 
 
