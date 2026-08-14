@@ -1358,16 +1358,12 @@ _behaviour_row post "$POST_PATH" "$INSIDE_POST" "$OUTSIDE_POST" "expected neithe
 # verb is wrong, which is a different claim and was false everywhere (#177).
 [ "$INSIDE_ABSENT" = "404" ] \
     || halt_without_rollback "POST $ABSENT_PATH answered $INSIDE_ABSENT inside the container, expected 404"
-[ "$OUTSIDE_ABSENT" = "404" ] \
-    || halt_without_rollback "POST $ABSENT_PATH answered $OUTSIDE_ABSENT through nginx, expected 404"
 
 # And a real path with the wrong verb must still say 405. Answering 404
 # everywhere would be the same defect mirrored: the deployment would then deny
 # that its own endpoints exist.
 [ "$INSIDE_GET_ONLY" = "405" ] \
     || halt_without_rollback "POST $GET_ONLY_PATH answered $INSIDE_GET_ONLY inside the container, expected 405 for a GET-only route"
-[ "$OUTSIDE_GET_ONLY" = "405" ] \
-    || halt_without_rollback "POST $GET_ONLY_PATH answered $OUTSIDE_GET_ONLY through nginx, expected 405"
 
 # A real POST route may answer 401, 403 or 422 depending on what guards it; what
 # it may not do is deny that it exists or that it takes POST.
@@ -1378,10 +1374,20 @@ case "$OUTSIDE_POST" in
     404|405|000|"") halt_without_rollback "POST $POST_PATH answered $OUTSIDE_POST through nginx; a route the application publishes as accepting POST must not deny it" ;;
 esac
 
+# Before the external assertions, because it is the more precise finding. If
+# nginx answers 405 where the container answered 404, "expected 404 through
+# nginx" is true and unhelpful -- it points at the application, which just gave
+# the right answer. "They disagree" points at the layer between.
 if [ "$INSIDE_ABSENT" != "$OUTSIDE_ABSENT" ] \
     || [ "$INSIDE_GET_ONLY" != "$OUTSIDE_GET_ONLY" ]; then
-    halt_without_rollback "the container and nginx disagree about the same request; something between the caller and the application is answering"
+    halt_without_rollback "the container and nginx disagree about the same request; something between the caller and the application is answering (absent: $INSIDE_ABSENT vs $OUTSIDE_ABSENT, get-only: $INSIDE_GET_ONLY vs $OUTSIDE_GET_ONLY)"
 fi
+
+# And only then whether the agreed answer is the right one.
+[ "$OUTSIDE_ABSENT" = "404" ] \
+    || halt_without_rollback "POST $ABSENT_PATH answered $OUTSIDE_ABSENT through nginx, expected 404"
+[ "$OUTSIDE_GET_ONLY" = "405" ] \
+    || halt_without_rollback "POST $GET_ONLY_PATH answered $OUTSIDE_GET_ONLY through nginx, expected 405"
 
 echo "  behaviour matches inside the container and through nginx"
 

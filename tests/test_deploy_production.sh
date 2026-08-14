@@ -17,6 +17,27 @@ set -uo pipefail
 SCRIPT="${SCRIPT_UNDER_TEST:-$(cd "$(dirname "$0")/.." && pwd)/scripts/deploy_production.sh}"
 
 PASS=0; FAIL=0
+
+# The tally reports on the exit path, not from the last line of the file.
+#
+# It used to be two statements at the bottom: an echo and `[ "$FAIL" -eq 0 ]`.
+# The exit status of a script is the status of its last command, so a section
+# appended below them ran, counted its failures into $FAIL, and left the status
+# of whatever it happened to end with -- an `rm -rf`, which succeeds. One real
+# FAIL was reported in the output and the job went green (found while adding
+# the post-deploy behaviour cases).
+#
+# On the trap it holds wherever the last case is written.
+_report_tally() {
+    local rc=$?
+    echo
+    echo "  passed: $PASS   failed: $FAIL"
+    if [ "$FAIL" -ne 0 ]; then
+        exit 1
+    fi
+    exit "$rc"
+}
+trap _report_tally EXIT
 ok()    { PASS=$((PASS+1)); printf '  ok    %s\n' "$1"; }
 bad()   { FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 — expected [$3], got [$2]"; fi; }
@@ -1634,11 +1655,6 @@ check "and says so rather than sounding like a fault" \
 check "and writes no second manifest" \
     "$(find "$SANDBOX/manifests" -type f -name '*.txt' | wc -l | tr -d ' ')" "$FIRST_COUNT"
 rm -rf "$SANDBOX"
-
-echo
-echo "  passed: $PASS   failed: $FAIL"
-[ "$FAIL" -eq 0 ]
-
 echo "== the deployed code is asked how it behaves, not only whether it answers =="
 # The class this covers is "CI and the image build different applications", and
 # no test suite can see it: on 2026-08-14 a catch-all registered only where the
@@ -1717,3 +1733,42 @@ printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":404,"ge
 run_guard
 refused_because "no probeable routes stops the deployment" "cannot report on an application it could not read"
 rm -rf "$SANDBOX"
+
+echo "== a failing case fails the run, wherever it is written =="
+# Not a case about deployment. The tally used to be two statements at the bottom
+# of this file, and the exit status of a script is that of its last command --
+# so a section appended below them counted its failures into $FAIL and left the
+# status of whatever it ended with. One real FAIL was printed and the job went
+# green.
+#
+# Asserted by running this file's own reporting in a subshell rather than by
+# reading it, because "the trap is registered" and "the status is non-zero" are
+# different claims and only the second one matters.
+_TALLY_PROBE="$(mktemp)"
+cat > "$_TALLY_PROBE" <<'PROBE'
+PASS=0; FAIL=0
+_report_tally() {
+    local rc=$?
+    echo "  passed: $PASS   failed: $FAIL"
+    if [ "$FAIL" -ne 0 ]; then exit 1; fi
+    exit "$rc"
+}
+trap _report_tally EXIT
+FAIL=1
+true            # a last command that succeeds, as `rm -rf` did
+PROBE
+bash "$_TALLY_PROBE" >/dev/null 2>&1
+check "a run ending on a successful command still fails when a case failed" "$?" "1"
+cat > "$_TALLY_PROBE" <<'PROBE'
+PASS=0; FAIL=0
+_report_tally() {
+    local rc=$?
+    if [ "$FAIL" -ne 0 ]; then exit 1; fi
+    exit "$rc"
+}
+trap _report_tally EXIT
+true
+PROBE
+bash "$_TALLY_PROBE" >/dev/null 2>&1
+check "and a run with no failures still succeeds" "$?" "0"
+rm -f "$_TALLY_PROBE"
