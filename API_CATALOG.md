@@ -104,7 +104,6 @@
 | `POST` | `/api/v1/auth/login-json` | Login Json |
 | `GET` | `/api/v1/auth/me` | Get Me |
 | `POST` | `/api/v1/auth/refresh` | Refresh Token |
-| `POST` | `/api/v1/auth/register` | Register User |
 | `GET` | `/api/v1/auth/verify` | Verify Key |
 
 ## batch (3)
