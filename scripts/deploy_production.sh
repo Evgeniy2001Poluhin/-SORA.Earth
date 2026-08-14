@@ -1200,6 +1200,204 @@ echo "  acceptance: exclude only User-Agent $DEPLOY_PROBE_UA when counting user-
 # not a reason to undo it.
 PHASE=committed
 
+# ------------------------------------------------------- behaviour, not status
+
+step "the deployed code behaves like the tested code"
+
+# 200 on /health proves the process is up. It does not prove the image contains
+# the application that was tested.
+#
+# On 2026-08-14 it did not. `app/main.py` registers a second catch-all under
+# `if _SPA_INDEX.exists()` -- true in the image, false in CI, because CI has no
+# built frontend. The handler that tells "no such path" from "wrong verb"
+# skipped catch-alls by name and missed that one, so every absent path answered
+# 404 in the test suite and 405 on production, on the same commit. Every health
+# check was green throughout. It was found by asking the running server a
+# question the suite had never asked it (#177).
+#
+# So the class this covers is "CI and the image build different applications",
+# and the only instrument that can see it is the deployed server.
+#
+# Deliberately after PHASE=committed: a mismatch here stops and does **not**
+# roll back. The site has already been proven healthy, so an automatic rollback
+# would replace one state whose behaviour is unverified with another, and
+# destroy the evidence in the process. The journal stays at `mutating` and no
+# manifest is written, which leaves both recoveries open and neither taken:
+# `--rollback` if the deployment is wrong, `--finalize` if it turns out to be
+# right (#160, #161).
+
+halt_without_rollback() {
+    echo >&2
+    echo "REFUSED: $*" >&2
+    echo >&2
+    echo "  Nothing was rolled back and nothing was recorded. What is running is" >&2
+    echo "  what this run deployed, and the journal still says so." >&2
+    echo >&2
+    echo "  Two ways out, and this run takes neither:" >&2
+    echo "    $0 --rollback ${PREV_COMMIT:-<the commit that was running before>}" >&2
+    echo "        if the behaviour above is wrong" >&2
+    echo "    $0 --finalize" >&2
+    echo "        if it is right and only this check is mistaken" >&2
+    exit 1
+}
+
+# The routes are read from the running application, never listed here.
+#
+# A list in this file would go stale exactly the way the test in #170 did: it
+# described an arrangement that had moved, and stayed green. The probe asks the
+# server which of its own routes are GET-only and which accept POST, so it
+# keeps testing whatever is actually deployed.
+#
+# Read from the OpenAPI document the process is serving rather than by importing
+# the app: a second import loads the models again -- fifteen seconds, measured
+# in #50 -- and would describe a fresh process rather than the one serving.
+BEHAVIOUR_PROBE=$("${DC[@]}" exec -T backend python3 - <<PROBE 2>/dev/null
+import json, urllib.error, urllib.request
+
+BASE = "http://127.0.0.1:8000"
+UA = "$DEPLOY_PROBE_UA"
+
+
+def code(path, method="POST"):
+    if not path:
+        return None
+    req = urllib.request.Request(
+        BASE + path, data=b"{}", method=method,
+        headers={"Content-Type": "application/json", "User-Agent": UA})
+    try:
+        return urllib.request.urlopen(req, timeout=15).status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except Exception:
+        return 0
+
+
+try:
+    spec = json.load(urllib.request.urlopen(BASE + "/openapi.json", timeout=20))
+except Exception as exc:
+    print(json.dumps({"error": type(exc).__name__}))
+    raise SystemExit(0)
+
+paths = spec.get("paths", {})
+# Sorted, so two runs against the same image choose the same routes and a
+# difference in the result is a difference in behaviour.
+# Only the API surface. Unconstrained, the first sorted GET-only path is "/",
+# the SPA root -- a 405 from it says nothing about the API, which is where the
+# #177 defect lived.
+verbs = {p: {v.lower() for v in paths[p]} for p in sorted(paths)
+         if p.startswith("/api/")}
+get_only = next((p for p in verbs if verbs[p] == {"get"} and "{" not in p), None)
+
+# No POST route is probed, and that is a deliberate departure from the plan
+# this step was written to.
+#
+# The check would have been "a published POST route does not deny POST", with
+# the route discovered rather than listed. Measured against production's own
+# document, the first sorted candidate is /api/v1/ab/predict -- which writes
+# a row to prediction_log. The verification step would have manufactured a
+# prediction on every deployment, into the table the platform's analytics read,
+# and the ordering is alphabetical: tomorrow's first candidate is whatever is
+# added under an earlier name.
+#
+# A verification step must not change what it verifies. The two questions left
+# are the ones the #177 class turns on -- an absent path and a wrong verb --
+# and routing answers both before any handler runs.
+print(json.dumps({
+    "absent_path": "/api/v1/__deploy_probe_absent__",
+    "absent": code("/api/v1/__deploy_probe_absent__"),
+    "get_only_path": get_only,
+    "get_only": code(get_only),
+}))
+PROBE
+)
+
+[ -n "$BEHAVIOUR_PROBE" ] \
+    || halt_without_rollback "the behaviour probe produced nothing; the container did not answer"
+
+_probe_field() {
+    # `or ''` matters: a JSON null becomes Python None and prints as the four
+    # characters `None`, which `[ -n ... ]` then reads as a value. The case
+    # where the probe found no route to ask about would have looked like a
+    # route named None and passed.
+    printf '%s' "$BEHAVIOUR_PROBE" | python3 -c \
+        "import json,sys; print(json.load(sys.stdin).get('$1') or '')" 2>/dev/null
+}
+
+if [ -n "$(_probe_field error)" ]; then
+    halt_without_rollback "the running application would not serve its own route table: $(_probe_field error)"
+fi
+
+ABSENT_PATH="$(_probe_field absent_path)"
+GET_ONLY_PATH="$(_probe_field get_only_path)"
+
+# `if`, not `A && B || C`. That chain reads as if-then-else and is not one --
+# a lesson this file already carries twice.
+if [ -z "$GET_ONLY_PATH" ]; then
+    halt_without_rollback "the route table offers no GET-only /api/ route to probe; this check cannot report on an application it could not read"
+fi
+
+echo "  probing, chosen from the running route table:"
+echo "    absent    $ABSENT_PATH"
+echo "    GET-only  $GET_ONLY_PATH"
+
+# Through nginx as well as inside the container. The two disagreeing is itself
+# the finding: it means a layer between the caller and the application is
+# answering, and the tests never see that layer at all.
+_external_code() {
+    # No `|| echo 000`. curl already writes `000` when it cannot connect *and*
+    # exits non-zero, so the fallback appended a second one: the function
+    # returned `000000`, matching neither an expected code nor an unexpected
+    # one, and an unreachable site would have passed.
+    local out
+    out="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+        -H 'Content-Type: application/json' -A "$DEPLOY_PROBE_UA" \
+        -d '{}' "$SITE$1" 2>/dev/null)"
+    printf '%s' "${out:-000}"
+}
+
+_behaviour_row() {
+    #  name  path  internal  external  expectation-test
+    local name="$1" path="$2" inside="$3" outside="$4" want="$5"
+    printf '  %-10s %-34s inside=%-4s nginx=%-4s  %s\n' \
+        "$name" "$path" "$inside" "$outside" "$want"
+}
+
+INSIDE_ABSENT="$(_probe_field absent)"
+INSIDE_GET_ONLY="$(_probe_field get_only)"
+OUTSIDE_ABSENT="$(_external_code "$ABSENT_PATH")"
+OUTSIDE_GET_ONLY="$(_external_code "$GET_ONLY_PATH")"
+
+_behaviour_row absent "$ABSENT_PATH" "$INSIDE_ABSENT" "$OUTSIDE_ABSENT" "expected 404"
+_behaviour_row get-only "$GET_ONLY_PATH" "$INSIDE_GET_ONLY" "$OUTSIDE_GET_ONLY" "expected 405"
+
+# An absent path must say it is absent. 405 asserts the resource exists and the
+# verb is wrong, which is a different claim and was false everywhere (#177).
+[ "$INSIDE_ABSENT" = "404" ] \
+    || halt_without_rollback "POST $ABSENT_PATH answered $INSIDE_ABSENT inside the container, expected 404"
+
+# And a real path with the wrong verb must still say 405. Answering 404
+# everywhere would be the same defect mirrored: the deployment would then deny
+# that its own endpoints exist.
+[ "$INSIDE_GET_ONLY" = "405" ] \
+    || halt_without_rollback "POST $GET_ONLY_PATH answered $INSIDE_GET_ONLY inside the container, expected 405 for a GET-only route"
+
+# Before the external assertions, because it is the more precise finding. If
+# nginx answers 405 where the container answered 404, "expected 404 through
+# nginx" is true and unhelpful -- it points at the application, which just gave
+# the right answer. "They disagree" points at the layer between.
+if [ "$INSIDE_ABSENT" != "$OUTSIDE_ABSENT" ] \
+    || [ "$INSIDE_GET_ONLY" != "$OUTSIDE_GET_ONLY" ]; then
+    halt_without_rollback "the container and nginx disagree about the same request; something between the caller and the application is answering (absent: $INSIDE_ABSENT vs $OUTSIDE_ABSENT, get-only: $INSIDE_GET_ONLY vs $OUTSIDE_GET_ONLY)"
+fi
+
+# And only then whether the agreed answer is the right one.
+[ "$OUTSIDE_ABSENT" = "404" ] \
+    || halt_without_rollback "POST $ABSENT_PATH answered $OUTSIDE_ABSENT through nginx, expected 404"
+[ "$OUTSIDE_GET_ONLY" = "405" ] \
+    || halt_without_rollback "POST $GET_ONLY_PATH answered $OUTSIDE_GET_ONLY through nginx, expected 405"
+
+echo "  behaviour matches inside the container and through nginx"
+
 step "recording what was deployed"
 
 # Published only here, and atomically.
