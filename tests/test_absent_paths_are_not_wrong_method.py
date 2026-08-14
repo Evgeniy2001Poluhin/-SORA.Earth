@@ -209,3 +209,68 @@ def test_every_registered_global_catchall_is_recognised():
     assert seen, "no catch-all found; the arrangement this guards has changed"
     for path in seen:
         assert _is_global_catchall(path), path
+
+
+# --- the production condition, reproduced rather than waited for -------------
+
+
+@pytest.fixture
+def spa_catchall_registered():
+    """Register `/{spa_path:path}` the way a built SPA does.
+
+    `app/main.py:934` adds it under `if _SPA_INDEX.exists()`, which is true in
+    the image and false in CI. So the arrangement that broke production is one
+    the suite never assembles, and the tests above pass in an environment that
+    cannot exhibit the defect.
+
+    This puts the route on the real app for the duration of one test, which is
+    the difference between covering the condition and waiting for CI to
+    someday be built with a frontend.
+    """
+    from starlette.routing import Route
+
+    from app.main import app
+
+    async def _spa(request):
+        from starlette.responses import PlainTextResponse
+        return PlainTextResponse("index.html")
+
+    route = Route("/{spa_path:path}", _spa, methods=["GET"])
+    # Before the POST catch-all, as it is in main.py: order is what decides
+    # which route Starlette reaches first.
+    app.router.routes.insert(0, route)
+    try:
+        yield
+    finally:
+        app.router.routes.remove(route)
+
+
+@pytest.mark.parametrize("path", ABSENT)
+@pytest.mark.parametrize("method", MUTATING)
+def test_an_absent_path_is_not_found_with_the_spa_built(
+        client, spa_catchall_registered, method, path):
+    """The case measured on production 2026-08-14.
+
+    With the SPA route present, the handler used to see a match for every path
+    -- the route is a catch-all under a name it was not comparing against --
+    and answered 405 everywhere. `POST /api/v1/definitely-not-here` returned
+    405 from the container while this file was green on the same commit.
+    """
+    response = client.request(method.upper(), path, json={})
+
+    assert response.status_code == 404, (
+        f"{method.upper()} {path} -> {response.status_code} with the SPA "
+        f"catch-all registered; this is the production arrangement"
+    )
+
+
+def test_a_real_route_with_the_wrong_verb_is_still_405_with_the_spa_built(
+        client, spa_catchall_registered):
+    """The other half, under the same condition.
+
+    Answering 404 unconditionally would be the same defect mirrored, and the
+    SPA route must not push it that way either.
+    """
+    response = client.post("/api/v1/ab/stats", json={})
+
+    assert response.status_code == 405, response.status_code
