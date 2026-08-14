@@ -163,6 +163,12 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
         else:
             enrichment_count = 0
 
+        #: What the recorded metrics were measured under. Stored beside them, so
+        #: a number in retrain_log says which question it answers -- and so the
+        #: series does not silently mix two kinds when the temporal split
+        #: becomes possible.
+        SPLIT_KIND = "stratified_by_outcome"
+
         min_samples = max(10, min(min_samples, 100000))  # safety clamp
         if len(df) < min_samples:
             raise HTTPException(400, f"Need at least {min_samples} samples, have {len(df)}")
@@ -242,11 +248,39 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
                 f"a classifier needs both successes and failures",
             )
 
-        # Temporal split — no shuffling for time series data
-        split_idx = int(len(X) * 0.8)
-        X_train, y_train = X[:split_idx], y[:split_idx]
-        X_test, y_test = X[split_idx:], y[split_idx:]
-        logger.info("Temporal split: train=%d, test=%d", len(X_train), len(X_test))
+        # Stratified by outcome, and **not** a temporal split (#183).
+        #
+        # This used to slice at 80% of the row order and call itself temporal.
+        # projects.csv has no time column: the order is whatever was appended
+        # last, by bulk upload or by /data/refresh. Measured 2026-08-14, the two
+        # sides were different populations -- 75.9% successes in the first 80%
+        # against 39.6% in the last 20%, with median budget 40M against 30M and
+        # median duration 69 against 49 months.
+        #
+        # So every AUC this recorded measured a shift in population as much as
+        # a model, and the promotion gate compared two such numbers.
+        #
+        # Stratifying removes the grossest artefact -- the class balance is now
+        # the same on both sides -- at the cost of the property the old name
+        # claimed. **This does not measure learning from the past.** A row from
+        # any point in the file may land in either side. That limitation is
+        # stated here, and in SPLIT_KIND below, rather than left for a reader to
+        # infer from a name.
+        #
+        # The honest temporal split needs an observation time per row, which
+        # nothing has ever written. Rows created from here carry `recorded_at`;
+        # the 17,071 already in the file cannot get one retroactively, so a
+        # temporal split becomes possible on new history and never on this
+        # history -- the same shape as #164.
+        from sklearn.model_selection import train_test_split
+
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y,
+        )
+        logger.info(
+            "Stratified split: train=%d (%.3f positive), test=%d (%.3f positive)",
+            len(X_train), float(y_train.mean()), len(X_test), float(y_test.mean()),
+        )
 
         # Both classes on both sides, checked after the split rather than only
         # over the whole set.
@@ -316,6 +350,11 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
             "roc_auc": auc, "best_threshold": best_t,
             "train_samples": len(X_train), "test_samples": len(X_test),
             "enrichment_from_log": enrichment_count,
+            # Which question the numbers above answer. Without it the series in
+            # retrain_log silently mixes two kinds the day the temporal split
+            # becomes possible, and a comparison across that boundary would be
+            # a comparison of two different measurements.
+            "split_kind": SPLIT_KIND,
         }
         with open(os.path.join(MODELS_DIR, "metrics.json"), "w") as f:
             json.dump(new_metrics, f, indent=2)
