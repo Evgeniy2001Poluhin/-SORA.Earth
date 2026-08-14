@@ -135,3 +135,62 @@ def test_a_clean_dataset_is_unaffected(dataset):
     dataset(_frame(40))
 
     assert _retrain(min_samples=10)["status"] in ("success", "accepted")
+
+
+# --- refusing before accepting ------------------------------------------------
+
+
+def test_an_impossible_request_is_refused_to_the_caller(dataset):
+    """#2. The async path answered `accepted` and then raised in the job.
+
+    A background task has no response to attach a status to, so the 400 reached
+    nobody and Starlette reported `RuntimeError: Caught handled exception, but
+    response already started` -- which reads as a server fault rather than as a
+    refused retrain. The check that can be made before accepting is now made
+    before accepting.
+    """
+    import app.api.retrain as retrain
+
+    dataset(_frame(40))
+
+    with pytest.raises(HTTPException) as exc:
+        retrain._preflight_retrain(999999)
+
+    assert exc.value.status_code == 400
+    assert "have 40" in str(exc.value.detail)
+
+
+def test_a_workable_request_passes_preflight_and_reports_the_clamp(dataset):
+    """The clamp is returned, so the caller and the job measure against the
+    same number rather than each clamping separately."""
+    import app.api.retrain as retrain
+
+    dataset(_frame(40))
+
+    assert retrain._preflight_retrain(5) == 10
+    assert retrain._preflight_retrain(40) == 40
+
+
+def test_a_missing_dataset_is_refused_before_accepting(tmp_path, monkeypatch):
+    import app.api.retrain as retrain
+
+    monkeypatch.setattr(retrain, "PROJECTS_CSV", str(tmp_path / "absent.csv"))
+
+    with pytest.raises(HTTPException) as exc:
+        retrain._preflight_retrain(10)
+
+    assert exc.value.status_code == 400
+
+
+def test_the_background_job_does_not_raise_into_the_server(dataset):
+    """Whatever the job decides, it stops there.
+
+    Not "it succeeds": a refusal is a legitimate outcome and is recorded in the
+    RetrainLog. What must not happen is an exception leaving a task that has no
+    response to put it in.
+    """
+    import app.api.retrain as retrain
+
+    dataset(_frame(40, successes=[1] * 40))   # one class: _do_retrain refuses
+
+    retrain._retrain_in_background(10)        # must return, not raise

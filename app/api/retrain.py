@@ -346,12 +346,68 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
         )
         raise
 
+def _preflight_retrain(min_samples: int) -> int:
+    """Refuse, before accepting, what can be refused without training (#2).
+
+    These are the same checks `_do_retrain` makes; the difference is when. In
+    the background they arrive after the caller has been told `accepted` and
+    the response has been sent -- so the 400 has nobody to reach, and raising
+    it there produced `RuntimeError: Caught handled exception, but response
+    already started` in the ASGI layer.
+
+    Returns the clamped `min_samples` so the caller and the job agree on the
+    number the refusal was measured against.
+    """
+    if not os.path.exists(PROJECTS_CSV):
+        raise HTTPException(400, "No training data (projects.csv) found")
+
+    clamped = max(10, min(min_samples, 100000))
+    try:
+        df = pd.read_csv(PROJECTS_CSV)
+    except Exception as e:
+        raise HTTPException(400, f"projects.csv is unreadable: {type(e).__name__}")
+
+    required = ["budget", "co2_reduction", "social_impact", "duration_months", "success"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise HTTPException(400, f"Missing columns in projects.csv: {missing}")
+    if len(df) < clamped:
+        raise HTTPException(400, f"Need at least {clamped} samples, have {len(df)}")
+    return clamped
+
+
+def _retrain_in_background(min_samples: int) -> None:
+    """Run the job with nothing left to raise into.
+
+    A background task has no response to attach a status to. `HTTPException`
+    from here is a category error -- there is nobody to receive a 400 -- and
+    Starlette turns it into a RuntimeError that reads as a server fault rather
+    than as a refused retrain.
+
+    `_do_retrain` already logs the reason and closes its RetrainLog row on the
+    way out, so the outcome is recorded where an operator looks for it. What
+    this adds is that it stops here.
+    """
+    try:
+        _do_retrain(min_samples, trigger_source="manual")
+    except HTTPException as exc:
+        logger.error("background retrain refused: %s", exc.detail)
+    except Exception:
+        logger.exception("background retrain failed")
+
+
 @router.post("/retrain")
 def retrain_model(background_tasks: BackgroundTasks, current_user=Depends(require_admin), min_samples: int = 50, sync: bool = False):
-    """Retrain RF. Default=async, ?sync=true for synchronous."""
+    """Retrain RF. Default=async, ?sync=true for synchronous.
+
+    The cheap preconditions are checked before the job is accepted, so a
+    request that cannot succeed is refused to the caller rather than accepted
+    and abandoned (#2).
+    """
+    clamped = _preflight_retrain(min_samples)
     if sync:
-        return _do_retrain(min_samples)
-    background_tasks.add_task(_do_retrain, min_samples)
+        return _do_retrain(clamped)
+    background_tasks.add_task(_retrain_in_background, clamped)
     return {
         "status": "accepted",
         "message": "Retrain started in background",
