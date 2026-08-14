@@ -442,6 +442,8 @@ if [ "$MODE" = finalize ]; then
     JOURNAL_PREVIOUS="$(awk '/^previous /{print $2}' "$JOURNAL")"
     [ -n "$JOURNAL_STARTED" ] \
         || fail "the journal records no start time; container ages cannot be checked against it"
+    # The script's own checkout, read before `cd "$REPO"` takes effect for git.
+    RECOVERY_TOOL_SHA="$(git -C "$(cd "$(dirname "$0")/.." && pwd)" rev-parse HEAD 2>/dev/null || true)"
     echo "  run       ${FINALIZED_RUN:-unknown}"
     echo "  started   $JOURNAL_STARTED"
     echo "  target    $TARGET"
@@ -1212,6 +1214,16 @@ TMP_MANIFEST="$MANIFEST.tmp"
     if [ "$MODE" = finalize ]; then
         echo "finalized      yes"
         echo "finalized_run  ${FINALIZED_RUN:-unknown}"
+        # Which code reconciled the record, as distinct from what is deployed.
+        #
+        # These legitimately differ, and the difference is the point: the fix
+        # that makes --finalize possible lands after the run it has to
+        # reconcile, so the tool is newer than the target by construction. The
+        # deployed checkout stays at the journal's target -- the equality is
+        # never relaxed -- and the script is run from elsewhere with
+        # DEPLOY_REPO pointing here. Recording only one of the two would make
+        # the manifest ambiguous about which.
+        echo "recovery_tool  ${RECOVERY_TOOL_SHA:-same checkout as target}"
         echo "note           the deploying run completed and was interrupted"
         echo "               before it wrote this record; nothing was rebuilt,"
         echo "               migrated or recreated to produce it (#160)"

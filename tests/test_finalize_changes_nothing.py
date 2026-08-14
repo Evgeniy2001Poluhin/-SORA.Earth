@@ -110,3 +110,36 @@ def test_the_manifest_is_synced_before_and_after_the_rename():
         "the directory is synced fewer than twice: once for the rename and "
         "once for the journal's removal, which is itself a directory entry"
     )
+
+
+def test_the_manifest_records_which_code_reconciled_it():
+    """The tool and the target legitimately differ, and both must be readable.
+
+    The fix that makes `--finalize` possible lands *after* the run it has to
+    reconcile, so the tool is newer than the target by construction. The
+    deployed checkout stays at the journal's target -- that equality is never
+    relaxed -- and the script is run from elsewhere with DEPLOY_REPO pointing at
+    production. A manifest naming only one of the two cannot say which.
+    """
+    source = open(SCRIPT).read()
+
+    assert "recovery_tool" in source
+    assert "RECOVERY_TOOL_SHA" in source
+    # Read from the script's own directory, not from $REPO -- which is the
+    # deployed checkout and would just repeat the target.
+    assert re.search(r'RECOVERY_TOOL_SHA="\$\(git -C "\$\(cd "\$\(dirname "\$0"\)/\.\."',
+                     source), "the tool SHA is not read from the script's own checkout"
+
+
+def test_the_target_equality_is_not_relaxed():
+    """The bootstrap is solved by moving the *tool*, never by loosening this.
+
+    "the checkout contains that commit" would admit any descendant, which on a
+    fast-forwarded production is every future deployment.
+    """
+    source = open(SCRIPT).read()
+
+    assert 'fail "the checkout is at $HEAD_SHA and the interrupted run targeted' in source
+    assert '[ "$HEAD_SHA" = "$TARGET" ]' in source, (
+        "the finalize target check is no longer an equality"
+    )
