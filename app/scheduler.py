@@ -46,6 +46,33 @@ def _finish_retrain_log(
         row.model_version = model_version
         row.data_version = data_version
         row.metrics_json = json.dumps(metrics, ensure_ascii=False) if metrics else None
+
+        # The same values, in columns. Written from the dict rather than parsed
+        # back out of the string, so the two cannot disagree about one run.
+        #
+        # The blob stays: it carries whatever a run reports that has no column
+        # yet, and it is what makes the migration reversible without a second
+        # backfill.
+        #
+        # `test_samples` matters as much as the score. Comparing two AUCs
+        # without it is comparing two numbers -- the promotion gate does that
+        # today, and 0.81 against 0.80 on a small test set is noise it cannot
+        # see. A confidence bound is the next change and it needs this column
+        # to exist first.
+        if metrics:
+            def _num(key, cast):
+                value = metrics.get(key)
+                try:
+                    return cast(value) if value is not None else None
+                except (TypeError, ValueError):
+                    return None
+
+            row.roc_auc = _num("roc_auc", float)
+            row.accuracy = _num("accuracy", float)
+            row.f1_score = _num("f1_score", float)
+            row.test_samples = _num("test_samples", int)
+            row.train_samples = _num("train_samples", int)
+
         row.error_message = error_message
         db.commit()
     finally:
