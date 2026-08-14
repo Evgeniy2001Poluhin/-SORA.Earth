@@ -84,7 +84,31 @@ COPY --chown=app:app entrypoint.sh ./
 RUN chmod +x ./entrypoint.sh
 
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+# The grace period is measured, not guessed (#50).
+#
+# `app/main.py` unpickles the models at import -- torch, SHAP, the ensembles --
+# and nothing answers on :8000 until that finishes, so no separation of
+# liveness from readiness helps here: during the load there is no server to ask.
+# The only question is how long the period is.
+#
+# Measured on production, 2026-08-14, from the container's own log:
+#
+#     11:08:33.878  container started
+#     11:08:34.849  schema verified
+#     11:08:35.501  gunicorn listening, workers booting
+#     11:08:48.644  Application startup complete
+#
+# 14.8 seconds. Against the old 20s that is 5.2 seconds of margin -- and on the
+# isolated stand where #50 was found the same image took past ninety, with three
+# checks failing before it answered. The container was marked unhealthy while it
+# was loading correctly, and anything reading that status was told the
+# application was broken.
+#
+# 120s covers both with room. What it costs is diagnostic latency: a container
+# that is genuinely broken stays `starting` for two minutes before it is called
+# unhealthy. Under Compose neither status triggers an action, so that cost is
+# paid by a reader and not by the deployment.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
     CMD curl -fsS http://localhost:8000/health || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "./entrypoint.sh"]
