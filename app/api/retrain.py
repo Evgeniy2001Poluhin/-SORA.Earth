@@ -178,8 +178,57 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
                         "budget_per_month", "co2_per_dollar", "efficiency_score",
                         "year", "quarter"]
 
+        # NaN and inf are removed before anything is fitted (#1).
+        #
+        # Without this the failure is `ValueError: Input y contains NaN` from
+        # deep inside sklearn, which names neither the row nor the column. A
+        # missing `success` is the common case -- projects.csv is appended to
+        # by more than the validated upload path -- and inf arrives from the
+        # derived features when a value is large enough to overflow the
+        # division rather than from a zero denominator, which the clips above
+        # already prevent.
+        #
+        # The count is reported rather than dropped quietly. Training on fewer
+        # rows than the operator supplied is a fact about the model, and a
+        # silent filter is how a dataset shrinks over releases with nobody
+        # noticing.
+        before = len(df)
+        df = df.replace([np.inf, -np.inf], np.nan).dropna(
+            subset=feature_cols + ["success"])
+        dropped = before - len(df)
+        if dropped:
+            logger.warning(
+                "retrain: dropped %d of %d rows carrying NaN or inf in a "
+                "feature or the label", dropped, before,
+            )
+
+        # Re-checked after the drop, not only before it. The count that matters
+        # is how many rows can be trained on, and the earlier check was made
+        # against rows that included the unusable ones.
+        if len(df) < min_samples:
+            raise HTTPException(
+                400,
+                f"Need at least {min_samples} usable samples, have {len(df)}"
+                + (f" ({dropped} of {before} rows carried NaN or inf)"
+                   if dropped else ""),
+            )
+
         X = df[feature_cols].values
-        y = df["success"].values
+        # int, not whatever read_csv inferred. A `success` column holding one
+        # NaN is read as float64, and the classifier then trains on 0.0/1.0
+        # labels while `stratify` and the metrics expect discrete classes.
+        y = df["success"].values.astype(int)
+
+        # One class cannot be scored. `roc_auc_score` raises "Only one class
+        # present in y_true", which reads as a bug in the metric rather than as
+        # a description of the training set.
+        classes = sorted(set(y.tolist()))
+        if len(classes) < 2:
+            raise HTTPException(
+                400,
+                f"Training data has only one outcome class ({classes}); "
+                f"a classifier needs both successes and failures",
+            )
 
         # Temporal split — no shuffling for time series data
         split_idx = int(len(X) * 0.8)

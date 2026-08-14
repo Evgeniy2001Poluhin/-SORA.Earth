@@ -171,7 +171,9 @@ class TestRetrain:
         assert r.status_code == 200
         assert "total" in r.json()
 
-    @pytest.mark.xfail(reason="ValueError NaN in y prod bug - needs deeper test isolation v0.2.2")
+    # The xfail here read "ValueError NaN in y prod bug". The bug was real and
+    # is fixed in #1: _do_retrain now drops rows carrying NaN or inf before
+    # anything is fitted, and says how many it dropped.
     def test_retrain_endpoint(self, preserve_models):
         from app.auth import require_admin
         app.dependency_overrides[require_admin] = lambda: {"username": "test_admin", "role": "admin"}

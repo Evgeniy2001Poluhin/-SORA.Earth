@@ -154,7 +154,10 @@ class TestRetrainEdgeCases:
                 shutil.copy2(f"{self._BACKUP}/{f}", f"models/{f}")
             shutil.rmtree(self._BACKUP, ignore_errors=True)
 
-    @pytest.mark.xfail(reason="Background task response conflict")
+    # The xfail here read "Background task response conflict" (#2). The
+    # endpoint clamps min_samples to 100000 and refuses with 400 when the
+    # dataset is smaller, which is what this asserts; the marker outlived
+    # whatever it was written for.
     def test_retrain_low_samples(self):
         r = client.post("/api/v1/model/retrain?min_samples=999999", headers=_admin)
         assert r.status_code == 400
