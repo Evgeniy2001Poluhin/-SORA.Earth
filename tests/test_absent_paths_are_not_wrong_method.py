@@ -151,3 +151,61 @@ def test_a_wrong_verb_on_a_real_path_still_says_so(client):
         "the GET endpoint this case depends on has moved"
     )
     assert client.post("/api/v1/ab/stats", json={}).status_code == 405
+
+
+# --- the catch-all is recognised by shape, not by the name it happens to use --
+
+
+CATCHALL_SHAPES = [
+    ("/{full_path:path}", True),
+    ("/{spa_path:path}", True),      # registered only where the SPA is built
+    ("/{x:path}", True),
+    ("/app/{path:path}", False),     # a real route under a prefix
+    ("/admin/{path:path}", False),
+    ("/v2/{full_path:path}", False),
+    ("/api/v1/items/{item_id}", False),
+    ("/", False),
+    (None, False),
+]
+
+
+@pytest.mark.parametrize("path,is_catchall", CATCHALL_SHAPES)
+def test_a_catchall_is_matched_by_shape(path, is_catchall):
+    """The defect this replaces was environment-dependent, which is the worst
+    kind to leave to a test suite.
+
+    The handler skipped `"/{full_path:path}"` as a literal string. A third
+    catch-all is registered a few lines above it under `if _SPA_INDEX.exists()`
+    and is spelled `/{spa_path:path}` -- so it was not skipped, it matched
+    every path, and every absent path answered 405.
+
+    That route exists only where the SPA has been built: absent in CI, present
+    in the image. Measured on production 2026-08-14, `POST
+    /api/v1/definitely-not-here` returned 405 from the container while this
+    suite was green on the same commit.
+
+    Anchored, so a route under a prefix is not skipped -- a match there is a
+    genuine one and 405 is then the honest answer.
+    """
+    from app.main import _is_global_catchall
+
+    assert _is_global_catchall(path) is is_catchall
+
+
+def test_every_registered_global_catchall_is_recognised():
+    """Read off the running app rather than from a list here.
+
+    A fourth catch-all added later, under whatever name, is the failure this
+    file exists to prevent -- and a hardcoded list would not see it.
+    """
+    from app.main import _is_global_catchall, app
+
+    seen = [
+        getattr(r, "path", None) for r in app.routes
+        if isinstance(getattr(r, "path", None), str)
+        and r.path.startswith("/{") and r.path.endswith(":path}")
+    ]
+
+    assert seen, "no catch-all found; the arrangement this guards has changed"
+    for path in seen:
+        assert _is_global_catchall(path), path
