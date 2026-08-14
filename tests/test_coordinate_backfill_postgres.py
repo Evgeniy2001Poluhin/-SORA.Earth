@@ -134,6 +134,23 @@ def test_an_out_of_range_coordinate_is_skipped_not_clamped(scratch_db, backfill_
     assert _coords(engine, "d") == (None, None)
 
 
+def test_a_json_boolean_is_not_a_coordinate(scratch_db, backfill_sql):
+    """The same input the ingester refuses, refused here.
+
+    In Python `bool` is a subclass of `int`, so `float(True)` is 1.0 and a
+    naive reader stores a point in the Gulf of Guinea. PostgreSQL will not cast
+    the text `true` to double precision, so this end refuses it by accident of
+    typing -- which is worth a test, because "it happens to fail" and "it is
+    specified to fail" look identical until someone rewrites the cast.
+    """
+    engine, _ = scratch_db
+    _add(engine, "bool", '{"latitude": true, "longitude": false}')
+
+    _run(engine, backfill_sql)
+
+    assert _coords(engine, "bool") == (None, None)
+
+
 def test_half_a_pair_is_not_a_location(scratch_db, backfill_sql):
     engine, _ = scratch_db
     _add(engine, "e", json.dumps({"latitude": 55.0}))

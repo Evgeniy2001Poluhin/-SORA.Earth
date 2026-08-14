@@ -128,6 +128,23 @@ def test_a_non_numeric_coordinate_is_refused(lat, lon):
     assert _coordinates({"latitude": lat, "longitude": lon}) == (None, None)
 
 
+@pytest.mark.parametrize("lat,lon", [
+    (True, False),
+    (True, 37.0),
+    (55.0, False),
+])
+def test_a_boolean_is_not_a_coordinate(lat, lon):
+    """`bool` is a subclass of `int`, so `float(True)` is 1.0.
+
+    `{"latitude": true, "longitude": false}` therefore passes a range check and
+    stores a point in the Gulf of Guinea -- in range, and indistinguishable
+    from a reading. The backfill refuses it already, because PostgreSQL will
+    not cast the text `true` to double precision, so without this the two ends
+    of one rule disagree about the same input.
+    """
+    assert _coordinates({"latitude": lat, "longitude": lon}) == (None, None)
+
+
 def test_nan_is_refused():
     """NaN fails every comparison, so a range check written as `not (lat < -90
     or lat > 90)` lets it through. Asked positively it does not."""

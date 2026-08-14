@@ -152,6 +152,17 @@ def _coordinates(metadata):
     if lat is None or lon is None:
         return None, None
 
+    # Before the float(), not after: `bool` is a subclass of `int`, so
+    # `float(True)` is 1.0 and `float(False)` is 0.0. A source answering
+    # `{"latitude": true, "longitude": false}` would land in the Gulf of
+    # Guinea, in range and indistinguishable from a reading.
+    #
+    # The backfill already refuses these -- PostgreSQL will not cast the text
+    # `true` to double precision -- so without this the two ends of the same
+    # rule disagree about the same input.
+    if isinstance(lat, bool) or isinstance(lon, bool):
+        return None, None
+
     try:
         lat, lon = float(lat), float(lon)
     except (TypeError, ValueError):
