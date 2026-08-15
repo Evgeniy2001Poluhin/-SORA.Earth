@@ -129,3 +129,24 @@ web/tsconfig.tsbuildinfo
 # Interprocess lock for the training dataset, created by the bulk-upload
 # endpoint (app/api/retrain.py). Runtime artifact, never committed.
 data/.projects.csv.lock
+
+# Written by retraining, therefore not source (#191).
+#
+# These six are the files `_do_retrain` rewrites. Tracked, they made retraining
+# and deploying mutually exclusive: a successful retrain left the working tree
+# dirty, `scripts/deploy_production.sh` refused it, and `git checkout` restored
+# them owned by whoever ran it -- root over SSH -- which broke the next retrain
+# for a container running as uid 1000.
+#
+# That loop cost a month. `models/` became root-owned on 17 July and every
+# retrain died writing its artefact until 15 August, unnoticed (#188).
+#
+# The other twelve files in models/ stay tracked: nothing at run time writes
+# them, so they can still arrive with the clone. Untracking the whole directory
+# would have removed delivery for artefacts that never caused the conflict.
+models/best_threshold.pkl
+models/meta.json
+models/metrics.json
+models/model.pkl
+models/rf_model_cal.pkl
+models/scaler.pkl
