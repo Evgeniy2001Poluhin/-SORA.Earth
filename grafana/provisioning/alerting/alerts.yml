@@ -25,6 +25,45 @@ groups:
         annotations:
           summary: "Data drift detected — consider retraining"
 
+      # The rule that did not fire for a month (#188).
+      #
+      # `sora-retrain-failed` below counts failures, and there were none --
+      # because `models/` became root-owned on 17 July, and drift never fired,
+      # so the scheduler never attempted a retrain at all. No attempts, no
+      # failures, and no failures read as health.
+      #
+      # This asks the other question: how long since one *succeeded*. It is the
+      # only one of the two that can notice a system which has stopped trying.
+      #
+      # 14 days, and deliberately not tighter. Retraining is triggered by
+      # drift, so a quiet fortnight can be legitimate -- the summary therefore
+      # says "check whether it tried", not "it is broken". -1 means no
+      # successful run has ever been recorded, which is never legitimate.
+      - uid: sora-retrain-stale
+        title: No Successful Retrain
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sora_retrain_seconds_since_success > 1209600 or sora_retrain_seconds_since_success == -1
+              intervalMs: 1000
+              maxDataPoints: 43200
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No retrain has succeeded in over 14 days"
+          description: >-
+            A quiet period can be legitimate: retraining is triggered by drift,
+            and no drift means no attempt. What this cannot distinguish is a
+            loop that stopped working, which is why it fires -- check whether a
+            retrain was attempted and what it reported, rather than assuming
+            either. A value of -1 means none has ever succeeded.
+
       - uid: sora-retrain-failed
         title: Retrain Failed
         condition: A
