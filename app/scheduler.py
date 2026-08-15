@@ -516,6 +516,15 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         new_auc = new_metrics.get("auc_roc") or new_metrics.get("roc_auc")
         promoted = True
         reject_reason = None
+        #: Which *kind* of refusal, for the journal and the metric label. The
+        #: reason is free text and cannot be grouped by; without this,
+        #: `registry_failed` is indistinguishable outside the process from a
+        #: model refused for its AUC, and the two call for opposite responses --
+        #: one needs the registry looked at, the other needs the model left
+        #: alone. The first refusal wins, so a model that fails on quality *and*
+        #: was not registered is reported on its quality: it would not be
+        #: promoted even with a working registry.
+        reject_kind = "rejected"
 
         # Two independent refusals, run in sequence rather than as one
         # if/elif chain.
@@ -526,10 +535,11 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         # Each of these answers a different question and both have to be asked.
         MIN_AUC_THRESHOLD = 0.80
 
-        def _reject(reason):
-            nonlocal promoted, reject_reason
+        def _reject(reason, kind="rejected"):
+            nonlocal promoted, reject_reason, reject_kind
             promoted = False
             reject_reason = reason
+            reject_kind = kind
             if sora_model_rejected_total: sora_model_rejected_total.inc()
             logger.warning("Closed loop: model REJECTED - %s", reason)
 
@@ -578,7 +588,8 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         if promoted and registry_ok is False:
             _reject("registry_failed: the model was trained and written but not "
                     "registered in MLflow, so it cannot be identified or rolled "
-                    "back from")
+                    "back from",
+                    kind="registry_failed")
 
         # 3. Not worse than what is already serving. A model can clear the
         # absolute bar and still be a step down, and that is a separate
@@ -597,11 +608,19 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
             logger.info("Closed loop: model PROMOTED (no previous AUC to compare) - AUC %s",
                         f"{float(new_auc):.4f}" if new_auc is not None else "unrecorded")
 
+        # `promoted` | `rejected` | `registry_failed`, joining the `failed` that
+        # _do_retrain records when training itself did not finish. Emitted on
+        # `sora_retrain_total`, which already carries a `status` label, rather
+        # than on a new counter -- the closed loop had simply never reported to
+        # it, so outside the process every refusal looked the same.
+        outcome = "promoted" if promoted else reject_kind
+        if sora_retrain_total: sora_retrain_total.labels(status=outcome).inc()
+
         log_id = _start_retrain_log(trigger_source=trigger_source, job_name="closed_loop")
         _finish_retrain_log(
             log_id=log_id,
-            status="promoted" if promoted else "rejected",
-            message="Closed loop: %s" % ("promoted" if promoted else "rejected"),
+            status=outcome,
+            message="Closed loop: %s" % outcome,
             metrics={"old_auc": float(old_auc) if old_auc else None, "new_auc": float(new_auc) if new_auc else None, "promoted": promoted, "reject_reason": reject_reason},
         )
         return {"status": "ok", "drift_detected": True, "retrained": True, "promoted": promoted, "old_auc": float(old_auc) if old_auc else None, "new_auc": float(new_auc) if new_auc else None, "reject_reason": reject_reason}

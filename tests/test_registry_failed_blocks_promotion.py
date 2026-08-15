@@ -70,7 +70,7 @@ def test_a_model_that_did_not_register_is_not_promoted(monkeypatch):
 
     assert result["promoted"] is False
     assert "registry_failed" in (result["reject_reason"] or "")
-    assert journal["status"] == "rejected"
+    assert journal["status"] == "registry_failed"
 
 
 def test_the_same_model_is_promoted_once_it_did_register(monkeypatch):
@@ -112,6 +112,7 @@ def test_the_refusal_does_not_deny_the_training_that_happened(monkeypatch):
     """
     result, journal = run_closed_loop(monkeypatch, {**GOOD_METRICS, "registry_ok": False})
 
+    assert journal["status"] == "registry_failed"
     assert journal["status"] != "failed", "the training happened and must not be disowned"
     assert journal["metrics"]["new_auc"] == pytest.approx(0.9063)
     assert journal["metrics"]["promoted"] is False
@@ -137,4 +138,47 @@ def test_offline_arrives_at_the_gate_as_not_registered(monkeypatch):
 
     assert result["promoted"] is False
     assert "registry_failed" in (result["reject_reason"] or "")
+    assert journal["status"] == "registry_failed"
+
+
+def test_a_quality_refusal_is_still_reported_as_a_plain_rejection(monkeypatch):
+    """The other kind must keep its own name, or the new one classifies nothing.
+
+    A model refused on AUC and one refused for not registering call for opposite
+    responses: the first needs the model left alone, the second needs the
+    registry looked at. If both arrive as `registry_failed` -- or both as
+    `rejected` -- the distinction is decorative.
+    """
+    poor = {**GOOD_METRICS, "roc_auc": 0.55, "registry_ok": True}
+    result, journal = run_closed_loop(monkeypatch, poor)
+
+    assert result["promoted"] is False
     assert journal["status"] == "rejected"
+    assert "registry_failed" not in (result["reject_reason"] or "")
+
+
+def test_the_outcomes_are_distinguishable_from_outside_the_process(monkeypatch):
+    """Four states, four names, on the counter that already classifies retrains.
+
+    Before this the closed loop never touched `sora_retrain_total`, and every
+    refusal incremented the same unlabelled `sora_model_rejected_total`. From
+    Prometheus a registry outage and a genuinely bad model were one number.
+    """
+    from app.prom_metrics import sora_retrain_total
+
+    def count(status):
+        for metric in sora_retrain_total.collect():
+            for sample in metric.samples:
+                if sample.labels.get("status") == status and sample.name.endswith("_total"):
+                    return sample.value
+        return 0.0
+
+    before = {s: count(s) for s in ("promoted", "rejected", "registry_failed")}
+
+    run_closed_loop(monkeypatch, {**GOOD_METRICS, "registry_ok": True})
+    run_closed_loop(monkeypatch, {**GOOD_METRICS, "registry_ok": False})
+    run_closed_loop(monkeypatch, {**GOOD_METRICS, "roc_auc": 0.55, "registry_ok": True})
+
+    assert count("promoted") == before["promoted"] + 1
+    assert count("registry_failed") == before["registry_failed"] + 1
+    assert count("rejected") == before["rejected"] + 1
