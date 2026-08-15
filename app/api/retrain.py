@@ -420,6 +420,31 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
         )
         raise
 
+#: When a row entered the training set, stamped as it is appended.
+#:
+#: An honest temporal split needs a time per row and nothing ever wrote one.
+#: The "temporal split" this file used to do sliced the row order instead, and
+#: measured a shift in population (#183).
+#:
+#: **Rows already in the file cannot get one.** All 17,071 of them predate this
+#: and there is no record of when each arrived; inventing a value would be the
+#: retroactive provenance #164 exists to undo. So the column is empty for the
+#: history and filled from here on, and a temporal split becomes possible on
+#: new rows and never on the old ones.
+#:
+#: A reader computing a temporal split must therefore check how much of the
+#: column is filled. A split over a half-filled column silently selects the new
+#: rows, which is a population, not a period.
+RECORDED_AT = "recorded_at"
+
+
+def _stamped(df):
+    """A copy of `df` carrying the moment it entered the training set."""
+    stamped = df.copy()
+    stamped[RECORDED_AT] = datetime.utcnow().isoformat(timespec="seconds")
+    return stamped
+
+
 def _preflight_retrain(min_samples: int) -> int:
     """Refuse, before accepting, what can be refused without training (#2).
 
@@ -548,7 +573,8 @@ def data_refresh(
     }
 
     df_existing = pd.read_csv(PROJECTS_CSV)
-    df_new = pd.concat([df_existing, pd.DataFrame([new_row])], ignore_index=True)
+    df_new = pd.concat(
+        [df_existing, _stamped(pd.DataFrame([new_row]))], ignore_index=True)
     df_new.to_csv(PROJECTS_CSV, index=False)
 
     # Read last retrain total_samples from RetrainLog
@@ -750,7 +776,7 @@ def _ingest_frame(df_new, auto_retrain: bool, _audit) -> dict:
     # lock so two uploads cannot interleave their read-modify-write.
     with _dataset_lock():
         df_existing = pd.read_csv(PROJECTS_CSV)
-        df_merged = pd.concat([df_existing, df_new], ignore_index=True)
+        df_merged = pd.concat([df_existing, _stamped(df_new)], ignore_index=True)
         try:
             _replace_projects_csv(df_merged)
         except Exception as e:
