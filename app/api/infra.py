@@ -253,7 +253,6 @@ async def get_system_metrics(authorization: str = Header(None)):
     return _metrics_view(authorization)
 
 
-@router.get("/metrics/prometheus")
 def _refresh_retrain_staleness() -> None:
     """Set the age gauge from retrain_log, at scrape time.
 
@@ -299,6 +298,7 @@ def _refresh_retrain_staleness() -> None:
             db.close()
 
 
+@router.get("/metrics/prometheus")
 async def prometheus_metrics():
     """The Prometheus registry, same as `/metrics`.
 
