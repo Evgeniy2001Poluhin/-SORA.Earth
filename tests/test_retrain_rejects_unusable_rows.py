@@ -227,19 +227,40 @@ def test_a_fractional_label_is_refused_not_truncated(dataset):
     assert "not 0 or 1" in str(exc.value.detail)
 
 
-def test_a_split_that_leaves_one_class_on_a_side_is_refused(dataset):
-    """The split is temporal and does not shuffle.
+def test_a_dataset_ordered_by_outcome_now_splits_cleanly(dataset, tmp_path,
+                                                        monkeypatch):
+    """This case used to be a refusal, and the change is the point (#183).
 
-    A dataset ordered by outcome passes the global two-class check and still
-    puts every failure in the first 80% and every success in the last 20%.
-    `rf.fit` then trains a one-class model and `predict_proba(...)[:, 1]`
-    indexes a column that does not exist -- an IndexError far from its cause.
+    Under the old slice at 80% of row order, a dataset ordered by outcome put
+    every failure in train and every success in test. The guard added here
+    refused it -- correctly, because `rf.fit` would have trained a one-class
+    model and `predict_proba(...)[:, 1]` would have indexed a column that does
+    not exist.
+
+    Stratifying makes the same data usable: both sides carry both classes by
+    construction. The guard stays -- it is still the right answer if the split
+    ever changes again -- but on this path it is unreachable, and asserting a
+    refusal that can no longer happen would be asserting nothing.
     """
-    df = _frame(40, successes=[0] * 32 + [1] * 8)
-    dataset(df)
+    import app.api.retrain as retrain
+
+    monkeypatch.setattr(retrain, "MODELS_DIR", str(tmp_path))
+    dataset(_frame(40, successes=[0] * 32 + [1] * 8))
+
+    result = _retrain(min_samples=10)
+
+    assert result["status"] in ("success", "accepted")
+
+
+def test_the_one_class_guard_is_still_there(dataset):
+    """Unreachable is not the same as removed.
+
+    A whole dataset of one outcome still cannot be trained on, and that check
+    runs before the split.
+    """
+    dataset(_frame(40, successes=[1] * 40))
 
     with pytest.raises(HTTPException) as exc:
         _retrain(min_samples=10)
 
-    assert exc.value.status_code == 400
-    assert "one outcome class in" in str(exc.value.detail)
+    assert "one outcome class" in str(exc.value.detail)
