@@ -101,7 +101,13 @@ def test_offline_mode_never_calls_mlflow(monkeypatch):
     with patch.object(mlflow_tracking.mlflow, "start_run", side_effect=AssertionError("called")):
         assert mlflow_tracking.log_prediction("rf_v1", {"budget": 1}) is None
         assert mlflow_tracking.log_evaluation("P", PROJECT, "Low") is None
-        assert mlflow_tracking.log_model_registry(object(), "rf_v1", {}) is None
+        # False, not None, since #189. The other two report nothing because
+        # nothing depends on whether they ran. Registration is different: the
+        # promotion gate refuses a model that is not in the registry, and
+        # "MLflow is switched off" is one of the ways a model is not in it.
+        # Returning None there would leave the gate unable to tell "not
+        # registered" from "no opinion".
+        assert mlflow_tracking.log_model_registry(object(), "rf_v1", {}) is False
 
     # get_experiment_stats is the path the offline guard was added to, so it has
     # to be covered too: the lookup must not happen at all.
