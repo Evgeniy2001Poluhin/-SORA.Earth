@@ -559,7 +559,28 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         elif new_auc is not None and float(new_auc) < MIN_AUC_THRESHOLD:
             _reject(f"AUC below minimum threshold: {new_auc:.4f} < {MIN_AUC_THRESHOLD}")
 
-        # 2. Not worse than what is already serving. A model can clear the
+        # 2. Registered, or not promoted (#189).
+        #
+        # A model that exists only on this container's disk is not a model the
+        # platform can point at: the registry is where a version is identified,
+        # compared and rolled back from. Promoting an unregistered one records
+        # a decision about an artefact nobody else can find.
+        #
+        # `registry_failed` rather than `failed`: the model was trained,
+        # evaluated and written. Reporting it as a failed run would be as
+        # untrue as reporting it as a success -- one denies work that happened,
+        # the other claims a step that did not.
+        #
+        # Absent means unknown, and unknown is not a promotion. Runs recorded
+        # before this carry no `registry_ok`, so they keep the old behaviour
+        # rather than being refused for lacking a field they could not have had.
+        registry_ok = new_metrics.get("registry_ok")
+        if promoted and registry_ok is False:
+            _reject("registry_failed: the model was trained and written but not "
+                    "registered in MLflow, so it cannot be identified or rolled "
+                    "back from")
+
+        # 3. Not worse than what is already serving. A model can clear the
         # absolute bar and still be a step down, and that is a separate
         # decision from whether it is good enough in isolation.
         if promoted and old_auc is not None and new_auc is not None:
