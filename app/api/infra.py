@@ -254,6 +254,45 @@ async def get_system_metrics(authorization: str = Header(None)):
 
 
 @router.get("/metrics/prometheus")
+def _refresh_retrain_staleness() -> None:
+    """Set the age gauge from retrain_log, at scrape time.
+
+    Computed on scrape rather than pushed by the job that retrains, because the
+    failure being watched for is that no job runs. A value only a runner
+    updates goes stale exactly when the thing it measures goes wrong -- and
+    stops moving, which reads as "recent" to anyone looking at the number
+    rather than at its timestamp.
+    """
+    from datetime import datetime, timezone
+
+    from app.database import RetrainLog, SessionLocal
+    from app.prom_metrics import sora_retrain_seconds_since_success
+
+    db = SessionLocal()
+    try:
+        last = (db.query(RetrainLog.finished_at)
+                  .filter(RetrainLog.status == "success",
+                          RetrainLog.finished_at.isnot(None))
+                  .order_by(RetrainLog.finished_at.desc())
+                  .first())
+        if last is None or last[0] is None:
+            sora_retrain_seconds_since_success.set(-1)
+            return
+        finished = last[0]
+        if finished.tzinfo is None:
+            finished = finished.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - finished).total_seconds()
+        sora_retrain_seconds_since_success.set(max(0.0, age))
+    except Exception:
+        # A metrics endpoint must not fail because a query did. Leaving the
+        # previous value is wrong in a different way, so it is set to -1: the
+        # alert then fires, and an alert on an unreadable database is correct.
+        from app.prom_metrics import sora_retrain_seconds_since_success as g
+        g.set(-1)
+    finally:
+        db.close()
+
+
 async def prometheus_metrics():
     """The Prometheus registry, same as `/metrics`.
 
@@ -283,6 +322,9 @@ async def prometheus_metrics():
     `/api/v1/metrics` as JSON, which is what they always were. Prometheus never
     saw them: infra/prometheus.yml scrapes `/metrics` and nothing else.
     """
+    # Refreshed here, not by whatever last retrained: the failure being watched
+    # for is that nothing retrains (#188).
+    _refresh_retrain_staleness()
     return PlainTextResponse(
         generate_latest(REGISTRY).decode("utf-8"),
         media_type=CONTENT_TYPE_LATEST,

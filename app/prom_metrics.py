@@ -13,6 +13,25 @@ sora_drift_detected     = Counter("sora_drift_detected_total","Drift detection e
 sora_model_promoted     = Counter("sora_model_promoted_total","Models promoted")
 sora_model_rejected     = Counter("sora_model_rejected_total","Models rejected")
 
+#: Seconds since the last retrain that finished successfully (#188).
+#:
+#: The counters above answer "how many runs failed". They cannot answer "has
+#: anything run at all", and that is the question that was open for a month:
+#: `models/` became root-owned on 17 July, every retrain died on writing its
+#: artefact, and because drift never fired the scheduler never even attempted
+#: one. No failures were counted, and no failures looked like health.
+#:
+#: A gauge of age, not a counter of events. An alert on this fires when the
+#: system stops trying, which is the state a counter cannot express.
+#:
+#: -1 means no successful run has ever been recorded. Not 0, which would read
+#: as "one just finished", and not absent, which would leave the alert with
+#: nothing to compare.
+sora_retrain_seconds_since_success = Gauge(
+    "sora_retrain_seconds_since_success",
+    "Seconds since the last successful retrain; -1 if there has never been one",
+)
+
 # ── Predictions ──
 sora_prediction_latency = Histogram(
     "sora_prediction_latency_ms", "Prediction latency in ms",
