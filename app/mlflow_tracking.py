@@ -180,16 +180,35 @@ def log_evaluation(project_name: str, esg_scores: dict, risk_level: str):
         _log_mlflow_failure("log_evaluation", e)
 
 
-def log_model_registry(model, model_name: str, metrics: dict):
+def log_model_registry(model, model_name: str, metrics: dict) -> bool:
+    """Register the model, and **say whether it worked** (#189).
+
+    This returned None either way, so a caller could not tell a registered
+    model from one whose upload was refused. Measured on production
+    2026-08-15: registration had been failing with
+    `PermissionError: '/mlflow'` while every retrain reported success, because
+    experiments 0 and 1 carry an absolute `artifact_location` from before the
+    server ran with `--serve-artifacts`.
+
+    Returns True when the model reached the registry, False when it did not,
+    and False when MLflow is switched off -- because "we did not try" is also
+    "it is not registered", and a caller deciding whether to promote needs the
+    second fact, not the first.
+
+    Still does not raise. Telemetry must not take a completed retrain down with
+    it; what changes is that the outcome is now reported rather than swallowed.
+    """
     if _OFFLINE:
-        return None
+        return False
     try:
         with mlflow.start_run(run_name=f"register_{model_name}"):
             mlflow.log_metrics(metrics)
             mlflow.sklearn.log_model(model, model_name)
             mlflow.set_tag("type", "model_registry")
+        return True
     except Exception as e:
         _log_mlflow_failure("log_model_registry", e)
+        return False
 
 
 def get_experiment_stats():

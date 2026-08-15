@@ -396,7 +396,10 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
 
         try:
             from app.mlflow_tracking import log_model_registry
-            log_model_registry(rf, "RandomForest_retrain", {"auc": auc or 0, "f1": f1, "accuracy": acc})
+            registry_ok = log_model_registry(
+                rf, "RandomForest_retrain",
+                {"auc": auc or 0, "f1": f1, "accuracy": acc})
+            new_metrics["registry_ok"] = bool(registry_ok)
         except Exception:
             pass
 
