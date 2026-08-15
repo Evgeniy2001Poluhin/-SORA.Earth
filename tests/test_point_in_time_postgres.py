@@ -164,18 +164,50 @@ def test_rewriting_the_vintage_is_refused(db):
     db.rollback()
 
 
-def test_correcting_a_period_is_still_allowed(db):
-    """The #58 backfill assigned periods to 45,065 production rows.
+def test_correcting_a_period_is_refused(db):
+    """This asserted the opposite until #164, and the reason it changed is
+    measurement rather than preference.
 
-    A guard that forbade that would forbid the one maintenance path this table
-    has, so the trigger has to permit it -- and this is the test that says so
-    rather than leaving it to be discovered by a failing backfill.
+    The #58 backfill assigned periods to 45,065 rows, and the trigger had to
+    permit that or the table's one maintenance path would have been forbidden.
+    So the exception was correct when it was written.
+
+    Measured on production 2026-08-14: `period_run_id` holds **one** distinct
+    value across 104,309 rows. Period correction happened once, in a single run
+    on 2026-08-05, and has not happened since. It is an event, not a process.
+
+    What the permission cost is that the value/period pairing is not
+    reproducible: `value` and `fetched_at` cannot be rewritten, so a
+    point-in-time read is exact -- but which period a value was attributed to
+    can change under it, silently, and the row keeps no record of what it said
+    before.
+
+    Refused now. A future correction is still possible and becomes a decision
+    that lifts the guard, which is a thing someone reviews, rather than an
+    UPDATE nobody sees.
     """
     _write(db, [(None, 4.92, datetime(2026, 6, 1))])
 
+    with pytest.raises(Exception) as exc:
+        db.execute(text(
+            "UPDATE country_indicator_history SET as_of_date = '2024-01-01'"))
+        db.commit()
+    assert "written once" in str(exc.value)
+    db.rollback()
+
+
+def test_the_columns_that_may_still_change_are_untouched(db):
+    """The guard must not become "nothing about this row may change".
+
+    `period_status` and the other provenance columns describe how a period was
+    established. Freezing those alongside the period would forbid recording
+    that a row was reviewed, which is not what #164 asked for.
+    """
+    _write(db, [(datetime(2024, 1, 1), 4.92, datetime(2026, 6, 1))])
+
     db.execute(text(
         "UPDATE country_indicator_history "
-        "SET as_of_date = '2024-01-01', period_status = 'recovered_inferred'"))
+        "SET period_status = 'recovered_inferred', period_method = 'manual'"))
     db.commit()
 
     series = series_as_of(db, "RUS", CODE, datetime(2026, 7, 1))
