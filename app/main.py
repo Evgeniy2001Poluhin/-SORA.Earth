@@ -769,6 +769,25 @@ from prometheus_client import Counter, Histogram, Gauge
 from app import prom_metrics  # noqa
 Instrumentator().instrument(app).expose(app)
 
+# The staleness gauge computes itself when collected, on whichever path does
+# the collecting (#188).
+#
+# It was refreshed from the handler of /api/v1/metrics/prometheus, and
+# infra/prometheus.yml scrapes /metrics at the root -- the endpoint the line
+# above creates. Measured on production 2026-08-15: the metric was published,
+# was scraped, and read 0.0 four hours after a successful retrain. It reached
+# Grafana and meant nothing.
+#
+# Registered after expose() so the endpoint exists; set_function is evaluated
+# at collection, so which endpoint runs stops being a question.
+try:
+    from app.api.infra import retrain_staleness_seconds
+    from app.prom_metrics import sora_retrain_seconds_since_success
+
+    sora_retrain_seconds_since_success.set_function(retrain_staleness_seconds)
+except Exception as _e:  # pragma: no cover - telemetry must not block startup
+    logger.warning("could not wire the retrain staleness gauge: %s", _e)
+
 
 # ===== MINIMAL ENDPOINTS (root, health, model-info) =====
 @app.get("/")

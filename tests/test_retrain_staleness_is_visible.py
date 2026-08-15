@@ -44,11 +44,15 @@ def _add(Session, status, hours_ago):
 
 
 def _value():
-    from app.api.infra import _refresh_retrain_staleness
-    from app.prom_metrics import sora_retrain_seconds_since_success
+    """The function the gauge computes itself from, called directly.
 
-    _refresh_retrain_staleness()
-    return sora_retrain_seconds_since_success._value.get()
+    Not the gauge's stored value: since #188's follow-up it has no stored
+    value -- `set_function` evaluates this at collection, which is what stopped
+    the metric depending on which endpoint had been called.
+    """
+    from app.api.infra import retrain_staleness_seconds
+
+    return retrain_staleness_seconds()
 
 
 def test_it_reports_the_age_of_the_last_success(log_db):
@@ -99,14 +103,19 @@ def test_an_unreadable_database_fires_the_alert(monkeypatch):
     assert _value() == -1
 
 
-def test_the_gauge_is_refreshed_when_the_endpoint_is_scraped():
-    """Read from the source: the value must not be pushed by whatever last
-    retrained, because the failure being watched for is that nothing does."""
+def test_the_gauge_computes_itself_at_collection():
+    """Not from a handler.
+
+    Refreshing it inside /api/v1/metrics/prometheus published a metric that
+    read 0.0 on production while a retrain had succeeded four hours earlier:
+    infra/prometheus.yml scrapes /metrics at the root, which that handler never
+    runs. A gauge depending on which endpoint was called reports on the
+    endpoint.
+    """
     import os
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(root, "app", "api", "infra.py"), encoding="utf-8") as fh:
+    with open(os.path.join(root, "app", "main.py"), encoding="utf-8") as fh:
         body = fh.read()
 
-    render = body[body.index("async def prometheus_metrics"):]
-    assert "_refresh_retrain_staleness()" in render[:render.index("generate_latest")]
+    assert "set_function(retrain_staleness_seconds)" in body

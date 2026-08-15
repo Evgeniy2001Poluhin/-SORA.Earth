@@ -105,28 +105,24 @@ def test_the_staleness_gauge_does_not_move(broken_write, log_db):
     A failed run must leave the age where it was. If it reset the gauge, the
     month of silence would have looked recent throughout.
     """
-    from app.api.infra import _refresh_retrain_staleness
-    from app.prom_metrics import sora_retrain_seconds_since_success
+    from app.api.infra import retrain_staleness_seconds
 
     with pytest.raises(Exception):
         broken_write._do_retrain(min_samples=10)
 
-    _refresh_retrain_staleness()
 
     # -1: this database has recorded a failed run and no successful one.
-    assert sora_retrain_seconds_since_success._value.get() == -1
+    assert retrain_staleness_seconds() == -1
 
 
 def test_a_success_afterwards_does_move_it(dataset, log_db):
     """Otherwise the assertion above is satisfied by a gauge that never moves,
     which is the defect wearing the shape of the fix."""
-    from app.api.infra import _refresh_retrain_staleness
-    from app.prom_metrics import sora_retrain_seconds_since_success
+    from app.api.infra import retrain_staleness_seconds
 
     dataset._do_retrain(min_samples=10)
-    _refresh_retrain_staleness()
 
-    value = sora_retrain_seconds_since_success._value.get()
+    value = retrain_staleness_seconds()
     assert value >= 0 and value < 300
 
 
@@ -137,8 +133,7 @@ def test_the_alert_condition_holds_on_the_signal_produced(broken_write, log_db):
     import os
     import re
 
-    from app.api.infra import _refresh_retrain_staleness
-    from app.prom_metrics import sora_retrain_seconds_since_success
+    from app.api.infra import retrain_staleness_seconds
 
     yaml = pytest.importorskip("yaml")
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -150,8 +145,7 @@ def test_the_alert_condition_holds_on_the_signal_produced(broken_write, log_db):
 
     with pytest.raises(Exception):
         broken_write._do_retrain(min_samples=10)
-    _refresh_retrain_staleness()
-    value = sora_retrain_seconds_since_success._value.get()
+    value = retrain_staleness_seconds()
 
     # The expression, read from the rule rather than restated here: a copy
     # would keep passing after someone edited the rule.
