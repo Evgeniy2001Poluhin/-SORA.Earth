@@ -268,8 +268,13 @@ def _refresh_retrain_staleness() -> None:
     from app.database import RetrainLog, SessionLocal
     from app.prom_metrics import sora_retrain_seconds_since_success
 
-    db = SessionLocal()
+    # Inside the try, not before it. Opening the session was the one statement
+    # left outside, so a database that refuses connections raised straight
+    # through this function and took the metrics endpoint down with it -- the
+    # endpoint whose whole job is to still answer when something is wrong.
+    db = None
     try:
+        db = SessionLocal()
         last = (db.query(RetrainLog.finished_at)
                   .filter(RetrainLog.status == "success",
                           RetrainLog.finished_at.isnot(None))
@@ -290,7 +295,8 @@ def _refresh_retrain_staleness() -> None:
         from app.prom_metrics import sora_retrain_seconds_since_success as g
         g.set(-1)
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 
 async def prometheus_metrics():
