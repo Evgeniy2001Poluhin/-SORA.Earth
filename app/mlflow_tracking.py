@@ -8,13 +8,52 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5556")
-EXPERIMENT_NAME = "sora-earth-esg"
+#: A new experiment, not `sora-earth-esg` and not `esg` (#189).
+#:
+#: `sora-earth-esg` (id 1) and `Default` (id 0) were created before the server
+#: ran with `--serve-artifacts`, so their `artifact_location` is an absolute
+#: path inside the mlflow container -- `/mlflow/artifacts/1`. The client is
+#: handed that path and tries to write it locally, which is the
+#: `PermissionError: '/mlflow'` that had every registration failing silently
+#: since 17 July while retrains reported success.
+#:
+#: `artifact_location` cannot be changed after creation, so those two are left
+#: as they are: they hold real history and rewriting it is not something this
+#: repository does.
+#:
+#: `esg` (id 2) does carry `mlflow-artifacts:/esg` and would work. It is not
+#: reused because the name says nothing about which line of runs it was made
+#: for, and pointing production at an experiment of unknown purpose trades one
+#: unknown for another.
+EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT_NAME", "sora-earth-esg-v2")
+
+#: Proxied through the tracking server, which is what `--serve-artifacts`
+#: exists for. Set explicitly rather than left to the server's default: the
+#: default is what produced the two broken experiments, and a value that
+#: matters should not depend on how the server happened to be started.
+EXPERIMENT_ARTIFACT_LOCATION = os.getenv(
+    "MLFLOW_ARTIFACT_LOCATION", f"mlflow-artifacts:/{EXPERIMENT_NAME}")
+
 _OFFLINE = os.getenv("SORA_OFFLINE","0")=="1"  # _SORA_OFFLINE_GUARD
+
+
+def _ensure_experiment() -> None:
+    """Point at the experiment, creating it with a proxied artifact location.
+
+    `set_experiment` alone would create it with whatever the server defaults
+    to, and that default is exactly what left experiments 0 and 1 unusable.
+    """
+    existing = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
+    if existing is None:
+        mlflow.create_experiment(
+            EXPERIMENT_NAME, artifact_location=EXPERIMENT_ARTIFACT_LOCATION)
+    mlflow.set_experiment(EXPERIMENT_NAME)
+
 
 try:
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     if not _OFFLINE:
-        mlflow.set_experiment(EXPERIMENT_NAME)
+        _ensure_experiment()
 except Exception as e:
     logger.warning("MLflow init failed: %s", e)
 
