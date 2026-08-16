@@ -71,9 +71,12 @@ def staged_dir(run_id: str) -> str:
     overwritten by the next retrain, so re-registering run N's model became
     impossible the moment run N+1 finished (#189).
     """
-    if not run_id or os.sep in run_id or run_id in (".", ".."):
-        raise ValueError(f"unusable run_id for a staged path: {run_id!r}")
-    return os.path.join(runtime_dir(), "staged", run_id)
+    # Validated as a UUID by app.model_source.validate_run_id, not merely
+    # screened for separators: a screen would still admit ".", "~", a name
+    # colliding with "active", or a control character.
+    from app.model_source import validate_run_id
+
+    return os.path.join(runtime_dir(), "staged", validate_run_id(run_id))
 
 
 def active_dir() -> str:
