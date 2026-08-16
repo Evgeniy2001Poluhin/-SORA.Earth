@@ -80,20 +80,55 @@ SUPERSEDED = (
 HISTORICAL_BANNER = "HISTORICAL — not the current plan"
 
 
+#: Belongs to that module and describes its own generator, not the project plan.
+OUT_OF_SCOPE = {"sora_ai_copilot/ROADMAP.md"}
+
+
+def discover_roadmaps():
+    """Find plan documents rather than iterate a list of the ones we know about.
+
+    The first version of this test checked a hardcoded tuple, and mutation
+    testing caught what that misses: adding a *seventh* roadmap left the suite
+    green, because a file nobody had listed was never opened. A guard whose
+    failure set cannot contain the case it claims to cover is decoration -- the
+    exact defect this file exists to prevent in the documents themselves.
+    """
+    found = []
+    for directory in ("", "docs"):
+        base = os.path.join(REPO_ROOT, directory) if directory else REPO_ROOT
+        if not os.path.isdir(base):
+            continue
+        for entry in sorted(os.listdir(base)):
+            if not entry.lower().endswith(".md"):
+                continue
+            if "roadmap" not in entry.lower():
+                continue
+            rel = f"{directory}/{entry}" if directory else entry
+            if rel in OUT_OF_SCOPE:
+                continue
+            found.append(rel)
+    return found
+
+
+def test_the_discovery_itself_finds_the_known_plans():
+    """If discovery silently found nothing, every check below would pass hollow."""
+    found = set(discover_roadmaps())
+    missing = (set(SUPERSEDED) | {"docs/DEVELOPMENT_ROADMAP.md"}) - found
+    assert not missing, f"discovery missed known plans: {sorted(missing)}"
+
+
 def test_exactly_one_document_declares_itself_current():
     """Six plans of equal apparent authority is what produced three stale reviews.
 
     `ROADMAP.md` announced itself as *Active development* while describing a
     sprint that finished months earlier, so a reader who found it first planned
     against a project that no longer existed. One document may claim to be
-    current, and this is the check that keeps it one.
+    current, and this is the check that keeps it one -- including against a plan
+    added tomorrow under a name nobody has written down yet.
     """
     claiming = []
-    for name in ("docs/DEVELOPMENT_ROADMAP.md",) + SUPERSEDED:
-        path = os.path.join(REPO_ROOT, name)
-        if not os.path.exists(path):
-            continue
-        with open(path, encoding="utf-8") as handle:
+    for name in discover_roadmaps():
+        with open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
             head = handle.read(4000)
         if re.search(r"\*\*Status:\*\*\s*(CURRENT|Active)", head):
             claiming.append(name)
@@ -103,18 +138,21 @@ def test_exactly_one_document_declares_itself_current():
     )
 
 
-@pytest.mark.parametrize("name", SUPERSEDED)
-def test_every_superseded_plan_says_so_at_the_top(name):
+def test_every_other_plan_says_it_is_historical_at_the_top():
     """The banner has to be the first thing read, not a note further down."""
-    path = os.path.join(REPO_ROOT, name)
-    if not os.path.exists(path):
-        pytest.skip(f"{name} is no longer in the repository")
-    with open(path, encoding="utf-8") as handle:
-        head = handle.read(600)
+    offenders = []
+    for name in discover_roadmaps():
+        if name == "docs/DEVELOPMENT_ROADMAP.md":
+            continue
+        with open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
+            head = handle.read(600)
+        if HISTORICAL_BANNER not in head:
+            offenders.append(name)
 
-    assert HISTORICAL_BANNER in head, (
-        f"{name} does not carry the historical banner in its first lines; a "
-        "reader who stops after the title will take it for the current plan"
+    assert not offenders, (
+        f"these plans do not carry the historical banner in their first lines: "
+        f"{offenders}. A reader who stops after the title will take them for "
+        "the current plan."
     )
 
 
