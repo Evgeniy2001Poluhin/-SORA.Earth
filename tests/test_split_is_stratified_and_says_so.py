@@ -75,8 +75,13 @@ def test_the_two_sides_have_the_same_class_balance(dataset):
     import app.api.retrain as retrain
 
     dataset(_frame())
-    retrain._do_retrain(min_samples=10)
-    with open(os.path.join(retrain.MODELS_DIR, "metrics.json")) as fh:
+    # The candidate is written to runtime/staged/<run_id>/, not to models/
+    # (#199 phase 4): models/ is the immutable seed and a run that no gate has
+    # approved does not touch it.
+    from app.paths import staged_dir
+
+    result = retrain._do_retrain(min_samples=10)
+    with open(os.path.join(staged_dir(result["run_id"]), "metrics.json")) as fh:
         metrics = json.load(fh)
 
     assert metrics["train_samples"] + metrics["test_samples"] == 400
@@ -92,8 +97,13 @@ def test_the_recorded_metrics_say_which_split_produced_them(dataset):
     import app.api.retrain as retrain
 
     dataset(_frame())
-    retrain._do_retrain(min_samples=10)
-    with open(os.path.join(retrain.MODELS_DIR, "metrics.json")) as fh:
+    # The candidate is written to runtime/staged/<run_id>/, not to models/
+    # (#199 phase 4): models/ is the immutable seed and a run that no gate has
+    # approved does not touch it.
+    from app.paths import staged_dir
+
+    result = retrain._do_retrain(min_samples=10)
+    with open(os.path.join(staged_dir(result["run_id"]), "metrics.json")) as fh:
         metrics = json.load(fh)
 
     assert metrics["split_kind"] == "stratified_by_outcome"

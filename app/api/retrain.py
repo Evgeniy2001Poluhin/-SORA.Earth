@@ -16,7 +16,8 @@ import torch
 from fastapi import (APIRouter, BackgroundTasks, Depends, File, HTTPException,
                      UploadFile)
 from app.auth import require_api_key
-from app.paths import data_dir, models_dir
+from app.paths import data_dir, models_dir, staged_dir
+from app.model_source import INCOMPLETE_MARKER
 
 router = APIRouter(prefix="/model", tags=["mlops"])
 
@@ -147,6 +148,16 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
     run_id = new_run_id()
     log_id = _start_retrain_log(trigger_source=trigger_source, job_name="model_retrain",
                                 run_id=run_id)
+
+    # The candidate's directory, created before anything is written into it, so
+    # every write below addresses one place. The marker says "still being
+    # assembled": activation and pruning both refuse a directory carrying it, so
+    # a half-written candidate can be neither promoted nor deleted underneath
+    # its writer.
+    staged = staged_dir(run_id)
+    os.makedirs(staged, exist_ok=True)
+    with open(os.path.join(staged, INCOMPLETE_MARKER), "w") as _marker:
+        _marker.write(run_id)
 
     try:
         if not os.path.exists(PROJECTS_CSV):
@@ -319,7 +330,7 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
         from sklearn.calibration import CalibratedClassifierCV
         rf_cal = CalibratedClassifierCV(rf, cv="prefit", method="isotonic")
         rf_cal.fit(X_test_s, y_test)
-        with open(os.path.join(MODELS_DIR, "rf_model_cal.pkl"), "wb") as fc:
+        with open(os.path.join(staged, "rf_model_cal.pkl"), "wb") as fc:
             pickle.dump(rf_cal, fc)
 
         y_pred = rf.predict(X_test_s)
@@ -342,11 +353,18 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
 
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
-        with open(os.path.join(MODELS_DIR, "model.pkl"), "wb") as f:
+        # The candidate goes to runtime/staged/<run_id>/, never to models/
+        # (#191, #199 phase 4). models/ is the immutable seed, and writing the
+        # newly trained model there overwrote the bootstrap every run — the
+        # thing a lost runtime volume is supposed to fall back to.
+        #
+        # It is also no longer served by being written. Until a gate rules, this
+        # directory is a candidate and nothing loads from it.
+        with open(os.path.join(staged, "model.pkl"), "wb") as f:
             pickle.dump(rf, f)
-        with open(os.path.join(MODELS_DIR, "scaler.pkl"), "wb") as f:
+        with open(os.path.join(staged, "scaler.pkl"), "wb") as f:
             pickle.dump(scaler, f)
-        with open(os.path.join(MODELS_DIR, "best_threshold.pkl"), "wb") as f:
+        with open(os.path.join(staged, "best_threshold.pkl"), "wb") as f:
             pickle.dump({"threshold": best_t}, f)
 
         new_metrics = {
@@ -366,7 +384,7 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
             "test_positive": int((y_test == 1).sum()),
             "test_negative": int((y_test == 0).sum()),
         }
-        with open(os.path.join(MODELS_DIR, "metrics.json"), "w") as f:
+        with open(os.path.join(staged, "metrics.json"), "w") as f:
             json.dump(new_metrics, f, indent=2)
 
         new_meta = {
@@ -375,20 +393,23 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
             "n_estimators": 200, "max_depth": 10,
             "features": feature_cols, "total_samples": len(df),
         }
-        with open(os.path.join(MODELS_DIR, "meta.json"), "w") as f:
+        with open(os.path.join(staged, "meta.json"), "w") as f:
             json.dump(new_meta, f, indent=2)
 
-        try:
-            from app import main as m
-            m.rf_model = rf
-            m.scaler = scaler
-            m.best_threshold = best_t
-            m.model_meta = new_meta
-            m.model_metrics = new_metrics
-            m.explainer_shap = __import__("shap").TreeExplainer(rf)
-            reloaded = True
-        except Exception:
-            reloaded = False
+        # Complete. Only now may a gate promote it.
+        os.remove(os.path.join(staged, INCOMPLETE_MARKER))
+
+        # The serving model is NOT replaced here (#199 phase 4).
+        #
+        # This block used to assign rf_model, scaler and the threshold straight
+        # into app.main, so a model became the champion by the fact of having
+        # been trained — before the AUC gate, the confidence bound, the registry
+        # check or the degradation check had run. "Not promoted" then meant "it
+        # is serving, and the journal says it should not be".
+        #
+        # Promotion is now an act: the gate calls activate(run_id), and the
+        # reload happens there.
+        reloaded = False
 
         result = {
             "status": "success",
@@ -403,6 +424,9 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
             "retrain_log_id": log_id,
             #: Same physical run as the decision row the caller will write.
             "run_id": run_id,
+            #: The candidate is staged under this run and is not serving. A
+            #: caller that decides to promote calls activate(run_id).
+            "staged": True,
         }
 
         try:

@@ -166,3 +166,43 @@ def health_fields(source: ModelSource) -> dict:
         # set changes; the detail stays in the server log.
         "reason_code": source.reason_code,
     }
+
+
+def reload_champion() -> ModelSource:
+    """Re-read the champion into the running application (#199 phase 4).
+
+    Called after `activate()`, and only then. Promotion used to happen by
+    assignment inside `_do_retrain` — the model became the champion by having
+    been trained, before any gate ruled — so this exists to make the sequence
+    the other way round: the gate decides, activation moves the files, and this
+    picks them up.
+
+    Assigning into `app.main` is not elegant. It is what the module does today,
+    and inventing a registry object here would be a second way to find the
+    serving model while the first still exists.
+    """
+    champion = load_champion(recover_first=True)
+    try:
+        from app import main as running
+
+        running.rf_model = champion.model
+        running.scaler = champion.scaler
+        running.best_threshold = champion.best_threshold
+        running.model_meta = champion.meta
+        running.model_metrics = champion.metrics
+        running.model_source = champion.source
+        try:
+            running.explainer_shap = __import__("shap").TreeExplainer(champion.model)
+        except Exception as exc:
+            # SHAP is explanation, not prediction. A failure here must not stop
+            # a promoted model from serving; it must not be silent either.
+            logger.warning("Promoted model loaded, but SHAP could not be rebuilt: %s: %s",
+                           type(exc).__name__, exc)
+    except Exception as exc:
+        logger.error("Activated model could not be loaded into the running app: %s: %s",
+                     type(exc).__name__, exc)
+        raise
+
+    logger.info("Now serving the model from run %s (version %s)",
+                champion.source.run_id, champion.source.version)
+    return champion.source

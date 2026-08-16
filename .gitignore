@@ -129,3 +129,11 @@ web/tsconfig.tsbuildinfo
 # Interprocess lock for the training dataset, created by the bulk-upload
 # endpoint (app/api/retrain.py). Runtime artifact, never committed.
 data/.projects.csv.lock
+
+# Staged candidates and the active champion (#191).
+#
+# In production this is a named volume mounted outside the checkout, but the
+# default resolves to ROOT_DIR/runtime so development works without setting
+# anything — which puts trained models inside the repository. Ignored, because
+# the one thing this whole design exists to prevent is a retrain reaching git.
+runtime/
