@@ -1,6 +1,11 @@
+> **HISTORICAL — not the current plan.**
+> Superseded by [`docs/DEVELOPMENT_ROADMAP.md`](docs/DEVELOPMENT_ROADMAP.md),
+> which is the only active roadmap in this repository. Kept because it records
+> why decisions were made; do not plan against it.
+
 # 🗺️ SORA.Earth — Development Roadmap
 
-> **Status:** Active development → v0.1.x bugfix series  
+> **Status:** HISTORICAL (was: Active development) → v0.1.x bugfix series
 > **Updated:** 2026-05-07 (after Day 2)  
 > **Current:** [v0.1.1](https://github.com/Evgeniy2001Poluhin/-SORA.Earth/releases/tag/v0.1.1) — 332/384 tests passing (86.5%)
 

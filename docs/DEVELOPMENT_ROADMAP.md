@@ -1,128 +1,216 @@
-# Development roadmap
+# SORA.Earth development roadmap
 
-**Status:** active · **Written:** 2026-08-16 · **Base:** `ff59610`
+**Status:** CURRENT — this is the only active plan in this repository
+**Adopted:** 2026-08-16 · **Base:** `ff59610` · **Decisions:** repository owner
 
-This exists because three external reviews of the project, dated 2026-07-17 and
-2026-07-24, all proposed roadmaps whose first items were already done, and none
-of which knew that M2 had closed as a negative result. A plan is only useful if
-its starting position is measured.
+## Why this document is singular
 
-Every "already true" claim below cites the file that makes it true, and the two
-dates are guarded by `tests/test_development_roadmap_dates.py`, which recomputes
-them from the code's own constants rather than trusting this prose.
+Five other roadmaps sit in this repository, and one of them — `ROADMAP.md` —
+still announces itself as *Active development*. Three external reviews written
+in July 2026 each opened with work that was already finished, and none of them
+knew M2 had closed as a negative result. That is what several plans of equal
+apparent authority produce: readers pick one, and plan against a project that no
+longer exists.
 
-## The one distinction the plan is built on
+Every superseded plan now carries a banner naming this file. They are kept, not
+deleted — they record why decisions were made — but none of them is current.
 
-Work here is blocked by one of three different things, and they must not be
-mixed:
+`tests/test_development_roadmap_dates.py` enforces both halves of that: exactly
+one document may declare itself current, and the dates below are recomputed from
+the code's constants rather than trusted as prose.
 
-- **Blocked by us** — more effort finishes it sooner.
-- **Blocked by the calendar** — effort changes nothing. Evidence needs elapsed
-  observation time.
-- **Blocked by a decision** — the owner's, not an engineering question.
+## Definition of done for the project
 
-Most published roadmaps for this project mixed the second kind into weekly
-sprints. That is how a plan comes to promise a forecasting result in six weeks
-when the declared protocol cannot produce one before February 2027.
+SORA.Earth is ready when a specialist can follow any output back along the whole
+chain:
 
-## Already true — do not re-plan these
+```
+source → observation → data snapshot → run_id → model
+→ evaluation protocol → registry → promotion gate
+→ active champion → forecast/decision → audit trail
+```
 
-| Claim in earlier reviews | Actual state | Evidence |
+Not when it shows many features.
+
+## Scope
+
+Carried forward from `ROADMAP_ENV_CRISIS_2026.md`, unchanged.
+
+**Pilot geography.** The first version works on the existing map of Russian
+regions. Not all BRICS countries at once — but the architecture must support
+adding countries and regions without rewriting the models or the database.
+
+**MVP hazards:** air pollution and extreme heat. After the MVP has confirmed
+metrics: fire risk, drought, floods, and combined risks.
+
+## Engineering principles
+
+Also carried forward unchanged. They predate this roadmap and outlive it.
+
+1. Audit before implementation.
+2. Reuse existing architecture and conventions.
+3. Do not break existing ESG endpoints.
+4. Do not duplicate scheduler, database, metrics or MLOps services.
+5. Use Alembic for every schema change.
+6. Every new module requires unit and integration tests.
+7. External API calls must use timeout, retry, cache and fallback.
+8. No synthetic data may be written to production tables.
+9. Synthetic data are allowed only in isolated tests and benchmarks.
+10. All timestamps must be timezone-aware and stored in UTC.
+11. Separate event time, publication time and ingestion time.
+12. Do not use random train/test split for time-series evaluation.
+13. Deep-learning models must not become champion based only on sample count.
+14. Every model must beat a simple baseline.
+15. Critical alerts require uncertainty and human review.
+16. No deployment before tests and migration checks pass.
+17. Never modify secrets or commit `.env`.
+18. Make small, reviewable commits.
+19. Update roadmap status after every completed task.
+20. Report facts only; do not claim metrics that were not measured.
+
+Principle 20 is why M2 closed as a negative result rather than reporting a
+number, and why no forecast quality figure appears anywhere in this document.
+
+## What this supersedes
+
+Six plans existed in this repository, of equal apparent authority. All are now
+marked historical and kept — they record why decisions were made — but none is
+current.
+
+| File | What it was | Disposition |
 |---|---|---|
-| "AUC threshold 0.70, raise to 0.80" | 0.80, **and** the 95% CI lower bound is what is tested, not the point estimate | `app/scheduler.py`, `app/model_quality.py:67` |
-| "Data refresh 24h → 6h" | 6h; ingestion hourly | `app/scheduler.py` |
-| "EnvironmentalObservation schema not done" | Exists, with six ingesters | `app/database.py:389`, `app/ingesters/` |
-| "SHA-256 password hashing (HIGH)" | Argon2id, argon2-cffi defaults | `app/auth.py:9,83` |
-| "No automated backups (CRITICAL)" | Encrypted daily backups with locking | `scripts/backup_crypt.sh`, `scripts/backup_local_daily.sh` |
-| "Clean Alembic install fails (P0)" | Passes, and is guarded by its own CI job | `.github/workflows/ci.yml` |
-| "496 tests, 72.5% coverage" | 2170 passed, 200 skipped on the CI-equivalent run | measured 2026-08-16 |
+| `ROADMAP_ENV_CRISIS_2026.md` | Environmental Intelligence programme, phases 0–8 | Scope, principles and phase structure merged here; M1 sign-off lives in `docs/M1_DATA_TRUST_REPORT.md` |
+| `ROADMAP.md` | Day 1–7 sprint to v0.2.0; declared itself *Active development* | Sprint completed; nothing outstanding |
+| `ROADMAP_DEFENSE_v6.2.md` | Defence sprint, 27 May 2026, P0–P2 by day | Sprint completed |
+| `ROADMAP_DEFENSE_v6.md` | Superseded by v6.2 before this document existed | Historical |
+| `SORA_Earth_Roadmap.md` | v13, 15 April 2026; component status inventory | Every listed component reads ✅; superseded by the measured table below |
 
-`sha256` still appears in `app/auth.py`, in HMAC token signing. That is correct
-use and not a password hash; the review that flagged it read the name, not the
-call site.
+`sora_ai_copilot/ROADMAP.md` belongs to that module and is out of scope here.
 
-## Blocked by us — urgent
+## When this document expires
 
-Urgent for one reason: these corrupt data that is accumulating **now**.
-Everything measured between today and the M3 dates becomes the evidence for M3.
-A journal that cannot say what one run did makes those measurements
-unaggregatable, and they cannot be re-taken because the time will have passed.
+It must be revised, not quietly followed, if any of these becomes true:
 
-| # | Step | What it closes | Done when |
-|---|---|---|---|
-| A1 | #199 Phase 0 — finalise by `run_id` | `app/api/infra.py` updates "newest row with this `trigger_source`", so a concurrent run finalises the wrong one | A competing row with the same `trigger_source` is provably untouched |
-| A2 | #199 Phase 0 — total write of the registry outcome | An `ImportError` leaves `registry_ok` absent, which reads as "recorded before the contract" and is promoted | A new run always materialises `True` / `False` / `registry_error` |
-| A3 | Measure the ambiguity window on production | Rows since 2026-08-15 that lost the key cannot be classified retrospectively | Four counts recorded in #199 |
-| A4 | #199 Phase 1 — one `run_id` per run | Two journal rows per cycle, related by nothing but a timestamp | One run, one id; `app/api/admin_ai.py` counts a cycle once |
-| A5 | #199 Phase 1 — separate the statuses | `success` sits beside `registry_ok=False` in one row | `training_status` / `registry_status` / `promotion_status` / `failure_reason` are columns |
-| A6 | Close #189; carry the tests over from #198 | The false `success` stops being written on **all seven** call paths | #189 closed; the legacy-row test and its mutation check moved, not rewritten |
+- the §7 gate constants change (the guard test fails on purpose in that case);
+- M3 is closed, whether positively or negatively;
+- the retrain lifecycle contract in #199 is settled differently from phases 1–5;
+- a phase's exit criterion is found to be unreachable, as happened to M2.
 
-## Blocked by us — not urgent, waiting on nothing
+## Phases
 
-| # | Step | Why | Done when |
-|---|---|---|---|
-| B1 | Baseline ladder: naive, seasonal naive, moving average | Without it, February 2027 arrives with a model and nothing to compare it against | Every forecast shows a baseline beside it; the harness runs on today's data |
-| B2 | CatBoost as challenger | Nine features with categoricals (country, region) is its case; a neural net is not the first candidate at this width | Installed, trained, compared to RF on one split |
-| B3 | Merge `train_model.py` / `_v2` / `_backup` | Three sources of truth about training | One file; suite green |
-| B4 | Publish crisis events to Redis | `app/services/crisis_detector.py` contains zero `publish` calls — events reach nobody | A subscriber receives one, and a test proves it |
-| B5 | Specialist UAT | Does not depend on model quality: it tests workflows, not numbers | 5–10 specialists, 30–50 cases, signed report |
-| B6 | Cover `app/training.py` and `app/shap_explainer.py` | 0% on the modules that decide quality | Tests that go red under mutation |
+| # | Phase | Horizon | Work | Exit criterion | Depends on |
+|---|---|---|---|---|---|
+| 0 | Lock governance | now | Adopt one roadmap; mark old plans historical; record base SHA, decision owner, expiry conditions | One current roadmap, guarded by tests against drift from code | — |
+| 1 | Safe finalisation | 1–2 weeks | #199 Phase 0: finalise strictly by `run_id`/`log_id`; drop the "newest row" lookup; a new run always materialises the registration outcome | A competing run is provably unmodified; an ImportError does not become legacy; a finalisation error is visible | #199 review |
+| 2 | Canonical run | 2–6 weeks | One `run_id`; split `training_status`, `registry_status`, `promotion_status`, `failure_reason`; remove double counting and false durations | One physical run counted once; statuses cannot contradict each other | Phase 1 |
+| 3 | Model storage | 3–8 weeks | #191 together with #199 items 4/6: `seed/`, `staged/`, `active/`; keep the LFS bootstrap; define the runtime volume | Fresh clone starts; retrain does not dirty Git; losing runtime falls back to seed | Owner decision |
+| 4 | Real promotion | 1–2 months | Train the candidate in staged; run one gate; activate atomically only what passed; implement rollback | A refused model never serves traffic; rollback proven by deliberate breakage | Phases 2–3 |
+| 5 | One orchestrator | 1–2 months | Route all seven paths through one retrain workflow; remove the weaker alternative gate in `app/api/infra.py` | No endpoint bypasses registry, CI bound, baseline and non-degradation | Phase 4 |
+| 6 | Evaluation harness | 2–6 weeks, parallel | Naive, seasonal naive, moving average; rolling-origin; MAE, MASE, bias, interval coverage, bootstrap CI, worst region | One reproducible report over one snapshot; a baseline is mandatory | Canonical run |
+| 7 | Data Trust | 1–3 months | Source register, data contracts, licensing, snapshots, point-in-time lineage, completeness/freshness/coverage | Every result ties to a source and a snapshot; gaps and revisions are visible | Can run in parallel |
+| 8 | M3 accumulation | until the evidence dates | Watch daily Open-Meteo coverage; record dropped days and the actual earliest evidence date | 12 admissible windows with no hidden gaps | Calendar |
+| 9 | Challenger models | after phase 6 | CatBoost/EBM for tabular data; LSTM shadow only; one split and one snapshot | Challenger compared to champion and baseline over identical windows | Evaluation harness |
+| 10 | Crisis benchmark | after the data is defined | Event schema, severity, negatives, lead time, evidence chain; then the crisis engine and Redis events | Event-level recall/precision, false alarms and lead time measured | Expert labelling |
+| 11 | Specialist workspace | 2–6 months | Case workflow, maps, evidence panel, provenance, escalation, audit trail, CSV/PDF/API | A specialist completes signal → verified decision | UX may start earlier |
+| 12 | Copilot | after tools stabilise | Citation-first RAG, tool gateway, read-only operations, audit, prompt-injection controls | Citation precision ≥ 95%; unsupported claims ≤ 2%; every number comes from tools/API | Data lineage |
+| 13 | Evidence pack | before the pilot | Model cards, dataset cards, evaluation reports, security/DR, restore drill, limitations, UAT sign-off | Pack tied to a release tag, Git SHA, snapshots and models | Earlier phases |
+| 14 | Limited pilot | final | Human-in-the-loop pilot with KPIs declared in advance and rollback | Pilot report and a go/no-go decision made on measurements | Evidence pack |
 
-**B1 is the one that gets deferred and should not be.** Baselines are cheap now
-and impossible to backfill into a comparison that has already been published.
+Phases 1–2 complete between roughly 2026-09-06 and 2026-10-11, which is well
+before the first M3 evidence date. That ordering is the point: the observations
+accumulating between now and February are what M3 will be argued from, and they
+must be recorded under a canonical run to be aggregatable at all.
 
-## Blocked by the calendar
+## Now
 
-| What | Earliest date | What moves it |
+| Priority | Task | Result |
 |---|---|---|
-| M3 forecast evidence, horizon 7 | **2027-02-04** | nothing that is worked on |
-| M3 forecast evidence, horizon 30 | **2028-02-05** | nothing that is worked on |
-| Either date, in the wrong direction | later | every day below 80% hourly coverage |
+| P0 | Finish the #199 review | Run owner, statuses and the moment of activation are settled |
+| P0 | #199 Phase 0 | Targeted finalisation; the registration outcome is always written |
+| P0 | Measure the ambiguity window | The count of new rows without `registry_ok` is known |
+| P1 | #199 Phase 1 | One run, and analytics that are correct |
+| P1 | Design #191 together with staged/active | LFS bootstrap survives; retrain is separated from Git |
+| P1 | Build the baseline/evaluation harness | A future forecast has something to be compared against |
+| P1 | Watch M3 coverage | No calendar days are lost |
+| P2 | Specialist interviews and UX scenarios | The UAT protocol exists in advance |
+| P2 | Data contracts and dataset snapshots | Data is fully reproducible |
 
-Both are `TRAINING_DAYS[h] + REQUIRED_WINDOWS × h` days from the clock start of
-2026-08-14, with the constants in
-`app/services/forecasting/entry_conditions.py`.
+## What needs elapsed time
 
-The only work that changes these dates is watching coverage — `/observations/coverage`,
-#185 — and not losing days. No forecast quality figure may be published before
-its date; one named earlier would have to be withdrawn, which is the single
-most expensive thing this project can do to itself.
+| Result | Not before | Condition |
+|---|---|---|
+| M3, horizon 7 | **2027-02-04** | 12 admissible windows and sufficient coverage |
+| M3, horizon 30 | **2028-02-05** | The required long history |
+| Any claim of beating a baseline | after the corresponding backtest | Rolling-origin, CI and regional slices |
+| Crisis warning quality | after an event-labelled benchmark | Real events, negatives and lead time |
+| Specialist assessment | after UAT | 5–10 specialists, 30–50 scenarios |
 
-## Blocked by a decision
+Both dates are `TRAINING_DAYS[h] + REQUIRED_WINDOWS × h` days from the M3 clock
+start of 2026-08-14, with the constants in
+`app/services/forecasting/entry_conditions.py`. **Every day below 80% coverage
+moves them further out.** No effort brings them closer.
 
-| What | Why it is the owner's call |
+## Deferred until a measured need exists
+
+Kubernetes · Redis Cluster · PostgreSQL read replicas · Feature Store · a local
+LLM for its own sake · new paid APIs without a specific question · new models
+before the shared evaluation harness · the crisis Redis publish before an event
+contract and a consumer · bulk refactoring of the training files without a map
+of their callers.
+
+The last two are corrections to an earlier draft of this roadmap, which had both
+as immediate work. Publishing crisis events with no agreed contract creates an
+interface nobody consented to, and merging `train_model.py` / `_v2` / `_backup`
+without mapping callers is the mistake already made once on `_do_retrain`, where
+seven call sites turned out to exist where one was assumed.
+
+## Readiness criteria
+
+| Area | Required outcome |
 |---|---|
-| #199 items 4 and 6 together with #191 | Both decide where model artefacts live; deciding separately means choosing the layout twice |
-| #164 `as_of_date` | Repeated correction is declared behaviour; a backfill bypass has to be intended, not inferred |
-| Exposing the registration retry on a route | New outward surface |
-| Local LLM / Ollama | Changes the deployment profile |
-| Read replicas, Redis Cluster, Kubernetes | Recommended to defer: the backend runs at under 1% CPU and there is no measured bottleneck |
+| Data | 100% of production results tie to source, timestamp and snapshot |
+| MLOps | One run, one gate, staged activation, proven rollback |
+| Forecasting | 12 windows, baseline, CI, interval coverage, worst-region report |
+| Crisis | Event benchmark, false-alarm rate, lead time, evidence chain |
+| Security | No unaccepted Critical/High; secrets and RBAC verified |
+| Recovery | A restore drill confirms RPO ≤ 24 h and RTO ≤ 4 h |
+| Copilot | Every number from tools; citations and unsupported claims measured |
+| Product | A specialist can verify the origin of any value |
+| Governance | High/Critical decisions are confirmed by a human |
+| Release | Evidence pack tied to tag, Git SHA, models and data |
 
-## Sequence
+## Immediate sequence
 
-| Window | Block | Result |
+```
+#199 Phase 0
+→ #199 Phase 1
+→ #191 + seed/staged/active
+→ one gate and orchestrator
+→ evaluation harness
+→ challengers
+→ M3 evidence
+→ crisis benchmark
+→ specialist UAT
+→ evidence pack
+→ pilot
+```
+
+The governing principle: make one model run self-consistent and reproducible
+first, then widen what the models and the product can do.
+
+## Already true — do not re-plan
+
+Each row cites what makes it true. July's reviews proposed all of these as
+outstanding work.
+
+| Claimed outstanding | Actual state | Evidence |
 |---|---|---|
-| now → 2 weeks | A1–A3 | Finalisation is targeted, errors are visible, the ambiguity window is a measured number |
-| 2 → 6 weeks | A4–A6 | One canonical run; #189 closed; per-run analytics become correct |
-| in parallel, 1 → 8 weeks | B1–B6 | Baselines, CatBoost, one training path, crisis events delivered, UAT |
-| 2 → 6 months | decisions above | Artefact layout, one gate, one orchestrator |
-| **2027-02-04** | calendar | First admissible statement about forecast quality at horizon 7 |
-| **2028-02-05** | calendar | The same at horizon 30 |
+| raise AUC 0.70 → 0.80 | 0.80, and the 95% CI **lower bound** is what is tested | `app/model_quality.py:67` |
+| refresh 24h → 6h | 6h; ingestion hourly | `app/scheduler.py` |
+| EnvironmentalObservation schema | exists, six ingesters | `app/database.py:389` |
+| SHA-256 password hashing | Argon2id | `app/auth.py:9,83` |
+| no automated backups | encrypted, daily, locked | `scripts/backup_crypt.sh` |
+| clean Alembic install fails | passes, guarded by its own CI job | `.github/workflows/ci.yml` |
 
-## What counts as success
-
-Not a headline metric. M2 is what happens when a target is chosen before
-checking that it is reachable: the ESG score turned out to have 1.00 distinct
-values per region, so any AUC reported against it would have been a number about
-nothing.
-
-1. Every prediction resolves to a `run_id`, a data snapshot, a model version and
-   a Git SHA.
-2. No model serves traffic without having passed one gate.
-3. By 2027-02-04 there are twelve honest windows and a baseline beside every
-   figure.
-4. A specialist can open the source of any value.
-5. **No published figure has had to be withdrawn.**
-
-The fifth is the cheapest to achieve and the most expensive to lose, and it is
-bought entirely by not naming numbers before their evidence exists.
+`sha256` does still appear in `app/auth.py` — as HMAC token signing, which is
+correct use, not a password hash.

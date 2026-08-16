@@ -68,6 +68,56 @@ def test_no_other_earliest_date_is_named():
     assert found <= allowed, f"unexpected future dates in the roadmap: {sorted(found - allowed)}"
 
 
+#: Every plan that existed before consolidation. Kept, never deleted -- they
+#: record why decisions were made -- but none of them may look current.
+SUPERSEDED = (
+    "ROADMAP.md",
+    "ROADMAP_ENV_CRISIS_2026.md",
+    "ROADMAP_DEFENSE_v6.md",
+    "ROADMAP_DEFENSE_v6.2.md",
+    "SORA_Earth_Roadmap.md",
+)
+HISTORICAL_BANNER = "HISTORICAL — not the current plan"
+
+
+def test_exactly_one_document_declares_itself_current():
+    """Six plans of equal apparent authority is what produced three stale reviews.
+
+    `ROADMAP.md` announced itself as *Active development* while describing a
+    sprint that finished months earlier, so a reader who found it first planned
+    against a project that no longer existed. One document may claim to be
+    current, and this is the check that keeps it one.
+    """
+    claiming = []
+    for name in ("docs/DEVELOPMENT_ROADMAP.md",) + SUPERSEDED:
+        path = os.path.join(REPO_ROOT, name)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as handle:
+            head = handle.read(4000)
+        if re.search(r"\*\*Status:\*\*\s*(CURRENT|Active)", head):
+            claiming.append(name)
+
+    assert claiming == ["docs/DEVELOPMENT_ROADMAP.md"], (
+        f"expected exactly one current roadmap, found: {claiming}"
+    )
+
+
+@pytest.mark.parametrize("name", SUPERSEDED)
+def test_every_superseded_plan_says_so_at_the_top(name):
+    """The banner has to be the first thing read, not a note further down."""
+    path = os.path.join(REPO_ROOT, name)
+    if not os.path.exists(path):
+        pytest.skip(f"{name} is no longer in the repository")
+    with open(path, encoding="utf-8") as handle:
+        head = handle.read(600)
+
+    assert HISTORICAL_BANNER in head, (
+        f"{name} does not carry the historical banner in its first lines; a "
+        "reader who stops after the title will take it for the current plan"
+    )
+
+
 def test_the_threshold_it_quotes_is_the_one_in_force():
     """The roadmap says the 0.80 gate is already done. It must still be 0.80."""
     body = read_roadmap()

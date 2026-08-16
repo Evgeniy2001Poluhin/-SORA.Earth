@@ -1,3 +1,8 @@
+> **HISTORICAL — not the current plan.**
+> Superseded by [`docs/DEVELOPMENT_ROADMAP.md`](docs/DEVELOPMENT_ROADMAP.md),
+> which is the only active roadmap in this repository. Kept because it records
+> why decisions were made; do not plan against it.
+
 # ROADMAP v6.1 — SORA.Earth Defense Sprint
 
 **Старт:** 27 мая 2026, 19:14 MSK
