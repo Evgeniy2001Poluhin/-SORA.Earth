@@ -42,13 +42,21 @@ import pickle
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from app.model_source import ModelSource, recover, resolve_model_source
+from app.model_source import (
+    OPTIONAL_ARTEFACTS,
+    REQUIRED_ARTEFACTS,
+    ModelSource,
+    recover,
+    resolve_model_source,
+)
 from app.paths import active_dir, seed_dir
 
 logger = logging.getLogger(__name__)
 
-#: Read together or not at all.
-CHAMPION_ARTEFACTS = ("model.pkl", "scaler.pkl", "best_threshold.pkl", "meta.json")
+#: Read together or not at all. Imported, not restated: two independent lists of
+#: "what a model is" drift, and the drift appears as a directory that passes the
+#: presence check and then fails to load.
+CHAMPION_ARTEFACTS = REQUIRED_ARTEFACTS
 
 
 @dataclass
@@ -79,10 +87,11 @@ def _load_set(directory: str) -> Champion:
     # trade. Read from the same directory as the rest, so it cannot describe a
     # different model.
     metrics = {}
-    metrics_path = os.path.join(directory, "metrics.json")
-    if os.path.exists(metrics_path):
-        with open(metrics_path, encoding="utf-8") as handle:
-            metrics = json.load(handle)
+    for name in OPTIONAL_ARTEFACTS:
+        path = os.path.join(directory, name)
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as handle:
+                metrics = json.load(handle)
 
     return Champion(model=model, scaler=scaler, best_threshold=threshold,
                     meta=meta, metrics=metrics,
@@ -119,14 +128,20 @@ def load_champion(recover_first: bool = True) -> Champion:
             )
             source = ModelSource(
                 source="seed", version=None, fell_back=True,
+                reason_code="active_unreadable",
                 reason=f"the active model could not be loaded: {type(exc).__name__}",
             )
 
     champion = _load_set(seed_dir())
+    # The version comes from the meta that was actually read, not from the
+    # resolver's earlier answer. After a corrupt `active` the resolver has no
+    # seed version to report, and taking it from there left /health saying a
+    # fallback happened while losing the version of the model now serving.
     champion.source = ModelSource(
         source="seed",
-        version=source.version if source.source == "seed" else None,
+        version=champion.meta.get("retrained_at"),
         fell_back=source.fell_back,
+        reason_code=source.reason_code,
         reason=source.reason,
     )
     if champion.source.fell_back:
@@ -146,5 +161,8 @@ def health_fields(source: ModelSource) -> dict:
         "run_id": source.run_id,
         "model_version": source.version,
         "fell_back": source.fell_back,
-        "reason": source.reason,
+        # A stable code, not the detailed text. The list of missing filenames is
+        # a property of the current artefact set and would change whenever that
+        # set changes; the detail stays in the server log.
+        "reason_code": source.reason_code,
     }

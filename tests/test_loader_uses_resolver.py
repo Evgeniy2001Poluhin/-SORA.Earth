@@ -182,7 +182,7 @@ def test_health_fields_never_carry_a_path(layout):
 
     fields = health_fields(champion.source)
 
-    assert set(fields) == {"source", "run_id", "model_version", "fell_back", "reason"}
+    assert set(fields) == {"source", "run_id", "model_version", "fell_back", "reason_code"}
     for value in fields.values():
         assert str(layout["runtime"]) not in str(value)
         assert str(layout["seed"]) not in str(value)
@@ -197,7 +197,10 @@ def test_health_reports_the_fallback_so_it_is_not_invisible(layout):
 
     assert fields["source"] == "seed"
     assert fields["fell_back"] is True
-    assert fields["reason"]
+    # A stable code, not a list of filenames: /health is public, and the
+    # artefact set is an implementation detail that will change.
+    assert fields["reason_code"] == "active_incomplete"
+    assert "scaler.pkl" not in str(fields), "the public response names internal files"
 
 
 def test_the_champion_set_is_the_retrained_one(layout):
@@ -207,3 +210,48 @@ def test_the_champion_set_is_the_retrained_one(layout):
         "model.pkl", "scaler.pkl", "best_threshold.pkl", "meta.json"}
     assert "xgb_model.pkl" not in CHAMPION_ARTEFACTS
     assert "ensemble_model_v2.pkl" not in CHAMPION_ARTEFACTS
+
+
+def test_a_corrupt_active_still_reports_the_version_actually_being_served(layout):
+    """The bug this replaces: /health showed the fallback and lost the version.
+
+    After `active` fails to load, the resolver has no seed version to hand over,
+    so taking it from there reported None — while a perfectly identifiable seed
+    model was answering every request.
+    """
+    stage_and_activate(layout, "champion", "20260816_120000")
+    (layout["runtime"] / "active" / "scaler.pkl").write_bytes(b"\x80\x04 truncated")
+
+    champion = load_champion()
+    fields = health_fields(champion.source)
+
+    assert fields["source"] == "seed"
+    assert fields["fell_back"] is True
+    assert fields["reason_code"] == "active_unreadable"
+    assert fields["model_version"] == "20260101_000000", (
+        "the version of the model actually serving was lost"
+    )
+
+
+def test_the_public_response_never_names_an_internal_file(layout):
+    """`missing scaler.pkl, best_threshold.pkl` would tie the API to the current
+    artefact set and change whenever that set does."""
+    partial = layout["runtime"] / "active"
+    partial.mkdir(parents=True)
+    with open(partial / "model.pkl", "wb") as handle:
+        pickle.dump(_Model("half"), handle)
+
+    fields = health_fields(load_champion().source)
+
+    published = " ".join(str(v) for v in fields.values())
+    for internal in ("model.pkl", "scaler.pkl", "best_threshold.pkl", "meta.json"):
+        assert internal not in published, f"the response names {internal}"
+    assert fields["reason_code"] in ("active_incomplete", "active_being_written")
+
+
+def test_the_required_set_has_one_definition(layout):
+    """Two independent lists of 'what a model is' drift, and the drift shows up
+    as a directory that passes the presence check and then fails to load."""
+    from app.model_source import REQUIRED_ARTEFACTS
+
+    assert CHAMPION_ARTEFACTS is REQUIRED_ARTEFACTS
