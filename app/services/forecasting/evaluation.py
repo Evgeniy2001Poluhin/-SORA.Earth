@@ -332,3 +332,113 @@ def evaluate_by_region(
         except ValueError as exc:
             report.skipped[str(region)] = str(exc)
     return report
+
+
+@dataclass
+class Comparison:
+    """A candidate against every baseline, over identical windows.
+
+    Engineering principle 14 -- every model must beat a simple baseline -- had
+    no function that answers whether it does. `baselines.py` supplied the
+    opponents and `evaluate_rolling_origin` the arena; this is the verdict.
+
+    `verdict` is `beats_all`, `loses_to_some` or `not_comparable`. The third is
+    not a formality: a candidate that could not be scored at all must never read
+    as a win, and the losing baselines are named so the answer to "which one"
+    does not require re-running anything.
+    """
+
+    metric: str
+    candidate: EvaluationReport
+    baselines: Dict[str, EvaluationReport] = field(default_factory=dict)
+    skipped: Dict[str, str] = field(default_factory=dict)
+
+    def losses(self) -> List[str]:
+        """Baselines the candidate did not beat. Ties count as losses."""
+        beaten = []
+        for name, report in self.baselines.items():
+            if not self.candidate.beats(report, self.metric):
+                beaten.append(name)
+        return sorted(beaten)
+
+    def hardest(self):
+        """(name, value) of the baseline that scored best -- the one to beat."""
+        scored = {n: r.mean(self.metric) for n, r in self.baselines.items()}
+        scored = {n: v for n, v in scored.items() if not math.isnan(v)}
+        if not scored:
+            return None, float("nan")
+        name = min(scored, key=scored.get)
+        return name, scored[name]
+
+    @property
+    def verdict(self) -> str:
+        if math.isnan(self.candidate.mean(self.metric)) or not self.baselines:
+            return "not_comparable"
+        return "beats_all" if not self.losses() else "loses_to_some"
+
+    def summary(self) -> Dict[str, object]:
+        """What a report or a gate reads. Every figure it needs, and no prose."""
+        hardest_name, hardest_value = self.hardest()
+        return {
+            "metric": self.metric,
+            "verdict": self.verdict,
+            "candidate": self.candidate.mean(self.metric),
+            "candidate_worst_window": self.candidate.worst(self.metric),
+            "candidate_ci": self.candidate.confidence_interval(self.metric),
+            "hardest_baseline": hardest_name,
+            "hardest_baseline_score": hardest_value,
+            "lost_to": self.losses(),
+            #: Baselines that could not be scored, and why. Reported beside the
+            #: verdict because "beat every baseline" over a set that quietly
+            #: shrank is not the same claim.
+            "baselines_skipped": dict(self.skipped),
+            "baselines_scored": len(self.baselines),
+        }
+
+
+def compare_to_baselines(
+    fit_predict: Callable[[pd.DataFrame, int], Sequence[float]],
+    df: pd.DataFrame,
+    target_col: str,
+    horizon: int,
+    train_size: int,
+    n_windows: int,
+    season_length: int = 7,
+    metric: str = "mase",
+    candidate_name: str = "candidate",
+    baselines=None,
+) -> Comparison:
+    """Score a candidate and every baseline over the *same* windows.
+
+    Identical windows is the whole point. Comparing a model scored on one split
+    against a baseline scored on another compares two arrangements, not two
+    models, and the difference can be larger than the effect being claimed.
+
+    A baseline that cannot be scored on this series is recorded in `skipped`,
+    never dropped: the ones that fall out are the ones needing the most history,
+    and seasonal naive -- the hardest to beat -- needs more than the others.
+    """
+    from app.services.forecasting.baselines import default_baselines
+
+    candidate = evaluate_rolling_origin(
+        fit_predict, df, target_col, horizon=horizon, train_size=train_size,
+        n_windows=n_windows, season_length=season_length, model_name=candidate_name,
+    )
+    comparison = Comparison(metric=metric, candidate=candidate)
+
+    for baseline in (baselines if baselines is not None
+                     else default_baselines(season_length=season_length)):
+        def scored(train_df, h, model=baseline):
+            model.fit(train_df, target_col)
+            return model.predict(h).yhat
+
+        try:
+            comparison.baselines[baseline.model_name] = evaluate_rolling_origin(
+                scored, df, target_col, horizon=horizon, train_size=train_size,
+                n_windows=n_windows, season_length=season_length,
+                model_name=baseline.model_name,
+            )
+        except ValueError as exc:
+            comparison.skipped[baseline.model_name] = str(exc)
+
+    return comparison
