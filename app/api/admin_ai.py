@@ -80,15 +80,15 @@ def ai_trigger_full_pipeline(_admin=Depends(require_admin)):
 
 @router.post("/report", response_model=AIActionResponse)
 def ai_generate_report(_admin=Depends(require_admin)):
-    from app.database import SessionLocal, RetrainLog, DataRefreshLog, PredictionLog
+    from app.database import count_physical_runs, SessionLocal, RetrainLog, DataRefreshLog, PredictionLog
     from sqlalchemy import func
     import json
 
     db = SessionLocal()
     try:
-        retrain_total = db.query(RetrainLog).count()
-        retrain_success = db.query(RetrainLog).filter(RetrainLog.status == "success").count()
-        retrain_failed = db.query(RetrainLog).filter(RetrainLog.status == "failed").count()
+        retrain_total = count_physical_runs(db)
+        retrain_success = count_physical_runs(db, status="success")
+        retrain_failed = count_physical_runs(db, status="failed")
         last_retrain = db.query(RetrainLog).order_by(RetrainLog.started_at.desc()).first()
 
         refresh_total = db.query(DataRefreshLog).count()

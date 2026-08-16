@@ -1,9 +1,33 @@
 from typing import Optional
 
 
-def _start_retrain_log(trigger_source: str = "manual", job_name: str = "model_retrain"):
+def new_run_id() -> str:
+    """The identity of one physical retrain (#199 phase 2A).
+
+    Minted by whoever starts the run, and passed down. A caller that already
+    holds one must hand it over rather than mint a second, or the cycle splits
+    into two runs again -- which is the state this replaces.
+    """
+    import uuid
+    return str(uuid.uuid4())
+
+
+def _start_retrain_log(trigger_source: str = "manual", job_name: str = "model_retrain",
+                       run_id: Optional[str] = None):
+    """Open a journal row, returning its id.
+
+    `run_id` is the identity of the physical retrain (#199 phase 2A). A caller
+    that will write a second row for the same run mints one with `new_run_id()`
+    and passes it to both. Omitting it gives this row a run of its own, which is
+    the old behaviour and is right for a caller that writes only one row.
+
+    The return stays the row id alone: nine existing call sites and tests treat
+    it as a scalar, and widening the contract to make forgetting visible is not
+    worth breaking them.
+    """
     from app.database import SessionLocal, RetrainLog
     from datetime import datetime
+    run_id = run_id or new_run_id()
     db = SessionLocal()
     try:
         row = RetrainLog(
@@ -12,6 +36,7 @@ def _start_retrain_log(trigger_source: str = "manual", job_name: str = "model_re
             trigger_source=trigger_source,
             job_name=job_name,
             message="Retraining started",
+            run_id=run_id,
         )
         db.add(row)
         db.commit()
@@ -597,7 +622,12 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
             logger.info("Closed loop: model PROMOTED (no previous AUC to compare) - AUC %s",
                         f"{float(new_auc):.4f}" if new_auc is not None else "unrecorded")
 
-        log_id = _start_retrain_log(trigger_source=trigger_source, job_name="closed_loop")
+        # The decision belongs to the run that produced the model, so it
+        # carries that run's id rather than minting a second (#199 phase 2A).
+        log_id = _start_retrain_log(
+            trigger_source=trigger_source, job_name="closed_loop",
+            run_id=result.get("run_id") if isinstance(result, dict) else None,
+        )
         _finish_retrain_log(
             log_id=log_id,
             status="promoted" if promoted else "rejected",
