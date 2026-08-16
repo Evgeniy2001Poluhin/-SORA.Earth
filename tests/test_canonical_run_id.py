@@ -222,3 +222,29 @@ def test_the_closed_loop_gives_its_decision_the_training_run_id(monkeypatch, ses
     assert len(written) == 2, f"expected the training row and the decision row: {written}"
     assert {r[3] for r in written} == {training_run}, "the decision minted its own run"
     assert count_physical_runs(sessions()) == 1
+
+
+def test_do_retrain_puts_the_run_it_opened_into_its_result():
+    """The seam the end-to-end test above cannot reach.
+
+    That test replaces `_do_retrain` with a fake that returns the id itself, so
+    it verifies the loop's half and nothing about the real function. Mutation
+    testing caught it: setting `"run_id": None` in `_do_retrain` left the suite
+    green.
+
+    Running the real `_do_retrain` here would train a model and rewrite
+    `models/`, which this repository forbids from a test tree, so the contract
+    is checked in the source. That is weaker than executing it and is labelled
+    as such -- it would not catch the value being wrong, only the key being
+    dropped. Executing it properly needs the staged-artefact work in phase 3.
+    """
+    import inspect
+
+    from app.api import retrain
+
+    source = inspect.getsource(retrain._do_retrain)
+    assert "run_id = new_run_id()" in source, "the run is not minted"
+    assert 'run_id=run_id' in source, "the row is opened without the run"
+    assert '"run_id": run_id,' in source, (
+        "the result does not carry the run, so the caller's decision row cannot join it"
+    )
