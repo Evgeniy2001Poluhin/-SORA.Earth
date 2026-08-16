@@ -1,3 +1,8 @@
+> **HISTORICAL — not the current plan.**
+> Superseded by [`docs/DEVELOPMENT_ROADMAP.md`](docs/DEVELOPMENT_ROADMAP.md),
+> which is the only active roadmap in this repository. Kept because it records
+> why decisions were made; do not plan against it.
+
 # SORA.Earth Environmental Intelligence Platform
 
 **Roadmap:** Environmental Forecasting & Early Crisis Warning  
