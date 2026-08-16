@@ -1,1 +1,14 @@
+# Git LFS for model artefacts.
+#
+# `models/*.pkl` matches one level only. A file placed in any subdirectory —
+# `models/seed/model.pkl`, say — would fall outside it and enter git as an
+# ordinary binary, and a fresh clone would then fail on a missing LFS object.
+# That is what closed PR #196: the tracking is the delivery mechanism, not
+# bookkeeping about it.
+#
+# The recursive pattern is here **before** anything moves, because attributes
+# are applied at `git add` time. Files added under the old pattern and moved
+# afterwards stay non-LFS until the history is rewritten.
 models/*.pkl filter=lfs diff=lfs merge=lfs -text
+models/**/*.pkl filter=lfs diff=lfs merge=lfs -text
+models/**/*.pth filter=lfs diff=lfs merge=lfs -text
