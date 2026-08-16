@@ -38,6 +38,22 @@ Two activations racing would interleave their renames and produce a state no
 recovery could distinguish, so every mutation takes an exclusive `flock` on a
 file under the runtime root, and pruning takes it too.
 
+## A requirement this places on the next PR
+
+`flock` excludes two processes only when both open **the same inode**. The
+subprocess test here proves the lock works between processes in one environment;
+it cannot prove it works between containers, because nothing yet mounts a shared
+runtime. Wiring the loader must therefore also establish, and check:
+
+- the backend and the scheduler mount one runtime volume;
+- both resolve the same `SORA_RUNTIME_DIR`;
+- the lock file is one inode, not one path in two filesystems;
+- an integration or deploy check demonstrates mutual exclusion across the two
+  containers, not merely across two processes.
+
+Until then this module is a library nothing calls, so a defect here cannot
+change what production does.
+
 ## What this does not do yet
 
 The seed files have not moved into `models/seed/`. `.gitattributes` tracks
@@ -71,6 +87,16 @@ REQUIRED_ARTEFACTS = ("model.pkl", "scaler.pkl", "best_threshold.pkl", "meta.jso
 #: writer or promoted half-finished.
 INCOMPLETE_MARKER = ".incomplete"
 
+#: Written into the champion when it is activated, and carried through the
+#: rename with it. It records which run produced the serving model.
+#:
+#: Protecting a candidate by `meta.json`'s `retrained_at` was too weak: that is
+#: a second-resolution timestamp, so two runs finishing in the same second share
+#: it, and pruning would then spare the wrong candidate — or fail to spare the
+#: right one. `run_id` is already the stronger identity, and `/health`, rollback
+#: and the evidence chain all need it anyway.
+ACTIVATION_MANIFEST = "activation.json"
+
 _NEXT_SUFFIX = ".next"
 _PREVIOUS_SUFFIX = ".previous"
 
@@ -87,6 +113,9 @@ class ModelSource:
 
     #: `active` or `seed`.
     source: str
+    #: The run that produced the serving model, when it is known. None for seed
+    #: and for a champion activated before manifests existed. Not a path.
+    run_id: Optional[str] = None
     #: `meta.json`'s `retrained_at`, when there is one. None for a seed that
     #: never recorded one, which is a fact about the artefact, not an error.
     version: Optional[str] = None
@@ -147,6 +176,19 @@ def _missing(path: str) -> List[str]:
 def _is_usable(path: str) -> bool:
     return not _missing(path) and not os.path.exists(
         os.path.join(path, INCOMPLETE_MARKER))
+
+
+def _manifest_of(path: str) -> dict:
+    import json
+
+    manifest = os.path.join(path, ACTIVATION_MANIFEST)
+    if not os.path.exists(manifest):
+        return {}
+    try:
+        with open(manifest, encoding="utf-8") as handle:
+            return json.load(handle) or {}
+    except (OSError, ValueError):
+        return {}
 
 
 def _version_of(path: str) -> Optional[str]:
@@ -232,7 +274,8 @@ def resolve_model_source() -> ModelSource:
     """Active if it is complete, otherwise seed — and never a staged candidate."""
     active = active_dir()
     if _is_usable(active):
-        return ModelSource(source="active", version=_version_of(active))
+        return ModelSource(source="active", version=_version_of(active),
+                           run_id=_manifest_of(active).get("run_id"))
 
     seed = seed_dir()
     existed = os.path.isdir(active)
@@ -281,6 +324,19 @@ def activate(run_id: str) -> ModelSource:
         if _missing(nxt):
             shutil.rmtree(nxt)
             raise ValueError(f"the copy of {run_id} did not come out complete")
+
+        # The manifest goes in before the swap, so it moves with the rename and
+        # a champion never exists without a record of which run made it.
+        import json
+        from datetime import datetime
+
+        with open(os.path.join(nxt, ACTIVATION_MANIFEST), "w", encoding="utf-8") as handle:
+            json.dump({
+                "run_id": run_id,
+                "model_version": _version_of(nxt),
+                "activated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }, handle)
+
         _fsync_tree(nxt)
         _fsync_parent(nxt)
 
@@ -296,7 +352,7 @@ def activate(run_id: str) -> ModelSource:
             shutil.rmtree(prev)
 
     logger.info("Activated the model from run %s", run_id)
-    return ModelSource(source="active", version=_version_of(active))
+    return ModelSource(source="active", version=_version_of(active), run_id=run_id)
 
 
 def prune_staged(keep: int = STAGED_RETENTION, protect=()) -> List[str]:
@@ -318,7 +374,10 @@ def prune_staged(keep: int = STAGED_RETENTION, protect=()) -> List[str]:
         return []
 
     protected = {str(p) for p in protect}
-    active_version = _version_of(active_dir())
+    # By run id, not by version: `retrained_at` has second resolution, so two
+    # runs finishing in the same second share it and pruning would spare the
+    # wrong candidate.
+    champion_run = _manifest_of(active_dir()).get("run_id")
 
     with _exclusive():
         entries = []
@@ -330,7 +389,7 @@ def prune_staged(keep: int = STAGED_RETENTION, protect=()) -> List[str]:
                 continue
             if name in protected:
                 continue
-            if active_version is not None and _version_of(path) == active_version:
+            if champion_run is not None and name == champion_run:
                 continue
             entries.append((os.path.getmtime(path), name))
 

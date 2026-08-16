@@ -392,3 +392,127 @@ def test_the_lock_is_held_across_processes_not_just_threads(layout):
         "another process acquired the lock while it was held; activations from "
         "the backend and the scheduler could interleave"
     )
+
+
+# ------------------------------------------------- manifest and full-state recovery
+
+def test_activation_records_which_run_produced_the_champion(layout):
+    """`/health`, rollback and the evidence chain all need this, and pruning
+    needs it to protect the right candidate."""
+    run = a_run()
+    stage(layout, run, version="20260816_120000")
+
+    activated = activate(run)
+
+    assert activated.run_id == run
+    resolved = resolve_model_source()
+    assert resolved.run_id == run
+    assert resolved.version == "20260816_120000"
+
+    manifest = json.loads(
+        (layout["runtime"] / "active" / "activation.json").read_text())
+    assert manifest["run_id"] == run
+    assert manifest["model_version"] == "20260816_120000"
+    assert manifest["activated_at"].endswith("Z")
+
+
+def test_the_manifest_travels_with_the_rename_not_after_it(layout):
+    """Writing it after the swap would leave a window in which a champion exists
+    with no record of which run made it — and a crash there is exactly when the
+    record matters most."""
+    run = a_run()
+    stage(layout, run)
+
+    real_rename = os.rename
+    seen = {}
+
+    def watching_rename(src, dst):
+        if str(dst).endswith("/active"):
+            seen["manifest_in_source"] = os.path.exists(
+                os.path.join(src, "activation.json"))
+        return real_rename(src, dst)
+
+    original = os.rename
+    os.rename = watching_rename
+    try:
+        activate(run)
+    finally:
+        os.rename = original
+
+    assert seen.get("manifest_in_source") is True, (
+        "the manifest was not in place before the directory became active"
+    )
+
+
+def test_pruning_protects_the_champion_even_when_versions_collide(layout):
+    """Two runs finishing in the same second share `retrained_at`.
+
+    Protecting by version would then spare whichever candidate happened to be
+    checked, not the one the champion was built from. This is why the manifest
+    carries `run_id`.
+    """
+    import time
+
+    champion, twin = a_run(), a_run()
+    stage(layout, champion, version="20260816_120000")
+    activate(champion)
+    time.sleep(0.01)
+    # Same version string, different run — indistinguishable by `retrained_at`.
+    stage(layout, twin, version="20260816_120000")
+    time.sleep(0.01)
+    for _ in range(3):
+        stage(layout, a_run(), version="20260816_130000")
+        time.sleep(0.01)
+
+    prune_staged(keep=1)
+
+    survivors = os.listdir(layout["runtime"] / "staged")
+    assert champion in survivors, "the champion's own candidate was pruned"
+
+
+def test_all_three_leftovers_at_once_keeps_active_and_drops_both(layout):
+    """`next` + `previous` + `active`.
+
+    Reachable by manual intervention as much as by a crash, so the contract is
+    chosen explicitly rather than left to whichever branch happens to run first:
+    **a complete `active` is the truth, and both leftovers go.** Promoting
+    `next` would install something no gate approved; restoring `previous` would
+    undo a swap that demonstrably completed.
+    """
+    run = a_run()
+    stage(layout, run, version="20260816_120000", body=b"champion")
+    activate(run)
+
+    write_model(layout["runtime"] / "active.next", "20260816_999999", b"unchosen")
+    write_model(layout["runtime"] / "active.previous", "20260815_000000", b"older")
+
+    outcome = recover()
+
+    assert outcome is not None
+    assert not os.path.exists(layout["runtime"] / "active.next")
+    assert not os.path.exists(layout["runtime"] / "active.previous")
+
+    resolved = resolve_model_source()
+    assert resolved.source == "active"
+    assert resolved.version == "20260816_120000"
+    assert resolved.run_id == run
+    assert active_body(layout) == b"champion"
+
+
+def test_next_and_previous_with_no_active_restores_previous(layout):
+    """The other three-way case: the swap was interrupted after the first
+    rename, and `next` is still sitting there unchosen."""
+    run = a_run()
+    stage(layout, run, version="20260816_120000", body=b"champion")
+    activate(run)
+
+    os.rename(layout["runtime"] / "active", layout["runtime"] / "active.previous")
+    write_model(layout["runtime"] / "active.next", "20260816_999999", b"unchosen")
+
+    recover()
+
+    resolved = resolve_model_source()
+    assert resolved.source == "active"
+    assert resolved.version == "20260816_120000", "the unchosen candidate was promoted"
+    assert active_body(layout) == b"champion"
+    assert not os.path.exists(layout["runtime"] / "active.next")
