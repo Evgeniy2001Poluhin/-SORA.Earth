@@ -39,26 +39,32 @@ STAGED_RETENTION = int(os.environ.get("SORA_STAGED_RETENTION", "5"))
 
 
 def seed_dir() -> str:
-    """The bootstrap models that ship with the repository (#191).
+    """The immutable bootstrap. **`models/` is the seed directory** (#191).
 
-    Defaults to `models/` — where they are today — rather than `models/seed/`.
-    The files have not moved, and moving them is deliberately a separate change:
-    `.gitattributes` tracks `models/*.pkl`, a pattern that is **not recursive**,
-    so relocating them into a subdirectory silently drops them out of Git LFS.
-    That is what a fresh clone then fails on, and it is what closed PR #196.
+    Decided 2026-08-16, after measuring what the alternative cost: relocating
+    into `models/seed/` would have touched 37 hardcoded references across 18
+    files, including training and calibration paths, for a change of name. The
+    separation those decisions were after — an immutable bootstrap apart from a
+    mutable runtime — is already achieved by `runtime/` being a separate named
+    volume, not by the directory being called `seed`.
 
-    Resolving the layout first means the move becomes a mechanical commit
-    against a mechanism already proven to work.
+    So `models/` is the seed, and nothing at runtime writes to it. The recursive
+    LFS pattern in `.gitattributes` protects any subdirectory added later; it is
+    not a promise that one is coming.
+
+    `models/seed/` is not a roadmap target unless a functional reason appears.
     """
     return os.environ.get(SEED_DIR_ENV) or models_dir()
 
 
 def runtime_dir() -> str:
-    """Where retraining writes. Outside the repository by decision (#191).
+    """Where retraining writes. Outside the repository, and never `models/`.
 
-    Inside it with a `.gitignore` is one typo away from committing a trained
-    model — and on 2026-08-16 a probe here overwrote six tracked files under
-    `models/` in a single run, which is that failure without the typo.
+    `models/` is the seed and is immutable at runtime: the only writer of
+    anything under it is a commit. Inside the repository with a `.gitignore` is
+    one typo away from committing a trained model — and on 2026-08-16 a probe
+    overwrote six tracked files under `models/` in a single run, which is that
+    failure without the typo.
     """
     return os.environ.get(RUNTIME_DIR_ENV) or os.path.join(ROOT_DIR, "runtime")
 
