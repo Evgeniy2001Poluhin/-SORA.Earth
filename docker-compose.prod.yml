@@ -80,6 +80,12 @@ services:
     user: "1000:1000"
     volumes:
       - ./models:/app/models
+      # One named volume, mounted by backend and scheduler at the same path
+      # (#191). The activation lock is an flock, and flock excludes two
+      # processes only when both open the *same inode* — two bind mounts of two
+      # host directories would give each container its own lock file and no
+      # mutual exclusion at all.
+      - runtime_models:/app/runtime
     # The one place the application image is built. `migrate` and `scheduler`
     # reference the same tag, so all three are the same image by construction
     # rather than by resemblance.
@@ -94,6 +100,9 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       ENV: production
+      # Identical in both services on purpose; a mismatch would put the lock
+      # file in two places and silently remove the mutual exclusion.
+      SORA_RUNTIME_DIR: /app/runtime
       MLFLOW_TRACKING_URI: "http://mlflow:5556"
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_API_KEY: ${ADMIN_API_KEY}
@@ -111,6 +120,9 @@ services:
     user: "1000:1000"
     volumes:
       - ./models:/app/models
+      # The same named volume at the same path as backend. Both must agree, or
+      # the lock protects nothing across containers.
+      - runtime_models:/app/runtime
     image: ${SORA_APP_IMAGE:-sora_earth_app:current}
     restart: unless-stopped
     command: python3 -u run_scheduler.py
@@ -118,6 +130,9 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       ENV: production
+      # Identical in both services on purpose; a mismatch would put the lock
+      # file in two places and silently remove the mutual exclusion.
+      SORA_RUNTIME_DIR: /app/runtime
       MLFLOW_TRACKING_URI: "http://mlflow:5556"
       RUN_SCHEDULER: "true"
       # See #91: the service is `backend` here and `app` in docker-compose.yml.
@@ -217,6 +232,10 @@ services:
     restart: unless-stopped
 
 volumes:
+  #: Where retraining stages candidates and the champion is activated (#191).
+  #: Named rather than a bind mount so both containers share one filesystem and
+  #: one inode for the lock file.
+  runtime_models:
   mlflowdata:
   pgdata:
   redisdata:

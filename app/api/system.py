@@ -34,6 +34,22 @@ def _check_external_data():
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
 
+def _model_provenance():
+    """Where the serving model came from (#191).
+
+    Reported because a seed model answering looks exactly like a promoted one
+    answering, and the difference is the content of every retrain since. Never a
+    path: /health is reachable without authentication and the host's filesystem
+    layout is not something an unauthenticated response should publish.
+    """
+    try:
+        from app.main import model_source
+        from app.model_loader import health_fields
+        return health_fields(model_source)
+    except Exception as exc:
+        return {"source": "unknown", "error": type(exc).__name__}
+
+
 @router.get("/health", summary="Full health check")
 async def health_check():
     checks = {
@@ -48,6 +64,11 @@ async def health_check():
             "version": VERSION,
             "uptime_seconds": round(time.time() - START_TIME),
             "python": platform.python_version(),
+            # Beside `checks`, not inside it: provenance is information, not a
+            # verdict, and it carries no `status`. The readiness computation
+            # below reads `c["status"]` from every entry in `checks`, so putting
+            # it there would raise KeyError on every /health call.
+            "model_provenance": _model_provenance(),
             "checks": checks,
         },
         status_code=200 if ok else 503,
