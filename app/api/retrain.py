@@ -392,6 +392,11 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
             "meta": new_meta,
             "models_reloaded": reloaded,
             "timestamp": timestamp,
+            #: The row this run owns (#199 phase 0). Callers that finalise a
+            #: decision must address it by id: `app/api/infra.py` used to find
+            #: "the newest row with trigger_source='mlops_auto'", which finalises
+            #: a concurrent run's row instead of its own.
+            "retrain_log_id": log_id,
         }
 
         try:
@@ -400,8 +405,23 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
                 rf, "RandomForest_retrain",
                 {"auc": auc or 0, "f1": f1, "accuracy": acc})
             new_metrics["registry_ok"] = bool(registry_ok)
-        except Exception:
-            pass
+        except Exception as exc:
+            # Absent is not the same as False, and the difference decides
+            # promotion: a run with no `registry_ok` is treated as recorded
+            # before the contract existed and is promoted, so swallowing this
+            # turned an import failure into a silent approval (#199 phase 0).
+            #
+            # `log_model_registry` does not raise -- everything outside its own
+            # try cannot -- so in practice this catches the import above. It is
+            # still written as a general handler because the cost of being wrong
+            # about that is a promotion nobody chose.
+            new_metrics["registry_ok"] = False
+            new_metrics["registry_error"] = type(exc).__name__
+            logger.error(
+                "Registry step failed for model %s: %s: %s -- recording it as "
+                "unregistered rather than leaving the field absent",
+                timestamp, type(exc).__name__, exc,
+            )
 
 
         _finish_retrain_log(
