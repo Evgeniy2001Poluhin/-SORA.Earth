@@ -400,20 +400,34 @@ async def v1_prefix_rewrite(request, call_next):
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 # ===== MODELS =====
-with open(os.path.join(ROOT_DIR, "models", "scaler.pkl"), "rb") as f:
-    scaler = pickle.load(f)
-with open(os.path.join(ROOT_DIR, "models", "model.pkl"), "rb") as f:
-    rf_model = pickle.load(f)
-with open(os.path.join(ROOT_DIR, "models", "meta.json"), "r") as f:
-    model_meta = json.load(f)
-with open(os.path.join(ROOT_DIR, "models", "xgb_model.pkl"), "rb") as f:
+#
+# The champion comes from `active` or from `seed`, whole (#191). Loading each
+# file with its own open() is what made mixing possible: a model from one
+# training run and a scaler from another produce predictions that are wrong in a
+# way nothing downstream can detect — the features land in a space the model was
+# not fitted on, the probabilities stay in [0, 1], and every check passes.
+#
+# recover() runs here, once, at process start. It is not on the prediction path.
+from app.model_loader import load_champion
+
+_champion = load_champion(recover_first=True)
+rf_model = _champion.model
+scaler = _champion.scaler
+best_threshold = _champion.best_threshold
+model_meta = _champion.meta
+model_metrics = _champion.metrics
+
+#: Provenance of the serving model, for /health. Never a path.
+model_source = _champion.source
+
+# Different models, not parts of the champion: they are not retrained, have no
+# staged or active copy, and continue to load from the seed directory.
+from app.paths import seed_dir as _seed_dir
+
+with open(os.path.join(_seed_dir(), "xgb_model.pkl"), "rb") as f:
     xgb_model = pickle.load(f)
-with open(os.path.join(ROOT_DIR, "models", "metrics.json"), "r") as f:
-    model_metrics = json.load(f)
-with open(os.path.join(ROOT_DIR, "models", "stacking_meta.pkl"), "rb") as f:
+with open(os.path.join(_seed_dir(), "stacking_meta.pkl"), "rb") as f:
     stacking_meta = pickle.load(f)
-with open(os.path.join(ROOT_DIR, "models", "best_threshold.pkl"), "rb") as f:
-    best_threshold = pickle.load(f)["threshold"]
 
 ENS_PATH = os.path.join(ROOT_DIR, "models", "ensemble_model.pkl")
 ensemble_model = None

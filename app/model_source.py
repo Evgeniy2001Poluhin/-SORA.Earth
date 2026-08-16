@@ -79,7 +79,16 @@ logger = logging.getLogger(__name__)
 #: one file was not enough: a copy interrupted after `model.pkl` and before
 #: `scaler.pkl` would have passed, and the features would then be scaled by
 #: whatever the previous model's scaler happened to be.
+#: The single canonical list. `app/model_loader.py` imports it rather than
+#: keeping a second one: two independent lists of "what a model is" drift, and
+#: the drift shows up as a directory that passes the presence check and then
+#: fails to load — the exact confusion this module exists to remove.
 REQUIRED_ARTEFACTS = ("model.pkl", "scaler.pkl", "best_threshold.pkl", "meta.json")
+
+#: Read from the same directory when present, but not required: a run that
+#: reports no metrics is still a usable model, and refusing to serve it over a
+#: missing report would be the wrong trade.
+OPTIONAL_ARTEFACTS = ("metrics.json",)
 
 #: Written into a staged directory while it is still being assembled, and
 #: removed when it is complete. Pruning and activation both refuse a directory
@@ -121,6 +130,12 @@ class ModelSource:
     version: Optional[str] = None
     #: True when active existed but was unusable, so seed answered instead.
     fell_back: bool = False
+    #: A stable code, safe to publish: `active_incomplete` or `active_unreadable`.
+    #: The list of missing filenames is a detail of the current artefact set and
+    #: would change whenever that set changes, so it goes to the server log and
+    #: not to an unauthenticated response.
+    reason_code: Optional[str] = None
+    #: The detailed explanation, for logs. Not published by health_fields.
     reason: Optional[str] = None
 
 
@@ -280,12 +295,14 @@ def resolve_model_source() -> ModelSource:
     seed = seed_dir()
     existed = os.path.isdir(active)
     reason = None
+    reason_code = None
     if existed:
         missing = _missing(active)
         reason = (
             "the active model is incomplete: missing " + ", ".join(missing)
             if missing else "the active model is still being written"
         )
+        reason_code = "active_incomplete" if missing else "active_being_written"
         # A warning, not an error: falling back is the designed behaviour.
         # Being quiet about it is the fault — from outside, a seed model
         # answering looks exactly like a promoted one answering.
@@ -294,7 +311,9 @@ def resolve_model_source() -> ModelSource:
             "promoted model.", reason
         )
     return ModelSource(source="seed", version=_version_of(seed),
-                       fell_back=existed, reason=reason)
+                       fell_back=existed,
+                       reason_code=reason_code if existed else None,
+                       reason=reason)
 
 
 def activate(run_id: str) -> ModelSource:
