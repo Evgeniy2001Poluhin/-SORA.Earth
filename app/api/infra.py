@@ -1,3 +1,5 @@
+import logging
+
 from app.prom_metrics import sora_retrain_total, sora_refresh_total, sora_full_pipeline_total
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from app.auth import require_admin
@@ -10,6 +12,10 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import Optional
 from app.websocket import manager, WebSocket, WebSocketDisconnect
+
+#: This module had no logger, so the finalisation failure below had nowhere
+#: to be reported (#199 phase 0).
+logger = logging.getLogger(__name__)
 from app.cache import cache
 from app.drift_detection import drift_detector
 from app.mlflow_tracking import get_experiment_stats
@@ -560,19 +566,29 @@ def auto_retrain_on_drift(
             promoted = False
             reject_reason = "AUC degraded: %.4f -> %.4f (delta=%+.4f)" % (float(old_auc), float(new_auc), auc_delta)
 
+    # The row this run owns, not "the newest one that looks like ours" (#199).
+    #
+    # The lookup here was `trigger_source == "mlops_auto"` ordered by id
+    # descending, so two runs overlapping by a second finalised each other's
+    # rows: the decision recorded against a run would be about a different
+    # model. `_do_retrain` now returns the id of the row it opened, and this
+    # addresses that and nothing else. When it is missing the run is left
+    # unfinalised and said so, because writing a verdict onto a row that might
+    # belong to someone else is worse than writing none.
+    finalisation_error = None
+    log_id = retrain_result.get("retrain_log_id") if isinstance(retrain_result, dict) else None
     try:
         from app.database import SessionLocal, RetrainLog
-        from sqlalchemy import desc
         import json
+
+        if log_id is None:
+            raise ValueError("retrain did not report the id of its retrain_log row")
 
         db = SessionLocal()
         try:
-            row = (
-                db.query(RetrainLog)
-                .filter(RetrainLog.trigger_source == "mlops_auto")
-                .order_by(desc(RetrainLog.id))
-                .first()
-            )
+            row = db.query(RetrainLog).filter(RetrainLog.id == log_id).first()
+            if row is None:
+                raise ValueError(f"retrain_log row {log_id} is gone")
             if row:
                 existing = {}
                 try:
@@ -594,10 +610,22 @@ def auto_retrain_on_drift(
                 db.commit()
         finally:
             db.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        # Not swallowed (#199 phase 0). This used to be `pass`, so a failure here
+        # left the row saying `success` for ever while the endpoint reported a
+        # decision that was never written down.
+        #
+        # The run's own outcome is not replaced by an invented status: the
+        # training happened and `promoted` below still reports what the gate
+        # decided. What is added is that the failure is visible -- in the log and
+        # in the response -- instead of being indistinguishable from success.
+        finalisation_error = f"{type(exc).__name__}: {exc}"
+        logger.error(
+            "Could not finalise retrain_log row %s: %s", log_id, finalisation_error
+        )
 
     return {
+        "finalisation_error": finalisation_error,
         "status": "ok",
         "drift_detected": drift_detected,
         "drift_result": drift,
