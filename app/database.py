@@ -225,6 +225,23 @@ class RetrainLog(Base):
     #: are counted as one run each, which is what the old readers already did.
     #: Backfilling a guessed grouping would invent history.
     run_id = Column(String(36), nullable=True, index=True)
+
+    #: What each stage of the run actually did (#199 phase 2B).
+    #:
+    #: `status` alone could not hold this. A cycle wrote `success` for the
+    #: training and `rejected` for the decision as two rows, and a run whose
+    #: training succeeded but whose registration did not had nowhere to say so
+    #: -- measured 2026-08-16, a row read `success` while its own metrics held
+    #: `registry_ok=False`.
+    #:
+    #: NULL on every row written before these columns existed, and on any row
+    #: whose writer has not been moved yet. `status` remains the projection of
+    #: these, computed in one place by `project_status`, so the twelve readers
+    #: that filter on it keep working and cannot drift from the new fields.
+    training_status = Column(String(30), nullable=True, index=True)
+    registry_status = Column(String(30), nullable=True, index=True)
+    promotion_status = Column(String(30), nullable=True, index=True)
+    failure_reason = Column(Text, nullable=True)
     model_version = Column(String(100), nullable=True)
     data_version = Column(String(100), nullable=True)
     metrics_json = Column(Text, nullable=True)
@@ -594,3 +611,27 @@ def count_physical_runs(db, status=None) -> int:
     )
     ungrouped = query.filter(RetrainLog.run_id.is_(None)).count()
     return int(grouped) + int(ungrouped)
+
+
+#: The only definition of what `status` means in terms of the split fields
+#: (#199 phase 2B).
+#:
+#: One definition on purpose. Two implementations of "what does this mean now"
+#: is exactly how `closed_loop_retrain` and `app/api/infra.py` ended up with two
+#: different promotion gates, one of which had no registry check at all.
+#:
+#: The mapping reproduces the values already written, so no reader changes
+#: behaviour: `promoted`/`rejected` when the gate has ruled, otherwise the
+#: training's own outcome, otherwise `running`.
+#:
+#: `registry_status` deliberately does not move `status` here. Making a failed
+#: registration visible in the top-level status is a contract change that
+#: belongs with #189 and #198, not with this split -- doing both at once would
+#: make it impossible to tell which change altered a figure.
+def project_status(training_status=None, registry_status=None,
+                   promotion_status=None) -> str:
+    if promotion_status in ("promoted", "rejected"):
+        return promotion_status
+    if training_status in ("failed", "skipped", "success"):
+        return training_status
+    return "running"
