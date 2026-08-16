@@ -20,7 +20,7 @@ from app.paths import data_dir, models_dir
 
 router = APIRouter(prefix="/model", tags=["mlops"])
 
-from app.scheduler import _start_retrain_log, _finish_retrain_log
+from app.scheduler import _start_retrain_log, _finish_retrain_log, new_run_id
 logger = __import__("logging").getLogger("sora_earth")
 
 PRED_LOG = os.path.join(data_dir(), "predictions_log.csv")
@@ -142,7 +142,11 @@ def walk_forward_validate(model_class, X, y, n_splits=5):
 
 def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
     """Actual retrain logic with persisted RetrainLog."""
-    log_id = _start_retrain_log(trigger_source=trigger_source, job_name="model_retrain")
+    #: Minted here because this run writes one row and its caller writes another
+    #: for the same physical retrain (#199 phase 2A).
+    run_id = new_run_id()
+    log_id = _start_retrain_log(trigger_source=trigger_source, job_name="model_retrain",
+                                run_id=run_id)
 
     try:
         if not os.path.exists(PROJECTS_CSV):
@@ -397,6 +401,8 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
             #: "the newest row with trigger_source='mlops_auto'", which finalises
             #: a concurrent run's row instead of its own.
             "retrain_log_id": log_id,
+            #: Same physical run as the decision row the caller will write.
+            "run_id": run_id,
         }
 
         try:

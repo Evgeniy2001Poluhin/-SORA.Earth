@@ -209,6 +209,22 @@ class RetrainLog(Base):
     status = Column(String(50), nullable=False, index=True)
     trigger_source = Column(String(50), default="scheduler", index=True)
     job_name = Column(String(100), default="model_retrain", nullable=True)
+
+    #: One physical retrain, however many rows it writes (#199 phase 2A).
+    #:
+    #: A closed-loop cycle writes two rows -- `_do_retrain` records the training
+    #: and the loop records the decision -- and before this they were related by
+    #: nothing but a timestamp. Measured 2026-08-16 on a real cycle: row 1 said
+    #: `success` with `registry_ok=False` in its own metrics, row 2 said
+    #: `registry_failed` with no `model_version`, and `admin_ai` counted the
+    #: cycle as one success. `retrain_models` produced two rows both saying
+    #: `success`, so one run was counted twice.
+    #:
+    #: **NULL for every row written before this column existed.** Those runs
+    #: cannot be reconstructed -- the information was never recorded -- so they
+    #: are counted as one run each, which is what the old readers already did.
+    #: Backfilling a guessed grouping would invent history.
+    run_id = Column(String(36), nullable=True, index=True)
     model_version = Column(String(100), nullable=True)
     data_version = Column(String(100), nullable=True)
     metrics_json = Column(Text, nullable=True)
@@ -544,3 +560,37 @@ class EnvironmentalJobLog(Base):
     records_rejected = Column(Integer, nullable=True, server_default="0")
     error_message = Column(Text, nullable=True)
     metadata_json = Column(JSON, nullable=True)  # Job-specific metadata
+
+
+def count_physical_runs(db, status=None) -> int:
+    """How many retrains happened, not how many rows were written (#199 phase 2A).
+
+    A closed-loop cycle writes two rows and `retrain_models` writes two rows,
+    both saying `success` -- so `db.query(RetrainLog).count()` reported one run
+    as two, and `admin_ai` reported a rejected cycle as a success.
+
+    Rows carrying a `run_id` are grouped by it. Rows without one predate the
+    column and are counted individually, because the grouping they belonged to
+    was never recorded and guessing it would put a reconstruction where a fact
+    is expected. That is also exactly what the old readers did, so historical
+    figures do not move.
+
+    `status` filters before grouping. A run whose rows disagree -- `success` for
+    the training and `rejected` for the decision, which is the normal shape --
+    therefore counts once under each, and that is the honest answer: the run did
+    both of those things.
+    """
+    from sqlalchemy import func
+
+    query = db.query(RetrainLog)
+    if status is not None:
+        query = query.filter(RetrainLog.status == status)
+
+    grouped = (
+        query.filter(RetrainLog.run_id.isnot(None))
+        .with_entities(RetrainLog.run_id)
+        .distinct()
+        .count()
+    )
+    ungrouped = query.filter(RetrainLog.run_id.is_(None)).count()
+    return int(grouped) + int(ungrouped)
