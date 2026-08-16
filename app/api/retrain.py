@@ -432,7 +432,14 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
 
         _finish_retrain_log(
             log_id=log_id,
-            status="success",
+            # No `status`: it is derived from the stages by project_status, so
+            # this row cannot disagree with its own fields (#199 phase 2B).
+            training_status="success",
+            registry_status=(
+                "registered" if new_metrics.get("registry_ok") is True
+                else "failed" if new_metrics.get("registry_ok") is False
+                else None
+            ),
             message="Manual retraining completed successfully",
             model_version=timestamp,
             metrics=new_metrics,
@@ -443,7 +450,8 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
         logger.exception("Retrain failed in _do_retrain: %s", e)
         _finish_retrain_log(
             log_id=log_id,
-            status="failed",
+            training_status="failed",
+            failure_reason=type(e).__name__,
             message="Manual retraining failed",
             error_message=str(e),
         )

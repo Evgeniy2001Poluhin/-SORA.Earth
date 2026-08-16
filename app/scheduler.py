@@ -48,14 +48,31 @@ def _start_retrain_log(trigger_source: str = "manual", job_name: str = "model_re
 
 def _finish_retrain_log(
     log_id: int,
-    status: str,
+    status: Optional[str] = None,
     message: Optional[str] = None,
     model_version: Optional[str] = None,
     data_version: Optional[str] = None,
     metrics: Optional[dict] = None,
     error_message: Optional[str] = None,
+    training_status: Optional[str] = None,
+    registry_status: Optional[str] = None,
+    promotion_status: Optional[str] = None,
+    failure_reason: Optional[str] = None,
 ):
-    from app.database import SessionLocal, RetrainLog
+    """Close a journal row, writing both the split stages and the old `status`.
+
+    Dual-write (#199 phase 2B). A caller that has been moved passes the stage it
+    knows about and `status` is derived by `project_status` -- the single
+    definition -- so the twelve readers still filtering on `status` cannot drift
+    from the new fields. A caller that has not been moved keeps passing `status`
+    and its stage columns stay NULL, exactly as rows written before the columns
+    existed do.
+
+    `status` therefore became optional, but it is not defaulted: passing neither
+    it nor any stage would write a row claiming to be finished while saying
+    nothing about what happened, so that combination raises.
+    """
+    from app.database import SessionLocal, RetrainLog, project_status
     from datetime import datetime
     import json
     db = SessionLocal()
@@ -66,7 +83,20 @@ def _finish_retrain_log(
         finished_at = datetime.utcnow()
         row.finished_at = finished_at
         row.duration_sec = (finished_at - row.started_at).total_seconds() if row.started_at else None
+        stages = (training_status, registry_status, promotion_status)
+        if status is None:
+            if not any(stages):
+                raise ValueError(
+                    f"retrain_log {log_id}: finishing a run requires either a status "
+                    "or at least one stage outcome"
+                )
+            status = project_status(training_status, registry_status, promotion_status)
+
         row.status = status
+        row.training_status = training_status
+        row.registry_status = registry_status
+        row.promotion_status = promotion_status
+        row.failure_reason = failure_reason
         row.message = message
         row.model_version = model_version
         row.data_version = data_version
@@ -630,7 +660,8 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         )
         _finish_retrain_log(
             log_id=log_id,
-            status="promoted" if promoted else "rejected",
+            promotion_status="promoted" if promoted else "rejected",
+            failure_reason=reject_reason,
             message="Closed loop: %s" % ("promoted" if promoted else "rejected"),
             metrics={"old_auc": float(old_auc) if old_auc else None, "new_auc": float(new_auc) if new_auc else None, "promoted": promoted, "reject_reason": reject_reason},
         )
