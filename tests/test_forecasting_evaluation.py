@@ -8,8 +8,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import math
+
 from app.services.forecasting.evaluation import (
     EvaluationReport,
+    evaluate_by_region,
     _seasonal_scale,
     evaluate_rolling_origin,
     rolling_origin_windows,
@@ -216,3 +219,66 @@ def test_the_callable_only_ever_sees_its_own_training_rows():
     assert [n for n, _ in seen] == [40, 47, 54]
     for length, last_seen in seen:
         assert last_seen == data["ds"].iloc[length - 1]
+
+
+def regional(frames):
+    """One frame per region, concatenated with a region column."""
+    parts = []
+    for name, values in frames.items():
+        part = series(values)
+        part["region"] = name
+        parts.append(part)
+    return pd.concat(parts, ignore_index=True)
+
+
+def flat_ten(train_df, horizon):
+    return [10.0] * horizon
+
+
+def test_the_worst_region_is_named_not_averaged_away():
+    """A model fine on average and three times worse in one region is not deployable."""
+    rng = np.random.default_rng(21)
+    easy = list(rng.normal(10.0, 0.5, 60))
+    hard = list(rng.normal(10.0, 4.0, 60))
+
+    report = evaluate_by_region(flat_ten, regional({"easy": easy, "hard": hard}),
+                                "y", "region", horizon=7, train_size=40,
+                                n_windows=2, metric="mae")
+
+    name, value = report.worst_region()
+    assert name == "hard"
+    assert value > report.best_region()[1]
+    assert report.spread() > 0
+
+
+def test_a_region_that_cannot_be_scored_is_recorded_not_dropped():
+    """The regions that fall out are the ones with least data — usually the hard ones."""
+    rng = np.random.default_rng(22)
+    enough = list(rng.normal(10.0, 1.0, 60))
+    too_short = list(rng.normal(10.0, 1.0, 12))
+
+    report = evaluate_by_region(flat_ten, regional({"big": enough, "tiny": too_short}),
+                                "y", "region", horizon=7, train_size=40,
+                                n_windows=2, metric="mae")
+
+    assert "big" in report.reports
+    assert "tiny" in report.skipped, "a region vanished from the report entirely"
+    assert "observations" in report.skipped["tiny"]
+
+    coverage = report.coverage()
+    assert coverage["regions_scored"] == 1.0
+    assert coverage["regions_skipped"] == 1.0
+    assert coverage["regions_total"] == 2.0
+
+
+def test_no_region_scored_reports_nothing_rather_than_a_flattering_number():
+    """An empty worst-region must not read as 'no region did badly'."""
+    rng = np.random.default_rng(23)
+    report = evaluate_by_region(flat_ten, regional({"a": list(rng.normal(10, 1, 10))}),
+                                "y", "region", horizon=7, train_size=40,
+                                n_windows=2, metric="mae")
+
+    assert report.reports == {}
+    assert report.worst_region() == (None, pytest.approx(float("nan"), nan_ok=True))
+    assert math.isnan(report.spread())
+    assert report.coverage()["regions_scored"] == 0.0

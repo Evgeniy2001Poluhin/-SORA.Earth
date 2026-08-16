@@ -28,11 +28,16 @@ keeps the same MASE.
 MASE < 1 means the model beat seasonal naive over that window. That is the
 number principle 14 is about.
 
-## What this does not do
+## Regions
 
-No regional slicing. The roadmap's phase 6 asks for a worst-region report, and
-that needs the region dimension threaded through, which is not attempted here --
-stated rather than half-built.
+`evaluate_by_region` runs the whole thing once per region and reports the worst
+one beside the mean, because a model that is fine on average and three times
+worse in one region is not a model to promote.
+
+A region with too little data is recorded in `skipped` with its reason, never
+dropped. The regions that fall out are the ones with the least data, which are
+usually the hard ones, so silently omitting them moves the worst-region figure
+in the flattering direction every single time.
 """
 import math
 from dataclasses import dataclass, field
@@ -237,4 +242,93 @@ def evaluate_rolling_origin(
             interval_coverage=coverage,
         ))
 
+    return report
+
+
+@dataclass
+class RegionalReport:
+    """Per-region evaluation, with what was left out kept beside it.
+
+    The worst region is the number that decides whether a model is deployable:
+    a mean that hides one region at three times the error is describing a model
+    nobody should promote. But a worst-region figure computed over regions that
+    silently dropped out is worse than none, because the regions most likely to
+    drop out are the ones with the least data -- which are usually the hard ones.
+    So `skipped` travels with the result and carries the reason.
+    """
+
+    metric: str
+    reports: Dict[str, EvaluationReport] = field(default_factory=dict)
+    skipped: Dict[str, str] = field(default_factory=dict)
+
+    def scored(self) -> Dict[str, float]:
+        return {name: r.mean(self.metric) for name, r in self.reports.items()}
+
+    def worst_region(self):
+        """(region, value) for the highest mean, or (None, nan) if nothing scored."""
+        scored = {k: v for k, v in self.scored().items() if not math.isnan(v)}
+        if not scored:
+            return None, float("nan")
+        name = max(scored, key=scored.get)
+        return name, scored[name]
+
+    def best_region(self):
+        scored = {k: v for k, v in self.scored().items() if not math.isnan(v)}
+        if not scored:
+            return None, float("nan")
+        name = min(scored, key=scored.get)
+        return name, scored[name]
+
+    def spread(self) -> float:
+        """Worst minus best. A model even across regions has a small one."""
+        _, worst = self.worst_region()
+        _, best = self.best_region()
+        if math.isnan(worst) or math.isnan(best):
+            return float("nan")
+        return worst - best
+
+    def coverage(self) -> Dict[str, float]:
+        """How much of the region set was actually scored.
+
+        Reported so a reader can tell "no region did badly" from "few regions
+        were looked at".
+        """
+        total = len(self.reports) + len(self.skipped)
+        return {
+            "regions_scored": float(len(self.reports)),
+            "regions_skipped": float(len(self.skipped)),
+            "regions_total": float(total),
+        }
+
+
+def evaluate_by_region(
+    fit_predict: Callable[[pd.DataFrame, int], Sequence[float]],
+    df: pd.DataFrame,
+    target_col: str,
+    region_col: str,
+    horizon: int,
+    train_size: int,
+    n_windows: int,
+    season_length: int = 7,
+    metric: str = "mase",
+) -> RegionalReport:
+    """Run the rolling-origin evaluation once per region.
+
+    A region that cannot supply enough observations is recorded in `skipped`
+    with the reason rather than omitted. Dropping it would move the worst-region
+    figure in the flattering direction every time.
+    """
+    if region_col not in df.columns:
+        raise ValueError(f"df has no column {region_col!r}")
+
+    report = RegionalReport(metric=metric)
+    for region, group in df.groupby(region_col, sort=True):
+        try:
+            report.reports[str(region)] = evaluate_rolling_origin(
+                fit_predict, group, target_col, horizon=horizon,
+                train_size=train_size, n_windows=n_windows,
+                season_length=season_length, model_name=str(region),
+            )
+        except ValueError as exc:
+            report.skipped[str(region)] = str(exc)
     return report
