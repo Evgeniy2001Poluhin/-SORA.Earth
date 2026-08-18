@@ -654,6 +654,30 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
 
         # The decision belongs to the run that produced the model, so it
         # carries that run's id rather than minting a second (#199 phase 2A).
+        # Promotion is an act, not a record (#199 phase 4).
+        #
+        # Until now the model was already serving by the time this line ran --
+        # `_do_retrain` assigned it into app.main before any gate had spoken, so
+        # a rejection recorded a decision about an artefact that was answering
+        # requests. The candidate now sits in runtime/staged/<run_id>/ and only
+        # a pass reaches runtime/active/.
+        #
+        # A failure to activate does not turn a promotion into a rejection: the
+        # gate said yes and that stays true. It is reported, and the previously
+        # active model keeps serving, which is the safe end state.
+        activation_error = None
+        if promoted and isinstance(result, dict) and result.get("run_id"):
+            try:
+                from app.model_loader import reload_champion
+                from app.model_source import activate
+
+                activate(result["run_id"])
+                reload_champion()
+            except Exception as exc:
+                activation_error = f"{type(exc).__name__}: {exc}"
+                logger.error("Promoted run %s could not be activated: %s",
+                             result.get("run_id"), activation_error)
+
         log_id = _start_retrain_log(
             trigger_source=trigger_source, job_name="closed_loop",
             run_id=result.get("run_id") if isinstance(result, dict) else None,
@@ -665,7 +689,8 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
             message="Closed loop: %s" % ("promoted" if promoted else "rejected"),
             metrics={"old_auc": float(old_auc) if old_auc else None, "new_auc": float(new_auc) if new_auc else None, "promoted": promoted, "reject_reason": reject_reason},
         )
-        return {"status": "ok", "drift_detected": True, "retrained": True, "promoted": promoted, "old_auc": float(old_auc) if old_auc else None, "new_auc": float(new_auc) if new_auc else None, "reject_reason": reject_reason}
+        return {"status": "ok", "drift_detected": True, "retrained": True, "promoted": promoted,
+                "activation_error": activation_error, "old_auc": float(old_auc) if old_auc else None, "new_auc": float(new_auc) if new_auc else None, "reject_reason": reject_reason}
     except Exception as e:
         logger.exception("Closed loop failed: %s", e)
         return {"status": "error", "error": str(e)}
