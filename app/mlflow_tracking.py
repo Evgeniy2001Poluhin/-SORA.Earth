@@ -219,7 +219,22 @@ def log_evaluation(project_name: str, esg_scores: dict, risk_level: str):
         _log_mlflow_failure("log_evaluation", e)
 
 
-def log_model_registry(model, model_name: str, metrics: dict) -> bool:
+def _registry_api():
+    """The MLflow entry points `log_model_registry` uses, resolved per call.
+
+    A seam, not an abstraction. It exists so a test can substitute MLflow
+    *before* a client is built and before a connection is opened -- patching
+    `requests` underneath a client that has already resolved its tracking URI
+    tests the transport, not this function, and leaves the interesting failure
+    (the artefact upload being refused) unreachable.
+
+    Resolved on each call rather than captured at import, so nothing here holds
+    module-level mutable state that one test could leak into the next.
+    """
+    return mlflow
+
+
+def log_model_registry(model, model_name: str, metrics: dict, *, api=None) -> bool:
     """Register the model, and **say whether it worked** (#189).
 
     This returned None either way, so a caller could not tell a registered
@@ -236,14 +251,19 @@ def log_model_registry(model, model_name: str, metrics: dict) -> bool:
 
     Still does not raise. Telemetry must not take a completed retrain down with
     it; what changes is that the outcome is now reported rather than swallowed.
+
+    `api` is the injection seam described on `_registry_api`. Callers in the
+    application never pass it, so production resolves to the `mlflow` module and
+    makes exactly the calls it made before.
     """
     if _OFFLINE:
         return False
+    api = _registry_api() if api is None else api
     try:
-        with mlflow.start_run(run_name=f"register_{model_name}"):
-            mlflow.log_metrics(metrics)
-            mlflow.sklearn.log_model(model, model_name)
-            mlflow.set_tag("type", "model_registry")
+        with api.start_run(run_name=f"register_{model_name}"):
+            api.log_metrics(metrics)
+            api.sklearn.log_model(model, model_name)
+            api.set_tag("type", "model_registry")
         return True
     except Exception as e:
         _log_mlflow_failure("log_model_registry", e)
