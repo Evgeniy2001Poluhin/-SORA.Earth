@@ -183,7 +183,13 @@ The closed-loop MLOps pipeline runs automatically via APScheduler in the `schedu
 2. **Auto-Retrain on Drift**: `app/scheduler.py:auto_retrain_on_drift_job()` (every 12h)
    - Checks latest drift log: if drift detected → trigger retrain
    - Retrains on historical `prediction_log` + labels from `evaluation` table
-   - Validates new model: if AUC > 0.70 → promote; else reject
+   - Validates the new model on three independent refusals: the 95%
+     **lower bound** of its AUC must clear 0.80 -- not the point estimate,
+     since 0.85 measured on 171 rows has a lower bound of 0.78 -- the run
+     must have registered the model in MLflow, and it must not be more
+     than 0.02 below what is already serving. Any one of the three
+     rejects it. The closed loop in `app/scheduler.py` applies all three;
+     `POST /mlops/auto-retrain` currently applies only the last.
    - Decision logged to `retrain_log` table
 
 3. **External Data Refresh** (daily): `app/scheduler.py:refresh_external_data_job()`
@@ -482,10 +488,30 @@ curl -X POST http://localhost:8000/api/v1/model/retrain \
 ## Production Server
 
 **Server Details:**
-- Host: `45.137.60.67` (Ubuntu 24.04, hostname: melted-rose)
-- SSH: `ssh root@45.137.60.67`
+- Host: `77.110.118.93` (Ubuntu 24.04, hostname: internal-amarant, Aeza NLs-3, Netherlands)
+- SSH: `ssh root@77.110.118.93` — **key only**, password authentication is disabled
 - Project directory: `/opt/sora_earth_ai_platform`
 - Domain: https://sora-earth.online
+
+The previous host, `45.137.60.67`, was **deleted for non-payment** around
+2026-08-16 and the provider confirmed on 2026-09-02 that deleted services cannot
+be restored. Everything on it is gone: the database, every environmental
+observation collected since 2026-07-30, and the days that had started the M3 §7
+clock. Nothing was held off the server. That address appears in the dated
+reports under `.claude/`; those describe the world as it was and are left alone.
+
+Two things about this host that are not guesses and will waste an hour if
+rediscovered:
+
+- **GitHub refuses anonymous `git-upload-pack` from this IP.** A public
+  third-party repository fails identically, so it is the address and not this
+  repository. The checkout pulls over SSH with a read-only deploy key at
+  `/root/.ssh/github_deploy`. Separately, git protocol v2 fails here and v0
+  works; `protocol.version = 0` is set in the host's global git config.
+- **The `runtime_models` volume was chowned to `1000:1000` by hand** so the
+  containers could take the activation lock. The image should create
+  `/app/runtime` and make that unnecessary; until that ships, a recreated volume
+  needs the same repair.
 
 **Deployment — one supported way, and this is it:**
 
@@ -579,7 +605,11 @@ git diff  # DO NOT USE over SSH
 
 Add to `~/.ssh/config` to prevent timeout disconnects:
 ```
-Host 45.137.60.67
+Host sora
+    HostName 77.110.118.93
+    User root
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
     ServerAliveInterval 60
     ServerAliveCountMax 3
 ```
@@ -612,6 +642,6 @@ docker compose -f docker-compose.prod.yml exec postgres \
 ### Monitoring Production
 
 - **Application logs**: `docker compose -f docker-compose.prod.yml logs -f backend`
-- **Grafana**: SSH tunnel required - `ssh -L 3000:127.0.0.1:3000 root@45.137.60.67`
-- **Prometheus**: SSH tunnel required - `ssh -L 9090:127.0.0.1:9090 root@45.137.60.67`
+- **Grafana**: SSH tunnel required - `ssh -L 3000:127.0.0.1:3000 root@77.110.118.93`
+- **Prometheus**: SSH tunnel required - `ssh -L 9090:127.0.0.1:9090 root@77.110.118.93`
 - **Health check**: `curl https://sora-earth.online/health`
