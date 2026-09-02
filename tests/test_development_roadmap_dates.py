@@ -23,7 +23,16 @@ ROADMAP = os.path.join(REPO_ROOT, "docs", "DEVELOPMENT_ROADMAP.md")
 
 #: The M3 clock start, declared in docs/M3_FORECAST_DECLARATION.md. Not derived
 #: from anything in code, so it is stated once here and nowhere else.
-CLOCK_START = date(2026, 8, 14)
+#:
+#: **None means the clock is void.** Amendment 1.1 of the declaration voided it
+#: on 2026-09-02: the production server was deleted for non-payment and the
+#: accumulated observations went with it, so there is no start to count from
+#: until collection resumes and a first qualifying day is measured.
+#:
+#: While it is None the checks below invert: the roadmap must carry **no**
+#: evidential date at all. A date quoted against a void clock is not merely
+#: stale, it is unfounded — nothing has started that it could be counted from.
+CLOCK_START = None
 
 
 def read_roadmap():
@@ -34,18 +43,25 @@ def read_roadmap():
 
 
 def earliest_date(horizon):
-    """What the gate's own constants imply, computed rather than restated."""
+    """What the gate's own constants imply, computed rather than restated.
+
+    Raises while the clock is void, because there is nothing to add the days to.
+    """
     from app.services.forecasting.entry_conditions import (
         REQUIRED_WINDOWS,
         TRAINING_DAYS,
     )
 
+    if CLOCK_START is None:
+        raise AssertionError("the clock is void; there is no date to compute")
     days = TRAINING_DAYS[horizon] + REQUIRED_WINDOWS * horizon
     return CLOCK_START + timedelta(days=days)
 
 
 @pytest.mark.parametrize("horizon", [7, 30])
 def test_the_roadmap_states_the_date_the_gate_implies(horizon):
+    if CLOCK_START is None:
+        pytest.skip("the clock is void; the inverse check below applies instead")
     body = read_roadmap()
     expected = earliest_date(horizon).isoformat()
 
@@ -57,8 +73,32 @@ def test_the_roadmap_states_the_date_the_gate_implies(horizon):
     )
 
 
+def test_a_void_clock_leaves_no_evidential_date_anywhere():
+    """The inverse check, and the load-bearing one right now.
+
+    With the clock void, `2027-02-04` is not a stale date — it is a date derived
+    from a start that no longer exists. Leaving it in the roadmap would state a
+    deadline for evidence that has not begun accumulating, which is the single
+    thing the declaration exists to prevent.
+
+    This test is what makes Amendment 1.1 enforceable rather than aspirational:
+    re-adding any future date without restarting the clock turns it red.
+    """
+    if CLOCK_START is not None:
+        pytest.skip("the clock is running; the forward checks above apply")
+
+    body = read_roadmap()
+    found = set(re.findall(r"\b20(?:2[7-9]|[3-9]\d)-\d{2}-\d{2}\b", body))
+    assert not found, (
+        f"the roadmap names evidential dates while the M3 clock is void: "
+        f"{sorted(found)}. See Amendment 1.1 of docs/M3_FORECAST_DECLARATION.md."
+    )
+
+
 def test_no_other_earliest_date_is_named():
     """A stale date left beside the correct one is the same defect, half-fixed."""
+    if CLOCK_START is None:
+        pytest.skip("the clock is void; the inverse check above applies instead")
     body = read_roadmap()
     allowed = {earliest_date(7).isoformat(), earliest_date(30).isoformat()}
     #: Dates in 2027 or later can only be the two gate dates; anything else in

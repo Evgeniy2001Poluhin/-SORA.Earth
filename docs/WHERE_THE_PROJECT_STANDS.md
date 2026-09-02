@@ -32,7 +32,7 @@ The experiment does not gate the product and has not been promoted. See
 |---|---|---|
 | M1 Data Trust | signed off, production verified | `docs/M1_DATA_TRUST_REPORT.md` |
 | M2 Forecasting | **CLOSED — NEGATIVE RESULT** | `e82d682` |
-| M3 Forecast target | declared, §7 clock running from 2026-08-14 | `10f985f` |
+| M3 Forecast target | declared; **§7 clock VOID since 2026-09-02**, see amendment 1.1 | `10f985f` |
 | Phase 1 (env foundation) | all seven exit criteria met | |
 | Product punch-list | empty | |
 
@@ -43,8 +43,12 @@ MAE = 0 — a property of the data wearing the shape of a result about a method.
 
 ## 3. The fact that shapes everything until February
 
-M3 cannot produce an evidential result before **2027-02-04** (h=7) or
-**2028-02-05** (h=30). Those dates come from the gate's own constants —
+M3 cannot produce an evidential result before a date that **is currently
+unknown**: the clock was voided on 2026-09-02 when the production server was
+deleted for non-payment and the accumulated observations were lost with it. It
+restarts when collection resumes. The figures below were 2027-02-04 (h=7) and
+2028-02-05 (h=30) under the original clock; they come from the gate's own
+constants —
 `REQUIRED_WINDOWS = 12`, `TRAINING_DAYS = {7: 90, 30: 180}` — and no amount of
 engineering moves them.
 
@@ -62,7 +66,7 @@ gate cannot use.
 verdict of each source's latest *run* — it catches "the ingester stopped", and
 only weakly, since `openmeteo` has no declared `max_vintage_hours`. It does not
 see a day where 18 of 24 hourly observations arrived. That is the thing that
-moves 2027-02-04, and it is invisible in the instrument this file's author
+moves the evidential date, and it is invisible in the instrument this file's author
 previously said covered it.
 
 What would cover it is a per-day, per-point count against the 19-of-24 rule.
@@ -118,6 +122,6 @@ Stated because each is plausible and each would cost more than it returns.
 
 ## 6. What would make this file stale
 
-Any of: M3 reaching 2027-02-04; the punch-list gaining an item that blocks the
+Any of: M3 reaching its evidential date; the punch-list gaining an item that blocks the
 product; the experiment being promoted. Each is a rewrite, not an edit, and
 this section is here so the next reader can tell.
