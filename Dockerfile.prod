@@ -83,6 +83,33 @@ COPY --chown=app:app scripts/     ./scripts/
 COPY --chown=app:app entrypoint.sh ./
 RUN chmod +x ./entrypoint.sh
 
+# The mount point for the `runtime_models` volume, created here so that Docker
+# has an owner to copy.
+#
+# Docker initialises an empty named volume from the image directory it is
+# mounted over, and that includes its ownership. When the path does not exist in
+# the image there is nothing to copy from, so the volume's root stays owned by
+# root -- while backend and scheduler run as `user: "1000:1000"`. The first
+# thing either does at import is take the activation lock:
+#
+#     PermissionError: [Errno 13] Permission denied: '/app/runtime/.model-source.lock'
+#       app/main.py:413        load_champion(recover_first=True)
+#       app/model_source.py:155  os.open(_lock_path(), os.O_CREAT | os.O_RDWR)
+#
+# gunicorn then reports "Worker failed to boot", nginx answers 502, and the
+# deployment refuses at exit 76. Measured on the first deployment carrying #191
+# to a fresh server, 2026-09-02 -- the volume is new exactly once, so this could
+# not appear until the phase 3 work first met an empty one.
+#
+# `mkdir` and not `VOLUME`: a VOLUME instruction would also declare an anonymous
+# volume for anyone running the image without compose, which is a different and
+# unwanted behaviour. The directory alone is what carries the ownership.
+#
+# It runs after `USER app`, so the directory is owned by app without a chown --
+# and a chown is not available here anyway, since this stage has already dropped
+# root.
+RUN mkdir -p /app/runtime
+
 EXPOSE 8000
 # The grace period is measured, not guessed (#50).
 #
