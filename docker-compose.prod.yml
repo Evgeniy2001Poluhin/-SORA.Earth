@@ -9,7 +9,34 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      # `-h 127.0.0.1` forces TCP, and that is the whole point of this line.
+      #
+      # Without a host, pg_isready connects over the Unix socket. During
+      # `initdb` the entrypoint runs a temporary server that listens on the
+      # socket **only** -- it logs "database system is ready to accept
+      # connections" while nothing is bound to 5432 -- then shuts it down and
+      # starts the real one. A socket-based check passes in that window, compose
+      # marks postgres healthy, `migrate` starts on `service_healthy` and
+      # connects over TCP, and alembic gets ECONNREFUSED.
+      #
+      # Measured on the first deployment to a fresh server, 2026-09-02:
+      #
+      #   20:21:38.905  temporary server: listening on Unix socket
+      #   20:21:38.917  "ready to accept connections"   <- no TCP listener yet
+      #   20:21:39.070  temporary server shutting down
+      #   20:21:39.192  real server: listening on IPv4 0.0.0.0:5432
+      #
+      # The deployment refused at exit 76 with the schema untouched, which is the
+      # right outcome and not the same as the bug being absent.
+      #
+      # A `start_period` would not fix this. It changes when the checks begin,
+      # not what they measure, and the socket-only server answers whenever it is
+      # asked. The check has to speak the transport its clients use.
+      #
+      # Only reachable with an empty volume, so it survives every deployment to a
+      # server that already has a database and appears on the one that restores
+      # from nothing -- during an incident.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -h 127.0.0.1"]
       interval: 10s
       timeout: 5s
       retries: 5
