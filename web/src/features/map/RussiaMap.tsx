@@ -4,6 +4,7 @@ import type { Feature, FeatureCollection, Geometry } from "geojson";
 import { useEffect, useState, useMemo } from "react";
 import "leaflet/dist/leaflet.css";
 import "./map.css";
+import { TILE_URL, TILE_ATTRIBUTION, TILE_MAX_NATIVE_ZOOM } from "./tiles";
 import { RUSSIA_REGIONS, FD_COLORS, type RussianRegion, type EnrichedRussianRegion } from "@/data/russia_regions";
 
 /** /geo/russia.geo.json keys each polygon by the same region code as RUSSIA_REGIONS. */
@@ -82,16 +83,30 @@ export default function RussiaMap({ height = 560, activeFD, search, mode, onSele
 
   return (
     <div className="map-wrap" style={{ height, position: "relative" }}>
+      {/* `maxBounds` and no `noWrap`, deliberately and not by oversight.
+          B reaches longitude 185 because Chukotka is east of the antimeridian,
+          and Leaflet serves that strip from the wrapped copy of the world --
+          `noWrap` would leave the far east as empty grey. Bounding the view
+          instead keeps the map from wandering into repeated copies, which is
+          the behaviour being fixed, without cutting off Russian territory.
+          `attributionControl` is on because OpenStreetMap's tile usage policy
+          requires visible credit. */}
       <MapContainer
         bounds={B}
         minZoom={3}
         maxZoom={10}
         scrollWheelZoom
-        attributionControl={false}
+        attributionControl
+        maxBounds={B}
+        maxBoundsViscosity={1.0}
         style={{ height: "100%", width: "100%", background: "var(--bg-1)" }}
       >
         <FitOnMount />
-        <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+        <TileLayer
+          url={TILE_URL}
+          attribution={TILE_ATTRIBUTION}
+          maxNativeZoom={TILE_MAX_NATIVE_ZOOM}
+        />
         {geo && (
           <GeoJSON key={`${mode}-${q}-${[...activeFD].join()}`} data={geo} style={geoStyle} onEachFeature={onEachFeature} />
         )}
