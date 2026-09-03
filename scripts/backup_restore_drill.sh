@@ -68,9 +68,33 @@ check "region_esg_scores rows" "$before_rows" "$after_rows"
 check "rows through the view" "$before_view" "$after_view"
 
 pg_fingerprint "$DB" > "$OUTDIR/after.fingerprint"
-if diff -u "$DUMP.fingerprint" "$OUTDIR/after.fingerprint" > "$OUTDIR/fingerprint.diff"; then
+
+# Compared after normalising CHECK constraint definitions, and nothing else.
+#
+# `pg_get_constraintdef` renders the stored parse tree; pg_dump writes that as
+# SQL and the restore re-parses it, giving an equivalent tree that prints
+# differently. Measured here on PostgreSQL 16, 2026-09-03: the array cast in
+# ck_environmental_observations_temporal_kind_known moved from the constructor
+# to each element. Nothing was lost, and a strict comparison fails on every
+# correct restore -- which is how a check ends up deleted rather than fixed.
+#
+# Only CHECK definitions are touched. Columns, indexes, row counts, the data
+# hash and the alembic revision are still compared byte for byte, and the raw
+# fingerprints are kept beside the normalised ones so the real difference is
+# always available. scripts/pg_fingerprint_normalise.py records what the
+# canonical form is blind to; tests/test_fingerprint_normalisation.py asserts it.
+NORM="${PYTHON:-python3} $(dirname "$0")/pg_fingerprint_normalise.py"
+$NORM < "$DUMP.fingerprint"        > "$OUTDIR/before.normalised"
+$NORM < "$OUTDIR/after.fingerprint" > "$OUTDIR/after.normalised"
+
+if diff -u "$OUTDIR/before.normalised" "$OUTDIR/after.normalised" > "$OUTDIR/fingerprint.diff"; then
     printf '  ok    %-34s %s\n' "fingerprint identical" \
         "$(wc -l < "$DUMP.fingerprint" | tr -d ' ') lines"
+    # Said out loud when it happens, so "identical" is never read as "byte for
+    # byte" on a run where it was not.
+    if ! diff -q "$DUMP.fingerprint" "$OUTDIR/after.fingerprint" >/dev/null; then
+        printf '        %s\n' "(CHECK constraints re-rendered by the restore; see raw fingerprints)"
+    fi
 else
     printf '  FAIL  %-34s see %s\n' "fingerprint differs" "$OUTDIR/fingerprint.diff"
     head -40 "$OUTDIR/fingerprint.diff"
