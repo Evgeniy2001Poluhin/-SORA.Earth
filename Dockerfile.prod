@@ -15,9 +15,46 @@ COPY web/package.json web/package-lock.json ./web/
 RUN cd web && npm ci
 
 COPY web/ ./web/
+
+# Without this the built site serves invented numbers.
+#
+# `web/src/api/mock.ts` decides at build time:
+#
+#     export const isMock =
+#         import.meta.env.VITE_USE_MOCK === "1" || !import.meta.env.VITE_API_BASE;
+#
+# Vite substitutes an unset variable with `undefined`, so an image built without
+# it ships `isMock === true` and eight endpoint modules -- evaluate, explain,
+# calibration, driftBaseline, history, mlops, admin, report -- answer from
+# canned data instead of the API.
+#
+# It is a switch and nothing else. `web/src/api/client.ts` hardcodes
+# `const BASE = "/api/v1"`, so this value does not route anything; setting it to
+# the same path keeps the two from reading as different claims.
+#
+# What it looked like on production, 2026-09-03: the SHAP panel drew a beige
+# rectangle captioned "SHAP Waterfall (mock)"; an ESG score of 79.5 and a
+# success probability of 87.8% were produced without the model being asked; and
+# the drift page showed "OBSERVATIONS 0 / NO BASELINE" beside "BASELINE 734
+# samples / 7 feats" and 100% drift on four features -- the real API and the
+# mock answering in the same view.
+#
+# The regression arrived with the move described above. The hand-built bundle
+# was made in an environment that had the variable; the in-image build was not
+# given it, and nothing failed loudly, because a mock is a working page.
+ENV VITE_API_BASE=/api/v1
+
 # vite.config.ts points outDir at ../app/static/spa, so the bundle lands in
 # /src/app/static/spa.
 RUN cd web && npm run build
+
+# The build is not allowed to be a mock. Vite inlines the flag, so the evidence
+# is in the output and this reads it there rather than trusting the ENV above to
+# have had the intended effect.
+RUN if grep -rqF 'SHAP Waterfall (mock)' /src/app/static/spa/assets/; then \
+        echo "FATAL: the SPA bundle contains mock payloads; VITE_API_BASE did not reach the build" >&2; \
+        exit 1; \
+    fi
 
 # Stage 1: builder
 FROM python:3.11-slim AS builder
