@@ -1,0 +1,24 @@
+[Unit]
+Description=SORA local backup freshness check
+Documentation=https://github.com/Evgeniy2001Poluhin/-SORA.Earth/issues/51
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sora_earth_ai_platform/scripts/backup_age_check.sh
+
+Environment=BACKUP_DIR=/var/backups/sora
+Environment=DB_NAME=sora_earth
+# Daily schedule plus two hours of slack. Tighter pages on a slow run; looser
+# lets a stopped schedule sit unnoticed for another day.
+Environment=MAX_AGE_HOURS=26
+
+# The unit is the alert. It fails, systemd records it failed, and
+# `systemctl --failed` shows it -- so a stopped backup is visible without any
+# external delivery configured. Set BACKUP_ALERT_HOOK when there is somewhere
+# to send it.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
