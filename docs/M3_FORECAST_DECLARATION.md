@@ -1,8 +1,9 @@
 # M3 — forecast target declaration (preregistration)
 
-    version              1.0
+    version              1.1
     declared             2026-08-14
-    clock start (§7)     the merge commit of this file
+    amended              2026-09-02  (see "Amendment 1.1" below)
+    clock start (§7)     VOID — pending restart, see Amendment 1.1
     supersedes           nothing
     amendable            only by a numbered version with a date and a reason
 
@@ -104,6 +105,57 @@ The gate is `REQUIRED_WINDOWS = 12` with `TRAINING_DAYS = {7: 90, 30: 180}`, so:
 
 No amount of engineering moves those dates, and no result assembled earlier is
 evidential.
+
+---
+
+## Amendment 1.1 — the clock is void and restarts
+
+**Date:** 2026-09-02. **Reason:** total loss of the accumulated observations.
+
+The production server was suspended for non-payment on or about 2026-08-16 and
+the service was then deleted. Aeza confirmed on 2026-09-02 that deleted services
+cannot be restored. `environmental_observations` is gone, and hourly readings
+cannot be re-fetched because the hours have passed.
+
+### What this costs, measured rather than estimated
+
+The clock started 2026-08-14 and collection stopped on or about 2026-08-16, so
+**about two days** of qualifying observations existed. No window was completed,
+no backtest was run, and nothing was known about how the target behaves. There
+is no result this amendment could be a choice of, which is the condition M2's §9
+exists to protect and the reason this amendment is legitimate at all.
+
+### What does not change
+
+The target, the horizons, the coverage rule and the gate constants stay exactly
+as preregistered in v1.0. `REQUIRED_WINDOWS = 12` and
+`TRAINING_DAYS = {7: 90, 30: 180}` are untouched. **Only the clock moves, and
+only because the data is physically absent.**
+
+An amendment that also relaxed a threshold would be indistinguishable from one
+that gained an advantage from the outage. This one may be checked against the
+diff: nothing but the clock is edited.
+
+### When the new clock starts
+
+At the **first day on the restored deployment that meets the coverage rule in
+§3** — at least 80% of the expected hourly observations. Not at the date the
+server is created, not at the first row written, and not chosen afterwards.
+
+That date is **not stated here because it has not happened yet.** It will be
+entered by measurement once collection has resumed, in a numbered amendment
+1.2. Until then the earliest evidential dates are unknown, and any figure quoted
+for them is wrong.
+
+`tests/test_development_roadmap_dates.py` enforces that: while the clock is
+void, the roadmap may not carry an evidential date at all.
+
+### What the delay is, so it is not understated later
+
+The clock previously implied **2027-02-04** (h=7) and **2028-02-05** (h=30).
+Restarting moves both later by however long the outage plus the rebuild takes,
+day for day. The loss of two days of data is the small part; the outage is the
+large one.
 
 ## 5. What this declaration does not do
 

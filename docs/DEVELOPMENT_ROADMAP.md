@@ -139,15 +139,24 @@ must be recorded under a canonical run to be aggregatable at all.
 
 | Result | Not before | Condition |
 |---|---|---|
-| M3, horizon 7 | **2027-02-04** | 12 admissible windows and sufficient coverage |
-| M3, horizon 30 | **2028-02-05** | The required long history |
+| M3, horizon 7 | **unknown — the clock is void** | collection must resume first |
+| M3, horizon 30 | **unknown — the clock is void** | collection must resume first |
 | Any claim of beating a baseline | after the corresponding backtest | Rolling-origin, CI and regional slices |
 | Crisis warning quality | after an event-labelled benchmark | Real events, negatives and lead time |
 | Specialist assessment | after UAT | 5–10 specialists, 30–50 scenarios |
 
-Both dates are `TRAINING_DAYS[h] + REQUIRED_WINDOWS × h` days from the M3 clock
-start of 2026-08-14, with the constants in
-`app/services/forecasting/entry_conditions.py`. **Every day below 80% coverage
+Both dates would be `TRAINING_DAYS[h] + REQUIRED_WINDOWS × h` days from the M3
+clock start, with the constants in
+`app/services/forecasting/entry_conditions.py`. **There is no clock start right
+now.** Amendment 1.1 of `docs/M3_FORECAST_DECLARATION.md` voided it on
+2026-09-02: the production server was deleted for non-payment and the
+accumulated observations went with it, so nothing has begun that a date could be
+counted from. It restarts at the first day on the restored deployment meeting
+the 80% coverage rule, entered by measurement in amendment 1.2.
+
+The figures the original clock implied are recorded in that amendment and are
+deliberately not repeated here. A date in a plan reads as a target however it is
+captioned, and these are no longer derivable from anything. **Every day below 80% coverage
 moves them further out.** No effort brings them closer.
 
 ## Deferred until a measured need exists
