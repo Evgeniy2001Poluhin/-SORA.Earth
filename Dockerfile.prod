@@ -42,7 +42,14 @@ COPY web/ ./web/
 # The regression arrived with the move described above. The hand-built bundle
 # was made in an environment that had the variable; the in-image build was not
 # given it, and nothing failed loudly, because a mock is a working page.
-ENV VITE_API_BASE=/api/v1
+# An ARG with a default rather than a bare ENV, so CI can build this stage a
+# second time with it emptied and prove the guard below actually rejects a mock
+# bundle. A check nobody has watched fail is a claim, not a check.
+#
+# Overridable is not a hole: emptying it makes the build fail, which is the
+# whole point of the step after `npm run build`.
+ARG VITE_API_BASE=/api/v1
+ENV VITE_API_BASE=${VITE_API_BASE}
 
 # vite.config.ts points outDir at ../app/static/spa, so the bundle lands in
 # /src/app/static/spa.
@@ -60,10 +67,23 @@ RUN cd web && npm run build
 #
 # The .map files are what a debugger reads and are never executed; the .js files
 # are what runs, and they are what this asks about.
-RUN if grep -rqF --include='*.js' 'SHAP Waterfall (mock)' /src/app/static/spa/assets/; then \
-        echo "FATAL: the SPA bundle contains mock payloads; VITE_API_BASE did not reach the build" >&2; \
-        exit 1; \
-    fi
+# Several markers, not one. Grepping for a single string is a check against one
+# example: the first version looked only for the SHAP placeholder and would have
+# passed a bundle still carrying the fabricated PDF report, which says
+# "Score: 72.3 / 100" over a real timestamp and is handed to the user as a file.
+#
+#   (mock)        -- the convention every user-visible placeholder follows
+#   mockEvaluate  -- the generator itself; it invents scores with Math.random()
+#
+# Measured on a correct build: none of these appear in any .js, and all of them
+# appear when VITE_API_BASE is emptied.
+RUN for marker in '(mock)' 'mockEvaluate'; do \
+        if grep -rqF --include='*.js' "$marker" /src/app/static/spa/assets/; then \
+            echo "FATAL: the SPA bundle contains mock payloads (found: $marker);" >&2; \
+            echo "       VITE_API_BASE did not reach the build." >&2; \
+            exit 1; \
+        fi; \
+    done
 
 # Stage 1: builder
 FROM python:3.11-slim AS builder

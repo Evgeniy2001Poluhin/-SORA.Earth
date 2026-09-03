@@ -67,9 +67,25 @@ def is_mock_expression(mock_flag_source):
     return match.group(1)
 
 
+def _instructions_only(text):
+    """The Dockerfile without its comments.
+
+    Everything here splits on instruction text, and a comment is not an
+    instruction. The first version of this file did not strip them, and the
+    explanation written above the ARG -- which mentions "the step after
+    `npm run build`" -- became the first match, so the parse cut the stage in
+    half and the test failed on a Dockerfile that was entirely correct.
+
+    The same mistake, in the same session, as a frontend test that found the
+    word `noWrap` in a comment saying why `noWrap` must not be used.
+    """
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#"))
+
+
 def spa_stage(dockerfile):
     """The build stage that compiles the frontend, found by its FROM line."""
-    stages = re.split(r"^FROM ", dockerfile, flags=re.M)
+    stages = re.split(r"^FROM ", _instructions_only(dockerfile), flags=re.M)
     for stage in stages:
         if "npm run build" in stage:
             return stage
@@ -146,6 +162,17 @@ def test_the_build_refuses_to_emit_a_mock_payload(dockerfile):
     # VITE_API_BASE set: the mock string appears in one `.js.map` and in no
     # `.js`. An unrestricted grep therefore rejects a build that is entirely
     # right — the first version of this check did exactly that.
+    # More than one marker. A grep for a single string checks one example: the
+    # first version looked only for the SHAP placeholder and would have passed a
+    # bundle still carrying the fabricated PDF report, which reads
+    # "Score: 72.3 / 100" over a real timestamp and is handed to the user as a
+    # file that outlives the page it came from.
+    markers = re.findall(r"'\(mock\)'|'mockEvaluate'", after_build)
+    assert len(set(markers)) >= 2, (
+        f"the post-build guard looks for {sorted(set(markers)) or 'nothing'}. "
+        "One marker is a check against one example; the placeholders follow a "
+        "convention and the generator has a name, and both are cheap to look for."
+    )
     assert "--include='*.js'" in after_build or '--include="*.js"' in after_build, (
         "the post-build grep is not restricted to *.js. Source maps contain the "
         "removed branch verbatim, so it will fail correct builds — and a check "

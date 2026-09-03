@@ -172,6 +172,45 @@ jobs:
       - name: Build
         run: npm run build
 
+  # `npm run build` above is not the deployment's build. It runs with whatever
+  # environment the runner happens to have, which is none of the build args the
+  # image is made with -- so it compiles a *mock* bundle and passes, while the
+  # thing that ships is built differently and guarded differently.
+  #
+  # This builds the deployment's own `spa` stage out of Dockerfile.prod, with
+  # its ARG defaults, and so exercises both the VITE_API_BASE default and the
+  # post-build guard that greps the emitted bundle. `--target spa` stops before
+  # the runtime stage, which installs torch and takes minutes.
+  production-spa-build:
+    name: production-spa-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Build the SPA stage exactly as the deployment does
+        run: docker build --target spa -f Dockerfile.prod -t sora-spa:ci .
+
+      # The negative control. Without it the step above only shows that the
+      # build succeeds, which it would do just as happily if the guard were
+      # deleted -- and a guard nobody has watched fail is a claim, not a check.
+      #
+      # Emptying VITE_API_BASE puts `isMock` back to true, so the bundle regains
+      # its mock payloads and the guard must reject it. A success here is the
+      # failure.
+      - name: Emptying VITE_API_BASE must fail the build
+        run: |
+          if docker build --target spa -f Dockerfile.prod \
+               --build-arg VITE_API_BASE= -t sora-spa:mock-probe . ; then
+            echo "FAILED: the image built with mocks enabled; the guard in" >&2
+            echo "        Dockerfile.prod did not reject the bundle." >&2
+            exit 1
+          fi
+          echo "the guard rejected the mock build, as it must"
+
   environmental-postgres-tests:
     runs-on: ubuntu-latest
     # 10 was right when this job ran one test file. It now also runs the schema
@@ -1005,6 +1044,7 @@ jobs:
       - integration-tests
       - shell-scripts
       - frontend-checks
+      - production-spa-build
     steps:
       - name: Every job must have succeeded
         env:
