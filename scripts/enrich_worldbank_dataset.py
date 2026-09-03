@@ -12,7 +12,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -466,7 +466,7 @@ def main():
         manifest_path,
         source_url="https://search.worldbank.org/api/v2/projects",
         query_params={"max_projects": args.max_projects},
-        fetch_timestamp=datetime.utcnow().isoformat() + "Z",
+        fetch_timestamp=datetime.now(timezone.utc).isoformat(),
         commit_sha=_git_commit_sha(),
         stage_counts=[
             StageCounts("wb_fetched_raw", len(wb_projects)),

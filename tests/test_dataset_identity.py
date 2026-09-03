@@ -160,3 +160,30 @@ class TestSchemaHashDetectsDrift:
         # Column order is part of the CSV's contract for any positional
         # reader; a silent reorder should be visible in the manifest.
         assert di.schema_hash(["a", "b"]) != di.schema_hash(["b", "a"])
+
+
+class TestFetchTimestampIsTimezoneAware:
+    """Both pipelines must produce a fetch_timestamp with an explicit UTC
+    offset -- not a naive datetime.utcnow() with a hand-appended "Z" string,
+    which is not the same guarantee and is deprecated in modern Python.
+
+    Imports each script's main() source and inspects the literal call rather
+    than running main() itself, which would need a live API and pandas I/O
+    this test file does not otherwise depend on.
+    """
+
+    def _main_source(self, module_name):
+        import inspect
+        import importlib
+        mod = importlib.import_module(module_name)
+        return inspect.getsource(mod.main)
+
+    def test_fetch_wb_projects_uses_timezone_aware_now(self):
+        src = self._main_source("fetch_wb_projects")
+        assert "timezone.utc" in src or "_dt.timezone.utc" in src
+        assert ".utcnow()" not in src
+
+    def test_enrich_worldbank_dataset_uses_timezone_aware_now(self):
+        src = self._main_source("enrich_worldbank_dataset")
+        assert "timezone.utc" in src
+        assert ".utcnow()" not in src
