@@ -125,6 +125,74 @@ def test_the_variable_that_disables_mocks_is_set_before_the_build(is_mock_expres
         )
 
 
+def test_the_variable_has_no_production_safe_default(is_mock_expression, dockerfile):
+    """A default that works is a default that hides a mistake.
+
+    `ARG VITE_API_BASE=/api/v1` would mean a caller who forgets the build arg
+    gets a correct-looking image, and the deployment-configuration error goes
+    unreported. The value belongs in the deployment description; the Dockerfile
+    only refuses to build without it.
+    """
+    negated = re.findall(r"!\s*import\.meta\.env\.([A-Z0-9_]+)", is_mock_expression)
+    stage = spa_stage(dockerfile)
+
+    for name in negated:
+        for line in stage.splitlines():
+            m = re.match(rf"\s*ARG\s+{name}\s*=\s*(\S.*)$", line)
+            assert not m, (
+                f"Dockerfile.prod defaults {name} to {m.group(1)!r}. Omitting the "
+                f"build arg then produces an image that looks right, so a broken "
+                f"deployment configuration ships silently -- which is the class of "
+                f"failure this file exists for."
+            )
+
+
+def test_missing_and_empty_are_refused_before_the_build(is_mock_expression, dockerfile):
+    """Unset, empty and whitespace-only must behave identically: fail closed."""
+    stage = spa_stage(dockerfile)
+    before_build = stage.split("npm run build")[0]
+
+    assert "tr -d '[:space:]'" in before_build or "tr -d \"[:space:]\"" in before_build, (
+        "nothing strips whitespace before testing the variable, so `--build-arg "
+        "VITE_API_BASE='   '` would be accepted as a value and the frontend "
+        "would be built with mocks on"
+    )
+    assert "exit 1" in before_build, (
+        "the pre-build check does not stop the build"
+    )
+
+
+def test_the_deployment_supplies_the_value(is_mock_expression):
+    """The other end of the contract: something has to pass it.
+
+    With no default in the Dockerfile, a deployment that does not set the build
+    arg cannot produce an image at all. That is the intended behaviour, and this
+    asserts the deployment does set it -- otherwise the fix reads as correct and
+    production simply stops building.
+    """
+    yaml = pytest.importorskip("yaml")
+    compose = yaml.safe_load(
+        (REPO / "docker-compose.prod.yml").read_text(encoding="utf-8"))
+
+    built = {n: s for n, s in (compose.get("services") or {}).items()
+             if (s or {}).get("build")}
+    assert built, "no service in docker-compose.prod.yml builds an image"
+
+    negated = re.findall(r"!\s*import\.meta\.env\.([A-Z0-9_]+)", is_mock_expression)
+    for name, service in built.items():
+        args = (service["build"].get("args") or {})
+        if isinstance(args, list):
+            args = dict(a.split("=", 1) for a in args if "=" in a)
+        for var in negated:
+            value = args.get(var)
+            assert value and str(value).strip(), (
+                f"{name}'s build in docker-compose.prod.yml passes no {var}. "
+                f"Dockerfile.prod has no default for it, so this build cannot "
+                f"succeed -- production would stop building rather than ship a "
+                f"mock, which is the right failure but still a failure."
+            )
+
+
 def test_the_explicit_mock_switch_is_not_turned_on(is_mock_expression, dockerfile):
     """The other half of the expression: `X === "1"` forces mocks on."""
     forced = re.findall(

@@ -94,6 +94,14 @@ services:
       context: .
       dockerfile: Dockerfile.prod
       target: runtime
+      args:
+        # Not a URL the app routes with -- web/src/api/client.ts hardcodes the
+        # path. It is the switch that decides whether the built frontend talks
+        # to the API at all: web/src/api/mock.ts turns eight endpoint modules
+        # into canned data when it is unset, and Dockerfile.prod declares it
+        # without a default so a build that omits it stops rather than shipping
+        # a convincing mock.
+        VITE_API_BASE: /api/v1
     restart: unless-stopped
     environment:
       WORKERS: "4"

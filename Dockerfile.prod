@@ -29,8 +29,8 @@ COPY web/ ./web/
 # canned data instead of the API.
 #
 # It is a switch and nothing else. `web/src/api/client.ts` hardcodes
-# `const BASE = "/api/v1"`, so this value does not route anything; setting it to
-# the same path keeps the two from reading as different claims.
+# `const BASE = "/api/v1"`, so this value routes nothing; the deployment sets it
+# to the same path so the two do not read as competing claims.
 #
 # What it looked like on production, 2026-09-03: the SHAP panel drew a beige
 # rectangle captioned "SHAP Waterfall (mock)"; an ESG score of 79.5 and a
@@ -42,14 +42,37 @@ COPY web/ ./web/
 # The regression arrived with the move described above. The hand-built bundle
 # was made in an environment that had the variable; the in-image build was not
 # given it, and nothing failed loudly, because a mock is a working page.
-# An ARG with a default rather than a bare ENV, so CI can build this stage a
-# second time with it emptied and prove the guard below actually rejects a mock
-# bundle. A check nobody has watched fail is a claim, not a check.
 #
-# Overridable is not a hole: emptying it makes the build fail, which is the
-# whole point of the step after `npm run build`.
-ARG VITE_API_BASE=/api/v1
+# ---
+#
+# Declared with **no default**, on purpose.
+#
+# A default of `/api/v1` here would be production-safe and that is the problem:
+# a caller who forgets to pass the argument gets a correct-looking image, and the
+# deployment-configuration mistake is hidden rather than reported. The value
+# belongs in the deployment description, so `docker-compose.prod.yml` sets it
+# under `backend.build.args` where it can be read, and a build that does not
+# supply it stops here.
+#
+# Missing and empty must behave identically -- fail closed -- so the check below
+# rejects unset, empty and whitespace-only alike.
+ARG VITE_API_BASE
 ENV VITE_API_BASE=${VITE_API_BASE}
+
+# The other half of the isMock expression, exposed only so CI can turn mocks on
+# deliberately and watch the guard after `npm run build` reject the result.
+# Nothing sets it in normal use, and a build that does still fails -- which is
+# the property being demonstrated, not a way around it.
+ARG VITE_USE_MOCK
+ENV VITE_USE_MOCK=${VITE_USE_MOCK}
+
+RUN if [ -z "$(printf '%s' "$VITE_API_BASE" | tr -d '[:space:]')" ]; then \
+        echo "FATAL: VITE_API_BASE is unset, empty or whitespace." >&2; \
+        echo "       web/src/api/mock.ts turns the whole frontend into canned" >&2; \
+        echo "       data when it is absent. Pass it as a build arg; the" >&2; \
+        echo "       deployment does so in docker-compose.prod.yml." >&2; \
+        exit 1; \
+    fi
 
 # vite.config.ts points outDir at ../app/static/spa, so the bundle lands in
 # /src/app/static/spa.
@@ -67,6 +90,7 @@ RUN cd web && npm run build
 #
 # The .map files are what a debugger reads and are never executed; the .js files
 # are what runs, and they are what this asks about.
+#
 # Several markers, not one. Grepping for a single string is a check against one
 # example: the first version looked only for the SHAP placeholder and would have
 # passed a bundle still carrying the fabricated PDF report, which says
@@ -75,8 +99,8 @@ RUN cd web && npm run build
 #   (mock)        -- the convention every user-visible placeholder follows
 #   mockEvaluate  -- the generator itself; it invents scores with Math.random()
 #
-# Measured on a correct build: none of these appear in any .js, and all of them
-# appear when VITE_API_BASE is emptied.
+# Measured on a correct build: none of these appear in any .js; building with
+# VITE_USE_MOCK=1 puts them back, which is how CI proves this step can fail.
 RUN for marker in '(mock)' 'mockEvaluate'; do \
         if grep -rqF --include='*.js' "$marker" /src/app/static/spa/assets/; then \
             echo "FATAL: the SPA bundle contains mock payloads (found: $marker);" >&2; \

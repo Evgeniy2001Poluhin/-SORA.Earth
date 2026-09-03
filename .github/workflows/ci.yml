@@ -191,25 +191,90 @@ jobs:
           ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
 
-      - name: Build the SPA stage exactly as the deployment does
-        run: docker build --target spa -f Dockerfile.prod -t sora-spa:ci .
-
-      # The negative control. Without it the step above only shows that the
-      # build succeeds, which it would do just as happily if the guard were
-      # deleted -- and a guard nobody has watched fail is a claim, not a check.
-      #
-      # Emptying VITE_API_BASE puts `isMock` back to true, so the bundle regains
-      # its mock payloads and the guard must reject it. A success here is the
-      # failure.
-      - name: Emptying VITE_API_BASE must fail the build
+      # The build args come from the deployment description, not from this file,
+      # so a divergence between the two shows up here rather than at deploy time.
+      - name: Read the build args the deployment uses
+        id: args
         run: |
-          if docker build --target spa -f Dockerfile.prod \
-               --build-arg VITE_API_BASE= -t sora-spa:mock-probe . ; then
-            echo "FAILED: the image built with mocks enabled; the guard in" >&2
-            echo "        Dockerfile.prod did not reject the bundle." >&2
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import yaml
+          args = (yaml.safe_load(open("docker-compose.prod.yml"))
+                  ["services"]["backend"]["build"].get("args") or {})
+          value = args.get("VITE_API_BASE")
+          assert value, "docker-compose.prod.yml sets no VITE_API_BASE build arg"
+          print(f"vite_api_base={value}")
+          PY
+
+      - name: Build the SPA stage exactly as the deployment does
+        run: |
+          docker build --target spa -f Dockerfile.prod \
+            --build-arg VITE_API_BASE='${{ steps.args.outputs.vite_api_base }}' \
+            -t sora-spa:ci .
+
+      # Two negative controls, and they must fail for *different* reasons.
+      #
+      # `! docker build ...` on its own is not a control: it passes on a network
+      # error, a full disk or a Dockerfile typo. Each check below therefore
+      # requires a non-zero exit **and** the specific sentinel from the step it
+      # is meant to exercise, and fails if the build succeeded or if it failed
+      # somewhere else.
+      - name: Omitting VITE_API_BASE must fail closed
+        run: |
+          set +e
+          docker build --target spa -f Dockerfile.prod -t sora-spa:no-arg . > build.log 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "FAILED: the image built with no VITE_API_BASE at all." >&2
             exit 1
           fi
-          echo "the guard rejected the mock build, as it must"
+          if ! grep -qF 'FATAL: VITE_API_BASE is unset, empty or whitespace.' build.log; then
+            echo "FAILED: the build failed (exit $rc) but not for the expected reason." >&2
+            tail -40 build.log >&2
+            exit 1
+          fi
+          echo "unset VITE_API_BASE was refused, with the expected message"
+
+      - name: A whitespace-only VITE_API_BASE must fail closed too
+        run: |
+          set +e
+          docker build --target spa -f Dockerfile.prod \
+            --build-arg VITE_API_BASE='   ' -t sora-spa:blank . > build2.log 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "FAILED: whitespace was accepted as a value." >&2
+            exit 1
+          fi
+          if ! grep -qF 'FATAL: VITE_API_BASE is unset, empty or whitespace.' build2.log; then
+            echo "FAILED: the build failed (exit $rc) but not for the expected reason." >&2
+            tail -40 build2.log >&2
+            exit 1
+          fi
+          echo "whitespace was refused, with the expected message"
+
+      # The one that exercises the post-build grep rather than the pre-build
+      # check: a valid VITE_API_BASE with mocks forced on. Without this the grep
+      # is never executed against a bundle that actually contains a mock.
+      - name: A bundle built with mocks must be rejected by the guard
+        run: |
+          set +e
+          docker build --target spa -f Dockerfile.prod \
+            --build-arg VITE_API_BASE='${{ steps.args.outputs.vite_api_base }}' \
+            --build-arg VITE_USE_MOCK=1 -t sora-spa:mock-probe . > build3.log 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "FAILED: a mock bundle built successfully; the guard after" >&2
+            echo "        npm run build did not reject it." >&2
+            exit 1
+          fi
+          if ! grep -qF 'FATAL: the SPA bundle contains mock payloads' build3.log; then
+            echo "FAILED: the build failed (exit $rc) but not at the mock guard." >&2
+            tail -40 build3.log >&2
+            exit 1
+          fi
+          echo "the guard rejected the mock bundle, as it must"
 
   environmental-postgres-tests:
     runs-on: ubuntu-latest
