@@ -12,12 +12,17 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import pandas as pd
 import requests
 from tqdm import tqdm
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from dataset_identity import (  # noqa: E402
+    StageCounts, assert_unique_keys, project_key, write_manifest,
+)
 
 
 # World Bank API endpoints
@@ -311,8 +316,16 @@ def map_wb_project_to_schema(project: Dict, gdp_cache: Dict[str, float]) -> Opti
         else:
             category = "Other"
 
+        # source_project_id and the identity scheme are shared with
+        # fetch_wb_projects.py via dataset_identity.py, so a row written by
+        # either script means the same thing to anything reading either
+        # output. "source" is lowercased to "worldbank" to match
+        # fetch_wb_projects.py -- project_key() is case-sensitive, and a
+        # caller joining rows from both scripts must not have to normalise
+        # case first to find they refer to the same source.
         return {
             "project_id": project_id,
+            "source_project_id": str(project_id or ""),
             "project_name": project_name,
             "budget": total_amt,
             "duration_months": duration_months,
@@ -328,7 +341,7 @@ def map_wb_project_to_schema(project: Dict, gdp_cache: Dict[str, float]) -> Opti
             "rating": rating or "Not Rated",
             "sectors": sectors_str,
             "themes": themes_str,
-            "source": "WorldBank",
+            "source": "worldbank",
         }
 
     except Exception as e:
@@ -341,6 +354,9 @@ def main():
     parser.add_argument("--output", default="data/projects_enriched_wb.csv", help="Output CSV file")
     parser.add_argument("--max-projects", type=int, default=22000, help="Max projects to fetch")
     parser.add_argument("--existing", default="data/projects.csv", help="Existing projects CSV")
+    parser.add_argument("--raw-output", default=None,
+                         help="path to save the raw, unfiltered API response before mapping "
+                         "(default: <output>.raw.json)")
     args = parser.parse_args()
 
     # Step 1: Fetch World Bank projects
@@ -349,6 +365,12 @@ def main():
     if not wb_projects:
         print("No projects fetched. Exiting.")
         sys.exit(1)
+
+    raw_path = args.raw_output or (args.output + ".raw.json")
+    os.makedirs(os.path.dirname(raw_path) or ".", exist_ok=True)
+    with open(raw_path, "w", encoding="utf-8") as _raw_f:
+        json.dump(wb_projects, _raw_f)
+    print(f"Saved {len(wb_projects)} raw API records -> {raw_path}")
 
     # Step 2: Map to our schema
     print(f"\nMapping {len(wb_projects)} projects to schema...")
@@ -379,17 +401,46 @@ def main():
         print(f"\nNo existing dataset at {args.existing}, using only World Bank data")
         combined_df = pd.DataFrame(mapped_projects)
 
-    # Step 4: Remove duplicates (if project_id exists)
-    print(f"\nTotal projects before deduplication: {len(combined_df)}")
-    if "project_id" in combined_df.columns:
-        # Remove rows with missing project_id first, then deduplicate
-        combined_df = combined_df[combined_df["project_id"].notna() & (combined_df["project_id"] != "")]
-        combined_df = combined_df.drop_duplicates(subset=["project_id"], keep="first")
+    # Step 4: Remove duplicates by composite (source, source_project_id) key.
+    #
+    # Previously: drop rows with a missing/blank project_id, then
+    # deduplicate on that column alone. Two defects in that: it never
+    # counted how many rows were dropped for having no id, and a bare
+    # project_id (not source-qualified) could collide with an id from a
+    # different source. Both are closed by scripts/dataset_identity.py.
+    before_count = len(combined_df)
+    if "source_project_id" in combined_df.columns:
+        no_id_mask = combined_df["source_project_id"].isna() | (combined_df["source_project_id"] == "")
+        no_id_count = int(no_id_mask.sum())
+        with_id_df = combined_df[~no_id_mask].copy()
+        with_id_df["_project_key"] = with_id_df.apply(
+            lambda r: project_key(r["source"], r["source_project_id"]), axis=1)
+        duplicate_count = int(with_id_df["_project_key"].duplicated(keep="first").sum())
+        with_id_df = with_id_df.drop_duplicates(subset=["_project_key"], keep="first")
+        unique_ids = with_id_df["_project_key"].nunique()
+        with_id_df = with_id_df.drop(columns=["_project_key"])
+        # Rows with no id (the pre-existing synthetic rows, whose identity
+        # was never recoverable -- see dataset_identity.synthetic_key) are
+        # kept, just not deduplicated: dropping them would delete legitimate
+        # rows over the same defect this schema exists to document, not fix
+        # retroactively.
+        combined_df = pd.concat([combined_df[no_id_mask], with_id_df], ignore_index=True)
+        print(f"  rows with no source_project_id (kept, not deduplicated): {no_id_count}")
+        print(f"  duplicate (source, source_project_id) pairs removed: {duplicate_count}")
+        print(f"  unique (source, source_project_id) keys: {unique_ids}")
+    else:
+        no_id_count = 0
+        duplicate_count = 0
+        unique_ids = 0
     print(f"Total projects after deduplication: {len(combined_df)}")
 
     # Step 5: Save
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-    combined_df.to_csv(args.output, index=False)
+    # Atomic write: a temp file, then one os.replace. A reader must
+    # never see a truncated CSV from an interrupted or concurrent run.
+    _tmp_output = args.output + ".tmp"
+    combined_df.to_csv(_tmp_output, index=False)
+    os.replace(_tmp_output, args.output)
     print(f"\n✅ Saved enriched dataset to {args.output}")
 
     # Step 6: Statistics
@@ -397,8 +448,8 @@ def main():
     print("DATASET STATISTICS")
     print("="*60)
     print(f"Total projects: {len(combined_df)}")
-    print(f"  - Original: {len(combined_df[combined_df['source'] != 'WorldBank'])}")
-    print(f"  - World Bank: {len(combined_df[combined_df['source'] == 'WorldBank'])}")
+    print(f"  - Original: {len(combined_df[combined_df['source'] != 'worldbank'])}")
+    print(f"  - World Bank: {len(combined_df[combined_df['source'] == 'worldbank'])}")
     print(f"\nSuccess rate: {combined_df['success'].mean():.2%}")
     print(f"Average budget: ${combined_df['budget'].mean():,.0f}")
     print(f"Average duration: {combined_df['duration_months'].mean():.1f} months")
@@ -408,6 +459,48 @@ def main():
     print(combined_df['country'].value_counts().head())
     print(f"\nTop 5 categories:")
     print(combined_df['category'].value_counts().head())
+
+
+    manifest_path = args.output + ".manifest.json"
+    write_manifest(
+        manifest_path,
+        source_url="https://search.worldbank.org/api/v2/projects",
+        query_params={"max_projects": args.max_projects},
+        fetch_timestamp=datetime.now(timezone.utc).isoformat(),
+        commit_sha=_git_commit_sha(),
+        stage_counts=[
+            StageCounts("wb_fetched_raw", len(wb_projects)),
+            StageCounts("wb_mapped", len(mapped_projects),
+                        reason="passed budget/duration validity checks in map_wb_project_to_schema"),
+            StageCounts("combined_before_dedup", before_count),
+            StageCounts("no_source_project_id", no_id_count,
+                        reason="kept, not deduplicated -- see dataset_identity.synthetic_key"),
+            StageCounts("duplicate_keys_removed", duplicate_count),
+            StageCounts("total_written", len(combined_df)),
+        ],
+        unique_ids=int(unique_ids),
+        duplicate_ids=int(duplicate_count),
+        columns=list(combined_df.columns),
+        output_path=args.output,
+    )
+    print(f"Wrote manifest -> {manifest_path}")
+
+
+def _git_commit_sha() -> str:
+    """Best-effort. A manifest naming 'unknown' is honest about a shallow
+    clone or dirty checkout; guessing would not be."""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode == 0:
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
 
 
 if __name__ == "__main__":

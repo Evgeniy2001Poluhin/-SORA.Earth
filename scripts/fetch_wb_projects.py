@@ -51,6 +51,12 @@ import time
 
 import requests
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from dataset_identity import (  # noqa: E402
+    MissingSourceProjectId, StageCounts, assert_unique_keys, project_key,
+    write_manifest,
+)
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 sys.path.insert(0, ROOT)  # so `app.external_data` is importable
 
@@ -346,8 +352,15 @@ def to_records(collected, gdp_map, gdp_median):
     span = (hi - lo) or 1.0
 
     records = []
+    skipped_no_id = 0
     for (row, budget), lb in zip(collected, log_budgets):
-        pid = str(row.get("id") or "")
+        pid = str(row.get("id") or "").strip()
+        # No source_project_id, no row. A row that cannot be deduplicated
+        # against a future fetch is exactly the defect this schema closes;
+        # letting it through with an empty id would reproduce it immediately.
+        if not pid:
+            skipped_no_id += 1
+            continue
         social = round(40.0 + 55.0 * ((lb - lo) / span), 1)  # 40..95 proxy
         board = parse_wb_date(row.get("boardapprovaldate"))
         closing = parse_wb_date(row.get("closingdate"))
@@ -365,14 +378,19 @@ def to_records(collected, gdp_map, gdp_median):
             "success": map_success(row.get("status"), closing, budget, disb),
             "name": (row.get("project_name") or "").strip().replace("\n", " "),
             "source": "worldbank",
+            "source_project_id": pid,
         })
-    return records
+    if skipped_no_id:
+        print(f"Skipped {skipped_no_id} World Bank row(s) with no project id "
+              f"(cannot be deduplicated; not written to output)")
+    return records, skipped_no_id
 
 
 # --- combine + write ------------------------------------------------------
 
 COLUMNS = ["budget", "co2_reduction", "social_impact", "duration_months",
-           "category", "region", "country_gdp_per_capita", "success", "name", "source"]
+           "category", "region", "country_gdp_per_capita", "success", "name", "source",
+           "source_project_id"]
 
 
 def load_synthetic(path, gdp_median):
@@ -383,6 +401,10 @@ def load_synthetic(path, gdp_median):
         for r in csv.DictReader(f):
             row = {c: r.get(c, "") for c in COLUMNS}
             row["source"] = "synthetic"
+            # No generator-issued id was ever recorded for these rows, and
+            # none is invented here -- see dataset_identity.synthetic_key.
+            # An explicit empty string, not the column simply being absent.
+            row["source_project_id"] = ""
             # synthetic rows have no country -> fill GDP with the WB median
             if not row.get("country_gdp_per_capita"):
                 row["country_gdp_per_capita"] = round(gdp_median, 2)
@@ -418,7 +440,7 @@ def main():
         collected = fetch_all(session)
 
     gdp_map, gdp_median = build_gdp_lookup([r for r, _ in collected], session)
-    wb_records = to_records(collected, gdp_map, gdp_median)
+    wb_records, skipped_no_id_total = to_records(collected, gdp_map, gdp_median)
     print(f"Mapped {len(wb_records)} World Bank rows.")
 
     # Persist a country -> GDP lookup so serving (make_features_v2) can supply
@@ -444,11 +466,27 @@ def main():
         rows.extend(synth)
     rows.extend(wb_records)
 
+    # Uniqueness is checked over World Bank rows only: synthetic rows all
+    # carry the same empty source_project_id by design (no generator-issued
+    # id exists to be unique), and project_key() refuses an empty id before
+    # this point is ever reached for them.
+    wb_keys = [project_key(r["source"], r["source_project_id"]) for r in wb_records]
+    duplicate_count = len(wb_keys) - len(set(wb_keys))
+    if duplicate_count:
+        assert_unique_keys(wb_keys)  # raises, naming the first duplicate
+
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    with open(args.out, "w", newline="") as f:
+    # Atomic write: a temp file in the same directory, then one os.replace.
+    # A reader that opens args.out mid-write (this script crashing partway
+    # through, or a concurrent run) must never see a truncated CSV.
+    tmp_out = args.out + ".tmp"
+    with open(tmp_out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=COLUMNS)
         w.writeheader()
         w.writerows(rows)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_out, args.out)
 
     n_wb_success = sum(r["success"] for r in wb_records)
     print(f"\nWrote {len(rows)} rows -> {os.path.relpath(args.out, ROOT)}")
@@ -462,6 +500,49 @@ def main():
         gdps = [r["country_gdp_per_capita"] for r in wb_records]
         print(f"  GDP/capita: min={min(gdps):.0f} max={max(gdps):.0f} "
               f"mean={sum(gdps)/len(gdps):.0f} (median fill={gdp_median:.0f})")
+
+    manifest_path = args.out + ".manifest.json"
+    write_manifest(
+        manifest_path,
+        source_url="https://search.worldbank.org/api/v2/projects",
+        query_params={"sector": FQ or None, "min": args.min or None,
+                      "no_combine": args.no_combine},
+        fetch_timestamp=_dt.datetime.now(_dt.timezone.utc).isoformat(),
+        commit_sha=_git_commit_sha(),
+        stage_counts=[
+            StageCounts("wb_fetched", len(collected)),
+            StageCounts("wb_mapped_with_id", len(wb_records),
+                        reason="rows with a non-empty World Bank project id"),
+            StageCounts("wb_skipped_no_id", skipped_no_id_total,
+                        reason="World Bank row had no project id; not written"),
+            StageCounts("synthetic_rows", len(rows) - len(wb_records)),
+            StageCounts("total_written", len(rows)),
+        ],
+        unique_ids=len(set(wb_keys)),
+        duplicate_ids=duplicate_count,
+        columns=COLUMNS,
+        output_path=args.out,
+    )
+    print(f"Wrote manifest -> {os.path.relpath(manifest_path, ROOT)}")
+
+
+def _git_commit_sha() -> str:
+    """The commit this run's code came from, best-effort.
+
+    A manifest naming "unknown" is honest about a shallow clone or a
+    dirty checkout; guessing would not be.
+    """
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT,
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode == 0:
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
 
 
 if __name__ == "__main__":
