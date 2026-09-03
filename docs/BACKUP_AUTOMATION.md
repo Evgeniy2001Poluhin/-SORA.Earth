@@ -124,6 +124,29 @@ owned by the service user on start and removes it on stop.
 records a skipped run as a failed unit, and a benign overlap pages somebody — the
 same outcome the `LOCK_SKIP` flag prevents one layer down.
 
+## When it stops running
+
+`backup_run.sh` alerts when a backup **fails**. Nothing alerted when one stops
+**happening** -- a disabled timer, a unit never enabled after a rebuild, a host
+restored without its schedule. That failure is silent by construction: no job
+runs, so no job reports, and it is discovered during a restore.
+
+    sudo install -m 0755 scripts/backup_age_check.sh /opt/sora_earth_ai_platform/scripts/
+    sudo install -m 0644 infra/systemd/sora-backup-age.service /etc/systemd/system/
+    sudo install -m 0644 infra/systemd/sora-backup-age.timer   /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now sora-backup-age.timer
+
+It runs at 07:30 UTC, four hours after the dump, so a slow run has finished and
+only a run that did not happen is reported. The unit failing **is** the alert:
+`systemctl --failed` shows it without any delivery configured. Set
+`BACKUP_ALERT_HOOK` when there is somewhere to send it.
+
+An empty directory fails, and this is the case the check exists for: "the newest
+dump is older than N hours" over zero dumps has no newest, and the obvious
+spelling of it compares an empty string and reports healthy. The count is
+checked before the age and printed either way.
+
 Checking that it is actually running, which is the M0 criterion:
 
 ```bash

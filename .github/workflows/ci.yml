@@ -547,6 +547,12 @@ jobs:
       - name: Behavioural tests for the daily local backup
         run: bash tests/test_backup_local_daily.sh
 
+      # Listed by name because this job runs shell tests one at a time; a file
+      # that is not named here runs nowhere. Found before by
+      # tests/test_postgres_files_are_wired_into_ci.py, for the same reason.
+      - name: Behavioural tests for the backup freshness check
+        run: bash tests/test_backup_age_check.sh
+
       # The guard is almost entirely refusals, so the tests are almost entirely
       # refusals: a wrong branch, an unmerged rollback target, a container the
       # compose file does not declare, a port reachable off-host, a certificate

@@ -1,0 +1,15 @@
+[Unit]
+Description=Check daily that a recent SORA backup exists
+Documentation=https://github.com/Evgeniy2001Poluhin/-SORA.Earth/issues/51
+
+[Timer]
+# Four hours after the 03:30 dump, so a run that is merely slow has finished
+# and only a run that did not happen is reported.
+OnCalendar=*-*-* 07:30:00 UTC
+
+# Catches up after a reboot: the question is whether a backup exists, and it is
+# worth asking late rather than not at all.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
