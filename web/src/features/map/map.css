@@ -67,6 +67,36 @@
   background: #0a0c0e;
 }
 
+/* OpenStreetMap ships light tiles; the design wants a dark canvas, and said so
+   above. Inverting the tile pane gives one without an API key.
+
+   CARTO's dark_all basemap was used until it began stamping
+   "API KEY REQUIRED" diagonally across every tile served without one. No key
+   was ever configured here, so both maps were delivered covered in watermarks.
+
+   Scoped to `.leaflet-tile-pane` on purpose. Leaflet keeps markers, tooltips,
+   popups and controls in sibling panes, so none of them are inverted — put this
+   on `.leaflet-container` instead and every marker colour flips, which is how
+   this trick usually goes wrong.
+
+   `hue-rotate(180deg)` after `invert(1)` restores hues the inversion reversed:
+   without it water comes out orange. */
+.leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) grayscale(0.75) brightness(0.85) contrast(1.05);
+}
+
+/* Attribution is required by OSM's tile usage policy, so it is made
+   unobtrusive rather than hidden. */
+.leaflet-control-attribution {
+  background: rgba(10, 12, 14, 0.72) !important;
+  color: var(--muted, #8b949e) !important;
+  font-size: 10px !important;
+  padding: 1px 6px !important;
+}
+.leaflet-control-attribution a {
+  color: var(--muted, #8b949e) !important;
+}
+
 /* ===== Zoom control: theme-aware via tokens ===== */
 .leaflet-control-zoom {
   margin: 12px !important;
