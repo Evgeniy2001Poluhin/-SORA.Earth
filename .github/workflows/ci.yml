@@ -762,6 +762,26 @@ jobs:
           docker ps -aq --filter 'name=sora-backup-it-' | xargs -r docker rm -f
           docker volume ls -q --filter 'name=sora-backup-it-' | xargs -r docker volume rm -f
 
+      # A dump that has never been restored through the drill is a hypothesis
+      # about the drill, not evidence it works. GAP-007 stood at PARTIAL for
+      # six weeks in exactly this shape -- the backup scripts were merged,
+      # tested and documented, and nothing scheduled them -- and
+      # scripts/backup_restore_drill.sh had the same gap one layer up: it
+      # existed and nobody had watched it pass.
+      #
+      # Runs against its own throwaway PostgreSQL, seeded by running the
+      # migrations rather than by describing the schema by hand -- the
+      # previous fixture hardcoded a shape from the server deleted
+      # 2026-08-16 and could not pass once production had migrated past it.
+      - name: The restore drill, against a real PostgreSQL migrated from nothing
+        run: bash tests/test_backup_restore_drill_integration.sh
+
+      - name: Remove any drill stand left behind
+        if: always()
+        run: |
+          docker ps -aq --filter 'name=sora-drill-it-' | xargs -r docker rm -f
+          docker volume ls -q --filter 'name=sora-drill-it-' | xargs -r docker volume rm -f
+
   # A clean database must be reachable from migrations alone. Production was
   # bootstrapped with Base.metadata.create_all(), which is not reproducible from
   # the repository, so this gate runs the chain against an empty PostgreSQL.
