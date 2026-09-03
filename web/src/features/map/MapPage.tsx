@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { MapContainer, TileLayer, CircleMarker, Tooltip } from "react-leaflet";
 import { useNavigate } from "react-router-dom";
-import type { LatLngBoundsExpression } from "leaflet";
 import "leaflet/dist/leaflet.css";
+import {
+  TILE_URL, TILE_ATTRIBUTION, TILE_MAX_NATIVE_ZOOM, WORLD_BOUNDS,
+} from "./tiles";
 import { api } from "@/api/client";
 import "./map.css";
 import { useState } from "react";
@@ -21,8 +23,6 @@ const BAND_COLOR: Record<string, string> = {
   emerging:   "#ea580c",
   lagging:    "#dc2626",
 };
-
-const WORLD_BOUNDS: LatLngBoundsExpression = [[-65, -Infinity], [82, Infinity]];
 
 const radiusByEsg = (esg: number) => 3 + (esg / 100) * 4;
 
@@ -70,19 +70,30 @@ export default function MapPage() {
       </div>
 
       <div className="map-wrap">
+        {/* `worldCopyJump` is gone with the repeating world it was there for:
+            it moves the view to the nearest copy, and `noWrap` below leaves
+            only one. `attributionControl` is on because OpenStreetMap's tile
+            usage policy requires visible credit. */}
         <MapContainer
           center={[28, 10]}
           zoom={2}
           minZoom={2}
           maxZoom={6}
           scrollWheelZoom
-          worldCopyJump
-          attributionControl={false}
+          attributionControl
           maxBounds={WORLD_BOUNDS}
           maxBoundsViscosity={1.0}
           style={{ height: 600, width: "100%", background: "var(--bg-1)" }}
         >
-          <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+          {/* `noWrap` is what stops the world repeating. Without it the tile
+              layer keeps painting copies past the bounds, while the markers
+              exist once and appear on the first copy only. */}
+          <TileLayer
+            url={TILE_URL}
+            attribution={TILE_ATTRIBUTION}
+            maxNativeZoom={TILE_MAX_NATIVE_ZOOM}
+            noWrap
+          />
 
           {/* Main markers */}
           {data.countries.map((c) => (
