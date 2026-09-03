@@ -139,6 +139,18 @@ def test_the_build_refuses_to_emit_a_mock_payload(dockerfile):
         "the post-build inspection does not fail the build; a warning in a "
         "build log is not a gate"
     )
+    # Restricted to executable output, and this is not a detail.
+    #
+    # `vite.config.ts` sets `sourcemap: true`, and a source map carries the
+    # original text of the branch Vite removed. Measured on a correct build with
+    # VITE_API_BASE set: the mock string appears in one `.js.map` and in no
+    # `.js`. An unrestricted grep therefore rejects a build that is entirely
+    # right — the first version of this check did exactly that.
+    assert "--include='*.js'" in after_build or '--include="*.js"' in after_build, (
+        "the post-build grep is not restricted to *.js. Source maps contain the "
+        "removed branch verbatim, so it will fail correct builds — and a check "
+        "that fails when nothing is wrong gets deleted rather than fixed."
+    )
 
 
 def test_the_api_base_is_not_load_bearing_for_routing(is_mock_expression):

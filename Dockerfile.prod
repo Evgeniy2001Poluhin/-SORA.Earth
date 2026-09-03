@@ -51,7 +51,16 @@ RUN cd web && npm run build
 # The build is not allowed to be a mock. Vite inlines the flag, so the evidence
 # is in the output and this reads it there rather than trusting the ENV above to
 # have had the intended effect.
-RUN if grep -rqF 'SHAP Waterfall (mock)' /src/app/static/spa/assets/; then \
+#
+# `--include='*.js'` and not the whole directory. `vite.config.ts` sets
+# `sourcemap: true`, and a source map carries the original text of the branch
+# Vite removed -- so an unrestricted grep matches the mock string in
+# ExplainPage-*.js.map on a build that is entirely correct, and fails it.
+# Measured: with VITE_API_BASE set, the string appears in one .map and in no .js.
+#
+# The .map files are what a debugger reads and are never executed; the .js files
+# are what runs, and they are what this asks about.
+RUN if grep -rqF --include='*.js' 'SHAP Waterfall (mock)' /src/app/static/spa/assets/; then \
         echo "FATAL: the SPA bundle contains mock payloads; VITE_API_BASE did not reach the build" >&2; \
         exit 1; \
     fi
