@@ -192,6 +192,11 @@ from app.prom_metrics import (
     sora_model_rejected as sora_model_rejected_total,
 )
 
+# The promotion decision, shared with the other caller that promotes. Imported at
+# module level rather than inside the job: it pulls in no client and touches no
+# socket, so there is nothing to defer.
+from app.promotion import evaluate_promotion
+
 
 
 def should_run_scheduler() -> bool:
@@ -569,85 +574,29 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         result = _do_retrain(min_samples=50, trigger_source=trigger_source)
         new_metrics = result.get("metrics", {}) if isinstance(result, dict) else {}
         new_auc = new_metrics.get("auc_roc") or new_metrics.get("roc_auc")
-        promoted = True
-        reject_reason = None
+        # The decision itself lives in `app/promotion.py`, because this is not
+        # the only caller that promotes. `POST /mlops/auto-retrain` applied a
+        # strict subset of these refusals -- the degradation rule with no floor
+        # under it -- so the same candidate got two different verdicts depending
+        # on who triggered the run. The rules below are unchanged; they are just
+        # no longer written twice (roadmap phase 5).
+        decision = evaluate_promotion(new_metrics, old_auc)
+        promoted = decision.promoted
+        reject_reason = decision.reject_reason
 
-        # Two independent refusals, run in sequence rather than as one
-        # if/elif chain.
-        #
-        # They were a chain, and adding the bound to the front of it silently
-        # disabled the second: a model that cleared the absolute gate never
-        # reached the degradation check, because the first branch had matched.
-        # Each of these answers a different question and both have to be asked.
-        MIN_AUC_THRESHOLD = 0.80
-
-        def _reject(reason):
-            nonlocal promoted, reject_reason
-            promoted = False
-            reject_reason = reason
+        # Reporting stays here: the gate decides, the caller says so. At most one
+        # refusal can fire -- each is guarded on the verdict so far -- so this
+        # counts exactly one outcome per run, as it did when the checks were
+        # inline.
+        if not promoted:
             if sora_model_rejected_total: sora_model_rejected_total.inc()
-            logger.warning("Closed loop: model REJECTED - %s", reason)
-
-        # 1. Absolute quality, on the lower bound rather than the estimate.
-        #
-        # `new_auc >= 0.80` treats a number measured on 171 rows as
-        # interchangeable with one measured on 3,415. Measured: AUC 0.81 on 171
-        # rows has a 95% lower bound of 0.746, so it was accepted as clearing
-        # 0.80 while being indistinguishable from 0.75.
-        #
-        # **This rejects models the old rule accepted.** That is its purpose,
-        # and the first refusal will read like a regression to anyone who does
-        # not know why it is here.
-        #
-        # The point estimate is used only when the class counts are absent --
-        # runs recorded before this change carry no `test_positive` -- so an old
-        # row is judged by the rule in force when it was written rather than
-        # refused for lacking a field it could not have had.
-        n_pos = new_metrics.get("test_positive")
-        n_neg = new_metrics.get("test_negative")
-        if new_auc is not None and n_pos is not None and n_neg is not None:
-            from app.model_quality import clears_threshold
-            cleared, why = clears_threshold(
-                new_auc, int(n_pos), int(n_neg), MIN_AUC_THRESHOLD)
-            if not cleared:
-                _reject(why)
-        elif new_auc is not None and float(new_auc) < MIN_AUC_THRESHOLD:
-            _reject(f"AUC below minimum threshold: {new_auc:.4f} < {MIN_AUC_THRESHOLD}")
-
-        # 2. Registered, or not promoted (#189).
-        #
-        # A model that exists only on this container's disk is not a model the
-        # platform can point at: the registry is where a version is identified,
-        # compared and rolled back from. Promoting an unregistered one records
-        # a decision about an artefact nobody else can find.
-        #
-        # `registry_failed` rather than `failed`: the model was trained,
-        # evaluated and written. Reporting it as a failed run would be as
-        # untrue as reporting it as a success -- one denies work that happened,
-        # the other claims a step that did not.
-        #
-        # Absent means unknown, and unknown is not a promotion. Runs recorded
-        # before this carry no `registry_ok`, so they keep the old behaviour
-        # rather than being refused for lacking a field they could not have had.
-        registry_ok = new_metrics.get("registry_ok")
-        if promoted and registry_ok is False:
-            _reject("registry_failed: the model was trained and written but not "
-                    "registered in MLflow, so it cannot be identified or rolled "
-                    "back from")
-
-        # 3. Not worse than what is already serving. A model can clear the
-        # absolute bar and still be a step down, and that is a separate
-        # decision from whether it is good enough in isolation.
-        if promoted and old_auc is not None and new_auc is not None:
-            auc_delta = float(new_auc) - float(old_auc)
-            if auc_delta < -0.02:
-                _reject("AUC degraded: %.4f -> %.4f (delta=%+.4f)"
-                        % (old_auc, new_auc, auc_delta))
-            else:
-                if sora_model_promoted_total: sora_model_promoted_total.inc()
-                logger.info("Closed loop: model PROMOTED - AUC %.4f -> %.4f (delta=%+.4f)",
-                            float(old_auc), float(new_auc), auc_delta)
-        elif promoted:
+            logger.warning("Closed loop: model REJECTED - %s", reject_reason)
+        elif old_auc is not None and new_auc is not None:
+            if sora_model_promoted_total: sora_model_promoted_total.inc()
+            logger.info("Closed loop: model PROMOTED - AUC %.4f -> %.4f (delta=%+.4f)",
+                        float(old_auc), float(new_auc),
+                        float(new_auc) - float(old_auc))
+        else:
             if sora_model_promoted_total: sora_model_promoted_total.inc()
             logger.info("Closed loop: model PROMOTED (no previous AUC to compare) - AUC %s",
                         f"{float(new_auc):.4f}" if new_auc is not None else "unrecorded")

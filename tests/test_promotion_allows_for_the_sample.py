@@ -73,14 +73,22 @@ def test_the_bound_is_clipped_at_zero():
 def test_both_refusals_are_reachable():
     """They were an if/elif chain, and putting the bound at the front of it
     disabled the degradation check: a model that cleared the absolute bar never
-    reached the second test. Read from the source, because the defect is the
-    control flow rather than any single value.
+    reached the second test.
+
+    This used to assert that control flow by reading `app/scheduler.py`, because
+    the defect is the shape rather than any single value and the shape was
+    embedded in a job that reaches MLflow and a database. Phase 5 moved the
+    decision into `app/promotion.py` so its two callers give one answer, and a
+    pure function can simply be asked: a candidate that clears the floor and is
+    also a large step down must still be refused. If the checks were chained
+    again, this promotes.
     """
-    import os
+    from app.promotion import evaluate_promotion
 
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(root, "app", "scheduler.py"), encoding="utf-8") as fh:
-        body = fh.read()
+    clears_the_floor_but_worse = evaluate_promotion(
+        {"auc_roc": 0.85}, old_auc=0.95)
 
-    assert "if promoted and old_auc is not None" in body
-    assert "elif old_auc is not None and new_auc is not None:" not in body
+    assert not clears_the_floor_but_worse.promoted, (
+        "a model that cleared the absolute bar was promoted without the "
+        "degradation check being asked")
+    assert "AUC degraded" in clears_the_floor_but_worse.reject_reason

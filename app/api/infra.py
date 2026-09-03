@@ -1,6 +1,8 @@
 import logging
 
-from app.prom_metrics import sora_retrain_total, sora_refresh_total, sora_full_pipeline_total
+from app.prom_metrics import (sora_retrain_total, sora_refresh_total, sora_full_pipeline_total,
+                              sora_model_promoted, sora_model_rejected)
+from app.promotion import evaluate_promotion
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from app.auth import require_admin
 from fastapi.responses import PlainTextResponse
@@ -557,14 +559,31 @@ def auto_retrain_on_drift(
     new_metrics = retrain_result.get("metrics", {}) if isinstance(retrain_result, dict) else {}
     new_auc = new_metrics.get("auc_roc") or new_metrics.get("roc_auc")
 
-    # validate: reject if AUC dropped > 2%
-    promoted = True
-    reject_reason = None
-    if old_auc is not None and new_auc is not None:
-        auc_delta = float(new_auc) - float(old_auc)
-        if auc_delta < -0.02:
-            promoted = False
-            reject_reason = "AUC degraded: %.4f -> %.4f (delta=%+.4f)" % (float(old_auc), float(new_auc), auc_delta)
+    # The same gate the scheduler's closed loop applies, because it is the same
+    # decision (roadmap phase 5).
+    #
+    # What stood here asked one of its three questions -- "is this materially
+    # worse than what is serving?" -- and neither of the other two. There was no
+    # floor, so a model measuring AUC 0.55 against a champion at 0.56 was
+    # promoted here and refused by the scheduler; and no registry requirement,
+    # so a model that exists only on this container's disk could become the
+    # champion through this endpoint alone.
+    #
+    # Not a policy difference to reconcile: a strict subset. Every model this
+    # now refuses was already being refused on the other path.
+    decision = evaluate_promotion(new_metrics, old_auc)
+    promoted = decision.promoted
+    reject_reason = decision.reject_reason
+
+    # Counted here for the first time. `sora_model_promoted_total` and
+    # `sora_model_rejected_total` were incremented only by the scheduler, so
+    # every promotion made through this endpoint was missing from both -- a
+    # metric that reports a subset of the thing it is named after.
+    if promoted:
+        if sora_model_promoted: sora_model_promoted.inc()
+    else:
+        if sora_model_rejected: sora_model_rejected.inc()
+        logger.warning("Auto-retrain: model REJECTED - %s", reject_reason)
 
     # The row this run owns, not "the newest one that looks like ours" (#199).
     #
