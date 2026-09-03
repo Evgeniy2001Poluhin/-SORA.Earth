@@ -5,7 +5,7 @@
 # A clean clone could not serve a working page, and production only worked
 # because the host directory was bind-mounted in. Building here makes the image
 # the source of truth (issue #21).
-FROM node:20-slim AS spa
+FROM node:22-slim AS spa
 
 WORKDIR /src
 
