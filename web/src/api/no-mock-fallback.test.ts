@@ -159,9 +159,16 @@ describe("the exported report", () => {
     // labelled application/pdf while being plain text. A file outlives the page
     // it came from: whoever opens it later has no way to know the number was
     // never computed.
+    // A string body, not `new Blob([...])`.
+    //
+    // On Node 20 -- which is what CI runs -- undici's Response rejects jsdom's
+    // Blob with "TypeError: object.stream is not a function", because the two
+    // implementations do not share the stream interface. Node 24 accepts it, so
+    // this passed locally and failed in CI. A string is understood by both, and
+    // `res.blob()` in report.ts still hands back a Blob either way.
     const spy = vi.fn(async (input: RequestInfo | URL) => {
       void input;
-      return new Response(new Blob(["%PDF-1.4 real"]), { status: 200 });
+      return new Response("%PDF-1.4 real", { status: 200 });
     });
     globalThis.fetch = spy as unknown as typeof fetch;
 
