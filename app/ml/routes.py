@@ -1,6 +1,7 @@
 """FastAPI routes powered by MLflow Registry model."""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from mlflow.exceptions import MlflowException
 import logging
 import time
 
@@ -59,17 +60,43 @@ def predict(req: PredictRequest):
 
 @router.get("/model/version")
 def model_version():
-    return {
-        "name": "esg-success-predictor",
-        "alias": get_alias(),
-        "version": str(get_version()),
-    }
+    try:
+        return {
+            "name": "esg-success-predictor",
+            "alias": get_alias(),
+            "version": str(get_version()),
+        }
+    except MlflowException as e:
+        # get_version() -> get_model() -> registry_loader._load() looks up
+        # `models:/{name}@{alias}` in the MLflow Model Registry -- a separate
+        # thing from the models/model.pkl file that actually serves
+        # /api/v1/predict, and nothing here has ever registered a model under
+        # that name+alias on this server. Unguarded, this was an unhandled
+        # RestException ("Registered model alias champion not found"),
+        # uncaught by anything, landing as a 500 with no log line at all --
+        # confirmed live: every real page load hit this (web/src/api/model.ts
+        # calls it "the primary, lightweight ... endpoint" and throws on
+        # !r.ok), and the operational counters had no ERROR entry to show
+        # for it. 503, not 500: the code did what it was asked; the registry
+        # entry it depends on does not exist yet.
+        logger.warning("model/version: no registered model for the configured "
+                        "alias yet: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="no model registered under the configured name/alias yet")
 
 
 @router.post("/model/reload")
 def model_reload():
-    reload_model()
-    return {"status": "reloaded", "version": str(get_version())}
+    try:
+        reload_model()
+        return {"status": "reloaded", "version": str(get_version())}
+    except MlflowException as e:
+        logger.warning("model/reload: no registered model for the configured "
+                        "alias yet: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="no model registered under the configured name/alias yet")
 
 @router.get("/model/calibration")
 def model_calibration():
