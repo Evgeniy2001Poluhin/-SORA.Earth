@@ -186,6 +186,19 @@ class TestMainCoverage:
         c = TestClient(app, raise_server_exceptions=False)
         assert c.get("/").status_code in (200, 404)
 
+    def test_favicon_redirects_to_the_svg_rather_than_500ing(self):
+        """Every browser requests /favicon.ico by default on every visit,
+        regardless of what a page declares -- no .ico was ever added (the
+        site uses favicon.svg only), and the route served FileResponse on a
+        path that does not exist: FileNotFoundError, uncaught, a 500 on
+        every real visit. Reproduced live on production, not just here.
+        Redirects to the SVG that does exist rather than adding a legacy
+        file there was never a reason to maintain."""
+        c = TestClient(app, raise_server_exceptions=False, follow_redirects=False)
+        r = c.get("/favicon.ico")
+        assert r.status_code == 302
+        assert r.headers["location"] == "/favicon.svg"
+
     def test_openapi(self):
         c = TestClient(app, raise_server_exceptions=False)
         r = c.get("/openapi.json")
