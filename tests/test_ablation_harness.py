@@ -291,6 +291,84 @@ class TestBootstrapInterval:
         assert ah.bootstrap_ci([]) == (None, None)
 
 
+class TestClusterBootstrap:
+    """Rows inside one project are not independent draws.
+
+    A row bootstrap over a clustered test set counts one project's agreement
+    with itself as evidence and reports an interval narrower than the data
+    supports. Under `legacy-approximate` the clusters are whole name-groups,
+    which makes this the difference between an interval and a decoration.
+    """
+
+    @staticmethod
+    def clustered(n_clusters=40, per_cluster=8):
+        """Identical rows within a cluster, and clusters that differ from
+        each other -- so cluster-level variance is the only variance there
+        is, and the two bootstraps must visibly disagree.
+
+        The first attempt at this fixture used p=0.9/y=1 and p=0.1/y=0,
+        which gives every row the same squared error (0.01): a mean with no
+        variance, identical under either resampling, and a test that could
+        not distinguish the two methods it existed to compare. The clusters
+        have to differ in how *wrong* they are, not only in their label.
+        """
+        y, p, g = [], [], []
+        for c in range(n_clusters):
+            well_calibrated = c % 2 == 0
+            for _ in range(per_cluster):
+                y.append(1 if well_calibrated else 0)
+                # squared error 0.0025 vs 0.2025 -- constant inside a
+                # cluster, far apart between them
+                p.append(0.95 if well_calibrated else 0.45)
+                g.append(f"C{c}")
+        return np.array(y), np.array(p, dtype=float), np.array(g)
+
+    def test_a_cluster_resample_never_splits_a_cluster(self):
+        rng = np.random.default_rng(0)
+        _y, _p, g = self.clustered(n_clusters=6, per_cluster=5)
+        idx = ah.resample_indices(rng, len(g), g)
+        counts = {}
+        for name in g[idx]:
+            counts[name] = counts.get(name, 0) + 1
+        # every present cluster appears as a whole multiple of its size
+        assert counts and all(v % 5 == 0 for v in counts.values()), counts
+
+    def test_without_groups_it_is_an_ordinary_row_bootstrap(self):
+        rng = np.random.default_rng(0)
+        idx = ah.resample_indices(rng, 100, None)
+        assert len(idx) == 100
+        assert idx.min() >= 0 and idx.max() < 100
+
+    def test_the_cluster_interval_is_wider_than_the_row_interval(self):
+        """The substantive property. If this stops holding, the harness has
+        gone back to treating correlated rows as independent."""
+        y, p, g = self.clustered()
+        row = ah.bootstrap_metrics(y, p, threshold=0.5, n_boot=200, seed=0)
+        cluster = ah.bootstrap_metrics(y, p, threshold=0.5, n_boot=200, seed=0,
+                                        groups=g)
+        row_width = row["brier"]["ci_hi"] - row["brier"]["ci_lo"]
+        cluster_width = cluster["brier"]["ci_hi"] - cluster["brier"]["ci_lo"]
+        assert cluster_width > row_width * 1.5, (row_width, cluster_width)
+
+    def test_the_report_records_which_bootstrap_was_used(self):
+        splits = split_of(synthetic())
+        result = ah.run_variant(ah.VARIANTS_BY_NAME["minimal_baseline"], splits,
+                                threshold=0.5, n_boot=10, seed=0,
+                                estimator_factory=tiny_forest,
+                                group_col=ah.ID_COLUMN)
+        assert result["bootstrap"]["mode"] == "cluster"
+        assert result["bootstrap"]["unit"] == ah.ID_COLUMN
+        assert result["bootstrap"]["n_clusters"] == len(splits["test"])
+
+    def test_without_a_group_column_it_says_row_rather_than_pretending(self):
+        splits = split_of(synthetic())
+        result = ah.run_variant(ah.VARIANTS_BY_NAME["minimal_baseline"], splits,
+                                threshold=0.5, n_boot=10, seed=0,
+                                estimator_factory=tiny_forest, group_col=None)
+        assert result["bootstrap"]["mode"] == "row"
+        assert result["bootstrap"]["n_clusters"] is None
+
+
 # --- the four mutations the review asked for ------------------------------
 
 class TestMutations:

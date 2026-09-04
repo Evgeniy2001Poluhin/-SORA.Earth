@@ -73,10 +73,32 @@ then checks the property separately, and the count lands in the report as
 
 **Legacy-approximate** exists because `data/projects.csv` has no id column at
 all (`docs/DATASET_AUDIT_2026-09-03.md`). It groups by a normalised `name`.
-Two different projects sharing a name are grouped as one; one project under
-two spellings is split. The report records
+Two different projects sharing a name are grouped as one; **one project
+recorded under two names or two versions is still split across parts, and
+this mode cannot prevent that.** The report records
 `split.evidence_strength = "weaker: grouped by normalised name, not by
-project id"`. It must not be presented as a grouped split.
+project id"`. It must not be presented as a grouped split, and a
+legacy-approximate result **cannot on its own close #232** — it is a
+diagnostic of the existing construction, not a clean measurement.
+
+## Confidence intervals: cluster bootstrap
+
+Rows belonging to one project are not independent draws. A row bootstrap
+over a clustered test set counts one project's agreement with itself as
+evidence and reports an interval narrower than the data supports, so the
+harness resamples **whole clusters with replacement** whenever the split had
+a grouping unit — `source_project_id` under `grouped`, the normalised name
+key under `legacy-approximate`. Every variant records which was used:
+
+```
+"bootstrap": {"mode": "cluster", "unit": "source_project_id", "n_clusters": 3389}
+```
+
+`mode: "row"` appears only when there is no grouping unit at all, and it says
+so rather than implying a cluster interval it did not compute. Measured on a
+fixture of 40 identical-within, different-between clusters (320 rows), the
+cluster interval is **2.78× wider** than the row interval — close to the
+√(320/40) ≈ 2.83 the structure implies.
 
 **Temporal refuses on this schema.** Neither file carries a date column, so
 an ordering would have to be invented — row order, or a date reconstructed
@@ -127,6 +149,7 @@ settings         {threshold, bootstrap_resamples, min_rows_per_split, estimator}
 variants[]       {variant, why, features[], excludes_target_derived,
                   metrics{roc_auc, pr_auc, log_loss, brier, calibration_error,
                           threshold, accuracy_at_threshold, f1_at_threshold},
+                  bootstrap{mode: cluster|row, unit, n_clusters},
                   confidence_intervals_95.<metric>{ci_lo, ci_hi,
                                                    n_resamples_used}}
 not_claimed[]    what the report is not
