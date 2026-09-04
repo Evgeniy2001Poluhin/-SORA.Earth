@@ -948,9 +948,17 @@ async def _admin_shell(path: str = ""):
     return FileResponse(_STATIC / "pages/admin.html")
 # --- /UI ROUTES ---
 
-from fastapi.responses import FileResponse as _FR
+from fastapi.responses import RedirectResponse as _RR
 @app.get("/favicon.ico", include_in_schema=False)
-def _favicon(): return _FR("app/static/favicon.ico")
+def _favicon():
+    """Browsers request this by default on every visit, regardless of what a
+    page's <link rel="icon"> declares. No .ico was ever added -- the site
+    uses favicon.svg only -- so this 500'd with FileNotFoundError on every
+    real visit (confirmed live: reproducible, not bot traffic only) instead
+    of the 404 a browser silently accepts for a missing favicon. Redirects
+    to the SVG that already exists and already serves 200, rather than
+    adding a legacy .ico file there was never a reason to maintain."""
+    return _RR(url="/favicon.svg", status_code=302)
 
 # ===== SORA_SPA_MOUNT =====
 from fastapi.staticfiles import StaticFiles
