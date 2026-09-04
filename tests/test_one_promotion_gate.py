@@ -133,6 +133,31 @@ def test_clearing_the_floor_does_not_skip_the_later_checks():
         "a model that cleared the absolute floor skipped the registry check")
 
 
+def test_clearing_the_floor_via_the_lower_bound_does_not_skip_the_registry_check():
+    """The test above only exercises check 1's point-estimate branch (no
+    n_pos/n_neg) -- new_auc < MIN_AUC_THRESHOLD is False so it falls through
+    the elif without ever reaching the `clears_threshold(...)` branch. That
+    branch is a separate `if`, and an early return placed inside only it (an
+    `else: return PromotionDecision(promoted=True)` after `cleared` succeeds)
+    reproduces the same historical bug for this one code path while every
+    other test here stays green. 0.85 on 600 rows is the fixture already
+    established above as clearing the lower bound on its own."""
+    decision = evaluate_promotion(
+        metrics(0.85, n_pos=200, n_neg=400, registry_ok=False))
+    assert not decision.promoted, (
+        "a model that cleared the floor via the lower bound skipped the "
+        "registry check")
+
+
+def test_clearing_the_floor_via_the_lower_bound_does_not_skip_the_degradation_check():
+    """Same gap as above, for check 3 instead of check 2."""
+    decision = evaluate_promotion(
+        metrics(0.85, n_pos=200, n_neg=400), old_auc=0.95)
+    assert not decision.promoted, (
+        "a model that cleared the floor via the lower bound skipped the "
+        "degradation check")
+
+
 def test_the_first_refusal_is_the_one_reported():
     """One outcome per run, so the counters stay a count of runs."""
     decision = evaluate_promotion(metrics(0.20, registry_ok=False), old_auc=0.90)
