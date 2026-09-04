@@ -34,8 +34,13 @@ Notes / assumptions (the WB API does not expose every field the model needs):
                          proxy fallback when a date is missing.
   * region            <- regionname mapped to AFR/APAC/EU/LATAM/NAM (else Unknown).
   * category          <- sector / project_name keyword-mapped to the existing
-                         vocabulary (water/edu/agro/waste/energy); default energy
-                         since we filter fq=sector_exact:(Environment).
+                         vocabulary (water/edu/agro/waste/energy); an unmatched
+                         row gets "energy" only when --sector actually scoped
+                         the fetch to something environment-adjacent, else
+                         "Unknown" (see to_records()'s category_default —
+                         measured live, 41.1% of an unfiltered fetch matched
+                         no rule, and "energy" was not an honest label for
+                         "Central Government", "Highways", "Health", ...).
   * social_impact     <- synthesized normalized 0..100 proxy from log(budget)
                          (WB has no social-impact metric); min-max scaled to 40..95.
 """
@@ -127,7 +132,10 @@ def map_region(regionname: str) -> str:
     return "Unknown"
 
 
-def map_category(sector, project_name: str) -> str:
+def map_category(sector, project_name: str, *, default: str = "energy") -> str:
+    """`default` is the caller's decision, not this function's -- see the
+    docstring on its only caller's `category_default` parameter for why
+    "energy" is wrong for an unfiltered fetch."""
     # sector may be a string, a list of dicts ({"Name": ...}), or absent.
     parts = []
     if isinstance(sector, list):
@@ -143,8 +151,7 @@ def map_category(sector, project_name: str) -> str:
     for needles, code in CATEGORY_RULES:
         if any(n in text for n in needles):
             return code
-    # We filtered on Environment, so the sensible default is energy.
-    return "energy"
+    return default
 
 
 def map_success(status, closingdate, budget, disb_pct) -> int:
@@ -341,9 +348,24 @@ def build_gdp_lookup(rows, session):
     return codes, median
 
 
-def to_records(collected, gdp_map, gdp_median):
+def to_records(collected, gdp_map, gdp_median, category_default="energy"):
     """Second pass: compute the normalized social_impact score across the batch
-    and attach country_gdp_per_capita (region->country->iso->gdp)."""
+    and attach country_gdp_per_capita (region->country->iso->gdp).
+
+    `category_default` is what a row gets when nothing in CATEGORY_RULES
+    matches its sector/name text -- "energy" only makes sense when the fetch
+    itself was scoped to `fq=sector_exact:(Environment)`, where every row is
+    at least environment-adjacent. `fetch_all()`'s default is unfiltered (all
+    ~22729 projects, every sector), and measured on a live fetch: 41.1%
+    (6652/16188) of rows matched no CATEGORY_RULES bucket and got labelled
+    "energy" by the old unconditional default -- among them "Central
+    Government", "Highways", "Health", "Railways", "Law and Justice",
+    "Banking Institutions". None of those are energy projects; the code
+    just had nothing else to say. `main()` passes "Unknown" here (the same
+    fallback name `map_region()` already uses) whenever no `--sector` filter
+    was applied, so an unmatched row says so rather than claiming a category
+    it was never shown evidence for.
+    """
     if not collected:
         return []
     from app.external_data import COUNTRY_ISO3
@@ -372,7 +394,8 @@ def to_records(collected, gdp_map, gdp_median):
             "co2_reduction": round(parse_co2(row), 1),
             "social_impact": social,
             "duration_months": duration_from_dates(board, closing, budget, pid),
-            "category": map_category(row.get("sector"), row.get("project_name")),
+            "category": map_category(row.get("sector"), row.get("project_name"),
+                                      default=category_default),
             "region": map_region(row.get("regionname")),
             "country_gdp_per_capita": round(gdp if gdp is not None else gdp_median, 2),
             "success": map_success(row.get("status"), closing, budget, disb),
@@ -440,7 +463,12 @@ def main():
         collected = fetch_all(session)
 
     gdp_map, gdp_median = build_gdp_lookup([r for r, _ in collected], session)
-    wb_records, skipped_no_id_total = to_records(collected, gdp_map, gdp_median)
+    # "energy" only when a sector filter actually scoped the fetch to
+    # something environment-adjacent; "Unknown" (map_region()'s own name for
+    # the same situation) otherwise. See to_records()'s docstring.
+    category_default = "energy" if FQ else "Unknown"
+    wb_records, skipped_no_id_total = to_records(
+        collected, gdp_map, gdp_median, category_default=category_default)
     print(f"Mapped {len(wb_records)} World Bank rows.")
 
     # Persist a country -> GDP lookup so serving (make_features_v2) can supply
