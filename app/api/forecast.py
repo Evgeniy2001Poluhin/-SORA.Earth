@@ -486,7 +486,13 @@ async def get_lstm_status(db: Session = Depends(_get_db)):
     """)).fetchone()
 
     unique_days = result[0] if result else 0
-    last_date = result[1] if result else datetime.now().date()
+    # `fetchone()` on an aggregate query always returns one row, even over zero
+    # matching source rows -- `MAX(created_at)` is then NULL, not the row
+    # itself. `if result else ...` never catches that (the row is truthy), so
+    # an empty `evaluations` table (a fresh deploy, no data in the last 60
+    # days) passed `last_date=None` through to `last_date + timedelta(...)`
+    # below and crashed on every call. Checked on the value, not the row.
+    last_date = result[1] if result and result[1] is not None else datetime.now().date()
 
     # Load data and check ensemble behavior
     try:
