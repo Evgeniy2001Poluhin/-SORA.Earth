@@ -113,13 +113,56 @@ checking. This should be resolved — or at minimum, explicitly acknowledged
 alongside the 0.905 figure — before it's used to justify a retrain on a
 larger reconstructed dataset built the same way.
 
+## `category` defaulted to "energy" for 41% of an unfiltered fetch — fixed
+
+`map_category()` falls back to a default when a row's sector/project-name
+text matches none of `CATEGORY_RULES`'s five keyword buckets
+(water/edu/agro/waste/energy). The default was unconditionally `"energy"`,
+with a comment justifying it: *"we filtered on Environment, so the sensible
+default is energy"* — true for the old, sector-filtered `fetch_rows()`, false
+for `fetch_all()`, which this session's live fetch used and which has **no**
+sector filter (`FQ = None`, all ~22,729 projects, every sector).
+
+Measured on the live fetch (16,188 rows with an id):
+
+| | count | share |
+|---|---|---|
+| matched a `CATEGORY_RULES` keyword bucket | 9,536 | 58.9% |
+| matched **no** bucket, labelled "energy" by the old default anyway | 6,652 | **41.1%** |
+
+The top sectors among the 6,652 defaulted rows: "Central Government (Central
+Agencies)" (693), "(Historic)Highways" (469), "Sub-National Government"
+(322), "(Historic)Financial sector development" (256), "Public
+Administration - Health" (228), "Social Protection" (222), "Railways" (207),
+"Health" (204) — none of them energy projects. The code had nothing else to
+say and said "energy" anyway.
+
+**Fixed**, not just documented: `map_category()` takes an explicit `default`
+parameter instead of hardcoding `"energy"`; `to_records()`'s new
+`category_default` parameter threads it through; `main()` passes `"energy"`
+only when `--sector` was actually supplied, `"Unknown"` otherwise (the same
+fallback name `map_region()` already uses for its own "nothing matched"
+case). A caller that genuinely does scope the fetch to Environment keeps the
+old behaviour — this is a caller decision now, not an unconditional
+assumption. Tests: `tests/test_fetch_wb_projects_identity.py`'s
+`TestCategoryDefaultIsNotAlwaysEnergy` (4 tests, mutation-tested — reverting
+the fix turns one red with the exact old-vs-new value shown).
+
+This changes nothing already written: `data/projects.csv` is unmodified, and
+this session's live-fetch CSV/manifest (already saved, not regenerated) still
+reflects the pre-fix "energy" labelling — the fix applies to the *next* fetch
+that uses this script, not retroactively.
+
 ## Not claimed here
 
-- Not claimed: the exact share of AUC this accounts for.
+- Not claimed: the exact share of AUC either finding above accounts for.
 - Not claimed: that `social_impact` (also synthesized from `log(budget)` per
   `fetch_wb_projects.py`'s own docstring — not a leakage vector by itself,
-  but it doubles budget's influence across two columns), `category`, or
-  `region` carry no genuine signal — not measured here.
+  but it doubles budget's influence across two columns) or `region` carry no
+  genuine signal — not measured here. `region` is a real, deterministic
+  mapping of the API's own `regionname` field (5 buckets + "Unknown"), not
+  synthetic — its accuracy as a *category* boundary was not separately
+  audited.
 - Not claimed: a fix. Two directions this motivates, neither attempted: (a)
   a leave-`duration_months`/`budget`-out retrain-and-compare to size the
   effect, or (b) re-deriving `duration_months` only from real dates with a

@@ -142,6 +142,60 @@ class TestUniquenessIsEnforced:
             di.assert_unique_keys(keys)
 
 
+class TestCategoryDefaultIsNotAlwaysEnergy:
+    """The audit's other live-fetch finding: `map_category()` fell back to
+    "energy" unconditionally on no keyword match. That is defensible only
+    when the fetch itself was scoped to environment-adjacent projects
+    (`fq=sector_exact:(Environment)`) -- `fetch_all()`'s default has no such
+    scope, and measured on a live, unfiltered fetch: 41.1% of rows (6652 of
+    16188) matched no CATEGORY_RULES bucket and were labelled "energy"
+    anyway, among them sectors like "Central Government", "Highways",
+    "Health", "Railways", "Banking Institutions" -- none of them energy
+    projects. `to_records()`'s `category_default` parameter is the fix:
+    the caller states what an unmatched row should be called, rather than
+    the mapping function assuming a scope it cannot see."""
+
+    def test_an_unmatched_sector_gets_the_callers_default_not_a_hardcoded_one(self):
+        collected = make_collected(
+            (api_row(sector="Central Government (Central Agencies)",
+                     project_name="Public Sector Modernization Program"), 1_000_000.0))
+        records, _skipped = fwp.to_records(
+            collected, GDP_MAP, GDP_MEDIAN, category_default="Unknown")
+        assert records[0]["category"] == "Unknown"
+
+    def test_the_default_stays_energy_when_the_caller_asks_for_it(self):
+        """A caller that really did scope the fetch to Environment (the
+        old, sector-filtered fetch_rows() path) still gets the old
+        behaviour -- this is a caller decision, not a removed feature."""
+        collected = make_collected(
+            (api_row(sector="Central Government (Central Agencies)",
+                     project_name="Public Sector Modernization Program"), 1_000_000.0))
+        records, _skipped = fwp.to_records(
+            collected, GDP_MAP, GDP_MEDIAN, category_default="energy")
+        assert records[0]["category"] == "energy"
+
+    def test_a_genuine_keyword_match_ignores_the_default_either_way(self):
+        """The default only fires when nothing matches -- a real "Health"
+        sector containing no CATEGORY_RULES keyword still falls through, but
+        a sector that does match (e.g. "Water supply") must never be
+        overridden by category_default, whatever it is set to."""
+        collected = make_collected(
+            (api_row(sector="Water supply and sanitation"), 1_000_000.0))
+        records, _skipped = fwp.to_records(
+            collected, GDP_MAP, GDP_MEDIAN, category_default="Unknown")
+        assert records[0]["category"] == "water"
+
+    def test_to_records_without_the_new_argument_keeps_the_old_behaviour(self):
+        """Backward compatible: existing callers that don't know about
+        category_default (there are several in this file alone) must not
+        break."""
+        collected = make_collected(
+            (api_row(sector="Central Government (Central Agencies)",
+                     project_name="Public Sector Modernization Program"), 1_000_000.0))
+        records, _skipped = fwp.to_records(collected, GDP_MAP, GDP_MEDIAN)
+        assert records[0]["category"] == "energy"
+
+
 class TestMutationTheGuardActuallyCatchesTheOriginalDefect:
     """Reproduces the exact defect the audit found, to prove the test above
     would have caught it. If `to_records()` is ever edited back to compute
