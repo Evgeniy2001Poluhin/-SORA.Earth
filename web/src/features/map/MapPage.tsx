@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { MapContainer, TileLayer, CircleMarker, Tooltip } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Tooltip, AttributionControl } from "react-leaflet";
 import { useNavigate } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import {
@@ -72,19 +72,25 @@ export default function MapPage() {
       <div className="map-wrap">
         {/* `worldCopyJump` is gone with the repeating world it was there for:
             it moves the view to the nearest copy, and `noWrap` below leaves
-            only one. `attributionControl` is on because OpenStreetMap's tile
-            usage policy requires visible credit. */}
+            only one. The default `attributionControl` is left off the
+            MapContainer and `<AttributionControl prefix={false}>` is
+            rendered instead: OSM's own tile usage policy only requires
+            crediting OpenStreetMap (the `TileLayer`'s `attribution` below) —
+            "Leaflet"'s own credit is that library's default `prefix`, not
+            anything OSM requires, and `prefix={false}` is Leaflet's
+            documented way to drop it. */}
         <MapContainer
           center={[28, 10]}
           zoom={2}
           minZoom={2}
           maxZoom={6}
           scrollWheelZoom
-          attributionControl
+          attributionControl={false}
           maxBounds={WORLD_BOUNDS}
           maxBoundsViscosity={1.0}
           style={{ height: 600, width: "100%", background: "var(--bg-1)" }}
         >
+          <AttributionControl prefix={false} />
           {/* `noWrap` is what stops the world repeating. Without it the tile
               layer keeps painting copies past the bounds, while the markers
               exist once and appear on the first copy only. */}
