@@ -212,3 +212,40 @@ def test_ensemble_linear_registered():
     assert len(result.dates) == 10
     assert result.confidence == "low"
     assert result.metadata["slope_per_day"] > 0
+
+
+class TestBootstrapAugmentOnEmptyInput:
+    """`_bootstrap_augment` on a genuinely empty frame -- the state of
+    `evaluations` on a freshly deployed server, before any evaluation has
+    been logged.
+
+    `len(df) >= target_size` (the existing early-out) is False for an empty
+    frame with any positive `target_size`, so execution used to reach the
+    "duplicate an existing row with jitter" fallback, which assumes at least
+    one row exists to duplicate: `np.random.randint(0, len(df))` with
+    `len(df) == 0` raises `ValueError: high <= 0`. Measured live in
+    production: this fired on every poll of `/lstm-status`, ~120 times/hour,
+    always caught by a caller further up -- so nothing was outright broken,
+    but the real condition (no data yet) was buried behind a numpy-internal
+    message that names neither the cause nor the code that raised it.
+
+    Kept as a direct unit test on the static method rather than going
+    through `EnsembleForecaster.fit()` (as `test_ensemble_cold_start_bootstrap`
+    above does): fitting Prophet/LSTM for real is what makes this test
+    module need a 120s timeout, and none of that is needed to pin this one
+    line's behaviour.
+    """
+
+    def test_an_empty_frame_is_returned_unchanged_not_crashed_on(self):
+        empty = pd.DataFrame({"ds": pd.to_datetime([]), "y": []})
+        result = EnsembleForecaster._bootstrap_augment(empty, "y", target_size=30)
+        assert len(result) == 0
+
+    def test_a_single_row_frame_still_augments_normally(self):
+        """The fix must not widen the early-out beyond `df.empty` -- a
+        one-row frame is not empty and must still reach the augmentation
+        logic below it (which can duplicate that one row with jitter)."""
+        one_row = pd.DataFrame({"ds": pd.to_datetime(["2026-01-01"]), "y": [50.0]})
+        result = EnsembleForecaster._bootstrap_augment(one_row, "y", target_size=5)
+        assert len(result) == 5
+

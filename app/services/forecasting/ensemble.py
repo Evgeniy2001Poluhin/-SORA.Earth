@@ -235,6 +235,22 @@ class EnsembleForecaster(BaseForecastModel):
         if len(df) >= target_size:
             return df
 
+        # Nothing to bootstrap from. The "duplicate an existing point with
+        # jitter" fallback below picks a random *existing* row -- it assumes
+        # at least one -- and `np.random.randint(0, len(df))` with
+        # `len(df) == 0` raises `ValueError: high <= 0`, a numpy-internal
+        # message that reads nothing like the actual condition (no data yet).
+        # Measured live: this fired on every /lstm-status poll on a freshly
+        # deployed server (0 evaluations), ~120 times/hour, always caught by
+        # `EnsembleForecaster.fit`'s own callers -- so nothing was broken
+        # end-to-end, but the real signal (this is a cold start with truly no
+        # data, not a data problem) was buried in an opaque exception message.
+        # Returning df unchanged here is exactly what happens above when df
+        # is already big enough; an empty df is not a special case worth
+        # different handling, just an earlier exit from the same rule.
+        if df.empty:
+            return df
+
         y_values = df[target_col].values
         dates = pd.to_datetime(df["ds"])
         noise_scale = np.std(y_values) * 0.05 if len(y_values) > 1 else 0.5
