@@ -4,6 +4,12 @@ Read-only investigation. No training, no dataset regeneration, no production
 change. Answers one question: what is the real, measured provenance of the
 training data, and where did "42K" and "700" come from.
 
+**Follow-up:** `docs/DATASET_AUDIT_2026-09-04_LIVE_FETCH.md` runs the live
+fetch this document recommended below, measures the actual counts, and
+surfaces a target-leakage finding in `duration_months` that bears on the
+0.905 AUC cited throughout this document — read it before treating that
+figure as trustworthy on its own.
+
 ## What is measured, in `data/projects.csv` on `main` (`b697926`)
 
 ```
