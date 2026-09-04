@@ -197,14 +197,19 @@ def test_every_other_plan_says_it_is_historical_at_the_top():
 
 
 def test_the_threshold_it_quotes_is_the_one_in_force():
-    """The roadmap says the 0.80 gate is already done. It must still be 0.80."""
-    body = read_roadmap()
-    scheduler = os.path.join(REPO_ROOT, "app", "scheduler.py")
-    with open(scheduler, encoding="utf-8") as handle:
-        source = handle.read()
+    """The roadmap says the 0.80 gate is already done. It must still be 0.80.
 
-    match = re.search(r"MIN_AUC_THRESHOLD\s*=\s*([0-9.]+)", source)
-    assert match, "MIN_AUC_THRESHOLD is gone from app/scheduler.py"
-    assert match.group(1) in body, (
-        f"the roadmap quotes a threshold the code no longer uses ({match.group(1)})"
+    Imported rather than read out of `app/scheduler.py` with a regex. The
+    constant moved to `app/promotion.py` in phase 5 when the gate was given one
+    definition, and a test that greps a named file for it goes red on a move
+    that changes no behaviour — while a second copy appearing elsewhere would
+    not have troubled it at all. The import follows the value wherever it lives.
+    """
+    from app.promotion import MIN_AUC_THRESHOLD
+
+    body = read_roadmap()
+    # "0.80" in prose, not the float's repr — `str(0.80)` is "0.8".
+    quoted = f"{MIN_AUC_THRESHOLD:.2f}"
+    assert quoted in body, (
+        f"the roadmap quotes a threshold the code no longer uses ({quoted})"
     )
