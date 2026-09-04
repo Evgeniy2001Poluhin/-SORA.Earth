@@ -1,4 +1,4 @@
-import { MapContainer, TileLayer, CircleMarker, Tooltip, GeoJSON, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Tooltip, GeoJSON, useMap, AttributionControl } from "react-leaflet";
 import { Path, type LatLngBoundsExpression, type Layer, type PathOptions } from "leaflet";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import { useEffect, useState, useMemo } from "react";
@@ -89,18 +89,23 @@ export default function RussiaMap({ height = 560, activeFD, search, mode, onSele
           `noWrap` would leave the far east as empty grey. Bounding the view
           instead keeps the map from wandering into repeated copies, which is
           the behaviour being fixed, without cutting off Russian territory.
-          `attributionControl` is on because OpenStreetMap's tile usage policy
-          requires visible credit. */}
+          The default `attributionControl` is left off the MapContainer and
+          `<AttributionControl prefix={false}>` is rendered instead: OSM's
+          own tile usage policy only requires crediting OpenStreetMap (the
+          `TileLayer`'s `attribution` below) — "Leaflet"'s own credit is
+          that library's default `prefix`, not anything OSM requires, and
+          `prefix={false}` is Leaflet's documented way to drop it. */}
       <MapContainer
         bounds={B}
         minZoom={3}
         maxZoom={10}
         scrollWheelZoom
-        attributionControl
+        attributionControl={false}
         maxBounds={B}
         maxBoundsViscosity={1.0}
         style={{ height: "100%", width: "100%", background: "var(--bg-1)" }}
       >
+        <AttributionControl prefix={false} />
         <FitOnMount />
         <TileLayer
           url={TILE_URL}

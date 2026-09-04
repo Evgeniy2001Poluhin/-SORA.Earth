@@ -86,23 +86,23 @@
 }
 
 /* Attribution is required by OSM's tile usage policy, so it is made
-   unobtrusive rather than hidden. */
+   unobtrusive rather than hidden.
+
+   This used to lose to a second, later `.leaflet-control-attribution` rule
+   further down this file (same specificity, also !important — the later one
+   wins) that set an opaque background, a visible border, and an accent-
+   colored link, undoing the "unobtrusive" intent above. That duplicate is
+   removed; this is now the only rule for it. */
 .leaflet-control-attribution {
-  background: rgba(10, 12, 14, 0.72) !important;
+  background: rgba(10, 12, 14, 0.55) !important;
   color: var(--muted, #8b949e) !important;
-  font-size: 10px !important;
-  padding: 1px 6px !important;
+  font-size: 9px !important;
+  padding: 1px 5px !important;
+  border: none !important;
+  opacity: 0.7 !important;
 }
 .leaflet-control-attribution a {
   color: var(--muted, #8b949e) !important;
-}
-
-/* Leaflet itself renders a small flag SVG before its own "Leaflet" credit
-   link (added upstream in support of Ukraine) — not something set in this
-   codebase's attribution string. Hidden; the OSM copyright text next to it,
-   which the tile usage policy requires, is untouched. */
-.leaflet-control-attribution .leaflet-attribution-flag {
-  display: none !important;
 }
 
 /* ===== Zoom control: theme-aware via tokens ===== */
@@ -140,15 +140,6 @@
   background: var(--bg-3) !important;
   color: var(--text) !important;
 }
-
-/* Attribution */
-.leaflet-control-attribution {
-  background: var(--bg-2) !important;
-  color: var(--muted) !important;
-  border: 1px solid var(--line) !important;
-  font-size: 10px !important;
-}
-.leaflet-control-attribution a { color: var(--planet) !important; }
 
 /* Tooltip on markers — transparent so your inner .tip styles work */
 .esg-tooltip {
