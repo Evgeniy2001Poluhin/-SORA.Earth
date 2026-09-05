@@ -33,7 +33,6 @@ warnings.filterwarnings("ignore", message="X does not have valid feature names")
 warnings.filterwarnings("ignore", message="X has feature names, but")
 
 from app.schemas import ProjectInput as Project, GHGInput
-from app.api import auth as auth_api
 from app.api import evaluate as evaluate_api
 from app.api import predict as predict_api
 from app.api import admin_retrain_log

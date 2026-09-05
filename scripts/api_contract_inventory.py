@@ -408,12 +408,22 @@ def check_ratchet(routes: list[Route], manifest: dict) -> list[str]:
     for key in sorted(now_uncovered - pinned_uncovered - set(allow)):
         problems.append(f"no response_model, and not in the baseline: {key}")
 
-    # 2. Progress has to be recorded, or the ratchet does not hold.
+    # 2. Progress has to be recorded, or the ratchet does not hold. A route can
+    #    leave the uncovered set two ways, and saying which one matters: the
+    #    first message was "now covered" for routes that had been *deleted*,
+    #    which sent a reader looking for a contract nobody wrote.
+    now_present = {route_key(r) for r in routes}
     for key in sorted(pinned_uncovered - now_uncovered):
-        problems.append(
-            f"now covered but still listed as uncovered: {key}\n"
-            "      run --update-manifest to lock the improvement in"
-        )
+        if key in now_present:
+            problems.append(
+                f"now covered but still listed as uncovered: {key}\n"
+                "      run --update-manifest to lock the improvement in"
+            )
+        else:
+            problems.append(
+                f"no longer declared, but still in the baseline: {key}\n"
+                "      removed or moved -- run --update-manifest"
+            )
 
     # 3. Exemptions may only shrink.
     for key in sorted(set(now_exempt) - set(pinned_exempt)):
@@ -452,13 +462,27 @@ def _head_sha() -> str:
 
 
 def _app_tree_sha(app_dir: Path) -> str:
-    """The identity of the tree that was actually measured.
+    """A digest of the files this run actually parsed.
 
     The generator commit moves whenever a document changes; this does not. Two
     inventories with the same `app_tree_sha` measured the same code, whatever
     else the branch was carrying, and that is the value a manifest should pin.
+
+    Computed from the working tree rather than from `git rev-parse HEAD:app`,
+    which was the first implementation and described the last *commit*. Those
+    two diverge exactly when someone edits `app/` and regenerates the baseline
+    -- the deletion of nine dead routes produced an unchanged `app_tree_sha`
+    while the inventory underneath it had moved by nine routes. A field named
+    for what was measured has to be computed from what was measured.
     """
-    return _git("rev-parse", f"HEAD:{app_dir.as_posix()}")
+    import hashlib
+
+    digest = hashlib.sha256()
+    for path in sorted(app_dir.rglob("*.py")):
+        digest.update(os.path.relpath(path, app_dir.parent).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
+    return digest.hexdigest()
 
 
 def _sha256(path: Path) -> str:

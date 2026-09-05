@@ -798,3 +798,47 @@ def test_identity_does_not_depend_on_how_the_directory_was_named(tmp_path, monke
 
     assert absolute == relative
     assert absolute == {"GET /thing @app/routes.py"}
+
+
+def test_a_deleted_route_is_not_reported_as_covered(tmp_path):
+    """Leaving the uncovered set by deletion is not the same as by contract.
+
+    The first message said "now covered" for a route that had been removed,
+    which sends a reader looking for a `response_model` nobody wrote. Found
+    while deleting the nine dead routes in issue 241 -- the gate was right to
+    refuse, and wrong about why.
+    """
+    pkg = covered_and_uncovered(tmp_path)
+    manifest = inv.build_manifest(inv.collect(pkg))
+
+    routes = pkg / "routes.py"
+    routes.write_text(
+        routes.read_text().split('@router.get("/has-none")')[0], encoding="utf-8"
+    )
+    problems = inv.check_ratchet(inv.collect(pkg), manifest)
+
+    assert any("no longer declared" in p for p in problems)
+    assert not any("now covered" in p for p in problems)
+
+
+def test_the_tree_digest_follows_the_files_not_the_last_commit(tmp_path):
+    """It is the identity of what was parsed, so an edit must move it.
+
+    The first version read `git rev-parse HEAD:app`, which describes the last
+    commit. Those diverge exactly when someone edits `app/` and regenerates the
+    baseline: deleting nine routes left the digest unchanged while the
+    inventory under it had moved by nine.
+    """
+    pkg = covered_and_uncovered(tmp_path)
+    before = inv._app_tree_sha(pkg)
+
+    (pkg / "routes.py").write_text("# nothing at all\n", encoding="utf-8")
+    after = inv._app_tree_sha(pkg)
+
+    assert before != after
+    assert len(after) == 64
+
+
+def test_the_tree_digest_is_stable_for_an_unchanged_tree(tmp_path):
+    pkg = covered_and_uncovered(tmp_path)
+    assert inv._app_tree_sha(pkg) == inv._app_tree_sha(pkg)

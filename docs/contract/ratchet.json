@@ -10,8 +10,8 @@
     "WS /ws/live @app/api/infra.py": "websocket"
   },
   "counts": {
-    "considered": 181,
-    "with_response_model": 23
+    "considered": 172,
+    "with_response_model": 18
   },
   "uncovered": [
     "DELETE /api/v1/webhooks/{sub_id} @app/api/webhooks.py",
@@ -24,10 +24,8 @@
     "GET /ab/stats @app/api/ab_test.py",
     "GET /admin/ai-teammate/status @app/api/ai_teammate_routes.py",
     "GET /admin/diagnostics @app/api/admin_diagnostics.py",
-    "GET /admin/stats @app/api/auth.py",
     "GET /admin/stats @app/auth_routes.py",
     "GET /admin/timeline @app/api/admin_timeline.py",
-    "GET /admin/users @app/api/auth.py",
     "GET /admin/users @app/auth_routes.py",
     "GET /analytics/country-benchmark/{country} @app/api/analytics.py",
     "GET /analytics/country-ranking @app/api/analytics.py",
@@ -59,9 +57,7 @@
     "GET /api/v2/model/calibration @app/ml/routes.py",
     "GET /api/v2/model/version @app/ml/routes.py",
     "GET /audit/log @app/auth_routes.py",
-    "GET /auth/me @app/api/auth.py",
     "GET /auth/me @app/auth_routes.py",
-    "GET /auth/verify @app/api/auth.py",
     "GET /auth/verify @app/auth_routes.py",
     "GET /batch @app/api/infra.py",
     "GET /batch/{batch_id} @app/api/infra.py",

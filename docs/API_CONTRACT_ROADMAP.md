@@ -24,20 +24,20 @@ number into CI.
 
 ## 1. Baseline
 
-Measured by `scripts/api_contract_inventory.py`, at commit `ebea7f8`:
+Measured by `scripts/api_contract_inventory.py`, after the removal in issue 241:
 
 | | |
 |---|---|
-| routes declared in `app/` | **187** |
+| routes declared in `app/` | **178** |
 | exempt (websocket / non-model `response_class`) | **6** |
-| considered | **181** |
-| declaring a `response_model` | **23** |
-| **coverage** | **12.7 %** |
+| considered | **172** |
+| declaring a `response_model` | **18** |
+| **coverage** | **10.5 %** |
 | handlers whose static returns disagree under one status | **13** |
 | of those, with a live frontend consumer | **4** |
 | declared but absent from the live OpenAPI document | **15** |
 | declared paths that could not be resolved unambiguously | **8** |
-| public addresses declared **twice** — one declaration is unreachable | **9** |
+| public addresses declared **twice** | **0** — nine were removed, see below |
 
 Reproduce:
 
@@ -241,46 +241,51 @@ each one re-running the inventory so the number moves visibly.
 | **P3** | admin and diagnostic endpoints | operator-facing, small blast radius |
 | **exempt** | files, redirects, streams, metrics, websockets | classified, not defects |
 
-### Nine addresses are claimed by two declarations, and nine routes are dead
+### The nine dead routes are gone, and the metric got worse
 
-Two different observations, and the first draft of this section merged them
-into one wrong mechanism. It said FastAPI answers with the first route
-registered and the second is shadowed. The conclusion held; the cause did not.
-**Shadowing requires both routers to be registered, and neither of the dead
-ones is.** Parsing `app/main.py` for the 39 router names it registers settles
-it, and finds no genuine shadowing anywhere in the repository.
+Removed in issue 241: `app/api/auth.py` and `app/api/admin_ai.py`, nine routes
+between them. `duplicate_public_paths` is now **0**.
 
-| cause | definition | routes |
+They were never alive. Both modules arrive in the repository's **first commit**,
+and `git log -S` finds no commit in the whole history that ever registered
+either router — no `include_router(auth_api…)`, no `admin_ai.router`. This was
+not the residue of a migration; it was duplication carried from day one for four
+months. `app/main.py` imported one of them and used it for nothing.
+
+Nothing was lost, established before deleting rather than assumed:
+
+- Of `app/api/auth.py`'s five handlers, three are byte-identical to the live
+  ones in `app/auth_routes.py`. Its JSON `/auth/login` already exists there as
+  `/auth/login-json`. Its one unique line — an `isinstance(user, str)` branch in
+  `/auth/verify` — guards a case that cannot occur: `require_api_key` returns
+  `API_KEYS[key]`, and all four construction sites build dicts.
+- All four of `app/api/admin_ai.py`'s handlers compare equal by AST to
+  `admin_ai_control.py`'s, except that the **live** one passes `force=True` to
+  `full_pipeline_run`. The deleted module was the older of the two.
+
+### The prediction about the denominator was wrong
+
+This document previously said that removing the nine would take the denominator
+to 172 and read as **12.8 %** "without a single contract being added". The
+denominator did go to 172. The rest was wrong, and measuring it says something
+the guess could not:
+
+| | before | after |
 |---|---|---|
-| **router not included** | module imported, router never registered | **5** — `app/api/auth.py`, imported at `main.py:36` as `auth_api`, with no `include_router` for it |
-| **module not imported** | module takes no part in building the app | **4** — `app/api/admin_ai.py`, absent from `main.py` entirely |
-| **shadowed duplicate** | same path and method, an earlier-included handler answers | **0** — none found |
-| **missing from OpenAPI** | absent from the published schema, cause not established | **15** — a separate set, not the nine |
+| considered | 181 | 172 |
+| with a `response_model` | 23 | **18** |
+| coverage | 12.7 % | **10.5 %** |
 
-The last row is deliberately not folded into the others. "Absent from the
-schema" can mean non-registration, mounting under a path this resolver does not
-reach, or conditional registration, and none of those is proven yet.
+**Five of the nine dead routes declared a `response_model`** — all four in
+`admin_ai.py` used `AIActionResponse`, and the dead `/auth/login` used `Token`.
+The dead code was better typed than the living average, by a wide margin: 56 %
+against 12.7 %. Deleting it made the measured coverage worse.
 
-The consequence that matters is `POST /auth/login`. The dead one takes a JSON
-body (`LoginRequest`); the live one, in `app/auth_routes.py`, takes a form
-(`OAuth2PasswordRequestForm`) — confirmed from the published document, which
-accepts only `application/x-www-form-urlencoded`. Anyone opening the file with
-the obvious name and writing a client against it gets a 422, from code that
-looks entirely functional: it handles errors, writes an audit entry, returns a
-`Token`.
-
-Tracked as issue 241. Deleting dead handlers is not contract work, but the
-coverage figure above is computed over a denominator inflated by nine routes
-that cannot answer anything: **removing them takes the denominator to 172 and
-the same 22 models to 12.8 % without a single contract being added.** That has
-to be said when the number is recomputed, or the metric will misreport the
-reason for its own improvement.
-
-The instrument's `duplicate_public_paths` detects *two declarations claiming one
-address*, not shadowing. Which one answers, and why the other does not, needs
-registration analysis the script does not do — it reads decorators, not
-`main.py`. Adding that would let the four causes be told apart mechanically
-instead of by hand.
+The guess assumed the nine were uncovered because they were dead, as though the
+two properties were related. They are not. This is the caution the metric needs
+stated next to it: **a percentage moves for reasons that have nothing to do with
+the work**, and the only defence is to re-run the instrument instead of
+reasoning about the number.
 
 ### Start here: disagreeing shapes that already have a consumer
 
@@ -389,9 +394,10 @@ dependencies.
 - Frontend types are generated from, or checked against, `/openapi.json`
   instead of being written by hand.
 - Coverage is re-measured and recorded at every phase, by the script, not by
-  assertion. It moved 12.2 % → 12.7 % when #244 landed, and the shape conflicts
-  with a live consumer went from five to four — measured by re-running the
-  inventory, not claimed.
+  assertion. It moved 12.2 % → 12.7 % when #244 landed, then **12.7 % → 10.5 %**
+  when issue 241 removed nine dead routes of which five were typed — measured by
+  re-running the instrument, and in the second case contradicting the prediction
+  written here beforehand.
 
 ---
 
