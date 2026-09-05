@@ -118,4 +118,51 @@ describe("MonteCarlo on the production path", () => {
     expect(data).toEqual({});
     expect(scoreLikeNumbersIn(data)).toEqual([]);
   });
+
+  // The test above checks the transport and stops there. It passed while the
+  // component crashed on exactly that value, which is the gap #236 is about:
+  // asserting what the client returns is not asserting what the page does
+  // with it. These render it.
+
+  it("renders the empty state rather than crashing on that same {}", () => {
+    // MonteCarlo draws inside EvaluatePage, so this was a third way the page
+    // blanked on an empty 200 -- `data.histogram.counts` on the Monte Carlo
+    // tab, surviving the fixes to the result and explain paths.
+    const { container } = renderWithQuery(
+      <MonteCarlo data={{} as never} loading={false} onRun={() => {}} />,
+    );
+
+    expect(container.querySelector(".mc-empty")).not.toBeNull();
+    expect(container.textContent ?? "").toContain("Click");
+  });
+
+  it("renders the empty state when the histogram is there but the stats are not", () => {
+    const { container } = renderWithQuery(
+      <MonteCarlo
+        data={{ histogram: { counts: [1, 2], edges: [0, 1, 2] } } as never}
+        loading={false}
+        onRun={() => {}}
+      />,
+    );
+
+    expect(container.querySelector(".mc-empty")).not.toBeNull();
+    expect(container.textContent ?? "").not.toContain("NaN");
+  });
+
+  it("still draws a complete simulation the server did return", () => {
+    const { container } = renderWithQuery(
+      <MonteCarlo
+        data={{
+          n: 500, mean: 61.25, stdev: 4.75, p10: 55.5, p50: 61.5, p90: 67.25,
+          min: 48.5, max: 74.5,
+          histogram: { counts: [2, 7, 3], edges: [48, 57, 66, 75] },
+        } as never}
+        loading={false}
+        onRun={() => {}}
+      />,
+    );
+
+    expect(container.querySelector(".mc-empty")).toBeNull();
+    expect(container.textContent ?? "").toContain("61.3");
+  });
 });

@@ -6,7 +6,10 @@ interface Props {
 }
 
 export function ReliabilityChart({ data }: Props) {
-  if (!data) {
+  // #236: `{}` is truthy, so this guard passed an empty 200 to
+  // `curve.bin_lower.map` and crashed the calibration panel. A reliability
+  // diagram is its curve; without one, the "run analysis" state is correct.
+  if (!data || !Array.isArray(data.curve?.bin_lower)) {
     return <div className="rel-empty">Run analysis to see reliability diagram</div>;
   }
   const { curve } = data;
