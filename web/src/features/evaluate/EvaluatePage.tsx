@@ -71,8 +71,27 @@ export function EvaluatePage() {
   const rankMut = useMutation({ mutationFn: evaluateApi.ranking });
   const mcMut = useMutation({ mutationFn: evaluateApi.monteCarlo });
   const explainMut = useMutation({ mutationFn: evaluateApi.explain });
-  const result: EvaluateResponse|undefined = evalMut.data;
-  const explain: ExplainResponse|undefined = explainMut.data;
+  // A scored result is one that carries a score. `evalMut.data` being `{}` —
+  // a 200 with an empty body — used to pass the `!result` guard below, reach
+  // `fmtNum(result.budget_usd)` with `undefined`, and take the whole page
+  // down with "Cannot read properties of undefined (reading
+  // 'toLocaleString')": a blank screen, measured (#236).
+  //
+  // The formatter is deliberately left strict rather than taught to print a
+  // dash for `undefined`. A crash is loud; a dash where a score belongs is
+  // the quiet kind of wrong this codebase keeps finding (#216). The fix is
+  // to stop calling it with nothing, not to make nothing look printable.
+  const rawResult: EvaluateResponse|undefined = evalMut.data;
+  const result: EvaluateResponse|undefined =
+    rawResult && rawResult.total_score != null ? rawResult : undefined;
+  // Same rule as `result` above, and the same measured crash: `{}` is
+  // truthy, so `{explain && <ShapWaterfall/>}` used to hand the panel an
+  // object with no `explanation`, and `[...data.explanation]` threw
+  // "not iterable" — blanking the page a second way after the first was
+  // fixed. An explanation without contributions is not an explanation.
+  const rawExplain: ExplainResponse|undefined = explainMut.data;
+  const explain: ExplainResponse|undefined =
+    rawExplain && Array.isArray(rawExplain.explanation) ? rawExplain : undefined;
   const score = useCountUp(result?.total_score ?? 0);
   const prob  = useCountUp(result?.success_probability ?? 0);
   const countryList = useMemo(()=> countries ? Object.keys(countries).sort() : [], [countries]);

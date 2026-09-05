@@ -28,7 +28,10 @@ export function LSTMProgressWidget() {
     );
   }
 
-  if (!data) {
+  // Same rule (#236): `{}` passed this guard and `samples / threshold`
+  // rendered "/ samples (NaN%)" -- a progress bar with no progress in it.
+  // A zero threshold would divide to Infinity, so it is excluded here too.
+  if (!data || !Number.isFinite(data.samples) || !(data.threshold > 0)) {
     return null;
   }
 
