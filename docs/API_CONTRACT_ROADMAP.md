@@ -31,10 +31,10 @@ Measured by `scripts/api_contract_inventory.py`, after the removal in issue 241:
 | routes declared in `app/` | **178** |
 | exempt (websocket / non-model `response_class`) | **6** |
 | considered | **172** |
-| declaring a `response_model` | **18** |
-| **coverage** | **10.5 %** |
-| handlers whose static returns disagree under one status | **13** |
-| of those, with a live frontend consumer | **4** |
+| declaring a `response_model` | **19** |
+| **coverage** | **11.0 %** |
+| handlers whose static returns disagree under one status | **12** |
+| of those, with a live frontend consumer | **3** |
 | declared but absent from the live OpenAPI document | **15** |
 | declared paths that could not be resolved unambiguously | **8** |
 | public addresses declared **twice** | **0** — nine were removed, see below |
@@ -293,10 +293,10 @@ Five of the fourteen are reached by the frontend today. These are the P0/P1
 starting set — not because they are the worst code, but because a consumer is
 already reading them.
 
-| public path | file |
-|---|---|
-| `GET /api/v1/model/drift` | `api/drift.py:17` — the #239 sample; live in production returning `{"status": "no_log", "drift": false}` |
-| `GET /api/v1/model/drift/mlflow-history` | `api/drift.py:61` |
+| public path | file | |
+|---|---|---|
+| ~~`GET /api/v1/model/drift`~~ | `api/drift.py` | migrated in #244 |
+| ~~`GET /api/v1/model/drift/mlflow-history`~~ | `api/drift.py` | migrated here |
 | `GET /api/v1/lstm-status` | `api/forecast.py:462` — consumed by `LSTMProgressWidget` |
 | `POST /api/v1/evaluate/monte-carlo` | `api/evaluate.py:552` — `{"error": …}` at HTTP 200 |
 | `POST /api/v1/mlops/drift/simulate` | `api/drift_baseline.py:91` |
@@ -395,9 +395,10 @@ dependencies.
   instead of being written by hand.
 - Coverage is re-measured and recorded at every phase, by the script, not by
   assertion. It moved 12.2 % → 12.7 % when #244 landed, then **12.7 % → 10.5 %**
-  when issue 241 removed nine dead routes of which five were typed — measured by
-  re-running the instrument, and in the second case contradicting the prediction
-  written here beforehand.
+  when issue 241 removed nine dead routes of which five were typed — contradicting
+  the prediction written here beforehand — and 10.5 % → 11.0 % with the MLflow
+  history migration. The count that tracks the work better is *shape conflicts
+  with a live consumer*: 5 → 4 → **3**.
 
 ---
 

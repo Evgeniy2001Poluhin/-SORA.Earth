@@ -2,7 +2,13 @@ import { api } from "../client";
 import type { DriftBaselineStatus, DriftBaselineFitResponse, DriftSimulateResponse } from "../types";
 import { isMock } from "../mock";
 export type MlflowDriftEvent={run_id:string;start_time:string;experiment_id?:string;"metrics.drift_score"?:number;"metrics.drifted_features_count"?:number;"metrics.n_samples_ref"?:number;"metrics.n_samples_cur"?:number;"tags.baseline_id"?:string;"params.drifted_features"?:string;};
-export type MlflowHistoryResp={events:MlflowDriftEvent[];count:number};
+/** GET /api/v1/model/drift/mlflow-history, migrated in the #241 follow-up.
+ *
+ *  An empty list here is a real answer -- MLflow replied and holds no drift
+ *  events -- unlike the KS report, where empty meant nothing was measured. A
+ *  tracking server that cannot be reached now answers 503 and arrives as a
+ *  rejection, so it can no longer be drawn as "0 events". */
+export type MlflowHistoryResp={status:"ok";events:MlflowDriftEvent[];count:number;reason_code:string|null};
 export type KsFeatureStat={ks_stat:number;p_value:number;drift:boolean};
 /** GET /api/v1/model/drift, migrated to a declared contract in #239.
  *
@@ -20,7 +26,7 @@ const STATUS:DriftBaselineStatus={exists:true,n_samples:734,feature_count:7,fitt
 const KS:ModelDriftKsResp={status:"ok",drift_detected:true,window:200,observations:200,reason_code:null,features:{
   budget:{ks_stat:0.7616,p_value:0,drift:true},co2_reduction:{ks_stat:0.4768,p_value:0,drift:true},
   social_impact:{ks_stat:0.7439,p_value:0,drift:true},duration_months:{ks_stat:0.3842,p_value:0,drift:true}}};
-const MLFLOW:MlflowHistoryResp={count:30,events:Array.from({length:30},(_,i)=>({
+const MLFLOW:MlflowHistoryResp={status:"ok",reason_code:null,count:30,events:Array.from({length:30},(_,i)=>({
   run_id:"r"+Math.random().toString(16).slice(2,10),
   start_time:new Date(Date.now()-i*3600000).toISOString(),
   "metrics.drift_score":i===1?0.5:1,"metrics.drifted_features_count":4,

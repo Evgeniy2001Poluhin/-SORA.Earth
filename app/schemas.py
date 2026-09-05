@@ -331,3 +331,47 @@ ModelDriftResponse = Annotated[
     Union[ModelDriftMeasured, ModelDriftNotMeasured],
     Field(discriminator="status"),
 ]
+
+
+# --- GET /api/v1/model/drift/mlflow-history ---------------------------------
+#
+# Second migration under docs/API_CONTRACT_ROADMAP.md. Three bodies became two,
+# and the one that mattered stopped being a 200.
+#
+# MLflow being unreachable used to answer 200 with
+# `{"events": [], "count": 0, "error": "<exception text>"}`. On screen that is
+# "Drift timeline (MLflow): 0 events" -- indistinguishable from a working MLflow
+# with nothing recorded. One is a fault, the other is a fact, and the operator
+# could not tell them apart. The exception text was also echoed to the caller.
+#
+# Unlike the KS report next door, an empty list here IS a measurement: MLflow
+# answered and holds no drift events. So there are two statuses, not three.
+
+
+class MlflowHistoryOk(BaseModel):
+    """MLflow answered. `events` may be empty, and that is a real answer."""
+
+    status: Literal["ok"]
+    #: Rows as MLflow returned them. Deliberately not pinned field by field: the
+    #: keys are MLflow column names selected at query time ("metrics.drift_score"
+    #: and friends, which are not Python identifiers), and the set varies with
+    #: what the tracking server actually stored. A stricter model would either
+    #: drop columns or promise ones that are often absent.
+    events: List[Dict[str, Any]] = Field(default_factory=list)
+    count: int
+    reason_code: Optional[str] = None
+
+
+class MlflowHistoryUnavailable(BaseModel):
+    """MLflow could not be queried. Served with 503, never 200."""
+
+    status: Literal["unavailable"]
+    events: List[Dict[str, Any]] = Field(default_factory=list)
+    count: int = 0
+    #: A fixed machine-readable string. The exception text is logged, not
+    #: returned: it reached the caller before, and an error message from a
+    #: tracking client is not something a browser should be shown.
+    reason_code: str
+
+
+MlflowHistoryResponse = MlflowHistoryOk

@@ -21,8 +21,12 @@ import pandas as pd
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+import logging
+
 from app.schemas import (
     KsFeatureStat,
+    MlflowHistoryOk,
+    MlflowHistoryUnavailable,
     ModelDriftMeasured,
     ModelDriftNotMeasured,
     ModelDriftResponse,
@@ -34,6 +38,8 @@ try:
     HAS_SCIPY = True
 except ImportError:
     HAS_SCIPY = False
+
+logger = logging.getLogger(__name__)
 
 #: Rows required before a KS test is worth running. Unchanged by #239 -- this
 #: PR moves the contract, not the algorithm or its thresholds.
@@ -126,9 +132,23 @@ def check_drift(window: int = 50):
 
 
 
-@router.get("/drift/mlflow-history", tags=["mlops"])
+@router.get(
+    "/drift/mlflow-history",
+    tags=["mlops"],
+    response_model=MlflowHistoryOk,
+    responses={503: {"model": MlflowHistoryUnavailable, "description": "MLflow could not be queried."}},
+    summary="Drift events recorded in MLflow",
+)
 def drift_mlflow_history(limit: int = 50):
-    """Return recent drift events recorded in MLflow (tag type=drift_event)."""
+    """Recent drift events recorded in MLflow (tag type=drift_event).
+
+    An empty list is a real answer here, unlike the KS report next door: it
+    means MLflow replied and holds no drift events. A tracking server that
+    cannot be reached is a different thing and answers 503 -- it used to answer
+    200 with an empty list and the exception text, which reached the screen as
+    "0 events" and was indistinguishable from the real empty (#241 follow-up,
+    docs/API_CONTRACT_ROADMAP.md).
+    """
     try:
         import mlflow as _ml
         runs = _ml.search_runs(
@@ -137,9 +157,17 @@ def drift_mlflow_history(limit: int = 50):
             max_results=int(max(1, min(limit, 500))),
         )
     except Exception as e:
-        return {"events": [], "count": 0, "error": str(e)}
+        # Logged, not returned: a tracking client's exception text is not
+        # something a browser should be shown, and it was being echoed.
+        logger.warning("mlflow drift history unavailable: %s", e)
+        return JSONResponse(
+            status_code=503,
+            content=MlflowHistoryUnavailable(
+                status="unavailable", events=[], count=0, reason_code="mlflow_unavailable"
+            ).model_dump(),
+        )
     if runs is None or getattr(runs, "empty", True):
-        return {"events": [], "count": 0}
+        return MlflowHistoryOk(status="ok", events=[], count=0, reason_code=None)
     keep = [c for c in [
         "run_id", "start_time", "experiment_id",
         "metrics.drift_score", "metrics.drifted_features_count",
@@ -150,4 +178,4 @@ def drift_mlflow_history(limit: int = 50):
     if "start_time" in df.columns:
         df["start_time"] = df["start_time"].astype(str)
     out = df.to_dict(orient="records")
-    return {"events": out, "count": len(out)}
+    return MlflowHistoryOk(status="ok", events=out, count=len(out), reason_code=None)

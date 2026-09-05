@@ -11,7 +11,7 @@
   },
   "counts": {
     "considered": 172,
-    "with_response_model": 18
+    "with_response_model": 19
   },
   "uncovered": [
     "DELETE /api/v1/webhooks/{sub_id} @app/api/webhooks.py",
@@ -99,7 +99,6 @@
     "GET /model/ab-comparison @app/api/ab_comparison.py",
     "GET /model/ab-comparison/plot @app/api/ab_comparison.py",
     "GET /model/compare @app/api/compare.py",
-    "GET /model/drift/mlflow-history @app/api/drift.py",
     "GET /model/feature-importance @app/api/retrain.py",
     "GET /model/metrics @app/api/retrain.py",
     "GET /model/prediction-log/stats @app/api/retrain.py",

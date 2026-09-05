@@ -254,3 +254,122 @@ def test_openapi_pins_the_verdict_to_the_status(client):
     for model in ("ModelDriftNotMeasured", "ModelDriftUnavailable"):
         verdict = components[model]["properties"]["drift_detected"]
         assert verdict.get("type") == "null", f"{model} must promise null, not a boolean"
+
+
+# --- GET /api/v1/model/drift/mlflow-history ---------------------------------
+#
+# Second migration. The distinction this one turns on is different from the KS
+# report's: here an empty list IS a measurement -- MLflow answered and holds
+# nothing -- while a tracking server that cannot be reached is a fault. Both
+# used to be 200 with `{"events": [], "count": 0}`, so the screen said
+# "0 events" either way.
+
+HISTORY_KEYS = {"status", "events", "count", "reason_code"}
+
+
+@pytest.fixture()
+def fake_mlflow(monkeypatch):
+    """Install a stub `mlflow` module the handler will import inside the request."""
+
+    def install(search_runs):
+        stub = types.ModuleType("mlflow")
+        stub.search_runs = search_runs  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "mlflow", stub)
+
+    return install
+
+
+def test_an_unreachable_tracking_server_is_a_fault_not_an_empty_history(client, fake_mlflow):
+    def explode(**_kwargs):
+        raise ConnectionError("tracking server refused the connection")
+
+    fake_mlflow(explode)
+
+    r = client.get("/api/v1/model/drift/mlflow-history")
+
+    assert r.status_code == 503, "this used to be 200 with an empty list"
+    body = r.json()
+    assert set(body) == HISTORY_KEYS
+    assert body["status"] == "unavailable"
+    assert body["events"] == []
+    assert body["reason_code"] == "mlflow_unavailable"
+
+
+def test_the_exception_text_is_not_returned_to_the_caller(client, fake_mlflow):
+    """It was. `{"error": str(e)}` echoed whatever the client raised."""
+    secret = "postgresql://sora:hunter2@db:5432/mlflow"
+
+    def explode(**_kwargs):
+        raise ConnectionError(f"could not connect to {secret}")
+
+    fake_mlflow(explode)
+
+    body = client.get("/api/v1/model/drift/mlflow-history").text
+
+    assert secret not in body
+    assert "hunter2" not in body
+    assert "error" not in client.get("/api/v1/model/drift/mlflow-history").json()
+
+
+def test_a_tracking_server_with_nothing_recorded_is_a_real_answer(client, fake_mlflow):
+    class Empty:
+        empty = True
+
+    fake_mlflow(lambda **_kwargs: Empty())
+
+    r = client.get("/api/v1/model/drift/mlflow-history")
+
+    assert r.status_code == 200, "MLflow answered; nothing recorded is a fact"
+    body = r.json()
+    assert set(body) == HISTORY_KEYS
+    assert body["status"] == "ok"
+    assert body["events"] == []
+    assert body["count"] == 0
+    assert body["reason_code"] is None
+
+
+def test_recorded_events_come_back_with_their_mlflow_column_names(client, fake_mlflow):
+    import pandas as pd
+
+    fake_mlflow(
+        lambda **_kwargs: pd.DataFrame(
+            [
+                {
+                    "run_id": "abc123",
+                    "start_time": "2026-09-05 10:00:00",
+                    "metrics.drift_score": 0.75,
+                    "tags.baseline_id": "baseline_zscore",
+                }
+            ]
+        )
+    )
+
+    r = client.get("/api/v1/model/drift/mlflow-history")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["count"] == 1
+    event = body["events"][0]
+    assert event["run_id"] == "abc123"
+    assert event["metrics.drift_score"] == 0.75, "dotted column names survive the model"
+
+
+def test_the_retired_error_field_is_gone_from_every_branch(client, fake_mlflow):
+    class Empty:
+        empty = True
+
+    fake_mlflow(lambda **_kwargs: Empty())
+    assert "error" not in client.get("/api/v1/model/drift/mlflow-history").json()
+
+
+def test_openapi_declares_both_branches_of_the_history(client):
+    schema = client.get("/openapi.json").json()
+    op = schema["paths"]["/api/v1/model/drift/mlflow-history"]["get"]
+
+    assert "503" in op["responses"]
+
+    components = schema["components"]["schemas"]
+    for model in ("MlflowHistoryOk", "MlflowHistoryUnavailable"):
+        assert model in components, model
+        assert HISTORY_KEYS <= set(components[model]["properties"]), model
