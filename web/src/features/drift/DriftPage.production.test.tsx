@@ -134,6 +134,40 @@ describe("LSTMProgressWidget when the API answers with nothing", () => {
     expect(container.querySelector(".progress-bar-fill")).toBeNull();
   });
 
+  it("says the status is unavailable rather than vanishing", async () => {
+    // The failure branch is a 503 now, so the query rejects and `data` is
+    // absent -- which is the same state as "nothing loaded yet", and the widget
+    // used to render nothing at all. A fault that leaves no trace on the page
+    // is the quiet kind of wrong this whole effort is about.
+    stubStatus(503);
+
+    const { container } = renderWithQuery(<LSTMProgressWidget />);
+
+    await waitFor(
+      () => expect(container.textContent ?? "").toContain("could not be determined"),
+      { timeout: 3000 },
+    );
+    expect(container.textContent ?? "").not.toContain("samples");
+  });
+
+  it("draws the active block even if the server omits its lists", async () => {
+    // The contract promises `models_active` and `weights` when active is true.
+    // Reading them on the strength of `active` alone is the mistake #236 was
+    // about, one level in.
+    stubJson({
+      status: "ok", active: true, samples: 40, threshold: 33, days_remaining: 0,
+      next_activation_date: null, message: "LSTM active", reason_code: null,
+      unique_days_raw: 40, last_evaluation_date: "2026-09-01",
+    });
+
+    const { container } = renderWithQuery(<LSTMProgressWidget />);
+
+    await waitFor(() => expect(container.textContent ?? "").toContain("LSTM is active"), {
+      timeout: 3000,
+    });
+    expect(container.textContent ?? "").not.toContain("NaN");
+  });
+
   it("renders the real progress the server reports", async () => {
     stubJson({ active: false, samples: 137, threshold: 500, days_remaining: 12, next_activation_date: null, models_active: [], weights: {}, message: "" });
 

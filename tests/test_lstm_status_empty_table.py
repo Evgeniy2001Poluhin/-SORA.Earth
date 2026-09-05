@@ -24,31 +24,57 @@ import pandas as pd
 def _call_lstm_status(last_date):
     """Call the real endpoint function with a mocked db and an empty
     time series, as if `evaluations` had `unique_days=0` and the given
-    `MAX(created_at)::date` (None for zero matching rows)."""
+    `MAX(created_at)::date` (None for zero matching rows).
+
+    Returns `(status_code, body)`. The endpoint returns a Pydantic model on
+    success and a `JSONResponse` on failure since its contract was declared,
+    so this normalises both to a dict -- the assertions below are about the
+    NULL-aggregate fix, not about the return type.
+    """
+    import json
+
+    from fastapi.responses import JSONResponse
+
     from app.api.forecast import get_lstm_status
 
     mock_db = MagicMock()
     mock_db.execute.return_value.fetchone.return_value = (0, last_date)
 
     with patch("app.api.forecast._query_time_series", return_value=pd.DataFrame()):
-        return asyncio.run(get_lstm_status(db=mock_db))
+        returned = asyncio.run(get_lstm_status(db=mock_db))
+
+    if isinstance(returned, JSONResponse):
+        return returned.status_code, json.loads(returned.body)
+    return 200, returned.model_dump()
 
 
 def test_a_null_max_created_at_does_not_crash_the_endpoint():
-    result = _call_lstm_status(None)
-    assert "error" not in result, (
-        f"the endpoint fell into its except-and-degrade path: {result}")
+    """The original assertion was `"error" not in result`.
+
+    That field no longer exists on any branch -- the failure path is a 503 with
+    a `reason_code` now -- so the assertion could not have failed. It asks the
+    same question against the current contract: did the endpoint answer, or
+    fall into its except-and-degrade path?
+    """
+    status_code, result = _call_lstm_status(None)
+    assert status_code == 200, f"the endpoint degraded instead of answering: {result}"
+    assert result["status"] == "ok", result
 
 
 def test_a_null_max_created_at_falls_back_to_today():
-    result = _call_lstm_status(None)
+    _status_code, result = _call_lstm_status(None)
     assert result["last_evaluation_date"] == date.today().isoformat()
 
 
 def test_a_null_max_created_at_still_reports_days_remaining():
-    """The specific fields this crash used to erase from the response --
-    replaced by the except block's degraded stub, which has none of them."""
-    result = _call_lstm_status(None)
+    """The specific fields this crash used to erase from the response.
+
+    What separates the branches is no longer which keys are present -- the
+    contract gives every branch the same set -- but `active`: a boolean when a
+    verdict was reached, `null` when the check could not run. `is False` here
+    would not hold on the degraded path.
+    """
+    _status_code, result = _call_lstm_status(None)
     assert result["active"] is False
     assert isinstance(result["days_remaining"], int)
     assert result["days_remaining"] > 0
@@ -59,5 +85,5 @@ def test_a_null_max_created_at_still_reports_days_remaining():
 def test_a_real_last_date_is_still_used_not_overridden():
     """The fallback must trigger only for None, never mask a genuine value."""
     real_date = date(2026, 7, 1)
-    result = _call_lstm_status(real_date)
+    _status_code, result = _call_lstm_status(real_date)
     assert result["last_evaluation_date"] == real_date.isoformat()

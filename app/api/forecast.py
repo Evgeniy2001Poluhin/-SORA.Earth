@@ -10,10 +10,18 @@ import numpy as np
 import pandas as pd
 import logging
 from fastapi import APIRouter, Query, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import List
 
-from app.schemas import ForecastResponse, ForecastPoint, HistoryPoint, ForecastCacheStats
+from app.schemas import (
+    ForecastResponse,
+    ForecastPoint,
+    HistoryPoint,
+    ForecastCacheStats,
+    LstmStatusOk,
+    LstmStatusUnavailable,
+)
 from app.services.forecasting import ModelRegistry, forecast_cache
 
 log = logging.getLogger(__name__)
@@ -459,7 +467,12 @@ def get_latest_forecast_metrics(
     return result
 
 
-@router.get("/lstm-status")
+@router.get(
+    "/lstm-status",
+    response_model=LstmStatusOk,
+    responses={503: {"model": LstmStatusUnavailable, "description": "Status could not be determined."}},
+    summary="LSTM activation status and progress towards its threshold",
+)
 async def get_lstm_status(db: Session = Depends(_get_db)):
     """Get LSTM activation status and progress towards threshold.
 
@@ -532,25 +545,40 @@ async def get_lstm_status(db: Session = Depends(_get_db)):
         sora_forecast_lstm_active.set(1.0 if lstm_active else 0.0)
         sora_forecast_days_remaining.set(days_remaining)
 
-        return {
-            "active": lstm_active,
-            "samples": n_samples,
-            "threshold": LSTM_MIN_ROWS,
-            "days_remaining": days_remaining,
-            "next_activation_date": next_activation_date,
-            "models_active": models_active,
-            "weights": weights,
-            "unique_days_raw": unique_days,
-            "last_evaluation_date": last_date.isoformat(),
-            "message": "LSTM active" if lstm_active else f"Need {days_remaining} more days of data"
-        }
+        return LstmStatusOk(
+            status="ok",
+            active=lstm_active,
+            samples=n_samples,
+            threshold=LSTM_MIN_ROWS,
+            days_remaining=days_remaining,
+            next_activation_date=next_activation_date,
+            models_active=models_active,
+            weights=weights,
+            unique_days_raw=unique_days,
+            last_evaluation_date=last_date.isoformat(),
+            message="LSTM active" if lstm_active else f"Need {days_remaining} more days of data",
+            reason_code=None,
+        )
     except Exception as e:
-        log.error(f"LSTM status check failed: {e}", exc_info=True)
-        return {
-            "active": False,
-            "samples": unique_days,
-            "threshold": LSTM_MIN_ROWS,
-            "days_remaining": max(0, LSTM_MIN_ROWS - unique_days),
-            "error": str(e),
-            "message": "Error checking LSTM status"
-        }
+        # 503 rather than a 200 saying `active: false`. That was a verdict
+        # nobody reached: "we could not determine whether LSTM is active" and
+        # "LSTM is not active" are different answers, and the screen showed the
+        # second for both. `active` and `days_remaining` are null here for the
+        # same reason -- false and zero are claims.
+        #
+        # `samples` is 0 rather than `unique_days`: the old branch put a count
+        # of distinct days into a field that means rows in the forecast series,
+        # so one name carried two quantities. The day count it does know is
+        # reported under its own name.
+        log.error("LSTM status check failed: %s", e, exc_info=True)
+        return JSONResponse(
+            status_code=503,
+            content=LstmStatusUnavailable(
+                status="unavailable",
+                threshold=LSTM_MIN_ROWS,
+                unique_days_raw=unique_days,
+                last_evaluation_date=last_date.isoformat(),
+                message="Could not determine LSTM status",
+                reason_code="status_check_failed",
+            ).model_dump(),
+        )

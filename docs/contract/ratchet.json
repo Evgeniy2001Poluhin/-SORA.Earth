@@ -11,7 +11,7 @@
   },
   "counts": {
     "considered": 172,
-    "with_response_model": 20
+    "with_response_model": 21
   },
   "uncovered": [
     "DELETE /api/v1/webhooks/{sub_id} @app/api/webhooks.py",
@@ -87,7 +87,6 @@
     "GET /history @app/api/evaluate.py",
     "GET /history/{eval_id} @app/api/evaluate.py",
     "GET /infra/data-refresh-status @app/api/infra.py",
-    "GET /lstm-status @app/api/forecast.py",
     "GET /map/countries @app/api/map_data.py",
     "GET /map/countries/{code} @app/api/map_data.py",
     "GET /metrics @app/api/infra.py",
