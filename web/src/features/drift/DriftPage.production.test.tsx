@@ -24,6 +24,7 @@ vi.mock("@/api/mock", async (importOriginal) => {
 
 import { DriftPage } from "./DriftPage";
 import { LSTMProgressWidget } from "./LSTMProgressWidget";
+import { DriftTimeline } from "./DriftTimeline";
 import { isMock } from "@/api/mock";
 import { renderWithQuery } from "@/test/utils";
 import { stubJson, stubStatus } from "@/test/http";
@@ -142,5 +143,67 @@ describe("LSTMProgressWidget when the API answers with nothing", () => {
       timeout: 3000,
     });
     expect(container.textContent ?? "").toContain("27.4%");
+  });
+});
+
+describe("DriftTimeline when an event arrives malformed", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("guards the payload correctly already", async () => {
+    // Included as the negative control for the sweep: this component was
+    // checked and its top-level guard is the shape the others now use.
+    stubJson({});
+
+    const { container } = renderWithQuery(<DriftTimeline />);
+    await waitFor(() => expect(container.textContent ?? "").toContain("No drift events yet"), {
+      timeout: 3000,
+    });
+    expect(container.textContent ?? "").toContain("0 events");
+  });
+
+  it("survives an event with no run_id instead of taking the page down", async () => {
+    // One level below the payload guard: every field in the row had a
+    // fallback except `run_id`, and `.slice` on undefined unmounted the
+    // whole drift page, since the timeline renders inside it.
+    stubJson({ events: [{ start_time: "2026-09-05T10:00:00Z", "metrics.drift_score": 0.42 }] });
+
+    const { container } = renderWithQuery(<DriftTimeline />);
+    await waitFor(() => expect(container.textContent ?? "").toContain("1 events"), { timeout: 3000 });
+
+    expect(container.textContent ?? "").not.toBe("");
+    expect(container.textContent ?? "").toContain("42%");
+  });
+
+  it("shows a dash rather than an Invalid Date when the timestamp is absent", async () => {
+    // Quieter than the crash and worse: an absent start_time sorts as NaN,
+    // which reorders the timeline rather than failing.
+    stubJson({ events: [{ run_id: "abcdef1234567890", "metrics.drift_score": 0.5 }] });
+
+    const { container } = renderWithQuery(<DriftTimeline />);
+    await waitFor(() => expect(container.textContent ?? "").toContain("abcdef12"), { timeout: 3000 });
+
+    expect(container.textContent ?? "").not.toContain("Invalid Date");
+  });
+
+  it("still renders a well-formed event exactly as before", async () => {
+    stubJson({
+      events: [{
+        run_id: "0123456789abcdef",
+        start_time: "2026-09-05T10:00:00Z",
+        "metrics.drift_score": 0.73,
+        "metrics.drifted_features_count": 3,
+        "tags.baseline_id": "baseline-x",
+        "params.drifted_features": "budget,co2",
+      }],
+    });
+
+    const { container } = renderWithQuery(<DriftTimeline />);
+    await waitFor(() => expect(container.textContent ?? "").toContain("01234567"), { timeout: 3000 });
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("73%");
+    expect(text).toContain("baseline-x");
   });
 });
