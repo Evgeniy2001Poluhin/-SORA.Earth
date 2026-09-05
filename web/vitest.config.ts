@@ -10,6 +10,7 @@ export default defineConfig({
     alias: { "@": path.resolve(__dirname, "src") },
   },
   test: {
+    env: { VITE_API_BASE: "/api/v1" },
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],

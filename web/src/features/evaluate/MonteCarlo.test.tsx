@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 
+// Mock mode for this file, said here rather than inherited (#218). These assert the shape of the canned Monte Carlo payload, which is a
+// real contract between the fixture and the component's bar sizing.
+// The production-mode counterpart is MonteCarlo.production.test.tsx.
+vi.mock("@/api/mock", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/mock")>();
+  return { ...actual, isMock: true };
+});
+
 import MonteCarlo from "./MonteCarlo";
 import { evaluateApi } from "@/api/endpoints/evaluate";
 import { renderWithQuery, stubChartLayout } from "@/test/utils";
