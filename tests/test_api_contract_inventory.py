@@ -13,6 +13,9 @@ report "0 routes, 0% coverage" -- a clean-looking result from an empty set.
 from __future__ import annotations
 
 import importlib.util
+import json
+import subprocess
+import sys
 import sys
 import textwrap
 from pathlib import Path
@@ -399,3 +402,190 @@ def test_an_ambiguous_path_is_not_credited_with_consumers(tmp_path):
     web = _web(tmp_path, {"api/x.ts": 'api("/model/drift")'})
     inv.attach_consumers(routes, web)
     assert routes[0].consumers == 0
+
+
+# --- provenance, determinism, and one address per route ----------------------
+
+
+def test_two_declarations_at_one_address_are_reported(tmp_path):
+    # FastAPI answers with the first registered match, so the second is
+    # unreachable. Nine of these exist in this codebase, including two
+    # /auth/login handlers whose request formats differ (JSON vs form).
+    pkg = write(tmp_path, '''
+        @router.post("/login")
+        def a():
+            return {"x": 1}
+    ''')
+    (tmp_path / "app" / "other.py").write_text(
+        textwrap.dedent('''
+        @router.post("/login")
+        def b():
+            return {"x": 1}
+    '''),
+        encoding="utf-8",
+    )
+    routes = inv.collect(tmp_path / "app")
+    inv.resolve_public_paths(routes, {"paths": {"/api/v1/login": {"post": {}}}})
+    s = inv.summarise(routes)
+    assert s["duplicate_public_paths"] == ["/api/v1/login"]
+
+
+def test_one_declaration_at_one_address_is_not_reported(tmp_path):
+    pkg = write(tmp_path, '''
+        @router.post("/login")
+        def a():
+            return {"x": 1}
+    ''')
+    routes = inv.collect(pkg)
+    inv.resolve_public_paths(routes, {"paths": {"/api/v1/login": {"post": {}}}})
+    assert inv.summarise(routes)["duplicate_public_paths"] == []
+
+
+def test_the_same_path_under_different_methods_is_not_a_duplicate(tmp_path):
+    pkg = write(tmp_path, '''
+        @router.get("/thing")
+        def a():
+            return {"x": 1}
+
+        @router.post("/thing")
+        def b():
+            return {"x": 1}
+    ''')
+    routes = inv.collect(pkg)
+    inv.resolve_public_paths(routes, {"paths": {"/api/v1/thing": {"get": {}, "post": {}}}})
+    assert inv.summarise(routes)["duplicate_public_paths"] == []
+
+
+def test_route_order_is_deterministic(tmp_path):
+    """`ast.walk` is breadth-first; the file is not.
+
+    The first version of this test put both routes at module level, where BFS
+    and source order happen to agree — so it passed with the sort removed, and
+    mutation testing caught that it was proving nothing. Depth has to differ
+    for walk order and line order to disagree at all: the nested route is
+    declared first in the file but visited second.
+    """
+    pkg = write(tmp_path, '''
+        if FEATURE:
+
+            @router.get("/declared-first-visited-second")
+            def nested():
+                return {"x": 1}
+
+        @router.get("/declared-second-visited-first")
+        def top_level():
+            return {"x": 1}
+    ''')
+    routes = inv.collect(pkg)
+    assert len(routes) == 2
+    rows = [(r.file, r.line) for r in routes]
+    assert rows == sorted(rows), "output must follow the file, not the walk"
+    assert routes[0].decl_path == "/declared-first-visited-second"
+
+
+def test_a_test_file_reference_is_not_a_consumer(tmp_path):
+    pkg = write(tmp_path, '''
+        @router.get("/only-tested")
+        def handler():
+            return {"a": 1}
+    ''')
+    routes = inv.collect(pkg)
+    inv.resolve_public_paths(routes, {"paths": {"/api/v1/only-tested": {"get": {}}}})
+    web = _web(tmp_path, {"features/Thing.production.test.tsx": 'api("/only-tested")'})
+    inv.attach_consumers(routes, web)
+    assert routes[0].consumers == 0, "a route called only by its own test has no consumer"
+    assert routes[0].test_references == 1, "but the reference is still visible"
+
+
+def test_a_template_literal_must_end_where_the_path_ends(tmp_path):
+    pkg = write(tmp_path, '''
+        @router.get("/drift")
+        def handler():
+            return {"a": 1}
+    ''')
+    routes = inv.collect(pkg)
+    inv.resolve_public_paths(routes, {"paths": {"/api/v1/drift": {"get": {}}}})
+    web = _web(tmp_path, {"api/x.ts": "api(`/drifting-along`)"})
+    inv.attach_consumers(routes, web)
+    assert routes[0].consumers == 0, "/drifting-along is not /drift"
+
+
+def test_a_snapshot_pinned_to_another_tree_is_refused(tmp_path):
+    snap = tmp_path / "openapi.json"
+    snap.write_text(json.dumps({"paths": {}}), encoding="utf-8")
+    snap.with_suffix(".meta.json").write_text(
+        json.dumps({"app_tree_sha": "a" * 40}), encoding="utf-8"
+    )
+    problem = inv.check_openapi_provenance(snap, "b" * 40)
+    assert problem and "different tree" in problem
+
+
+def test_a_snapshot_whose_bytes_changed_is_refused(tmp_path):
+    snap = tmp_path / "openapi.json"
+    snap.write_text(json.dumps({"paths": {}}), encoding="utf-8")
+    snap.with_suffix(".meta.json").write_text(
+        json.dumps({"sha256": "0" * 64}), encoding="utf-8"
+    )
+    problem = inv.check_openapi_provenance(snap, "b" * 40)
+    assert problem and "digest" in problem
+
+
+def test_a_matching_snapshot_passes(tmp_path):
+    import hashlib
+
+    snap = tmp_path / "openapi.json"
+    snap.write_text(json.dumps({"paths": {}}), encoding="utf-8")
+    snap.with_suffix(".meta.json").write_text(
+        json.dumps(
+            {"app_tree_sha": "c" * 40, "sha256": hashlib.sha256(snap.read_bytes()).hexdigest()}
+        ),
+        encoding="utf-8",
+    )
+    assert inv.check_openapi_provenance(snap, "c" * 40) is None
+
+
+def test_an_unpinned_snapshot_is_allowed_but_unverified(tmp_path):
+    snap = tmp_path / "openapi.json"
+    snap.write_text(json.dumps({"paths": {}}), encoding="utf-8")
+    assert inv.check_openapi_provenance(snap, "c" * 40) is None
+
+
+def test_the_written_baseline_carries_no_generating_commit(tmp_path):
+    """Otherwise committing the baseline makes it stale immediately.
+
+    The generating commit changes with every commit, including the one that
+    adds the baseline file, so storing it guarantees the committed copy names
+    a commit that does not contain it -- and two runs of the same tree could
+    never be byte-identical, which is the property the ratchet depends on.
+
+    Asserted against the file the script actually writes, not against
+    `summarise()`. The first version of this test checked `summarise()`, which
+    never added the field -- `main()` did -- so putting the field back left it
+    green. Mutation testing caught that; it is the fourth test in this work
+    that turned out to be looking somewhere the defect could not be.
+    """
+    out = tmp_path / "inventory.json"
+    subprocess.run(
+        [sys.executable, str(SCRIPT), "--app-dir", "app", "--json", str(out)],
+        cwd=str(SCRIPT.parents[1]),
+        check=True,
+        capture_output=True,
+    )
+    summary = json.loads(out.read_text(encoding="utf-8"))["summary"]
+
+    assert "generator_commit" not in summary
+    assert "commit" not in summary
+    assert summary["app_tree_sha"], "the stable identity must still be recorded"
+
+
+def test_two_runs_of_one_tree_write_identical_bytes(tmp_path):
+    """The property the ratchet depends on, asserted on the artefact."""
+    first, second = tmp_path / "a.json", tmp_path / "b.json"
+    for out in (first, second):
+        subprocess.run(
+            [sys.executable, str(SCRIPT), "--app-dir", "app", "--json", str(out)],
+            cwd=str(SCRIPT.parents[1]),
+            check=True,
+            capture_output=True,
+        )
+    assert first.read_bytes() == second.read_bytes()

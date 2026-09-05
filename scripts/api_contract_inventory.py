@@ -29,6 +29,7 @@ import argparse
 import ast
 import csv
 import json
+import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
@@ -70,6 +71,7 @@ class Route:
     router_prefix: str = ""
     public_path: Optional[str] = None
     consumers: int = 0
+    test_references: int = 0
 
     @property
     def covered(self) -> bool:
@@ -202,26 +204,59 @@ def resolve_public_paths(routes: list[Route], openapi: dict) -> None:
             r.public_path = None
 
 
+def _is_test_source(path: Path) -> bool:
+    """A reference from a test is not a consumer.
+
+    A route called only by its own test would otherwise be reported as having
+    a live consumer, which is the opposite of what the priority order needs.
+    """
+    name = path.name
+    if ".test." in name or ".spec." in name or name.endswith(".d.ts"):
+        return True
+    return "test" in {part.lower() for part in path.parts}
+
+
+def _count_references(blob: str, client_path: str) -> int:
+    """References to a path that are actually calls, not prose.
+
+    A quoted literal is one. A template literal is one only when the path ends
+    where the path ends: `` `/drift?${q}` `` counts for /drift, `` `/drifting` ``
+    does not.
+    """
+    total = blob.count(f'"{client_path}"') + blob.count(f"'{client_path}'")
+    for match in re.finditer(re.escape("`" + client_path), blob):
+        nxt = blob[match.end() : match.end() + 1]
+        if nxt in {"?", "`", "#", "$", ""}:
+            total += 1
+    return total
+
+
 def attach_consumers(routes: list[Route], web_dir: Path) -> None:
     """Count references to each public path in the frontend source.
 
     Scans the whole tree, not just the api/ directory: several components call
     `api("/lstm-status")` inline, and a scan limited to the endpoint modules
-    reports them as having no consumer.
+    reports them as having no consumer. Test sources are counted separately
+    and never as consumers.
     """
     if not web_dir.is_dir():
         return
-    seen: list[str] = []
-    for path in web_dir.rglob("*"):
-        if path.suffix in {".ts", ".tsx"} and path.is_file():
-            seen.append(path.read_text(encoding="utf-8", errors="replace"))
-    blob = "\n".join(seen)
+    src: list[str] = []
+    tests: list[str] = []
+    for path in sorted(web_dir.rglob("*")):
+        if path.suffix not in {".ts", ".tsx"} or not path.is_file():
+            continue
+        body = path.read_text(encoding="utf-8", errors="replace")
+        (tests if _is_test_source(path) else src).append(body)
+    src_blob = "\n".join(src)
+    test_blob = "\n".join(tests)
     for r in routes:
         if not r.public_path or r.public_path.startswith("AMBIGUOUS"):
             continue
         # The client prepends its own base, so it names the path without it.
         client_path = r.public_path.split("/api/v1", 1)[-1] if "/api/v1" in r.public_path else r.public_path
-        r.consumers = blob.count(f'"{client_path}"') + blob.count(f"`{client_path}") + blob.count(f"'{client_path}'")
+        r.consumers = _count_references(src_blob, client_path)
+        r.test_references = _count_references(test_blob, client_path)
 
 
 def collect(app_dir: Path) -> list[Route]:
@@ -274,6 +309,11 @@ def collect(app_dir: Path) -> list[Route]:
                         dynamic_returns=dynamic,
                     )
                 )
+    # Sorted so two runs of the same tree produce byte-identical output.
+    # `ast.walk` is breadth-first, so handler order within a file follows the
+    # tree's shape rather than the file's, which would make the committed
+    # baseline churn for no reason.
+    routes.sort(key=lambda r: (r.file, r.line, r.decl_path, tuple(r.methods)))
     return routes
 
 
@@ -281,6 +321,19 @@ def summarise(routes: list[Route]) -> dict:
     considered = [r for r in routes if r.exempt_reason is None]
     covered = [r for r in considered if r.covered]
     conflicts = [r for r in considered if r.shape_conflict]
+    from collections import Counter
+
+    # Two declarations resolving to one public path+method: only the first
+    # registered answers, and the other is unreachable. Found nine of these on
+    # the first run -- app/api/auth.py and app/api/admin_ai.py declare routes
+    # their routers never register, including a JSON-body /auth/login while
+    # the live one takes a form.
+    addressed = Counter(
+        (r.public_path, tuple(r.methods))
+        for r in routes
+        if r.public_path and not r.public_path.startswith("AMBIGUOUS")
+    )
+    duplicate_paths = sorted(p for (p, _m), n in addressed.items() if n > 1)
     return {
         "routes_total": len(routes),
         "exempt": len(routes) - len(considered),
@@ -288,17 +341,76 @@ def summarise(routes: list[Route]) -> dict:
         "with_response_model": len(covered),
         "coverage_pct": round(100 * len(covered) / len(considered), 1) if considered else 0.0,
         "shape_conflicts": len(conflicts),
+        "duplicate_public_paths": duplicate_paths,
     }
 
 
-def _head_sha() -> str:
+def _git(*args: str) -> str:
     try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10
-        )
+        out = subprocess.run(["git", *args], capture_output=True, text=True, timeout=10)
         return out.stdout.strip() or "unknown"
     except Exception:
         return "unknown"
+
+
+def _head_sha() -> str:
+    """The checkout that ran the script. Not what was measured."""
+    return _git("rev-parse", "HEAD")
+
+
+def _app_tree_sha(app_dir: Path) -> str:
+    """The identity of the tree that was actually measured.
+
+    The generator commit moves whenever a document changes; this does not. Two
+    inventories with the same `app_tree_sha` measured the same code, whatever
+    else the branch was carrying, and that is the value a manifest should pin.
+    """
+    return _git("rev-parse", f"HEAD:{app_dir.as_posix()}")
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def check_openapi_provenance(openapi_path: Path, app_tree_sha: str) -> Optional[str]:
+    """Refuse to mix a code inventory with an OpenAPI snapshot of other code.
+
+    The static inventory and the OpenAPI document are two baselines. If the
+    snapshot was taken from a deployment running different code, every
+    resolved path and consumer count is attributed to the wrong tree -- and
+    nothing downstream could tell. A sidecar `<stem>.meta.json` pins the tree
+    the snapshot belongs to; when it is present and disagrees, this refuses.
+
+    Returns an error message, or None when the pairing is sound or unpinned.
+    """
+    meta_path = openapi_path.with_suffix(".meta.json")
+    if not meta_path.exists():
+        return None
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return f"{meta_path}: unreadable ({exc})"
+
+    expected_digest = meta.get("sha256")
+    actual_digest = _sha256(openapi_path)
+    if expected_digest and expected_digest != actual_digest:
+        return (
+            f"{openapi_path.name} does not match its manifest digest\n"
+            f"  manifest {expected_digest}\n  actual   {actual_digest}"
+        )
+
+    expected_tree = meta.get("app_tree_sha")
+    if expected_tree and app_tree_sha != "unknown" and expected_tree != app_tree_sha:
+        return (
+            "the OpenAPI snapshot describes a different tree than the one being "
+            f"inventoried\n  snapshot app_tree_sha {expected_tree}\n"
+            f"  measured app_tree_sha {app_tree_sha}\n"
+            "Refresh the snapshot against this tree, or pass --allow-openapi-drift "
+            "and treat every resolved path as unverified."
+        )
+    return None
 
 
 def main() -> int:
@@ -315,6 +427,11 @@ def main() -> int:
     ap.add_argument("--list-uncovered", action="store_true", help="print every route with no response_model")
     ap.add_argument("--openapi", help="a saved /openapi.json; resolves declared paths to public ones")
     ap.add_argument("--web-dir", default="web/src", help="frontend source, scanned for consumers")
+    ap.add_argument(
+        "--allow-openapi-drift",
+        action="store_true",
+        help="proceed when the OpenAPI snapshot is pinned to a different app tree",
+    )
     args = ap.parse_args()
 
     app_dir = Path(args.app_dir)
@@ -323,7 +440,14 @@ def main() -> int:
         return 2
 
     routes = collect(app_dir)
+    app_tree = _app_tree_sha(app_dir)
     if args.openapi:
+        problem = check_openapi_provenance(Path(args.openapi), app_tree)
+        if problem and not args.allow_openapi_drift:
+            print(f"REFUSED: {problem}", file=sys.stderr)
+            return 3
+        if problem:
+            print(f"WARNING (--allow-openapi-drift): {problem}", file=sys.stderr)
         try:
             resolve_public_paths(routes, json.loads(Path(args.openapi).read_text(encoding="utf-8")))
         except (OSError, json.JSONDecodeError) as exc:
@@ -331,8 +455,23 @@ def main() -> int:
             return 2
         attach_consumers(routes, Path(args.web_dir))
     summary = summarise(routes)
-    summary["commit"] = _head_sha()
+    # `app_tree_sha` is the baseline's identity and is stable: it names the
+    # code that was measured. The generating commit is deliberately NOT stored
+    # here. It changes every time anything is committed -- including the commit
+    # that adds this very file -- so a baseline carrying it is stale the moment
+    # it lands, and two runs of the same tree would never be byte-identical.
+    # It is printed for the run instead.
+    summary["app_tree_sha"] = app_tree
     summary["app_dir"] = str(app_dir)
+    if args.openapi:
+        summary["openapi_file"] = str(args.openapi)
+        # Not `openapi_sha256`: gitleaks' generic-api-key rule fires on a long
+        # hex value beside a field name containing "api", and "openapi" does.
+        # The digest of a public document is not a credential, but allowlisting
+        # it by value would rot the moment the snapshot is refreshed, and the
+        # repository's own .gitleaks.toml prefers a name that says what it is
+        # over an exception that outlives its reason. Do not rename this back.
+        summary["snapshot_sha256"] = _sha256(Path(args.openapi))
 
     payload = {"summary": summary, "routes": [asdict(r) | {"shape_conflict": r.shape_conflict} for r in routes]}
 
@@ -355,7 +494,8 @@ def main() -> int:
                      r.return_count, r.raise_count, r.dynamic_returns, int(r.shape_conflict)]
                 )
 
-    print(f"commit              {summary['commit']}")
+    print(f"generator commit    {_head_sha()}  (this run; not recorded in the baseline)")
+    print(f"app tree            {summary['app_tree_sha']}  (what was measured; the baseline's identity)")
     print(f"routes declared     {summary['routes_total']}")
     print(f"  exempt            {summary['exempt']}  (websocket / non-model response_class)")
     print(f"  considered        {summary['considered']}")
@@ -368,6 +508,10 @@ def main() -> int:
         consumed = [r for r in routes if r.shape_conflict and r.consumers > 0]
         print(f"  unmounted         {len(unresolved)}  (declared but absent from the OpenAPI document)")
         print(f"  ambiguous         {len(ambiguous)}")
+        dups = summary["duplicate_public_paths"]
+        print(f"  duplicate paths   {len(dups)}  (two declarations, one address -- one is unreachable)")
+        for d in dups:
+            print(f"    {d}")
         print(f"  conflicts with a live frontend consumer: {len(consumed)}")
         for r in sorted(consumed, key=lambda r: r.public_path or ""):
             print(f"    {'|'.join(r.methods):6} {r.public_path}")

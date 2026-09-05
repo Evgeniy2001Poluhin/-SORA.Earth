@@ -59,8 +59,8 @@ app/api/drift.py,17,check_drift,/drift,/model,/api/v1/model/drift,1,GET,,,,,4,0,
 app/api/drift.py,61,drift_mlflow_history,/drift/mlflow-history,/model,/api/v1/model/drift/mlflow-history,1,GET,,,,,3,0,0,1
 app/api/drift_baseline.py,17,fit_baseline,/mlops/drift/baseline/fit,,/api/v1/mlops/drift/baseline/fit,1,POST,,,,,1,1,0,0
 app/api/drift_baseline.py,44,observe,/mlops/drift/observe,,/api/v1/mlops/drift/observe,0,POST,,,,,1,0,0,0
-app/api/drift_baseline.py,53,baseline_status,/mlops/drift/baseline,,/api/v1/mlops/drift/baseline,3,GET,,,,,1,0,0,0
-app/api/drift_baseline.py,71,reset_baseline,/mlops/drift/baseline,,/api/v1/mlops/drift/baseline,3,DELETE,,,,,1,0,0,0
+app/api/drift_baseline.py,53,baseline_status,/mlops/drift/baseline,,/api/v1/mlops/drift/baseline,2,GET,,,,,1,0,0,0
+app/api/drift_baseline.py,71,reset_baseline,/mlops/drift/baseline,,/api/v1/mlops/drift/baseline,2,DELETE,,,,,1,0,0,0
 app/api/drift_baseline.py,91,simulate_drift,/mlops/drift/simulate,,/api/v1/mlops/drift/simulate,1,POST,,,,,2,1,0,1
 app/api/drift_monitor.py,13,analyze_drift,/drift/analyze,,/api/v1/drift/analyze,0,POST,,,,,1,2,1,0
 app/api/drift_monitor.py,51,test_alert,/drift/test-alert,,/api/v1/drift/test-alert,0,POST,,,,,1,0,1,0
@@ -102,7 +102,7 @@ app/api/infra.py,139,websocket_endpoint,/ws/live,,,0,WS,,,,websocket,1,0,0,0
 app/api/infra.py,155,ws_status,/ws/status,,/api/v1/ws/status,0,GET,,,,,1,0,0,0
 app/api/infra.py,161,cache_stats,/cache/stats,,/api/v1/cache/stats,0,GET,,,,,1,0,1,0
 app/api/infra.py,166,clear_cache,/cache/clear,,/api/v1/cache/clear,0,POST,,,,,1,0,0,0
-app/api/infra.py,173,check_drift_infra,/mlops/drift,,/api/v1/mlops/drift,4,GET,,,,,1,0,1,0
+app/api/infra.py,173,check_drift_infra,/mlops/drift,,/api/v1/mlops/drift,2,GET,,,,,1,0,1,0
 app/api/infra.py,178,mlops_health,/mlops/health,,/api/v1/mlops/health,1,GET,,,,,1,0,0,0
 app/api/infra.py,194,mlflow_stats,/mlflow/stats,,/api/v1/mlflow/stats,1,GET,,,,,1,0,1,0
 app/api/infra.py,200,rate_limit_status,/rate-limit/status,,/api/v1/rate-limit/status,0,GET,,,,,1,0,1,0
@@ -174,10 +174,10 @@ app/main.py,938,_login_page,/auth/login,/api/v1,,0,GET,,,HTMLResponse,response_c
 app/main.py,942,_app_shell,/app/{path:path},/api/v1,,0,GET,,,HTMLResponse,response_class=HTMLResponse,1,0,1,0
 app/main.py,946,_admin_shell,/admin/{path:path},/api/v1,,0,GET,,,HTMLResponse,response_class=HTMLResponse,1,0,1,0
 app/main.py,952,_favicon,/favicon.ico,/api/v1,,0,GET,,,,,1,0,1,0
-app/main.py,1011,_spa_catchall,/{full_path:path},/api/v1,,0,GET,,,,,1,3,1,0
 app/main.py,977,_sora_spa,/{spa_path:path},/api/v1,,0,GET,,,,,2,1,2,0
 app/main.py,997,_spa_v2_root,/v2,/api/v1,,0,GET,,,,,1,0,1,0
 app/main.py,1000,_spa_v2_any,/v2/{full_path:path},/api/v1,,0,GET,,,,,1,0,1,0
+app/main.py,1011,_spa_catchall,/{full_path:path},/api/v1,,0,GET,,,,,1,3,1,0
 app/ml/routes.py,34,predict,/predict,/api/v2,/api/v2/predict,0,POST,,PredictResponse,,,1,1,1,0
 app/ml/routes.py,61,model_version,/model/version,/api/v2,/api/v2/model/version,1,GET,,,,,1,1,0,0
 app/ml/routes.py,89,model_reload,/model/reload,/api/v2,/api/v2/model/reload,0,POST,,,,,1,1,0,0

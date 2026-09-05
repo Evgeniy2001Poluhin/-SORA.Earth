@@ -37,6 +37,7 @@ Measured by `scripts/api_contract_inventory.py`, at commit `79e788c`:
 | of those, with a live frontend consumer | **5** |
 | declared but absent from the live OpenAPI document | **15** |
 | declared paths that could not be resolved unambiguously | **8** |
+| public addresses declared **twice** — one declaration is unreachable | **9** |
 
 Reproduce:
 
@@ -77,22 +78,60 @@ counted as a defect would understate coverage and invite a pointless fix.
 
 ### The instrument was verified before its number was used
 
-`tests/test_api_contract_inventory.py` — 29 cases, each a fixture whose correct
+`tests/test_api_contract_inventory.py` — 41 cases, each a fixture whose correct
 answer is known by construction: coverage, exemption for every class in the
 exempt set, single-quoted paths, nested-function returns, key-order-insensitive
 shape comparison, non-route decorators, the summary's arithmetic, prefix-based
-path resolution, recorded ambiguity, and consumer detection. One case is a
+path resolution, recorded ambiguity, consumer detection, duplicate addresses,
+deterministic ordering, and snapshot provenance. One case is a
 negative control asserting the script finds real routes in the real package,
 because a collector that silently returned nothing would print "0 routes,
 0 % coverage" and look like a finding.
 
-Ten mutations of the script's predicates were each confirmed to turn the suite
-red before being reverted: `covered` forced true; the websocket exemption
-removed; `shape_conflict` forced false; the nested-function skip removed;
-exempt routes folded back into the denominator; path resolution matching by
-suffix without the prefix; ambiguity resolved by taking the first candidate;
-the router prefix not read; consumers searched only under `web/src/api`; and
-the HTTP method ignored when resolving.
+Eighteen mutations of the script's predicates were each confirmed to turn the
+suite red before being reverted, covering every predicate above.
+
+Two of them did not, at first, and both were tests of mine that could not
+fail:
+
+- Removing the route sort left the suite green, because the fixture put both
+  routes at module level where breadth-first walk order and file order happen
+  to agree. Depth has to differ for them to disagree; the fixture now nests one
+  route inside an `if`, declared first and visited second.
+- Putting the generating commit back into the baseline left the suite green,
+  because the test asserted on `summarise()` and the field was added by
+  `main()`. It now asserts on the file the script actually writes, and a second
+  test asserts two runs of one tree write identical bytes.
+
+Mutation testing found both; review found neither. That is the same defect this
+document is about — a check that cannot distinguish the broken case from the
+working one — one level up.
+
+### Two baselines, pinned to each other
+
+The inventory measures code; the OpenAPI snapshot describes a deployment. If
+the snapshot came from a deployment running different code, every resolved path
+and consumer count is attributed to a tree the snapshot never saw, and nothing
+downstream could tell.
+
+So the baseline's identity is `app_tree_sha` — the git hash of `app/`, naming
+the code that was measured. The generating commit is printed for the run and
+deliberately **not** stored: it changes with every commit, including the one
+that adds the baseline, so a baseline carrying it is stale the moment it lands
+and no two runs of one tree could ever agree. That was found by running the
+reproducibility check the review asked for, which failed for exactly this
+reason.
+
+The snapshot carries a sidecar `openapi-79e788c.meta.json` pinning the tree it
+belongs to and its own sha256, and the script **refuses** (exit 3) when either
+disagrees. `--allow-openapi-drift` proceeds and says so, and then every resolved
+path is unverified.
+
+Both refusals are tested, and both were confirmed by mutating the manifest and
+the snapshot.
+
+The committed JSON and CSV are byte-identical across runs of the same tree:
+routes are sorted by file and line, and no timestamp is recorded.
 
 ### What this baseline does **not** prove
 
@@ -202,6 +241,25 @@ each one re-running the inventory so the number moves visibly.
 | **P2** | map, compliance, rankings, timeline | visible, but a wrong answer is not a decision |
 | **P3** | admin and diagnostic endpoints | operator-facing, small blast radius |
 | **exempt** | files, redirects, streams, metrics, websockets | classified, not defects |
+
+### Nine addresses are declared twice, and one declaration of each is dead
+
+FastAPI answers with the first route registered for a path and method; a second
+declaration at the same address can never be reached.
+
+- `app/api/auth.py` is imported by `app/main.py` and its router is **never
+  registered**. Its five routes — including `POST /auth/login` — are dead. That
+  login takes a JSON body (`LoginRequest`); the live one, in
+  `app/auth_routes.py`, takes a form (`OAuth2PasswordRequestForm`). Anyone
+  reading the dead file to write a client gets a 422. Confirmed from the live
+  document: `/api/v1/auth/login` accepts only
+  `application/x-www-form-urlencoded`.
+- `app/api/admin_ai.py` is not imported at all; `admin_ai_control.py` serves
+  those four addresses, confirmed by `operationId=ai_control_ai_trigger_retrain`.
+
+Tracked as issue 241 — deleting dead handlers is not contract work, and the
+coverage figure above is computed over a denominator inflated by nine routes
+that cannot answer anything.
 
 ### Start here: disagreeing shapes that already have a consumer
 
