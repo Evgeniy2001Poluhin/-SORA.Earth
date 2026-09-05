@@ -604,6 +604,55 @@ jobs:
   # The shell scripts had no CI at all. tests/test_backup_lock.sh has existed for
   # a while and has never run here, which is the same as not having it: a test
   # nobody executes cannot fail, and a green board said nothing about any of this.
+  api-contract-ratchet:
+    name: response contract ratchet
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # A job here rather than its own workflow, unlike secret-scan.yml. That
+      # file isolates itself to avoid a seventh editor of this one, and pays for
+      # it: branch protection requires exactly one context, `required-checks`,
+      # and `needs:` cannot reach across workflows -- so a separate workflow
+      # reports but does not block. A ratchet that does not block is not a
+      # ratchet. This job is in `required-checks` below.
+      #
+      # It refuses when a route arrives without a `response_model`, when one
+      # loses the model it had, when an exemption appears or its reason
+      # changes, when a hand-written allowance lacks a reason or an issue, or
+      # when an allowance matches nothing.
+      #
+      # It also refuses when a route has been *covered* and the manifest was
+      # not regenerated. An unrecorded improvement lets the same route slip
+      # back to uncovered later without tripping anything, so the gate would
+      # only be a floor. The failure prints the command that fixes it.
+      #
+      # The inventory imports nothing outside the standard library, so nothing
+      # is installed here.
+      - name: ratchet against the committed baseline
+        run: python3 scripts/api_contract_inventory.py --ratchet docs/contract/ratchet.json
+
+      # Guards the gate rather than the code: the ratchet check alone cannot
+      # catch a hand-edited manifest, because editing `uncovered` makes the
+      # comparison agree with whatever was written.
+      - name: the committed manifest is the one this tree produces
+        run: |
+          python3 scripts/api_contract_inventory.py --update-manifest /tmp/regenerated.json > /dev/null
+          if ! diff -u docs/contract/ratchet.json /tmp/regenerated.json; then
+            echo
+            echo "docs/contract/ratchet.json is not what this tree produces. Regenerate it:"
+            echo "  python3 scripts/api_contract_inventory.py --update-manifest docs/contract/ratchet.json"
+            exit 1
+          fi
+
   shell-scripts:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1136,6 +1185,7 @@ jobs:
       - shell-scripts
       - frontend-checks
       - production-spa-build
+      - api-contract-ratchet
     steps:
       - name: Every job must have succeeded
         env:

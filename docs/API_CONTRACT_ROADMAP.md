@@ -24,17 +24,17 @@ number into CI.
 
 ## 1. Baseline
 
-Measured by `scripts/api_contract_inventory.py`, at commit `79e788c`:
+Measured by `scripts/api_contract_inventory.py`, at commit `ebea7f8`:
 
 | | |
 |---|---|
 | routes declared in `app/` | **187** |
 | exempt (websocket / non-model `response_class`) | **6** |
 | considered | **181** |
-| declaring a `response_model` | **22** |
-| **coverage** | **12.2 %** |
-| handlers whose static returns disagree under one status | **14** |
-| of those, with a live frontend consumer | **5** |
+| declaring a `response_model` | **23** |
+| **coverage** | **12.7 %** |
+| handlers whose static returns disagree under one status | **13** |
+| of those, with a live frontend consumer | **4** |
 | declared but absent from the live OpenAPI document | **15** |
 | declared paths that could not be resolved unambiguously | **8** |
 | public addresses declared **twice** — one declaration is unreachable | **9** |
@@ -43,21 +43,20 @@ Reproduce:
 
 ```bash
 python3 scripts/api_contract_inventory.py
-python3 scripts/api_contract_inventory.py --openapi docs/contract/openapi-79e788c.json \
+python3 scripts/api_contract_inventory.py --openapi docs/contract/openapi-ebea7f8.json \
     --json docs/contract/inventory.json --csv docs/contract/inventory.csv
 ```
 
 The machine-readable baseline is committed at `docs/contract/inventory.json`
 and `docs/contract/inventory.csv`. Regenerate it rather than editing it.
 
-The figures describe `app/` as it stands at `79e788c`, the tip of `main`; this
-PR adds no file under `app/`, so the measured tree is that one. The `commit`
+The figures describe `app/` at `ebea7f8`, the tip of `main`. The `commit`
 field inside the JSON records the checkout that generated it, which is this
 branch — the two differ by documents and this script, not by a route.
 
-`docs/contract/openapi-79e788c.json` is a snapshot of
+`docs/contract/openapi-ebea7f8.json` is a snapshot of
 `https://sora-earth.online/openapi.json` taken on 2026-09-05, with production
-running `79e788c`. It is committed so the resolution step is reproducible
+running `ebea7f8`. It is committed so the resolution step is reproducible
 without a running server; it goes stale when routes are mounted or moved, and
 should be refreshed alongside the inventory.
 
@@ -122,7 +121,7 @@ and no two runs of one tree could ever agree. That was found by running the
 reproducibility check the review asked for, which failed for exactly this
 reason.
 
-The snapshot carries a sidecar `openapi-79e788c.meta.json` pinning the tree it
+The snapshot carries a sidecar `openapi-ebea7f8.meta.json` pinning the tree it
 belongs to and its own sha256, and the script **refuses** (exit 3) when either
 disagrees. `--allow-openapi-drift` proceeds and says so, and then every resolved
 path is unverified.
@@ -216,16 +215,16 @@ partial shape rather than an empty body, and it is live.
 **Phase A — instrument (this PR).** Inventory script, its tests, this document,
 committed baseline. No handler, model or CI change.
 
-**Phase B — one vertical sample (#239).** Migrate `GET /api/v1/model/drift`
-end to end: a single verdict field name, a declared `response_model`, the same
+**Phase B — one vertical sample (#239). Done, merged in #244, deployed and
+verified in production.** `GET /api/v1/model/drift` end to end: a single verdict field name, a declared `response_model`, the same
 shape on all four branches, contract tests covering each branch, and the
 frontend type derived from it. Decide in the same PR whether the parallel
 `/api/v1/mlops/drift` should remain — two drift endpoints with different
 contracts is itself the problem. The sample establishes the pattern every later
 migration copies.
 
-**Phase C — ratchet gate.** Only after B, and only on the verified inventory.
-See §5.
+**Phase C — ratchet gate. Done.** A job in `ci.yml`, inside `required-checks`,
+on the verified inventory. See §5.
 
 **Phase D — migrate by risk.** Priority order in §4, smallest reviewable PRs,
 each one re-running the inventory so the number moves visibly.
@@ -325,28 +324,64 @@ consumer count and everything except side effects and existing tests.
 
 ---
 
-## 5. The ratchet, and why it is not a blanket gate
+## 5. The ratchet
 
-A rule that fails CI for any route without a `response_model` would fail on 159
-existing routes, block the repository, and be deleted within a week as
-impractical. What survives is a ratchet:
+A rule that failed CI for any route without a `response_model` would fail on
+158 existing routes, block the repository, and be deleted within a week as
+impractical. So the baseline is pinned in `docs/contract/ratchet.json` and a job
+in `ci.yml` enforces movement in one direction only.
 
-- the current baseline is pinned in a manifest file;
-- a **new** route must declare a `response_model` or a classified exemption;
-- an existing route may not have its model removed;
-- the count of uncovered routes may not increase;
-- the exemption list may only shrink;
-- every exemption carries a reason and an issue number.
+**It is a job in `ci.yml` rather than its own workflow, and that is a
+deliberate departure from the precedent in `secret-scan.yml`.** That file
+isolates itself to avoid another editor of `ci.yml`, and pays a price for it:
+branch protection on `main` requires exactly one context, `required-checks`,
+which is a job aggregating others through `needs:` — and `needs:` cannot reach
+across workflows. A separate workflow therefore reports and does not block.
+Acceptable for a scanner that also runs weekly over history; not acceptable for
+a ratchet, which is only worth having if it stops the thing it names. This job
+is listed in `required-checks`.
 
-`--fail-under` already exists in the script for this, but the ratchet must
-compare against the committed manifest, not a hand-typed percentage — a
-threshold someone edits downward is not a ratchet.
+Worth stating plainly as a consequence: **`secret-scan` does not block a merge
+today either.** It reports. Whether that is intended is the owner's call, and it
+is not changed here.
 
----
+Five rules, all of them tested and each confirmed by breaking it:
+
+1. **A route may not arrive without a contract**, and a covered route may not
+   lose the model it had. Both surface the same way: the route is uncovered and
+   is not in the pinned set.
+2. **Covering a route must be recorded.** This is what makes it a ratchet
+   rather than a floor: an improvement left unrecorded lets the same route slip
+   back to uncovered later without tripping anything, because it is still in
+   the pinned list. The failure prints the one command that fixes it.
+3. **Exemptions may only shrink**, and an exemption's reason may not change
+   silently.
+4. **A hand-written allowance states a reason and an issue number.** Without
+   both, it is refused — an exception nobody can trace outlives the reason for
+   it.
+5. **A stale allowance must be removed.** One that matches no current route is
+   dead weight that would silently admit a route if one ever reappeared at that
+   address.
+
+The workflow has a second step, and it guards the gate rather than the code:
+the manifest is regenerated and compared byte for byte with the committed one.
+The ratchet check alone cannot catch a hand-edited manifest, because editing
+`uncovered` makes the comparison agree with whatever was written.
+
+Identity is `METHOD router_prefix+path @file`, with the line number excluded so
+a route that moves down its file is the same route, and with the path recorded
+relative to the package so a scan by absolute path agrees with one by relative
+path. That second point was a real defect, found by the control asserting the
+committed manifest matches the tree it ships with: without it the manifest only
+matched when the script was invoked from the repository root.
+
+The gate imports nothing outside the standard library, so its job installs no
+dependencies.
 
 ## 6. Done when
 
-- Every new route has a declared contract or a classified exemption.
+- Every new route has a declared contract or a classified exemption. **Enforced
+  since Phase C** — no longer a wish.
 - For each migrated route, every return branch is covered by a contract test —
   including the failure branches.
 - No two branches of one status carry incompatible key sets.
@@ -354,7 +389,9 @@ threshold someone edits downward is not a ratchet.
 - Frontend types are generated from, or checked against, `/openapi.json`
   instead of being written by hand.
 - Coverage is re-measured and recorded at every phase, by the script, not by
-  assertion.
+  assertion. It moved 12.2 % → 12.7 % when #244 landed, and the shape conflicts
+  with a live consumer went from five to four — measured by re-running the
+  inventory, not claimed.
 
 ---
 

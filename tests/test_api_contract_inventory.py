@@ -589,3 +589,212 @@ def test_two_runs_of_one_tree_write_identical_bytes(tmp_path):
             capture_output=True,
         )
     assert first.read_bytes() == second.read_bytes()
+
+
+# --- the ratchet -------------------------------------------------------------
+#
+# A gate that only fails on new offences is a floor, not a ratchet: an
+# improvement that is never recorded can be undone silently. Rule 2 below is
+# what makes this hold in one direction, and it is the one worth breaking to
+# check.
+
+
+def covered_and_uncovered(tmp_path):
+    return write(tmp_path, '''
+        @router.get("/has-one", response_model=T)
+        def a():
+            return {"x": 1}
+
+        @router.get("/has-none")
+        def b():
+            return {"x": 1}
+    ''')
+
+
+def test_an_unchanged_tree_passes(tmp_path):
+    pkg = covered_and_uncovered(tmp_path)
+    routes = inv.collect(pkg)
+    assert inv.check_ratchet(routes, inv.build_manifest(routes)) == []
+
+
+def test_a_new_route_without_a_contract_fails(tmp_path):
+    pkg = covered_and_uncovered(tmp_path)
+    manifest = inv.build_manifest(inv.collect(pkg))
+
+    (pkg / "more.py").write_text(
+        textwrap.dedent('''
+        @router.get("/brand-new")
+        def c():
+            return {"x": 1}
+    '''),
+        encoding="utf-8",
+    )
+    problems = inv.check_ratchet(inv.collect(pkg), manifest)
+
+    assert len(problems) == 1
+    assert "/brand-new" in problems[0]
+
+
+def test_a_covered_route_losing_its_model_fails(tmp_path):
+    pkg = covered_and_uncovered(tmp_path)
+    manifest = inv.build_manifest(inv.collect(pkg))
+
+    routes = pkg / "routes.py"
+    routes.write_text(routes.read_text().replace(', response_model=T', ''), encoding="utf-8")
+    problems = inv.check_ratchet(inv.collect(pkg), manifest)
+
+    assert any("/has-one" in p for p in problems)
+
+
+def test_covering_a_route_without_recording_it_fails(tmp_path):
+    """Rule 2, and the reason this is a ratchet.
+
+    If an improvement may go unrecorded, the same route can return to uncovered
+    later without tripping anything -- it is still in the pinned list. Locking
+    the gain in is one command, and refusing until it is run is what keeps the
+    baseline honest.
+    """
+    pkg = covered_and_uncovered(tmp_path)
+    manifest = inv.build_manifest(inv.collect(pkg))
+
+    routes = pkg / "routes.py"
+    routes.write_text(
+        routes.read_text().replace('@router.get("/has-none")', '@router.get("/has-none", response_model=T)'),
+        encoding="utf-8",
+    )
+    problems = inv.check_ratchet(inv.collect(pkg), manifest)
+
+    assert any("now covered but still listed" in p for p in problems)
+    assert any("--update-manifest" in p for p in problems)
+
+
+def test_a_route_moving_within_its_file_is_not_a_change(tmp_path):
+    """Identity excludes the line number, or every insertion above a route
+    would read as that route disappearing and a new one arriving."""
+    pkg = covered_and_uncovered(tmp_path)
+    manifest = inv.build_manifest(inv.collect(pkg))
+
+    routes = pkg / "routes.py"
+    routes.write_text("# a new comment\n\n" + routes.read_text(), encoding="utf-8")
+
+    assert inv.check_ratchet(inv.collect(pkg), manifest) == []
+
+
+def test_a_new_exemption_fails(tmp_path):
+    pkg = covered_and_uncovered(tmp_path)
+    manifest = inv.build_manifest(inv.collect(pkg))
+
+    (pkg / "ws.py").write_text(
+        textwrap.dedent('''
+        @router.websocket("/live")
+        async def w(ws):
+            await ws.accept()
+    '''),
+        encoding="utf-8",
+    )
+    problems = inv.check_ratchet(inv.collect(pkg), manifest)
+
+    assert any("new exemption" in p for p in problems)
+
+
+def test_changing_why_a_route_is_exempt_fails(tmp_path):
+    pkg = write(tmp_path, '''
+        @router.get("/page", response_class=HTMLResponse)
+        def a():
+            return "<html/>"
+    ''')
+    manifest = inv.build_manifest(inv.collect(pkg))
+
+    routes = pkg / "routes.py"
+    routes.write_text(routes.read_text().replace("HTMLResponse", "FileResponse"), encoding="utf-8")
+    problems = inv.check_ratchet(inv.collect(pkg), manifest)
+
+    assert any("exemption reason changed" in p for p in problems)
+
+
+def test_an_allowance_admits_a_route_the_baseline_does_not_have(tmp_path):
+    pkg = covered_and_uncovered(tmp_path)
+    manifest = inv.build_manifest(inv.collect(pkg))
+
+    (pkg / "more.py").write_text(
+        textwrap.dedent('''
+        @router.get("/deliberate")
+        def c():
+            return {"x": 1}
+    '''),
+        encoding="utf-8",
+    )
+    routes = inv.collect(pkg)
+    key = next(inv.route_key(r) for r in routes if r.decl_path == "/deliberate")
+    manifest["allow"] = {key: {"reason": "migrating in the next PR", "issue": 999}}
+
+    assert inv.check_ratchet(routes, manifest) == []
+
+
+@pytest.mark.parametrize(
+    "entry", [{"reason": "because"}, {"issue": 999}, {}, "just a string"]
+)
+def test_an_allowance_without_both_a_reason_and_an_issue_fails(tmp_path, entry):
+    """An exception nobody can trace outlives the reason for it."""
+    pkg = covered_and_uncovered(tmp_path)
+    routes = inv.collect(pkg)
+    manifest = inv.build_manifest(routes)
+    key = next(inv.route_key(r) for r in routes if r.decl_path == "/has-none")
+    manifest["uncovered"] = [k for k in manifest["uncovered"] if k != key]
+    manifest["allow"] = {key: entry}
+
+    problems = inv.check_ratchet(routes, manifest)
+
+    assert any("needs both a reason and an issue" in p for p in problems)
+
+
+def test_an_allowance_that_matches_nothing_must_be_removed(tmp_path):
+    """The exemption list may only shrink.
+
+    A stale allowance is dead weight that would silently admit a route if one
+    ever reappeared at that address.
+    """
+    pkg = covered_and_uncovered(tmp_path)
+    routes = inv.collect(pkg)
+    manifest = inv.build_manifest(routes)
+    manifest["allow"] = {"GET /gone @app/nowhere.py": {"reason": "old", "issue": 1}}
+
+    problems = inv.check_ratchet(routes, manifest)
+
+    assert any("no longer matches" in p for p in problems)
+
+
+def test_the_committed_manifest_matches_the_tree_it_ships_with():
+    """Negative control for the gate itself.
+
+    If the committed baseline drifted from `app/`, every check above would still
+    pass on its fixtures while the real gate reported a repository that does not
+    exist.
+    """
+    root = Path(__file__).resolve().parents[1]
+    manifest = json.loads((root / "docs" / "contract" / "ratchet.json").read_text(encoding="utf-8"))
+    problems = inv.check_ratchet(inv.collect(root / "app"), manifest)
+
+    assert problems == [], "run: python3 scripts/api_contract_inventory.py --update-manifest docs/contract/ratchet.json"
+
+
+def test_identity_does_not_depend_on_how_the_directory_was_named(tmp_path, monkeypatch):
+    """A relative and an absolute scan of one tree must agree.
+
+    They did not: the file path went into the key exactly as given, so a
+    manifest written from the repository root did not match a run from
+    anywhere else -- every route read as new. Caught by the committed-manifest
+    control, not by any fixture here.
+    """
+    pkg = write(tmp_path, '''
+        @router.get("/thing")
+        def a():
+            return {"x": 1}
+    ''')
+    absolute = {inv.route_key(r) for r in inv.collect(pkg)}
+
+    monkeypatch.chdir(tmp_path)
+    relative = {inv.route_key(r) for r in inv.collect(Path("app"))}
+
+    assert absolute == relative
+    assert absolute == {"GET /thing @app/routes.py"}

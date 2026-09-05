@@ -29,6 +29,7 @@ import argparse
 import ast
 import csv
 import json
+import os
 import re
 import subprocess
 import sys
@@ -260,7 +261,16 @@ def attach_consumers(routes: list[Route], web_dir: Path) -> None:
 
 
 def collect(app_dir: Path) -> list[Route]:
+    """Inventory every route declared under `app_dir`.
+
+    Paths are recorded relative to the package's parent, so scanning "app" and
+    "/somewhere/repo/app" produce the same identities. Without that the ratchet
+    manifest only matched when the script happened to be invoked from the
+    repository root with a relative path, and any other invocation reported
+    every route as new.
+    """
     routes: list[Route] = []
+    base = app_dir.parent
     for path in sorted(app_dir.rglob("*.py")):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
@@ -292,7 +302,7 @@ def collect(app_dir: Path) -> list[Route]:
                 shapes, dynamic, n_ret, n_raise = _returns_in(node)
                 routes.append(
                     Route(
-                        file=str(path),
+                        file=os.path.relpath(path, base),
                         line=dec.lineno,
                         function=node.name,
                         decl_path=decl_path,
@@ -343,6 +353,89 @@ def summarise(routes: list[Route]) -> dict:
         "shape_conflicts": len(conflicts),
         "duplicate_public_paths": duplicate_paths,
     }
+
+
+def route_key(r: Route) -> str:
+    """A route's identity for the ratchet.
+
+    Address plus declaring file. The address alone is not unique -- nine
+    addresses in this repository are claimed by two declarations (issue 241) --
+    and the line number is not stable, so it is excluded: a route that moves
+    down a file is the same route.
+    """
+    return f"{'|'.join(r.methods)} {r.router_prefix}{r.decl_path} @{r.file}"
+
+
+def build_manifest(routes: list[Route]) -> dict:
+    considered = [r for r in routes if r.exempt_reason is None]
+    return {
+        "_comment": (
+            "Ratchet baseline for docs/API_CONTRACT_ROADMAP.md. Regenerate with "
+            "scripts/api_contract_inventory.py --update-manifest. Do not hand-edit "
+            "`uncovered` or `auto_exempt`; `allow` is the only human section."
+        ),
+        "counts": {
+            "considered": len(considered),
+            "with_response_model": len([r for r in considered if r.covered]),
+        },
+        "uncovered": sorted(route_key(r) for r in considered if not r.covered),
+        "auto_exempt": {
+            route_key(r): r.exempt_reason for r in routes if r.exempt_reason is not None
+        },
+        "allow": {},
+    }
+
+
+def check_ratchet(routes: list[Route], manifest: dict) -> list[str]:
+    """Compare the tree against the pinned baseline. Returns failure lines.
+
+    Five rules, and the second is the one that makes this a ratchet rather than
+    a floor: covering a route must be recorded, or the gain is not locked in and
+    the same route could quietly go back to uncovered later.
+    """
+    problems: list[str] = []
+    considered = [r for r in routes if r.exempt_reason is None]
+
+    pinned_uncovered = set(manifest.get("uncovered", []))
+    pinned_exempt = dict(manifest.get("auto_exempt", {}))
+    allow = dict(manifest.get("allow", {}))
+
+    now_uncovered = {route_key(r) for r in considered if not r.covered}
+    now_exempt = {route_key(r): r.exempt_reason for r in routes if r.exempt_reason is not None}
+
+    # 1. A route may not arrive without a contract, and a covered one may not
+    #    lose it -- both show up here, because neither is in the pinned set.
+    for key in sorted(now_uncovered - pinned_uncovered - set(allow)):
+        problems.append(f"no response_model, and not in the baseline: {key}")
+
+    # 2. Progress has to be recorded, or the ratchet does not hold.
+    for key in sorted(pinned_uncovered - now_uncovered):
+        problems.append(
+            f"now covered but still listed as uncovered: {key}\n"
+            "      run --update-manifest to lock the improvement in"
+        )
+
+    # 3. Exemptions may only shrink.
+    for key in sorted(set(now_exempt) - set(pinned_exempt)):
+        problems.append(f"new exemption not in the baseline: {key} ({now_exempt[key]})")
+    for key in sorted(set(now_exempt) & set(pinned_exempt)):
+        if now_exempt[key] != pinned_exempt[key]:
+            problems.append(
+                f"exemption reason changed: {key}\n"
+                f"      was {pinned_exempt[key]!r}, now {now_exempt[key]!r}"
+            )
+
+    # 4. Every hand-written allowance states why, and where it is tracked.
+    for key, entry in sorted(allow.items()):
+        if not isinstance(entry, dict) or not entry.get("reason") or not entry.get("issue"):
+            problems.append(f"allowance needs both a reason and an issue: {key}")
+
+    # 5. A stale allowance is dead weight that would silently re-admit a route
+    #    if one ever reappeared at that address.
+    for key in sorted(set(allow) - now_uncovered):
+        problems.append(f"allowance no longer matches any uncovered route; remove it: {key}")
+
+    return problems
 
 
 def _git(*args: str) -> str:
@@ -427,6 +520,8 @@ def main() -> int:
     ap.add_argument("--list-uncovered", action="store_true", help="print every route with no response_model")
     ap.add_argument("--openapi", help="a saved /openapi.json; resolves declared paths to public ones")
     ap.add_argument("--web-dir", default="web/src", help="frontend source, scanned for consumers")
+    ap.add_argument("--ratchet", help="fail if the tree has regressed against this manifest")
+    ap.add_argument("--update-manifest", help="write the current state to this manifest")
     ap.add_argument(
         "--allow-openapi-drift",
         action="store_true",
@@ -522,6 +617,26 @@ def main() -> int:
             if r.exempt_reason is None and not r.covered:
                 flag = "  <-- shapes disagree" if r.shape_conflict else ""
                 print(f"  {'|'.join(r.methods):5} {r.decl_path:42} {r.file}:{r.line}{flag}")
+
+    if args.update_manifest:
+        Path(args.update_manifest).write_text(
+            json.dumps(build_manifest(routes), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        print(f"\nwrote {args.update_manifest}")
+
+    if args.ratchet:
+        try:
+            manifest = json.loads(Path(args.ratchet).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"could not read --ratchet {args.ratchet}: {exc}", file=sys.stderr)
+            return 2
+        problems = check_ratchet(routes, manifest)
+        if problems:
+            print(f"\nRATCHET FAILED ({len(problems)}):", file=sys.stderr)
+            for p in problems:
+                print(f"  - {p}", file=sys.stderr)
+            return 1
+        print("\nratchet: no regression against the baseline")
 
     if args.fail_under is not None and summary["coverage_pct"] < args.fail_under:
         print(f"\nFAIL: coverage {summary['coverage_pct']}% is below --fail-under {args.fail_under}", file=sys.stderr)

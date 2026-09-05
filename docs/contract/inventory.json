@@ -1477,42 +1477,23 @@
     {
       "consumers": 1,
       "decl_path": "/drift",
-      "dynamic_returns": 0,
+      "dynamic_returns": 5,
       "exempt_reason": null,
       "file": "app/api/drift.py",
       "function": "check_drift",
       "is_websocket": false,
-      "line": 17,
-      "literal_shapes": [
-        [
-          "status"
-        ],
-        [
-          "drift",
-          "status"
-        ],
-        [
-          "drift",
-          "n",
-          "status"
-        ],
-        [
-          "drift_detected",
-          "features",
-          "status",
-          "window"
-        ]
-      ],
+      "line": 69,
+      "literal_shapes": [],
       "methods": [
         "GET"
       ],
       "public_path": "/api/v1/model/drift",
       "raise_count": 0,
       "response_class": null,
-      "response_model": null,
-      "return_count": 4,
+      "response_model": "ModelDriftResponse",
+      "return_count": 5,
       "router_prefix": "/model",
-      "shape_conflict": true,
+      "shape_conflict": false,
       "status_code": null,
       "test_references": 0
     },
@@ -1524,7 +1505,7 @@
       "file": "app/api/drift.py",
       "function": "drift_mlflow_history",
       "is_websocket": false,
-      "line": 61,
+      "line": 129,
       "literal_shapes": [
         [
           "count",
@@ -4945,9 +4926,9 @@
   ],
   "summary": {
     "app_dir": "app",
-    "app_tree_sha": "adc898853f01d43f08d42f631a53bd0bac30575c",
+    "app_tree_sha": "425a1c6fdac15de6c0f59f475b0a8588eb3ed734",
     "considered": 181,
-    "coverage_pct": 12.2,
+    "coverage_pct": 12.7,
     "duplicate_public_paths": [
       "/api/v1/admin/ai/full-pipeline",
       "/api/v1/admin/ai/refresh",
@@ -4960,10 +4941,10 @@
       "/api/v1/auth/verify"
     ],
     "exempt": 6,
-    "openapi_file": "docs/contract/openapi-79e788c.json",
+    "openapi_file": "docs/contract/openapi-ebea7f8.json",
     "routes_total": 187,
-    "shape_conflicts": 14,
-    "snapshot_sha256": "c7d05216e9e1f358fca6dc7a404b9c9a21537a8fb542234397039aaae2e9aa69",
-    "with_response_model": 22
+    "shape_conflicts": 13,
+    "snapshot_sha256": "d70f6cb4d835855a8e768d6d622e9cb253d11232336f037eb95cb84533768736",
+    "with_response_model": 23
   }
 }
