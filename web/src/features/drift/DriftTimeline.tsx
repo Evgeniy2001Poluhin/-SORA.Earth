@@ -3,6 +3,10 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceL
 import { driftBaselineApi } from "@/api/endpoints/driftBaseline";
 import type { MlflowDriftEvent, KsFeatureStat } from "@/api/endpoints/driftBaseline";
 
+/** Rows the server requires before it will run a KS test (`MIN_WINDOW_ROWS`).
+ *  Quoted only to make the "not enough data" line specific; the server decides. */
+const MIN_KS_ROWS = 10;
+
 export function DriftTimeline() {
   const tl = useQuery({ queryKey: ["drift-mlflow-history"], queryFn: driftBaselineApi.mlflowHistory, refetchInterval: 30000 });
   const ks = useQuery({ queryKey: ["drift-ks-report"], queryFn: driftBaselineApi.ksReport, refetchInterval: 30000 });
@@ -27,7 +31,30 @@ export function DriftTimeline() {
       features: e["params.drifted_features"] || "-",
     }));
 
-  const ksFeatures = ks.data && ks.data.features && typeof ks.data.features === 'object' ? Object.entries(ks.data.features as Record<string, KsFeatureStat>) : [];
+  // #239. The KS table used to be labelled "N features" with N counted from
+  // whatever `features` happened to hold, so "there is no prediction log yet"
+  // reached the screen as "0 features" -- a measurement nobody took. The server
+  // now says which of those it is, and every case is answered here by name
+  // rather than by counting.
+  const ksFeatures: Array<[string, KsFeatureStat]> =
+    ks.data?.status === "ok" ? Object.entries(ks.data.features) : [];
+
+  const ksLabel = (): string => {
+    if (ks.isLoading) return "loading…";
+    // A 503 rejects in the client, so an unavailable service arrives here as an
+    // error, not as an answer. It must not read as "no drift".
+    if (ks.isError) return "unavailable — the test could not be run";
+    switch (ks.data?.status) {
+      case "ok":
+        return `${ksFeatures.length} features`;
+      case "no_log":
+        return "not enough data — no prediction log yet";
+      case "insufficient_data":
+        return `not enough data — ${ks.data.observations} of ${MIN_KS_ROWS} rows`;
+      default:
+        return "no data";
+    }
+  };
 
   return (
     <div>
@@ -51,7 +78,7 @@ export function DriftTimeline() {
         </div>
       )}
 
-      <div className="eyebrow" style={{ marginBottom: 12 }}>Kolmogorov-Smirnov per-feature: {ksFeatures.length} features</div>
+      <div className="eyebrow" style={{ marginBottom: 12 }}>Kolmogorov-Smirnov per-feature: {ksLabel()}</div>
       <div className="drift-table" style={{ marginBottom: 24 }}>
         <div className="drift-row drift-head" style={{ gridTemplateColumns: "1.4fr 1fr 1fr 1fr" }}>
           <div>Feature</div>

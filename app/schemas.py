@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Optional, List, Dict, Any, Literal
+from typing import Annotated, Optional, List, Dict, Any, Literal, Union
 
 class ProjectInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -253,3 +253,81 @@ class ObservationPage(BaseModel):
     #: Echoed exactly as applied, including the defaults the caller did not set.
     filters: dict
     observations: List[ObservationRow]
+
+
+# --- GET /api/v1/model/drift ------------------------------------------------
+#
+# The first migrated contract (#239). The endpoint used to answer 200 with four
+# incompatible bodies: the verdict was called `drift` on two branches,
+# `drift_detected` on a third, and was absent on the fourth. A consumer written
+# against the successful branch -- the only one visible in development -- read
+# `undefined` everywhere else, and `undefined` reads as "no drift".
+#
+# Three rules hold the shape together:
+#
+#   * every 200 carries the same field set, so no consumer ever reads a missing
+#     key;
+#   * `drift_detected` is a boolean only when a verdict was actually computed,
+#     and `null` otherwise -- never `false`, which is a claim nobody made;
+#   * a broken deployment is not a data state. Missing SciPy is a 503, because
+#     scipy==1.13.1 is a declared dependency and its absence is a fault, not an
+#     answer about drift.
+
+
+class KsFeatureStat(BaseModel):
+    """One feature's two-sample KS result."""
+
+    ks_stat: float
+    p_value: float
+    drift: bool
+
+
+class _ModelDriftBase(BaseModel):
+    """Fields every answer carries, whatever its status."""
+
+    window: int = Field(..., description="Size of the recent window requested.")
+    observations: int = Field(
+        ..., description="Rows actually available in that window; 0 when there is no log."
+    )
+    features: Dict[str, KsFeatureStat] = Field(
+        default_factory=dict,
+        description=(
+            "Per-feature KS results. Empty means 'no feature produced a result' "
+            "ONLY when status is 'ok'; on every other status nothing was measured."
+        ),
+    )
+    reason_code: Optional[str] = Field(
+        None, description="Machine-readable detail for a non-'ok' status."
+    )
+
+
+class ModelDriftMeasured(_ModelDriftBase):
+    """A verdict was computed."""
+
+    status: Literal["ok"]
+    drift_detected: bool
+
+
+class ModelDriftNotMeasured(_ModelDriftBase):
+    """A legitimate domain state: there was not enough to compute a verdict.
+
+    Still 200, because "no data yet" is an answer about the world rather than a
+    failure. `drift_detected` is null and not false: false would assert that
+    drift was looked for and not found.
+    """
+
+    status: Literal["no_log", "insufficient_data"]
+    drift_detected: None = None
+
+
+class ModelDriftUnavailable(_ModelDriftBase):
+    """The service could not run the test at all. Served with 503, never 200."""
+
+    status: Literal["unavailable"]
+    drift_detected: None = None
+
+
+ModelDriftResponse = Annotated[
+    Union[ModelDriftMeasured, ModelDriftNotMeasured],
+    Field(discriminator="status"),
+]
