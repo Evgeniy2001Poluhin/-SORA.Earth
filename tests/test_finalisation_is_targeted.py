@@ -24,6 +24,23 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, RetrainLog
 
+def _drift(detected: bool):
+    """A drift result shaped like the one `compute_drift` really returns.
+
+    These tests used to patch `app.api.drift.check_drift` with a plain dict.
+    That mock agreed with the caller while the real function stopped agreeing:
+    the contract migration changed the return to a Pydantic model, and
+    `drift_result.get(...)` would have raised AttributeError in production
+    without a single test going red. The mock now has the shape the real
+    function produces, so the next such change fails here.
+    """
+    from app.schemas import ModelDriftMeasured
+
+    return ModelDriftMeasured(
+        status="ok", drift_detected=detected, window=50,
+        observations=100, features={}, reason_code=None,
+    )
+
 
 @pytest.fixture
 def sessions(tmp_path, monkeypatch):
@@ -61,7 +78,7 @@ def read(sessions, row_id):
 def run_auto_retrain(monkeypatch, *, log_id, new_auc=0.95, old_auc=0.90):
     from app.api import infra
 
-    monkeypatch.setattr("app.api.drift.check_drift", lambda window=50: {"drift_detected": True})
+    monkeypatch.setattr("app.api.drift.compute_drift", lambda window=50: _drift(True))
     monkeypatch.setattr("app.api.retrain._get_current_metrics", lambda: {"roc_auc": old_auc})
     monkeypatch.setattr(
         "app.api.retrain._do_retrain",
@@ -127,7 +144,7 @@ def test_a_run_without_a_row_id_is_refused_rather_than_guessed(monkeypatch, sess
 
     bystander = add_row(sessions)
 
-    monkeypatch.setattr("app.api.drift.check_drift", lambda window=50: {"drift_detected": True})
+    monkeypatch.setattr("app.api.drift.compute_drift", lambda window=50: _drift(True))
     monkeypatch.setattr("app.api.retrain._get_current_metrics", lambda: {"roc_auc": 0.9})
     monkeypatch.setattr(
         "app.api.retrain._do_retrain",

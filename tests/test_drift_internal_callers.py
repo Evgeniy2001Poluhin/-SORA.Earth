@@ -8,7 +8,9 @@ loop and `POST /mlops/auto-retrain` would have raised `AttributeError` the next
 time they ran.
 
 **Nothing caught it**, and the reason is the point of this file: every existing
-test patches `app.api.drift.check_drift` with a mock returning a dict.
+test patched `app.api.drift.check_drift` with a mock returning a dict (they now
+patch `compute_drift`, with a model rather than a dict, so the mock and the
+function agree again).
 Replacing the function hides any disagreement between what it really returns
 and what its caller expects. So these tests call the real `compute_drift` and
 never mock it.
