@@ -144,98 +144,6 @@
       "decl_path": "/refresh",
       "dynamic_returns": 2,
       "exempt_reason": null,
-      "file": "app/api/admin_ai.py",
-      "function": "ai_trigger_refresh",
-      "is_websocket": false,
-      "line": 20,
-      "literal_shapes": [],
-      "methods": [
-        "POST"
-      ],
-      "public_path": "/api/v1/admin/ai/refresh",
-      "raise_count": 0,
-      "response_class": null,
-      "response_model": "AIActionResponse",
-      "return_count": 2,
-      "router_prefix": "/admin/ai",
-      "shape_conflict": false,
-      "status_code": null,
-      "test_references": 0
-    },
-    {
-      "consumers": 0,
-      "decl_path": "/retrain",
-      "dynamic_returns": 2,
-      "exempt_reason": null,
-      "file": "app/api/admin_ai.py",
-      "function": "ai_trigger_retrain",
-      "is_websocket": false,
-      "line": 41,
-      "literal_shapes": [],
-      "methods": [
-        "POST"
-      ],
-      "public_path": "/api/v1/admin/ai/retrain",
-      "raise_count": 0,
-      "response_class": null,
-      "response_model": "AIActionResponse",
-      "return_count": 2,
-      "router_prefix": "/admin/ai",
-      "shape_conflict": false,
-      "status_code": null,
-      "test_references": 0
-    },
-    {
-      "consumers": 0,
-      "decl_path": "/full-pipeline",
-      "dynamic_returns": 2,
-      "exempt_reason": null,
-      "file": "app/api/admin_ai.py",
-      "function": "ai_trigger_full_pipeline",
-      "is_websocket": false,
-      "line": 61,
-      "literal_shapes": [],
-      "methods": [
-        "POST"
-      ],
-      "public_path": "/api/v1/admin/ai/full-pipeline",
-      "raise_count": 0,
-      "response_class": null,
-      "response_model": "AIActionResponse",
-      "return_count": 2,
-      "router_prefix": "/admin/ai",
-      "shape_conflict": false,
-      "status_code": null,
-      "test_references": 0
-    },
-    {
-      "consumers": 0,
-      "decl_path": "/report",
-      "dynamic_returns": 1,
-      "exempt_reason": null,
-      "file": "app/api/admin_ai.py",
-      "function": "ai_generate_report",
-      "is_websocket": false,
-      "line": 81,
-      "literal_shapes": [],
-      "methods": [
-        "POST"
-      ],
-      "public_path": "/api/v1/admin/ai/report",
-      "raise_count": 0,
-      "response_class": null,
-      "response_model": "AIActionResponse",
-      "return_count": 1,
-      "router_prefix": "/admin/ai",
-      "shape_conflict": false,
-      "status_code": null,
-      "test_references": 0
-    },
-    {
-      "consumers": 0,
-      "decl_path": "/refresh",
-      "dynamic_returns": 2,
-      "exempt_reason": null,
       "file": "app/api/admin_ai_control.py",
       "function": "ai_trigger_refresh",
       "is_websocket": false,
@@ -709,142 +617,6 @@
       "response_model": null,
       "return_count": 1,
       "router_prefix": "/analytics",
-      "shape_conflict": false,
-      "status_code": null,
-      "test_references": 0
-    },
-    {
-      "consumers": 0,
-      "decl_path": "/auth/login",
-      "dynamic_returns": 1,
-      "exempt_reason": null,
-      "file": "app/api/auth.py",
-      "function": "login",
-      "is_websocket": false,
-      "line": 14,
-      "literal_shapes": [],
-      "methods": [
-        "POST"
-      ],
-      "public_path": "/api/v1/auth/login",
-      "raise_count": 1,
-      "response_class": null,
-      "response_model": "Token",
-      "return_count": 1,
-      "router_prefix": "",
-      "shape_conflict": false,
-      "status_code": null,
-      "test_references": 0
-    },
-    {
-      "consumers": 1,
-      "decl_path": "/auth/me",
-      "dynamic_returns": 0,
-      "exempt_reason": null,
-      "file": "app/api/auth.py",
-      "function": "get_me",
-      "is_websocket": false,
-      "line": 27,
-      "literal_shapes": [
-        [
-          "role",
-          "username"
-        ]
-      ],
-      "methods": [
-        "GET"
-      ],
-      "public_path": "/api/v1/auth/me",
-      "raise_count": 0,
-      "response_class": null,
-      "response_model": null,
-      "return_count": 1,
-      "router_prefix": "",
-      "shape_conflict": false,
-      "status_code": null,
-      "test_references": 0
-    },
-    {
-      "consumers": 0,
-      "decl_path": "/admin/users",
-      "dynamic_returns": 1,
-      "exempt_reason": null,
-      "file": "app/api/auth.py",
-      "function": "list_users",
-      "is_websocket": false,
-      "line": 31,
-      "literal_shapes": [],
-      "methods": [
-        "GET"
-      ],
-      "public_path": "/api/v1/admin/users",
-      "raise_count": 0,
-      "response_class": null,
-      "response_model": null,
-      "return_count": 1,
-      "router_prefix": "",
-      "shape_conflict": false,
-      "status_code": null,
-      "test_references": 0
-    },
-    {
-      "consumers": 0,
-      "decl_path": "/auth/verify",
-      "dynamic_returns": 0,
-      "exempt_reason": null,
-      "file": "app/api/auth.py",
-      "function": "verify_key",
-      "is_websocket": false,
-      "line": 35,
-      "literal_shapes": [
-        [
-          "authenticated",
-          "role",
-          "user"
-        ],
-        [
-          "authenticated",
-          "role",
-          "user"
-        ]
-      ],
-      "methods": [
-        "GET"
-      ],
-      "public_path": "/api/v1/auth/verify",
-      "raise_count": 0,
-      "response_class": null,
-      "response_model": null,
-      "return_count": 2,
-      "router_prefix": "",
-      "shape_conflict": false,
-      "status_code": null,
-      "test_references": 0
-    },
-    {
-      "consumers": 0,
-      "decl_path": "/admin/stats",
-      "dynamic_returns": 0,
-      "exempt_reason": null,
-      "file": "app/api/auth.py",
-      "function": "admin_stats",
-      "is_websocket": false,
-      "line": 41,
-      "literal_shapes": [
-        [
-          "authenticated_as",
-          "metrics"
-        ]
-      ],
-      "methods": [
-        "GET"
-      ],
-      "public_path": "/api/v1/admin/stats",
-      "raise_count": 0,
-      "response_class": null,
-      "response_model": null,
-      "return_count": 1,
-      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null,
       "test_references": 0
@@ -4343,7 +4115,7 @@
       "file": "app/main.py",
       "function": "read_root",
       "is_websocket": false,
-      "line": 807,
+      "line": 806,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -4366,7 +4138,7 @@
       "file": "app/main.py",
       "function": "dev_page",
       "is_websocket": false,
-      "line": 818,
+      "line": 817,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -4389,7 +4161,7 @@
       "file": "app/main.py",
       "function": "health",
       "is_websocket": false,
-      "line": 825,
+      "line": 824,
       "literal_shapes": [
         [
           "models_loaded",
@@ -4418,7 +4190,7 @@
       "file": "app/main.py",
       "function": "system_health",
       "is_websocket": false,
-      "line": 830,
+      "line": 829,
       "literal_shapes": [
         [
           "app_version",
@@ -4449,7 +4221,7 @@
       "file": "app/main.py",
       "function": "model_info",
       "is_websocket": false,
-      "line": 846,
+      "line": 845,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -4472,7 +4244,7 @@
       "file": "app/main.py",
       "function": "get_model_metrics",
       "is_websocket": false,
-      "line": 851,
+      "line": 850,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -4495,7 +4267,7 @@
       "file": "app/main.py",
       "function": "admin_dashboard",
       "is_websocket": false,
-      "line": 918,
+      "line": 917,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -4518,7 +4290,7 @@
       "file": "app/main.py",
       "function": "_login_page",
       "is_websocket": false,
-      "line": 938,
+      "line": 937,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -4541,7 +4313,7 @@
       "file": "app/main.py",
       "function": "_app_shell",
       "is_websocket": false,
-      "line": 942,
+      "line": 941,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -4564,7 +4336,7 @@
       "file": "app/main.py",
       "function": "_admin_shell",
       "is_websocket": false,
-      "line": 946,
+      "line": 945,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -4587,7 +4359,7 @@
       "file": "app/main.py",
       "function": "_favicon",
       "is_websocket": false,
-      "line": 952,
+      "line": 951,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -4610,7 +4382,7 @@
       "file": "app/main.py",
       "function": "_sora_spa",
       "is_websocket": false,
-      "line": 977,
+      "line": 976,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -4633,7 +4405,7 @@
       "file": "app/main.py",
       "function": "_spa_v2_root",
       "is_websocket": false,
-      "line": 997,
+      "line": 996,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -4656,7 +4428,7 @@
       "file": "app/main.py",
       "function": "_spa_v2_any",
       "is_websocket": false,
-      "line": 1000,
+      "line": 999,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -4679,7 +4451,7 @@
       "file": "app/main.py",
       "function": "_spa_catchall",
       "is_websocket": false,
-      "line": 1011,
+      "line": 1010,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -4926,25 +4698,15 @@
   ],
   "summary": {
     "app_dir": "app",
-    "app_tree_sha": "425a1c6fdac15de6c0f59f475b0a8588eb3ed734",
-    "considered": 181,
-    "coverage_pct": 12.7,
-    "duplicate_public_paths": [
-      "/api/v1/admin/ai/full-pipeline",
-      "/api/v1/admin/ai/refresh",
-      "/api/v1/admin/ai/report",
-      "/api/v1/admin/ai/retrain",
-      "/api/v1/admin/stats",
-      "/api/v1/admin/users",
-      "/api/v1/auth/login",
-      "/api/v1/auth/me",
-      "/api/v1/auth/verify"
-    ],
+    "app_tree_sha": "cded9b506bbb65ba02a883ed53f300443be91b02c2b205728369825d3652a720",
+    "considered": 172,
+    "coverage_pct": 10.5,
+    "duplicate_public_paths": [],
     "exempt": 6,
     "openapi_file": "docs/contract/openapi-ebea7f8.json",
-    "routes_total": 187,
+    "routes_total": 178,
     "shape_conflicts": 13,
     "snapshot_sha256": "d70f6cb4d835855a8e768d6d622e9cb253d11232336f037eb95cb84533768736",
-    "with_response_model": 23
+    "with_response_model": 18
   }
 }

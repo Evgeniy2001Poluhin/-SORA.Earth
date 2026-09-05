@@ -1,6 +1,7 @@
 {
-  "app_tree_sha": "425a1c6fdac15de6c0f59f475b0a8588eb3ed734",
-  "note": "Pins the snapshot to the app/ tree it describes. The inventory refuses to resolve paths against it when the tree being measured differs, because every resolved path and consumer count would then be attributed to code the snapshot never saw.",
+  "app_tree_sha": "cded9b506bbb65ba02a883ed53f300443be91b02c2b205728369825d3652a720",
+  "app_tree_sha_scheme": "sha256 over (relative path, file bytes) of every *.py under app/",
+  "note": "Pins the snapshot to the app/ tree it describes. The inventory refuses to resolve paths against it when the tree differs.\nRe-pinned when issue 241 deleted app/api/auth.py and app/api/admin_ai.py. That is a change to app/ which the snapshot predates, and the re-pin is deliberate rather than a reflex: the deleted modules were never registered in main.py -- verified by AST-parsing every router main.py includes, and by `git log -S`, which finds no commit in the repository's history that ever registered them -- so they served nothing and the published document is identical either side of the deletion. The discriminating evidence is the media type: the published /api/v1/auth/login accepts only application/x-www-form-urlencoded, which is app/auth_routes.py's signature; the deleted handler took a JSON body. operationIds do not discriminate here, because both modules would generate the same ones.",
   "production_commit": "ebea7f897a93c9d3b9a1c9192575fa561496c30d",
   "sha256": "d70f6cb4d835855a8e768d6d622e9cb253d11232336f037eb95cb84533768736",
   "source": "https://sora-earth.online/openapi.json",
