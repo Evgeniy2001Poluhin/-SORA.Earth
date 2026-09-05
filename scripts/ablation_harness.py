@@ -447,14 +447,42 @@ def evaluate_predictions(y_true: np.ndarray, y_prob: np.ndarray, *,
     }
 
 
+def resample_indices(rng, n: int, groups: Optional[np.ndarray]) -> np.ndarray:
+    """Row bootstrap when there are no groups; cluster bootstrap when there are.
+
+    With `groups`, whole clusters are drawn with replacement and every member
+    of a drawn cluster comes with it. That is the point: rows inside one
+    project are not independent draws, and resampling them as if they were
+    reports an interval narrower than the data supports. On a dataset where
+    each project contributes several rows, the row bootstrap counts the same
+    project's agreement with itself as evidence.
+
+    A cluster drawn twice contributes its rows twice, so the resample is
+    about `n` rows only when cluster sizes are even; that is inherent to the
+    method, not a defect, and `n_resamples_used` in the report is what says
+    how many resamples actually produced a metric.
+    """
+    if groups is None:
+        return rng.integers(0, n, n)
+    _uniq, inverse = np.unique(groups, return_inverse=True)
+    members = [np.flatnonzero(inverse == i) for i in range(inverse.max() + 1)]
+    if not members:
+        return np.array([], dtype=int)
+    picked = rng.integers(0, len(members), len(members))
+    return np.concatenate([members[i] for i in picked])
+
+
 def bootstrap_metrics(y_true: np.ndarray, y_prob: np.ndarray, *,
                       threshold: float, n_boot: int, seed: int,
-                      alpha: float = 0.05) -> dict:
+                      alpha: float = 0.05,
+                      groups: Optional[np.ndarray] = None) -> dict:
     rng = np.random.default_rng(seed)
     n = len(y_true)
     collected: dict = {}
     for _ in range(max(0, n_boot)):
-        idx = rng.integers(0, n, n)
+        idx = resample_indices(rng, n, groups)
+        if len(idx) == 0:
+            continue
         yt, yp = y_true[idx], y_prob[idx]
         if len(set(yt.tolist())) < 2:
             continue  # a resample with one class cannot produce an AUC
@@ -525,7 +553,8 @@ def _encode(train: pd.DataFrame, other: pd.DataFrame, features: Sequence[str]):
 
 def run_variant(variant: Variant, splits: dict, *, threshold: float,
                 n_boot: int, seed: int,
-                estimator_factory: Callable = _default_estimator) -> dict:
+                estimator_factory: Callable = _default_estimator,
+                group_col: Optional[str] = None) -> dict:
     assert_group_excludes_target_derived(variant)
     train, test = splits["train"], splits["test"]
     for frame, where in ((train, "train"), (test, "test")):
@@ -541,14 +570,26 @@ def run_variant(variant: Variant, splits: dict, *, threshold: float,
     y_prob = model.predict_proba(x_test)[:, 1]
 
     point = evaluate_predictions(y_test, y_prob, threshold=threshold)
+    # Cluster bootstrap whenever the split had a grouping unit: rows inside
+    # one project are not independent, and a row bootstrap over them reports
+    # a narrower interval than the data supports.
+    groups = (test[group_col].astype(str).to_numpy()
+              if group_col and group_col in test.columns else None)
     return {
         "variant": variant.name,
         "why": variant.why,
         "features": list(variant.features),
         "excludes_target_derived": variant.must_exclude_target_derived,
         "metrics": point,
+        "bootstrap": {
+            "mode": "cluster" if groups is not None else "row",
+            "unit": group_col if groups is not None else "row",
+            "n_clusters": (int(len(set(groups.tolist()))) if groups is not None
+                           else None),
+        },
         "confidence_intervals_95": bootstrap_metrics(
-            y_test, y_prob, threshold=threshold, n_boot=n_boot, seed=seed),
+            y_test, y_prob, threshold=threshold, n_boot=n_boot, seed=seed,
+            groups=groups),
     }
 
 
@@ -647,7 +688,7 @@ def main(argv=None) -> int:
             raise MissingFeature(f"unknown variant {name!r}")
         results.append(run_variant(
             VARIANTS_BY_NAME[name], splits, threshold=args.threshold,
-            n_boot=args.bootstrap, seed=args.seed))
+            n_boot=args.bootstrap, seed=args.seed, group_col=id_col))
 
     payload = {
         "schema_version": SCHEMA_VERSION,
