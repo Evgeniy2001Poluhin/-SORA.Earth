@@ -1,0 +1,62 @@
+# A separate workflow rather than a job in ci.yml, following the reasoning in
+# secret-scan.yml: several open pull requests edit that file, and another
+# editor turns a mechanical conflict into a recurring one. Nothing here needs
+# the rest of CI -- the inventory parses source with `ast` and imports nothing
+# outside the standard library, so this job installs no dependencies and runs
+# in seconds.
+name: api-contract
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ratchet:
+    name: response contract ratchet
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # The gate. It refuses when a route arrives without a `response_model`,
+      # when one loses the model it had, when an exemption appears or its
+      # reason changes, when a hand-written allowance lacks a reason or an
+      # issue, or when an allowance no longer matches anything.
+      #
+      # It also refuses when a route has been *covered* and the manifest was
+      # not regenerated. That is deliberate: an unrecorded improvement lets the
+      # same route slip back to uncovered later without tripping anything, so
+      # the ratchet would only be a floor. Locking the gain in is one command,
+      # printed in the failure.
+      - name: ratchet against the committed baseline
+        run: |
+          python3 scripts/api_contract_inventory.py \
+            --ratchet docs/contract/ratchet.json
+
+      # A gate whose baseline has drifted from the tree it ships with reports a
+      # repository that does not exist, so the manifest is regenerated here and
+      # compared byte for byte. This catches a hand-edited manifest, which the
+      # ratchet check itself cannot: hand-editing `uncovered` would make the
+      # comparison agree with whatever was written.
+      - name: the committed manifest is the one this tree produces
+        run: |
+          python3 scripts/api_contract_inventory.py \
+            --update-manifest /tmp/regenerated.json > /dev/null
+          if ! diff -u docs/contract/ratchet.json /tmp/regenerated.json; then
+            echo
+            echo "docs/contract/ratchet.json is not what this tree produces."
+            echo "Regenerate it:"
+            echo "  python3 scripts/api_contract_inventory.py --update-manifest docs/contract/ratchet.json"
+            exit 1
+          fi

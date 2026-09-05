@@ -1,8 +1,8 @@
 {
-  "app_tree_sha": "adc898853f01d43f08d42f631a53bd0bac30575c",
+  "app_tree_sha": "425a1c6fdac15de6c0f59f475b0a8588eb3ed734",
   "note": "Pins the snapshot to the app/ tree it describes. The inventory refuses to resolve paths against it when the tree being measured differs, because every resolved path and consumer count would then be attributed to code the snapshot never saw.",
-  "production_commit": "79e788c082b6aa9595770c76b53af208c385a4a7",
-  "sha256": "c7d05216e9e1f358fca6dc7a404b9c9a21537a8fb542234397039aaae2e9aa69",
+  "production_commit": "ebea7f897a93c9d3b9a1c9192575fa561496c30d",
+  "sha256": "d70f6cb4d835855a8e768d6d622e9cb253d11232336f037eb95cb84533768736",
   "source": "https://sora-earth.online/openapi.json",
   "taken_at": "2026-09-05"
 }
