@@ -1,7 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 
+/** GET /api/v1/lstm-status, migrated to a declared contract.
+ *
+ *  `active` is `null` when the check could not run: "we could not determine
+ *  whether LSTM is active" and "LSTM is not active" are different answers, and
+ *  the failure branch used to send the second for both. `days_remaining` is
+ *  null for the same reason -- zero reads as "ready today".
+ *
+ *  That branch is now a 503, so it arrives as a rejection rather than as data. */
 type LSTMStatus = {
+  status: "ok";
   active: boolean;
   samples: number;
   threshold: number;
@@ -13,7 +22,7 @@ type LSTMStatus = {
 };
 
 export function LSTMProgressWidget() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["lstm-status"],
     queryFn: () => api<LSTMStatus>("/lstm-status"),
     refetchInterval: 30000, // Refresh every 30s
@@ -24,6 +33,23 @@ export function LSTMProgressWidget() {
       <div className="lstm-progress-widget loading">
         <div className="spinner" />
         <span>Loading LSTM status...</span>
+      </div>
+    );
+  }
+
+  // A 503 rejects, so `data` is absent -- the same state as "nothing loaded".
+  // Rendering nothing would hide a fault; the widget says the status could not
+  // be read instead of quietly disappearing.
+  if (isError) {
+    return (
+      <div className="lstm-progress-widget pending">
+        <div className="widget-header">
+          <h3>LSTM Training Progress</h3>
+          <span className="badge pending">Unavailable</span>
+        </div>
+        <p style={{ fontSize: 13, opacity: 0.9 }}>
+          Status could not be determined.
+        </p>
       </div>
     );
   }
@@ -75,9 +101,12 @@ export function LSTMProgressWidget() {
         <div className="ready-message">
           <p>✨ LSTM is active in ensemble with {samples} samples</p>
           <div style={{ marginTop: "8px", fontSize: "13px", opacity: 0.9 }}>
-            <strong>Active models:</strong> {models_active.join(", ")}
+            {/* Guarded on the arrays themselves, not on `active` alone. The
+                contract promises them, but reading a field on the strength of
+                a sibling's value is the mistake #236 was about. */}
+            <strong>Active models:</strong> {(models_active ?? []).join(", ") || "—"}
             <br />
-            <strong>Weights:</strong> LSTM {(weights.lstm * 100).toFixed(0)}%, Prophet {(weights.prophet * 100).toFixed(0)}%
+            <strong>Weights:</strong> LSTM {((weights?.lstm ?? 0) * 100).toFixed(0)}%, Prophet {((weights?.prophet ?? 0) * 100).toFixed(0)}%
           </div>
         </div>
       )}

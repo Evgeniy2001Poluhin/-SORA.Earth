@@ -1932,7 +1932,7 @@
       "file": "app/api/evaluate.py",
       "function": "evaluate_monte_carlo",
       "is_websocket": false,
-      "line": 599,
+      "line": 608,
       "literal_shapes": [],
       "methods": [
         "POST"
@@ -2096,7 +2096,7 @@
       "file": "app/api/forecast.py",
       "function": "forecast",
       "is_websocket": false,
-      "line": 66,
+      "line": 74,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -2119,7 +2119,7 @@
       "file": "app/api/forecast.py",
       "function": "invalidate_forecast_cache",
       "is_websocket": false,
-      "line": 178,
+      "line": 186,
       "literal_shapes": [],
       "methods": [
         "DELETE"
@@ -2142,7 +2142,7 @@
       "file": "app/api/forecast.py",
       "function": "get_forecast_cache_stats",
       "is_websocket": false,
-      "line": 185,
+      "line": 193,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -2165,7 +2165,7 @@
       "file": "app/api/forecast.py",
       "function": "trigger_pretrain",
       "is_websocket": false,
-      "line": 191,
+      "line": 199,
       "literal_shapes": [],
       "methods": [
         "POST"
@@ -2188,7 +2188,7 @@
       "file": "app/api/forecast.py",
       "function": "get_forecast_history",
       "is_websocket": false,
-      "line": 277,
+      "line": 285,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -2211,7 +2211,7 @@
       "file": "app/api/forecast.py",
       "function": "get_forecast_model_performance",
       "is_websocket": false,
-      "line": 315,
+      "line": 323,
       "literal_shapes": [
         [
           "metrics",
@@ -2239,7 +2239,7 @@
       "file": "app/api/forecast.py",
       "function": "get_latest_forecast_metrics",
       "is_websocket": false,
-      "line": 390,
+      "line": 398,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -2257,44 +2257,23 @@
     {
       "consumers": 1,
       "decl_path": "/lstm-status",
-      "dynamic_returns": 0,
+      "dynamic_returns": 2,
       "exempt_reason": null,
       "file": "app/api/forecast.py",
       "function": "get_lstm_status",
       "is_websocket": false,
-      "line": 462,
-      "literal_shapes": [
-        [
-          "active",
-          "days_remaining",
-          "last_evaluation_date",
-          "message",
-          "models_active",
-          "next_activation_date",
-          "samples",
-          "threshold",
-          "unique_days_raw",
-          "weights"
-        ],
-        [
-          "active",
-          "days_remaining",
-          "error",
-          "message",
-          "samples",
-          "threshold"
-        ]
-      ],
+      "line": 470,
+      "literal_shapes": [],
       "methods": [
         "GET"
       ],
       "public_path": "/api/v1/lstm-status",
       "raise_count": 0,
       "response_class": null,
-      "response_model": null,
+      "response_model": "LstmStatusOk",
       "return_count": 2,
       "router_prefix": "",
-      "shape_conflict": true,
+      "shape_conflict": false,
       "status_code": null,
       "test_references": 0
     },
@@ -4669,16 +4648,16 @@
   ],
   "summary": {
     "app_dir": "app",
-    "app_tree_sha": "1af126d8e8936accc93a67fef06c430525a9571f20b698379c1b4db114dda2ab",
+    "app_tree_sha": "93b6831802253673b520a71d66aadbbfa216b598001f9017dc47d3919b5390d7",
     "considered": 172,
-    "coverage_pct": 11.6,
+    "coverage_pct": 12.2,
     "duplicate_public_paths": [],
     "exempt": 6,
     "openapi_drift_allowed": true,
     "openapi_file": "docs/contract/openapi-ebea7f8.json",
     "routes_total": 178,
-    "shape_conflicts": 11,
+    "shape_conflicts": 10,
     "snapshot_sha256": "d70f6cb4d835855a8e768d6d622e9cb253d11232336f037eb95cb84533768736",
-    "with_response_model": 20
+    "with_response_model": 21
   }
 }

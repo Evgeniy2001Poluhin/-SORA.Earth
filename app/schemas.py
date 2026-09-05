@@ -435,3 +435,60 @@ class MonteCarloUnavailable(BaseModel):
     n: int = 0
     failed: int
     reason_code: str
+
+
+# --- GET /api/v1/lstm-status ------------------------------------------------
+#
+# Fifth migration under docs/API_CONTRACT_ROADMAP.md.
+#
+# The failure branch answered 200 with `active: false` -- a verdict nobody
+# reached. "We could not determine whether LSTM is active" and "LSTM is not
+# active" are different answers, and the screen showed the second for both.
+#
+# It also reused `samples` for a different quantity: the success branch counts
+# rows in the forecast series, the failure branch put the count of distinct
+# days there instead. Same field, two meanings, no way to tell which.
+#
+# `days_remaining: 0` is the same trap as `drift_detected: false` -- it reads
+# as "ready today". Both it and `active` are null when nothing was determined.
+
+
+class LstmStatusOk(BaseModel):
+    """Activation status was determined."""
+
+    status: Literal["ok"]
+    active: bool
+    #: Rows in the forecast series. Not the same as `unique_days_raw`.
+    samples: int
+    threshold: int
+    days_remaining: int
+    next_activation_date: Optional[str] = None
+    models_active: List[str] = Field(default_factory=list)
+    weights: Dict[str, float] = Field(default_factory=dict)
+    unique_days_raw: int
+    last_evaluation_date: Optional[str] = None
+    message: str
+    reason_code: Optional[str] = None
+
+
+class LstmStatusUnavailable(BaseModel):
+    """Status could not be determined. Served with 503, never 200.
+
+    `active` and `days_remaining` are null rather than false and zero: both of
+    those are claims, and on this branch nothing was measured to support them.
+    `unique_days_raw` is still reported because the first query did succeed --
+    it is the one thing this branch actually knows.
+    """
+
+    status: Literal["unavailable"]
+    active: None = None
+    samples: int = 0
+    threshold: int
+    days_remaining: None = None
+    next_activation_date: None = None
+    models_active: List[str] = Field(default_factory=list)
+    weights: Dict[str, float] = Field(default_factory=dict)
+    unique_days_raw: int
+    last_evaluation_date: Optional[str] = None
+    message: str
+    reason_code: str
