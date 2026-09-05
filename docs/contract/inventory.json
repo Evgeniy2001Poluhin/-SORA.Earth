@@ -1254,7 +1254,7 @@
       "file": "app/api/drift.py",
       "function": "check_drift",
       "is_websocket": false,
-      "line": 69,
+      "line": 75,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -1272,37 +1272,23 @@
     {
       "consumers": 1,
       "decl_path": "/drift/mlflow-history",
-      "dynamic_returns": 0,
+      "dynamic_returns": 3,
       "exempt_reason": null,
       "file": "app/api/drift.py",
       "function": "drift_mlflow_history",
       "is_websocket": false,
-      "line": 129,
-      "literal_shapes": [
-        [
-          "count",
-          "error",
-          "events"
-        ],
-        [
-          "count",
-          "events"
-        ],
-        [
-          "count",
-          "events"
-        ]
-      ],
+      "line": 135,
+      "literal_shapes": [],
       "methods": [
         "GET"
       ],
       "public_path": "/api/v1/model/drift/mlflow-history",
       "raise_count": 0,
       "response_class": null,
-      "response_model": null,
+      "response_model": "MlflowHistoryOk",
       "return_count": 3,
       "router_prefix": "/model",
-      "shape_conflict": true,
+      "shape_conflict": false,
       "status_code": null,
       "test_references": 0
     },
@@ -4698,15 +4684,16 @@
   ],
   "summary": {
     "app_dir": "app",
-    "app_tree_sha": "cded9b506bbb65ba02a883ed53f300443be91b02c2b205728369825d3652a720",
+    "app_tree_sha": "dd36744f0520843a0c0fb8b6a9b538a5f41d23788c5d2a274fe48173006d4ead",
     "considered": 172,
-    "coverage_pct": 10.5,
+    "coverage_pct": 11.0,
     "duplicate_public_paths": [],
     "exempt": 6,
+    "openapi_drift_allowed": true,
     "openapi_file": "docs/contract/openapi-ebea7f8.json",
     "routes_total": 178,
-    "shape_conflicts": 13,
+    "shape_conflicts": 12,
     "snapshot_sha256": "d70f6cb4d835855a8e768d6d622e9cb253d11232336f037eb95cb84533768736",
-    "with_response_model": 18
+    "with_response_model": 19
   }
 }

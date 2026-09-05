@@ -11,7 +11,22 @@ export function DriftTimeline() {
   const tl = useQuery({ queryKey: ["drift-mlflow-history"], queryFn: driftBaselineApi.mlflowHistory, refetchInterval: 30000 });
   const ks = useQuery({ queryKey: ["drift-ks-report"], queryFn: driftBaselineApi.ksReport, refetchInterval: 30000 });
 
-  const events: MlflowDriftEvent[] = tl.data && tl.data.events ? tl.data.events : [];
+  // Guarded on the array as well as the status. The status is the server's
+  // contract, but a client that reads `events` on the strength of a string is
+  // exactly what #236 was about -- and it is not hypothetical here: the KS
+  // report next door also answers `status: "ok"`, with no `events` at all.
+  const events: MlflowDriftEvent[] =
+    tl.data?.status === "ok" && Array.isArray(tl.data.events) ? tl.data.events : [];
+
+  // "0 events" used to cover two different worlds: MLflow answered and holds
+  // nothing, or MLflow could not be reached at all. The second is now a 503 and
+  // arrives as a rejection, so the two are told apart here rather than counted
+  // together.
+  const timelineLabel = (): string => {
+    if (tl.isLoading) return "loading…";
+    if (tl.isError) return "unavailable — MLflow could not be queried";
+    return `${data.length} events`;
+  };
   // The payload-level guard above is the correct shape already. What was
   // missing is the same question one level down: every field here has a
   // fallback except `run_id`, so a single event without one threw on
@@ -37,7 +52,7 @@ export function DriftTimeline() {
   // now says which of those it is, and every case is answered here by name
   // rather than by counting.
   const ksFeatures: Array<[string, KsFeatureStat]> =
-    ks.data?.status === "ok" ? Object.entries(ks.data.features) : [];
+    ks.data?.status === "ok" && ks.data.features ? Object.entries(ks.data.features) : [];
 
   const ksLabel = (): string => {
     if (ks.isLoading) return "loading…";
@@ -58,7 +73,7 @@ export function DriftTimeline() {
 
   return (
     <div>
-      <div className="eyebrow" style={{ marginBottom: 12 }}>Drift timeline (MLflow): {data.length} events</div>
+      <div className="eyebrow" style={{ marginBottom: 12 }}>Drift timeline (MLflow): {timelineLabel()}</div>
       {data.length > 0 ? (
       <div className="drift-chart-wrap" style={{ marginBottom: 24 }}>
         <ResponsiveContainer width="100%" height="100%" debounce={50}>
@@ -74,7 +89,11 @@ export function DriftTimeline() {
       </div>
       ) : (
         <div className="drift-chart-wrap" style={{ marginBottom: 24, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>
-          {tl.isLoading ? "Loading timeline…" : "No drift events yet"}
+          {tl.isLoading
+            ? "Loading timeline…"
+            : tl.isError
+              ? "MLflow could not be queried"
+              : "No drift events yet"}
         </div>
       )}
 

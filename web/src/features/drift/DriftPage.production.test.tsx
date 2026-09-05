@@ -146,6 +146,10 @@ describe("LSTMProgressWidget when the API answers with nothing", () => {
   });
 });
 
+// The envelope carries `status` since the #241 follow-up migrated this
+// endpoint: an unreachable MLflow answers 503 rather than an empty list, so
+// these fixtures declare the successful status explicitly instead of relying
+// on a bare `events` key.
 describe("DriftTimeline when an event arrives malformed", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -167,7 +171,7 @@ describe("DriftTimeline when an event arrives malformed", () => {
     // One level below the payload guard: every field in the row had a
     // fallback except `run_id`, and `.slice` on undefined unmounted the
     // whole drift page, since the timeline renders inside it.
-    stubJson({ events: [{ start_time: "2026-09-05T10:00:00Z", "metrics.drift_score": 0.42 }] });
+    stubJson({ status: "ok", reason_code: null, count: 1, events: [{ start_time: "2026-09-05T10:00:00Z", "metrics.drift_score": 0.42 }] });
 
     const { container } = renderWithQuery(<DriftTimeline />);
     await waitFor(() => expect(container.textContent ?? "").toContain("1 events"), { timeout: 3000 });
@@ -179,7 +183,7 @@ describe("DriftTimeline when an event arrives malformed", () => {
   it("shows a dash rather than an Invalid Date when the timestamp is absent", async () => {
     // Quieter than the crash and worse: an absent start_time sorts as NaN,
     // which reorders the timeline rather than failing.
-    stubJson({ events: [{ run_id: "abcdef1234567890", "metrics.drift_score": 0.5 }] });
+    stubJson({ status: "ok", reason_code: null, count: 1, events: [{ run_id: "abcdef1234567890", "metrics.drift_score": 0.5 }] });
 
     const { container } = renderWithQuery(<DriftTimeline />);
     await waitFor(() => expect(container.textContent ?? "").toContain("abcdef12"), { timeout: 3000 });
@@ -189,6 +193,9 @@ describe("DriftTimeline when an event arrives malformed", () => {
 
   it("still renders a well-formed event exactly as before", async () => {
     stubJson({
+      status: "ok",
+      reason_code: null,
+      count: 1,
       events: [{
         run_id: "0123456789abcdef",
         start_time: "2026-09-05T10:00:00Z",
@@ -298,5 +305,62 @@ describe("the KS table against the migrated contract (#239)", () => {
       timeout: 3000,
     });
     expect(container.textContent ?? "").toContain("0.6125");
+  });
+});
+
+describe("the MLflow timeline against its migrated contract", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("says MLflow could not be queried rather than showing zero events", async () => {
+    // The defect: an unreachable tracking server answered 200 with an empty
+    // list, so the screen said "0 events" -- the same thing it says when
+    // MLflow is fine and holds nothing. One is a fault, the other is a fact.
+    stubStatus(503);
+
+    const { container } = renderWithQuery(<DriftTimeline />);
+
+    // Asserted on the label itself, not on the page text. The first version
+    // checked `container.textContent`, which is satisfied by the empty-state
+    // line further down -- so removing the label's error branch left the test
+    // green while the label still read "0 events". Mutation testing caught it.
+    const label = () =>
+      Array.from(container.querySelectorAll(".eyebrow")).find((n) =>
+        (n.textContent ?? "").startsWith("Drift timeline (MLflow):"),
+      );
+
+    await waitFor(() => expect(label()?.textContent ?? "").toContain("could not be queried"), {
+      timeout: 3000,
+    });
+    expect(label()?.textContent ?? "").not.toContain("0 events");
+    expect(container.textContent ?? "").not.toContain("No drift events yet");
+  });
+
+  it("still says there are no events when MLflow answered and holds none", async () => {
+    // The other half: an empty list from a working MLflow is a real answer and
+    // must keep reading as one.
+    stubJson({ status: "ok", events: [], count: 0, reason_code: null });
+
+    const { container } = renderWithQuery(<DriftTimeline />);
+
+    await waitFor(() => expect(container.textContent ?? "").toContain("0 events"), {
+      timeout: 3000,
+    });
+    expect(container.textContent ?? "").toContain("No drift events yet");
+    expect(container.textContent ?? "").not.toContain("could not be queried");
+  });
+
+  it("draws no events for a status that reported none, even if some arrive", async () => {
+    // `events` is read on the strength of the status plus the array, not the
+    // status alone. Not hypothetical: the KS report on the same page also
+    // answers `status: "ok"`, carrying no `events` at all -- which is exactly
+    // how the first version of this guard crashed.
+    stubJson({ status: "unavailable", events: [{ run_id: "should-not-render" }], count: 1, reason_code: "mlflow_unavailable" });
+
+    const { container } = renderWithQuery(<DriftTimeline />);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    expect(container.textContent ?? "").not.toContain("should-n");
   });
 });

@@ -46,8 +46,8 @@ app/api/data_pipeline.py,74,data_status,/status,/data,/api/v1/data/status,0,GET,
 app/api/data_pipeline.py,80,all_countries,/countries,/data,/api/v1/data/countries,0,GET,,,,,1,0,0,0
 app/api/data_pipeline.py,87,single_country,/country/{name},/data,/api/v1/data/country/{name},0,GET,,,,,3,0,1,1
 app/api/data_pipeline.py,111,supported_countries,/countries/supported,/data,/api/v1/data/countries/supported,0,GET,,,,,1,0,1,0
-app/api/drift.py,69,check_drift,/drift,/model,/api/v1/model/drift,1,GET,,ModelDriftResponse,,,5,0,5,0
-app/api/drift.py,129,drift_mlflow_history,/drift/mlflow-history,/model,/api/v1/model/drift/mlflow-history,1,GET,,,,,3,0,0,1
+app/api/drift.py,75,check_drift,/drift,/model,/api/v1/model/drift,1,GET,,ModelDriftResponse,,,5,0,5,0
+app/api/drift.py,135,drift_mlflow_history,/drift/mlflow-history,/model,/api/v1/model/drift/mlflow-history,1,GET,,MlflowHistoryOk,,,3,0,3,0
 app/api/drift_baseline.py,17,fit_baseline,/mlops/drift/baseline/fit,,/api/v1/mlops/drift/baseline/fit,1,POST,,,,,1,1,0,0
 app/api/drift_baseline.py,44,observe,/mlops/drift/observe,,/api/v1/mlops/drift/observe,0,POST,,,,,1,0,0,0
 app/api/drift_baseline.py,53,baseline_status,/mlops/drift/baseline,,/api/v1/mlops/drift/baseline,2,GET,,,,,1,0,0,0

@@ -560,6 +560,7 @@ def main() -> int:
 
     routes = collect(app_dir)
     app_tree = _app_tree_sha(app_dir)
+    drift_allowed = False
     if args.openapi:
         problem = check_openapi_provenance(Path(args.openapi), app_tree)
         if problem and not args.allow_openapi_drift:
@@ -567,6 +568,10 @@ def main() -> int:
             return 3
         if problem:
             print(f"WARNING (--allow-openapi-drift): {problem}", file=sys.stderr)
+        # Recorded in the artefact, not only on stderr: a file that was
+        # generated against a snapshot of other code has to say so, or the next
+        # reader takes its resolved paths for verified ones.
+        drift_allowed = bool(problem)
         try:
             resolve_public_paths(routes, json.loads(Path(args.openapi).read_text(encoding="utf-8")))
         except (OSError, json.JSONDecodeError) as exc:
@@ -584,6 +589,7 @@ def main() -> int:
     summary["app_dir"] = str(app_dir)
     if args.openapi:
         summary["openapi_file"] = str(args.openapi)
+        summary["openapi_drift_allowed"] = drift_allowed
         # Not `openapi_sha256`: gitleaks' generic-api-key rule fires on a long
         # hex value beside a field name containing "api", and "openapi" does.
         # The digest of a public document is not a credential, but allowlisting
