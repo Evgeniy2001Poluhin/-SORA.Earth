@@ -207,6 +207,7 @@ export function EvaluatePage() {
                 <MonteCarlo
                   data={mcMut.data}
                   loading={mcMut.isPending}
+                  failed={mcMut.isError}
                   onRun={(n)=>mcMut.mutate({ ...form, region: form.country, n })}
                 />
               ) : activeTab === "whatif" ? (

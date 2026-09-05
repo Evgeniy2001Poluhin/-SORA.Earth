@@ -375,3 +375,63 @@ class MlflowHistoryUnavailable(BaseModel):
 
 
 MlflowHistoryResponse = MlflowHistoryOk
+
+
+# --- POST /api/v1/evaluate/monte-carlo --------------------------------------
+#
+# Fourth migration under docs/API_CONTRACT_ROADMAP.md.
+#
+# "Every one of N simulations raised" used to answer 200 with
+# `{"error": "no successful runs"}`. A caller reading `mean` got `undefined`,
+# and `undefined` reads as zero on the way to a chart. It is not a state of the
+# world -- it is the service failing to compute anything, with the reasons
+# discarded by `except Exception: continue`.
+#
+# The second fix here is `n`. It counted *successful* runs while reading as the
+# number requested: ask for 1000, have 950 raise, and the answer says `n: 50`
+# with no way to tell that from a request for 50. `requested` is now stated
+# beside it, so a distribution computed from a fraction of the sample says so.
+
+
+class MonteCarloHistogram(BaseModel):
+    edges: List[float]
+    counts: List[int]
+
+
+class MonteCarloOk(BaseModel):
+    """A distribution was computed. `n` may still be below `requested`."""
+
+    status: Literal["ok"]
+    #: Simulations asked for, after clamping to the endpoint's own bounds.
+    requested: int
+    #: Simulations that produced a score. Kept under its original name: the
+    #: only consumer reads `n`, and it has always meant "successful runs".
+    n: int
+    #: Simulations that raised. `requested == n + failed` always holds, so a
+    #: caller can see a shortfall instead of inferring one.
+    failed: int
+    mean: float
+    stdev: float
+    min: float
+    max: float
+    p10: float
+    p50: float
+    p90: float
+    histogram: MonteCarloHistogram
+    reason_code: Optional[str] = None
+
+
+class MonteCarloUnavailable(BaseModel):
+    """Nothing could be computed. Served with 503, never 200.
+
+    503 rather than 500 or 422: a computation service that produced no result
+    at all is unavailable for the purpose asked of it. The request itself
+    passed validation, and the endpoint clamps every field into range before
+    simulating, so it cannot claim the input is at fault.
+    """
+
+    status: Literal["unavailable"]
+    requested: int
+    n: int = 0
+    failed: int
+    reason_code: str

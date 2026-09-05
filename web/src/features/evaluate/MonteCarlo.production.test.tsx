@@ -149,6 +149,61 @@ describe("MonteCarlo on the production path", () => {
     expect(container.textContent ?? "").not.toContain("NaN");
   });
 
+  it("shows n out of requested when part of the sample failed", () => {
+    // `n` counted successful runs while reading as the number asked for, so a
+    // mean over 50 of 1000 samples looked like a mean over 50 of 50.
+    const { container } = renderWithQuery(
+      <MonteCarlo
+        data={{
+          status: "ok", requested: 1000, n: 50, failed: 950, reason_code: "partial_sample",
+          mean: 61.25, stdev: 4.75, p10: 55.5, p50: 61.5, p90: 67.25, min: 48.5, max: 74.5,
+          histogram: { counts: [2, 7, 3], edges: [48, 57, 66, 75] },
+        } as never}
+        loading={false}
+        onRun={() => {}}
+      />,
+    );
+
+    expect(container.textContent ?? "").toContain("50 / 1000");
+  });
+
+  it("shows n alone when every simulation succeeded", () => {
+    const { container } = renderWithQuery(
+      <MonteCarlo
+        data={{
+          status: "ok", requested: 500, n: 500, failed: 0, reason_code: null,
+          mean: 61.25, stdev: 4.75, p10: 55.5, p50: 61.5, p90: 67.25, min: 48.5, max: 74.5,
+          histogram: { counts: [2, 7, 3], edges: [48, 57, 66, 75] },
+        } as never}
+        loading={false}
+        onRun={() => {}}
+      />,
+    );
+
+    expect(container.textContent ?? "").not.toContain("500 / 500");
+  });
+
+  it("says the simulation failed rather than looking un-run", () => {
+    // A 503 rejects, so `data` is absent -- the same state as "not run yet".
+    // Without the flag the panel invited the user to press Run again on a
+    // request that had just failed.
+    const { container } = renderWithQuery(
+      <MonteCarlo data={undefined} loading={false} failed onRun={() => {}} />,
+    );
+
+    expect(container.textContent ?? "").toContain("Simulation failed");
+    expect(container.textContent ?? "").not.toContain("Click \"Run\"");
+  });
+
+  it("still invites a first run when nothing has been attempted", () => {
+    const { container } = renderWithQuery(
+      <MonteCarlo data={undefined} loading={false} onRun={() => {}} />,
+    );
+
+    expect(container.textContent ?? "").toContain("Click");
+    expect(container.textContent ?? "").not.toContain("Simulation failed");
+  });
+
   it("still draws a complete simulation the server did return", () => {
     const { container } = renderWithQuery(
       <MonteCarlo

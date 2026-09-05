@@ -1,10 +1,17 @@
+import logging
 from typing import Optional
 from typing import List
 
 from fastapi import APIRouter, Request, Query
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 
-from app.schemas import ProjectInput as Project, GHGInput
+from app.schemas import (
+    ProjectInput as Project,
+    GHGInput,
+    MonteCarloHistogram,
+    MonteCarloOk,
+    MonteCarloUnavailable,
+)
 from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 from app.cache import cache
 from app import external_data
@@ -21,6 +28,8 @@ import tempfile
 
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 def _clamp(x, lo=0.0, hi=100.0):
@@ -549,36 +558,104 @@ class _MCRequest(_BM_MC):
     n: int = 500
     noise: float = 0.15
 
-@router.post("/evaluate/monte-carlo")
+def _region_name(region: str) -> str:
+    """The continent a country belongs to, or Europe.
+
+    A seam, like `_simulate_once` below: it hides an `app.main` import that
+    otherwise happens inside the request.
+    """
+    from app.main import COUNTRIES
+
+    meta = COUNTRIES.get(region, {"region": "Europe"})
+    return meta.get("region", "Europe") if isinstance(meta, dict) else "Europe"
+
+
+def _clamped_sample(req: "_MCRequest", jitter) -> dict:
+    """One jittered sample, held inside the range `calculate_esg` accepts.
+
+    Pure, and imports nothing: the clamps are the part worth testing on their
+    own, and a test of them should not have to stand up the application. They
+    are also the reason invalid input is not a 422 here -- a negative budget or
+    a social score of 400 is clamped rather than rejected, so it never becomes
+    one exception per sample.
+
+    Unchanged from the original handler; only moved.
+    """
+    return {
+        "project_name": req.project_name,
+        "region": req.region,
+        "budget_usd": max(1000.0, jitter(req.budget_usd)),
+        "co2_reduction_tons_per_year": max(1.0, jitter(req.co2_reduction_tons_per_year)),
+        "social_impact_score": max(1.0, min(10.0, jitter(req.social_impact_score))),
+        "project_duration_months": max(1, int(round(jitter(req.project_duration_months)))),
+    }
+
+
+def _simulate_once(req: "_MCRequest", region_name: str, jitter) -> float:
+    """Score one jittered sample of the request.
+
+    A seam: extracted so a test can replace the computation without importing
+    `app.main`, which pulls in the whole application and, through
+    `app.mlflow_tracking`, a network call with no timeout (issue 243). Before
+    this, every test of this endpoint paid that import -- a targeted run of
+    eight cases took four minutes and told us nothing about the contract.
+    """
+    from app.main import Project as _P, calculate_esg
+
+    return calculate_esg(_P(**_clamped_sample(req, jitter)), region_name)["total_score"]
+
+
+@router.post(
+    "/evaluate/monte-carlo",
+    response_model=MonteCarloOk,
+    responses={503: {"model": MonteCarloUnavailable, "description": "No simulation produced a score."}},
+    summary="Distribution of the ESG score under input noise",
+)
 async def evaluate_monte_carlo(req: _MCRequest):
-    """Run N simulations with triangular noise on inputs, return distribution stats."""
+    """Run N simulations with triangular noise on inputs, return distribution stats.
+
+    Two things this contract fixes (docs/API_CONTRACT_ROADMAP.md). "Every
+    simulation raised" used to be a 200 carrying `{"error": ...}`, so a caller
+    reading `mean` got `undefined`; it is now a 500. And `n` counted successful
+    runs while reading as the number requested -- `requested` is stated beside
+    it, so a distribution built from a fraction of the sample says so.
+    """
     import random, statistics
-    from app.main import calculate_esg, COUNTRIES, Project as _P
-    region_meta = COUNTRIES.get(req.region, {"region": "Europe"})
-    rname = region_meta.get("region", "Europe") if isinstance(region_meta, dict) else "Europe"
+    rname = _region_name(req.region)
     n = max(50, min(int(req.n), 5000))
     noise = max(0.01, min(float(req.noise), 0.5))
     scores = []
+    _failed = 0
+    _first_failure = None
     rng = random.Random(42)
     for _ in range(n):
         def jit(v):
             lo = v * (1 - noise); hi = v * (1 + noise)
             return rng.triangular(lo, hi, v)
         try:
-            p = _P(
-                project_name=req.project_name,
-                region=req.region,
-                budget_usd=max(1000.0, jit(req.budget_usd)),
-                co2_reduction_tons_per_year=max(1.0, jit(req.co2_reduction_tons_per_year)),
-                social_impact_score=max(1.0, min(10.0, jit(req.social_impact_score))),
-                project_duration_months=max(1, int(round(jit(req.project_duration_months)))),
-            )
-            r = calculate_esg(p, rname)
-            scores.append(r["total_score"])
-        except Exception:
+            scores.append(_simulate_once(req, rname, jit))
+        except Exception as exc:  # noqa: PERF203 - one bad sample must not end the run
+            if _first_failure is None:
+                _first_failure = exc
+            _failed += 1
             continue
     if not scores:
-        return {"error": "no successful runs"}
+        # Logged rather than returned: the caller gets a machine-readable
+        # reason, and whatever the ESG calculation raised stays server-side.
+        # One aggregated line, not one per sample: a thousand failed
+        # simulations must not write a thousand tracebacks. The type is enough
+        # to find it; the text stays out of the response.
+        logger.warning(
+            "monte-carlo: all %d simulations raised; first failure was %s",
+            n, type(_first_failure).__name__,
+        )
+        return JSONResponse(
+            status_code=503,
+            content=MonteCarloUnavailable(
+                status="unavailable", requested=n, n=0, failed=_failed,
+                reason_code="no_successful_runs",
+            ).model_dump(),
+        )
     scores.sort()
     def pct(p):
         if not scores: return 0.0
@@ -593,14 +670,23 @@ async def evaluate_monte_carlo(req: _MCRequest):
     for s in scores:
         idx = min(int((s - lo) / width), nbins - 1)
         bins[idx] += 1
-    return {
-        "n": len(scores),
-        "mean": round(statistics.mean(scores), 2),
-        "stdev": round(statistics.pstdev(scores), 2),
-        "min": round(lo, 2),
-        "max": round(hi, 2),
-        "p10": pct(10),
-        "p50": pct(50),
-        "p90": pct(90),
-        "histogram": {"edges": edges, "counts": bins},
-    }
+    if _failed:
+        logger.warning(
+            "monte-carlo: %d of %d simulations raised; first failure was %s",
+            _failed, n, type(_first_failure).__name__,
+        )
+    return MonteCarloOk(
+        status="ok",
+        requested=n,
+        n=len(scores),
+        failed=_failed,
+        mean=round(statistics.mean(scores), 2),
+        stdev=round(statistics.pstdev(scores), 2),
+        min=round(lo, 2),
+        max=round(hi, 2),
+        p10=pct(10),
+        p50=pct(50),
+        p90=pct(90),
+        histogram=MonteCarloHistogram(edges=edges, counts=bins),
+        reason_code="partial_sample" if _failed else None,
+    )

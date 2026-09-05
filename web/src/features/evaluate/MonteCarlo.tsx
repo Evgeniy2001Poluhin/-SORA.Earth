@@ -1,7 +1,13 @@
 import { useMemo } from "react";
 
 type MCData = {
+  /** Simulations that produced a score -- the meaning it always had. */
   n: number;
+  /** Simulations asked for, after the endpoint's own clamping. Optional so a
+   *  caller still on the pre-contract shape type-checks. */
+  requested?: number;
+  /** Simulations that raised. `requested === n + failed`. */
+  failed?: number;
   mean: number;
   stdev: number;
   min: number;
@@ -15,11 +21,15 @@ type MCData = {
 type Props = {
   data: MCData | undefined;
   loading: boolean;
+  /** The run failed outright -- every simulation raised, so the server
+   *  answered 503. Distinct from "not run yet", which is what an absent
+   *  `data` used to mean for both. */
+  failed?: boolean;
   onRun: (n: number) => void;
 };
 
 export default function MonteCarlo(props: Props) {
-  const { data: raw, loading, onRun } = props;
+  const { data: raw, loading, failed, onRun } = props;
   // #236, and the third crash path in EvaluatePage on the same trigger: this
   // renders inside it, on the Monte Carlo tab, so an empty 200 from
   // /evaluate/monte-carlo took the page down here too even after the result
@@ -55,12 +65,26 @@ export default function MonteCarlo(props: Props) {
 
       {!data ? (
         <div className="mc-empty">
-          {loading ? "Running simulations..." : "Click \"Run\" to simulate input uncertainty (+/- 15% triangular noise on budget, CO2, social impact)."}
+          {loading
+            ? "Running simulations..."
+            : failed
+              ? "Simulation failed — no run produced a score."
+              : "Click \"Run\" to simulate input uncertainty (+/- 15% triangular noise on budget, CO2, social impact)."}
         </div>
       ) : (
         <>
           <div className="mc-stats">
-            <div><span className="lbl">N</span><span className="val tabular">{data.n}</span></div>
+            <div>
+              <span className="lbl">N</span>
+              <span className="val tabular">
+                {/* `n` is the count that produced a score. When some raised,
+                    both numbers are shown: averaging 50 of 1000 samples is not
+                    the same answer as averaging 50 of 50. */}
+                {typeof data.failed === "number" && data.failed > 0
+                  ? `${data.n} / ${data.requested}`
+                  : data.n}
+              </span>
+            </div>
             <div><span className="lbl">MEAN</span><span className="val tabular">{data.mean.toFixed(1)}</span></div>
             <div><span className="lbl">STDEV</span><span className="val tabular">{data.stdev.toFixed(2)}</span></div>
             <div className="hi"><span className="lbl">P10</span><span className="val tabular">{data.p10.toFixed(1)}</span></div>

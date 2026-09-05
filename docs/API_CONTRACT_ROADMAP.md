@@ -31,10 +31,10 @@ Measured by `scripts/api_contract_inventory.py`, after the removal in issue 241:
 | routes declared in `app/` | **178** |
 | exempt (websocket / non-model `response_class`) | **6** |
 | considered | **172** |
-| declaring a `response_model` | **19** |
-| **coverage** | **11.0 %** |
-| handlers whose static returns disagree under one status | **12** |
-| of those, with a live frontend consumer | **3** |
+| declaring a `response_model` | **20** |
+| **coverage** | **11.6 %** |
+| handlers whose static returns disagree under one status | **11** |
+| of those, with a live frontend consumer | **2** |
 | declared but absent from the live OpenAPI document | **15** |
 | declared paths that could not be resolved unambiguously | **8** |
 | public addresses declared **twice** | **0** — nine were removed, see below |
@@ -296,7 +296,8 @@ already reading them.
 | public path | file | |
 |---|---|---|
 | ~~`GET /api/v1/model/drift`~~ | `api/drift.py` | migrated in #244 |
-| ~~`GET /api/v1/model/drift/mlflow-history`~~ | `api/drift.py` | migrated here |
+| ~~`GET /api/v1/model/drift/mlflow-history`~~ | `api/drift.py` | migrated in #247 |
+| ~~`POST /api/v1/evaluate/monte-carlo`~~ | `api/evaluate.py` | migrated here |
 | `GET /api/v1/lstm-status` | `api/forecast.py:462` — consumed by `LSTMProgressWidget` |
 | `POST /api/v1/evaluate/monte-carlo` | `api/evaluate.py:552` — `{"error": …}` at HTTP 200 |
 | `POST /api/v1/mlops/drift/simulate` | `api/drift_baseline.py:91` |
@@ -396,9 +397,9 @@ dependencies.
 - Coverage is re-measured and recorded at every phase, by the script, not by
   assertion. It moved 12.2 % → 12.7 % when #244 landed, then **12.7 % → 10.5 %**
   when issue 241 removed nine dead routes of which five were typed — contradicting
-  the prediction written here beforehand — and 10.5 % → 11.0 % with the MLflow
-  history migration. The count that tracks the work better is *shape conflicts
-  with a live consumer*: 5 → 4 → **3**.
+  the prediction written here beforehand — and 10.5 % → 11.0 % → **11.6 %** with
+  the MLflow history and Monte Carlo migrations. The count that tracks the work
+  better is *shape conflicts with a live consumer*: 5 → 4 → 3 → **2**.
 
 ---
 
