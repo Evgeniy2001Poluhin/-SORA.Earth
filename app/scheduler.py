@@ -557,9 +557,27 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         logger.warning("Closed loop skipped: lock held")
         return {"status": "skipped", "reason": "lock_held"}
     try:
-        from app.api.drift import check_drift
-        drift_result = check_drift(window=50)
-        drift_detected = bool(drift_result.get("drift_detected", False))
+        from app.api.drift import compute_drift
+        drift_result = compute_drift(window=50)
+        # `compute_drift`, not the HTTP handler: that one returns a Response on
+        # the unavailable path, and this needs the value.
+        #
+        # A check that could not run is not "no drift". Treating it as one is
+        # the defect the whole contract effort is about, and here it would mean
+        # the closed loop silently declines to retrain whenever the KS test is
+        # broken -- looking exactly like a healthy model.
+        if drift_result.status == "unavailable":
+            logger.warning(
+                "Closed loop: drift check unavailable (%s), skipping retrain",
+                drift_result.reason_code,
+            )
+            return {
+                "status": "skipped",
+                "drift_detected": None,
+                "retrained": False,
+                "reason": "drift_check_unavailable",
+            }
+        drift_detected = bool(drift_result.drift_detected)
         if not drift_detected:
             logger.info("Closed loop: no drift, skipping retrain")
             return {"status": "ok", "drift_detected": False, "retrained": False, "reason": "drift_not_detected"}
