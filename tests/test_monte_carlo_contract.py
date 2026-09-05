@@ -27,16 +27,19 @@ from fastapi.testclient import TestClient
 # network call with no timeout (issue 243). A fixture is too late -- the import
 # has already blocked by the time one runs. This is why the first version of
 # this file took four minutes for eight tests.
+#
+# `setdefault`, deliberately: in CI `conftest.py` imports `app.main` first, so
+# the real module is already registered and this is a no-op. The stub is only
+# used where nothing has imported it yet -- a targeted local run. That keeps
+# the blast radius to the case that needs it rather than replacing a shared
+# module for the whole session, which is what an earlier version of the
+# clamping test did to `app.main` and what broke this file in CI.
 _mlflow_stub = types.ModuleType("app.mlflow_tracking")
 _mlflow_stub.log_evaluation = lambda *a, **k: None  # type: ignore[attr-defined]
 _mlflow_stub.log_drift_event = lambda *a, **k: None  # type: ignore[attr-defined]
 sys.modules.setdefault("app.mlflow_tracking", _mlflow_stub)
 
 evaluate_module = importlib.import_module("app.api.evaluate")
-
-#: Captured before the autouse seam fixture replaces it, for the one test that
-#: needs the real clamping rather than a stub.
-REAL_SIMULATE_ONCE = evaluate_module._simulate_once
 
 OK_KEYS = {
     "status", "requested", "n", "failed", "mean", "stdev", "min", "max",
@@ -187,7 +190,7 @@ def test_openapi_declares_both_branches(client):
 # --- what happens to input the request model does not bound -------------------
 
 
-def test_out_of_range_input_is_clamped_rather_than_raising(monkeypatch):
+def test_out_of_range_input_is_clamped_rather_than_raising():
     """Answers the question "should bad input be a 422 instead of a 503?".
 
     `_MCRequest` bounds nothing: a negative budget or a social score of 400
@@ -197,30 +200,39 @@ def test_out_of_range_input_is_clamped_rather_than_raising(monkeypatch):
     internal exceptions, and a 503 from this endpoint really does mean the
     service failed rather than the caller.
 
-    Tested against the real `_simulate_once` with a stubbed `app.main`, so the
-    clamps themselves run. Importing the actual application is what made this
-    file take four minutes.
+    Tested against `_clamped_sample`, which is pure and imports nothing. The
+    first version replaced `sys.modules["app.main"]` with a stub, which worked
+    locally under `--noconftest` and broke in CI: `conftest.py` does
+    `from app.main import app`, and the stub had no `app`. Poisoning a shared
+    module to test one function is too wide a blast radius -- the function is
+    now separable instead.
     """
-    seen = {}
-
-    class FakeProject:
-        def __init__(self, **kwargs):
-            seen.update(kwargs)
-
-    stub = types.ModuleType("app.main")
-    stub.Project = FakeProject  # type: ignore[attr-defined]
-    stub.calculate_esg = lambda project, region: {"total_score": 50.0}  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "app.main", stub)
-
     req = evaluate_module._MCRequest(
         project_name="P", region="Nowhere",
         budget_usd=-5_000, co2_reduction_tons_per_year=-1,
         social_impact_score=400, project_duration_months=-12,
     )
-    score = REAL_SIMULATE_ONCE(req, "Europe", lambda v: v)
 
-    assert score == 50.0, "the simulation ran; nothing raised"
-    assert seen["budget_usd"] == 1000.0, "a negative budget is floored"
-    assert seen["co2_reduction_tons_per_year"] == 1.0
-    assert seen["social_impact_score"] == 10.0, "400 is capped at the scale's top"
-    assert seen["project_duration_months"] == 1, "a negative duration is floored"
+    fields = evaluate_module._clamped_sample(req, lambda v: v)
+
+    assert fields["budget_usd"] == 1000.0, "a negative budget is floored"
+    assert fields["co2_reduction_tons_per_year"] == 1.0
+    assert fields["social_impact_score"] == 10.0, "400 is capped at the scale's top"
+    assert fields["project_duration_months"] == 1, "a negative duration is floored"
+
+
+def test_the_clamps_leave_a_valid_sample_alone():
+    """A negative control: clamping that changed everything would pass the
+    test above while destroying the simulation."""
+    req = evaluate_module._MCRequest(
+        project_name="P", region="Sweden",
+        budget_usd=150_000, co2_reduction_tons_per_year=120,
+        social_impact_score=8, project_duration_months=24,
+    )
+
+    fields = evaluate_module._clamped_sample(req, lambda v: v)
+
+    assert fields["budget_usd"] == 150_000
+    assert fields["co2_reduction_tons_per_year"] == 120
+    assert fields["social_impact_score"] == 8
+    assert fields["project_duration_months"] == 24

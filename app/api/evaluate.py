@@ -570,30 +570,39 @@ def _region_name(region: str) -> str:
     return meta.get("region", "Europe") if isinstance(meta, dict) else "Europe"
 
 
+def _clamped_sample(req: "_MCRequest", jitter) -> dict:
+    """One jittered sample, held inside the range `calculate_esg` accepts.
+
+    Pure, and imports nothing: the clamps are the part worth testing on their
+    own, and a test of them should not have to stand up the application. They
+    are also the reason invalid input is not a 422 here -- a negative budget or
+    a social score of 400 is clamped rather than rejected, so it never becomes
+    one exception per sample.
+
+    Unchanged from the original handler; only moved.
+    """
+    return {
+        "project_name": req.project_name,
+        "region": req.region,
+        "budget_usd": max(1000.0, jitter(req.budget_usd)),
+        "co2_reduction_tons_per_year": max(1.0, jitter(req.co2_reduction_tons_per_year)),
+        "social_impact_score": max(1.0, min(10.0, jitter(req.social_impact_score))),
+        "project_duration_months": max(1, int(round(jitter(req.project_duration_months)))),
+    }
+
+
 def _simulate_once(req: "_MCRequest", region_name: str, jitter) -> float:
     """Score one jittered sample of the request.
 
-    Extracted so a test can replace the computation without importing
-    `app.main`, which pulls in the whole application and its startup. Before
-    this, every test of this endpoint paid that import inside the request --
-    a targeted run of eight cases took four minutes and told us nothing about
-    the contract.
-
-    The clamps are the endpoint's own and unchanged: jitter can push a value
-    below what `calculate_esg` accepts, and this keeps it in range rather than
-    raising once per sample.
+    A seam: extracted so a test can replace the computation without importing
+    `app.main`, which pulls in the whole application and, through
+    `app.mlflow_tracking`, a network call with no timeout (issue 243). Before
+    this, every test of this endpoint paid that import -- a targeted run of
+    eight cases took four minutes and told us nothing about the contract.
     """
     from app.main import Project as _P, calculate_esg
 
-    project = _P(
-        project_name=req.project_name,
-        region=req.region,
-        budget_usd=max(1000.0, jitter(req.budget_usd)),
-        co2_reduction_tons_per_year=max(1.0, jitter(req.co2_reduction_tons_per_year)),
-        social_impact_score=max(1.0, min(10.0, jitter(req.social_impact_score))),
-        project_duration_months=max(1, int(round(jitter(req.project_duration_months)))),
-    )
-    return calculate_esg(project, region_name)["total_score"]
+    return calculate_esg(_P(**_clamped_sample(req, jitter)), region_name)["total_score"]
 
 
 @router.post(
