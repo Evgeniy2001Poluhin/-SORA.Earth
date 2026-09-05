@@ -1,6 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
+// Mock mode for this file, said here rather than inherited (#218). These assert the canned SHAP payload's field names and that it echoes
+// the caller's inputs rather than returning fixed defaults.
+// The production-mode counterpart is ExplainPage.production.test.tsx.
+vi.mock("@/api/mock", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/mock")>();
+  return { ...actual, isMock: true };
+});
 
 import { ExplainPage } from "./ExplainPage";
 import { explainApi } from "@/api/endpoints/explain";

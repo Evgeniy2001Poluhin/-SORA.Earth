@@ -1,6 +1,14 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 
+// Mock mode for this file, said here rather than inherited (#218). Only the rendering block below needs mock mode; the payload block above
+// stubs evaluateApi.whatIf directly and is mode-independent.
+// The production-mode counterpart is WhatIf.production.test.tsx.
+vi.mock("@/api/mock", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/mock")>();
+  return { ...actual, isMock: true };
+});
+
 import { WhatIf } from "./WhatIf";
 import { evaluateApi } from "@/api/endpoints/evaluate";
 import { renderWithQuery, stubChartLayout } from "@/test/utils";

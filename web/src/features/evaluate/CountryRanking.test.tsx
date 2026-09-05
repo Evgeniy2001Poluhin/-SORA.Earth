@@ -1,6 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 
+// Mock mode for this file, said here rather than inherited (#218). These
+// tests assert the shape of the canned payload, which is a real contract
+// between the fixtures and the component -- but they used to work only
+// because `vitest.config.ts` set no VITE_API_BASE, so the mode was decided
+// somewhere these files never mention. The production-mode counterpart is
+// CountryRanking.production.test.tsx.
+vi.mock("@/api/mock", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/mock")>();
+  return { ...actual, isMock: true };
+});
+
 import CountryRanking from "./CountryRanking";
 import { evaluateApi } from "@/api/endpoints/evaluate";
 import { renderWithQuery } from "@/test/utils";

@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
+
+// Mock mode for this file, said here rather than inherited (#218). These assert that p5/p95 line up with lower_90/upper_90 in the canned
+// payload -- a contract the type omitted until it was checked against
+// app/api/calibration.py.
+// The production-mode counterpart is UncertaintyCard.production.test.tsx.
+vi.mock("@/api/mock", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/mock")>();
+  return { ...actual, isMock: true };
+});
 
 import { UncertaintyCard } from "./UncertaintyCard";
 import { calibrationApi } from "@/api/endpoints/calibration";

@@ -33,18 +33,10 @@ vi.mock("./mock", async (importOriginal) => {
 import { evaluateApi } from "./endpoints/evaluate";
 import { reportApi } from "./endpoints/report";
 import { isMock } from "./mock";
+// Shared with the production-mode tests added in #218 -- one definition, so
+// "a failure must never arrive as a plausible score" cannot drift per file.
+import { numbersIn } from "@/test/http";
 
-/** Anything that could be read off a page as a score. */
-function numbersIn(value: unknown): number[] {
-  const found: number[] = [];
-  const walk = (v: unknown) => {
-    if (typeof v === "number" && Number.isFinite(v)) found.push(v);
-    else if (Array.isArray(v)) v.forEach(walk);
-    else if (v && typeof v === "object") Object.values(v).forEach(walk);
-  };
-  walk(value);
-  return found;
-}
 
 const BODY = {
   project_name: "Solar Farm",
