@@ -223,8 +223,8 @@ frontend type derived from it. Decide in the same PR whether the parallel
 contracts is itself the problem. The sample establishes the pattern every later
 migration copies.
 
-**Phase C — ratchet gate. Done.** `.github/workflows/api-contract.yml`, on the
-verified inventory. See §5.
+**Phase C — ratchet gate. Done.** A job in `ci.yml`, inside `required-checks`,
+on the verified inventory. See §5.
 
 **Phase D — migrate by risk.** Priority order in §4, smallest reviewable PRs,
 each one re-running the inventory so the number moves visibly.
@@ -328,8 +328,22 @@ consumer count and everything except side effects and existing tests.
 
 A rule that failed CI for any route without a `response_model` would fail on
 158 existing routes, block the repository, and be deleted within a week as
-impractical. So the baseline is pinned in `docs/contract/ratchet.json` and
-`.github/workflows/api-contract.yml` enforces movement in one direction only.
+impractical. So the baseline is pinned in `docs/contract/ratchet.json` and a job
+in `ci.yml` enforces movement in one direction only.
+
+**It is a job in `ci.yml` rather than its own workflow, and that is a
+deliberate departure from the precedent in `secret-scan.yml`.** That file
+isolates itself to avoid another editor of `ci.yml`, and pays a price for it:
+branch protection on `main` requires exactly one context, `required-checks`,
+which is a job aggregating others through `needs:` — and `needs:` cannot reach
+across workflows. A separate workflow therefore reports and does not block.
+Acceptable for a scanner that also runs weekly over history; not acceptable for
+a ratchet, which is only worth having if it stops the thing it names. This job
+is listed in `required-checks`.
+
+Worth stating plainly as a consequence: **`secret-scan` does not block a merge
+today either.** It reports. Whether that is intended is the owner's call, and it
+is not changed here.
 
 Five rules, all of them tested and each confirmed by breaking it:
 
