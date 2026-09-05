@@ -123,6 +123,38 @@ describe("WhatIf on the production path", () => {
     expect(scoreLikeNumbersIn({ ...(error as Error) })).toEqual([]);
   });
 
+  it("an empty variations map draws no bars rather than three reading +0.00", async () => {
+    // #236. `if(!v) return []` guarded `undefined`; `{variations:{}}` is
+    // truthy and each row fell back to `?? 0`, so the page drew three bars
+    // claiming every parameter changes the score by exactly zero — a
+    // sensitivity result nobody computed, presented as one.
+    stubJson({ base: {}, variations: {} });
+
+    const { container } = renderWithQuery(<WhatIf form={FORM} lastRun={FORM} />);
+
+    await waitFor(
+      () => expect(screen.getByText("Run an evaluation first")).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    expect(container.querySelectorAll(".wi-row")).toHaveLength(0);
+    expect(container.textContent ?? "").not.toContain("+0.00");
+  });
+
+  it("a partial variations map draws only the rows the server answered", async () => {
+    // Dropping the unanswered rows rather than zero-filling them: the two
+    // the server did compute are real and must still be shown.
+    stubJson({ base: {}, variations: { co2_reduction: variation(4.5), budget: variation(-1.25) } });
+
+    const { container } = renderWithQuery(<WhatIf form={FORM} lastRun={FORM} />);
+
+    await waitFor(() => expect(container.querySelectorAll(".wi-row")).toHaveLength(2), {
+      timeout: 3000,
+    });
+    expect(screen.getByText("CO2 +20%")).toBeInTheDocument();
+    expect(screen.getByText("Budget +20%")).toBeInTheDocument();
+    expect(screen.queryByText("Social +1")).not.toBeInTheDocument();
+  });
+
   it("draws no tornado at all when the request fails", async () => {
     // Not "draws zeros": `tornado` is [] without data, so the empty state
     // shows instead of three bars that would read as a measured "no effect".

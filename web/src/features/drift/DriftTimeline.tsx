@@ -8,14 +8,21 @@ export function DriftTimeline() {
   const ks = useQuery({ queryKey: ["drift-ks-report"], queryFn: driftBaselineApi.ksReport, refetchInterval: 30000 });
 
   const events: MlflowDriftEvent[] = tl.data && tl.data.events ? tl.data.events : [];
+  // The payload-level guard above is the correct shape already. What was
+  // missing is the same question one level down: every field here has a
+  // fallback except `run_id`, so a single event without one threw on
+  // `.slice` and took the whole drift page with it -- the timeline renders
+  // inside DriftPage. An absent `start_time` was quieter and worse: it sorts
+  // as NaN, which reorders the timeline rather than failing (#236).
+  const at = (e: MlflowDriftEvent) => new Date(e.start_time).getTime();
   const data = events
     .slice()
-    .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+    .sort((a, b) => (Number.isFinite(at(a)) ? at(a) : 0) - (Number.isFinite(at(b)) ? at(b) : 0))
     .map((e) => ({
-      timeShort: new Date(e.start_time).toLocaleTimeString(),
+      timeShort: Number.isFinite(at(e)) ? new Date(at(e)).toLocaleTimeString() : "-",
       drift_score: Number(e["metrics.drift_score"]) || 0,
       drifted_count: Number(e["metrics.drifted_features_count"]) || 0,
-      run: e.run_id.slice(0, 8),
+      run: typeof e.run_id === "string" ? e.run_id.slice(0, 8) : "-",
       baseline: e["tags.baseline_id"] || "-",
       features: e["params.drifted_features"] || "-",
     }));

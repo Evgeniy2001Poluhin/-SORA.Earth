@@ -19,7 +19,22 @@ type Props = {
 };
 
 export default function MonteCarlo(props: Props) {
-  const { data, loading, onRun } = props;
+  const { data: raw, loading, onRun } = props;
+  // #236, and the third crash path in EvaluatePage on the same trigger: this
+  // renders inside it, on the Monte Carlo tab, so an empty 200 from
+  // /evaluate/monte-carlo took the page down here too even after the result
+  // and explain paths were guarded. `{}` is truthy, so `!data` passed it to
+  // `data.histogram.counts` and to six `.toFixed` calls.
+  //
+  // A simulation is the histogram plus its percentiles; without them there is
+  // nothing to draw, and the "Click Run to simulate" state is the honest one.
+  const data =
+    raw &&
+    Array.isArray(raw.histogram?.counts) &&
+    Array.isArray(raw.histogram?.edges) &&
+    typeof raw.mean === "number"
+      ? raw
+      : undefined;
   const max = useMemo(() => {
     if (!data) return 1;
     let m = 1;

@@ -66,7 +66,16 @@ export function DriftPage() {
   if (q.isError) return <div className="card-body"><p style={{ color: "#EF4444" }}>Failed to load drift status</p></div>;
 
   const d = q.data;
-  if (!d) {
+  // The worst face of #236, because this is the monitoring page: `{}` is
+  // truthy, `d.drift_detected` came back undefined, and the KPI rendered a
+  // green STABLE beside a "NaN%" drift score -- a verdict nobody computed,
+  // telling an operator the model is fine. Measured, not read.
+  //
+  // Guarded on the two fields the verdict is built from. Every real branch
+  // of `check_drift()` carries both, including "no_baseline" and
+  // "insufficient_data" (drift_score 0.0), so no legitimate answer is
+  // suppressed by this -- those still render their own status.
+  if (!d || !d.status || typeof d.drift_score !== "number") {
     return (
       <div className="card-body">
         <p style={{ color: "var(--muted)" }}>No drift data available yet. Waiting for first observation...</p>

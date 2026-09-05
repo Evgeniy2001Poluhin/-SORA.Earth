@@ -98,26 +98,35 @@ describe("UncertaintyCard on the production path", () => {
     expect(scoreLikeNumbersIn({ ...(error as Error) })).toEqual([]);
   });
 
-  it("DOCUMENTS TODAY'S BEHAVIOUR: an empty 200 renders 0.0% as if measured", async () => {
-    // Not an endorsement, and deliberately not fixed here. #218 asks for
-    // production-path coverage and warns against overreaching, so this
-    // records what the component does now rather than changing it.
-    //
-    // `if (!q.data) return null` guards `undefined`, but `{}` is truthy, and
-    // every read below it is `?? 0`. A 200 carrying nothing therefore paints
-    // a complete confidence-interval card reading 0.0% — the same failure
-    // family as #216: a page that looks normal while showing numbers the
-    // model never produced. An *error* is handled correctly (test below);
-    // this is the success-shaped empty answer. Tracked separately.
+  it("an empty 200 draws no interval rather than one reading 0.0%", async () => {
+    // #236. This test was written first to pin the defect: `if (!q.data)`
+    // guarded `undefined` while `{}` is truthy, and every read below was
+    // `?? 0`, so a 200 carrying nothing painted a complete confidence
+    // interval reading 0.0% — the #216 failure family, a page that looks
+    // normal showing numbers the model never produced. The guard now asks
+    // for the fields it renders, and this asserts the fix.
     stubJson({});
 
     const { container } = renderWithQuery(<UncertaintyCard payload={PAYLOAD} />);
 
-    await waitFor(
-      () => expect(container.querySelector(".uncertainty-card")).not.toBeNull(),
-      { timeout: 3000 },
-    );
-    expect(container.textContent ?? "").toContain("0.0%");
+    // Give the query time to resolve, so this cannot pass merely by being
+    // asserted before the empty answer arrived.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(container.querySelector(".uncertainty-card")).toBeNull();
+    expect(container.textContent ?? "").not.toContain("0.0%");
+  });
+
+  it("a partial 200 missing tree_distribution still draws nothing", async () => {
+    // Half an answer is not an answer: the card reads from both
+    // `prediction` and `tree_distribution`, so either being absent has to
+    // mean the same thing as neither arriving.
+    stubJson({ prediction: { mean: 0.6, median: 0.6, lower_90: 0.5, upper_90: 0.7 } });
+
+    const { container } = renderWithQuery(<UncertaintyCard payload={PAYLOAD} />);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(container.querySelector(".uncertainty-card")).toBeNull();
   });
 
   it("renders no interval at all when the request fails", async () => {

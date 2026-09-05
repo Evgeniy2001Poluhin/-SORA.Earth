@@ -84,11 +84,20 @@ export function WhatIf({ form, lastRun }: Props) {
 
   const tornado = useMemo(()=>{
     const v = wi.data?.variations; if(!v) return [];
-    return [
-      { key:"Budget +20%",  delta: v.budget?.score_change ?? 0,         abs: Math.abs(v.budget?.score_change ?? 0) },
-      { key:"CO2 +20%",     delta: v.co2_reduction?.score_change ?? 0,  abs: Math.abs(v.co2_reduction?.score_change ?? 0) },
-      { key:"Social +1",    delta: v.social_impact?.score_change ?? 0,  abs: Math.abs(v.social_impact?.score_change ?? 0) },
-    ].sort((a,b)=>b.abs-a.abs);
+    const rows = [
+      { key:"Budget +20%",  delta: v.budget?.score_change,        abs: Math.abs(v.budget?.score_change ?? 0) },
+      { key:"CO2 +20%",     delta: v.co2_reduction?.score_change, abs: Math.abs(v.co2_reduction?.score_change ?? 0) },
+      { key:"Social +1",    delta: v.social_impact?.score_change, abs: Math.abs(v.social_impact?.score_change ?? 0) },
+    ];
+    // "Every parameter changes the score by exactly zero" is a claim, not an
+    // empty state (#236). `{variations:{}}` from the server used to draw all
+    // three bars reading +0.00 — a sensitivity result nobody computed. Rows
+    // the server did not answer for are dropped, and if none survive the
+    // caller shows "Run an evaluation first" instead.
+    const answered = rows.filter(r => typeof r.delta === "number");
+    return answered
+      .map(r => ({ ...r, delta: r.delta as number }))
+      .sort((a,b)=>b.abs-a.abs);
   },[wi.data]);
 
   const maxAbs = Math.max(0.5, ...tornado.map(t=>t.abs));

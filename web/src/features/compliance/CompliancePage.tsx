@@ -208,7 +208,15 @@ export function CompliancePage() {
         </button>
       </section>
 
-      {mut.data && (
+      {/* #236: `{}` is truthy, and `overall_readiness.toFixed(0)` below
+          crashed the page on it. Guarding on the score alone is not enough --
+          `Object.entries(categories)` and `recommended_actions.length` throw
+          the same way -- so this names the three the section cannot render
+          without, and a partial payload takes the empty state too. */}
+      {mut.data &&
+        mut.data.overall_readiness != null &&
+        mut.data.categories != null &&
+        Array.isArray(mut.data.recommended_actions) && (
         <motion.section
           className="cmp-result"
           initial={{ opacity: 0, y: 8 }}
@@ -239,7 +247,13 @@ export function CompliancePage() {
 
           <h3>ESRS categories</h3>
           <div className="cats">
-            {Object.entries(mut.data.categories).map(([k, v]) => (
+            {/* Item level, the same question as the payload guard above: a
+                category without `gaps` threw on `.length`, and one without a
+                numeric `score` would throw on `.toFixed`. A category that
+                carries no score is not a category to draw. */}
+            {Object.entries(mut.data.categories)
+              .filter(([, v]) => typeof v?.score === "number")
+              .map(([k, v]) => (
               <div key={k} className={`cat s-${v.status}`}>
                 <div className="cat-head">
                   <span>{CATEGORY_LABELS[k] || k}</span>
@@ -248,9 +262,9 @@ export function CompliancePage() {
                 <div className="bar">
                   <div className="fill" style={{ width: `${v.score}%` }} />
                 </div>
-                {v.gaps.length > 0 && (
+                {(v.gaps?.length ?? 0) > 0 && (
                   <ul className="gaps">
-                    {v.gaps.map((g, i) => (
+                    {(v.gaps ?? []).map((g, i) => (
                       <li key={i}>{g}</li>
                 ))}
                   </ul>

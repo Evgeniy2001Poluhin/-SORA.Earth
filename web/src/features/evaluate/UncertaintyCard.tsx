@@ -31,7 +31,17 @@ export function UncertaintyCard({ payload }: Props) {
     enabled: body.budget > 0,
   });
 
-  if (!q.data) return null;
+  // Absent and empty are different answers, and only one of them is a
+  // reason to draw an interval (#236). `!q.data` alone guards `undefined`;
+  // a 200 carrying `{}` is truthy, and every read below is `?? 0`, so the
+  // card used to paint a complete confidence interval reading 0.0% — a
+  // number the model never produced, on a page that looks normal. Measured,
+  // not deduced: see UncertaintyCard.production.test.tsx.
+  //
+  // Guarded on the fields actually rendered rather than on the object, so a
+  // payload that arrives without them renders nothing, exactly as a failed
+  // request already does.
+  if (!q.data?.prediction || !q.data?.tree_distribution) return null;
   const u = q.data;
   const lo = (u?.prediction?.lower_90 ?? 0) * 100;
   const med = (u?.prediction?.median ?? 0) * 100;

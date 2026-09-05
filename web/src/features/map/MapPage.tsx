@@ -36,7 +36,9 @@ export default function MapPage() {
 
   if (isLoading) return <div className="map-page"><p className="muted">Loading map...</p></div>;
   if (error)     return <div className="map-page"><p className="err">{(error as Error).message}</p></div>;
-  if (!data)     return null;
+  // #236: `{}` is truthy, so this passed an empty 200 to
+  // `data.countries.filter` and blanked the map.
+  if (!data || !Array.isArray(data.countries)) return null;
 
   return (
     <div className="map-page">
@@ -49,8 +51,16 @@ export default function MapPage() {
         </div>
         <div className="map-stats">
           <div className="stat"><b>{data.countries.filter(c => c.band === "leader").length}</b><em>leaders</em></div>
-          <div className="stat"><b>{data.countries[0].name}</b><em>top: {data.countries[0].esg}</em></div>
-          <div className="stat"><b>{Math.round(data.countries.reduce((s,c)=>s+c.esg,0)/data.countries.length)}</b><em>avg ESG</em></div>
+          {/* Separate from the payload guard above and more reachable: an
+              empty list is a legitimate answer, and `countries[0].name`
+              took the page down on it. Averaging an empty list divides
+              by zero, which prints "NaN" rather than failing. */}
+          {data.countries.length > 0 && (
+            <>
+              <div className="stat"><b>{data.countries[0].name}</b><em>top: {data.countries[0].esg}</em></div>
+              <div className="stat"><b>{Math.round(data.countries.reduce((s,c)=>s+c.esg,0)/data.countries.length)}</b><em>avg ESG</em></div>
+            </>
+          )}
         </div>
               <button onClick={() => setRuOpen(true)}
           style={{ marginTop: 8, padding: "6px 14px", borderRadius: 6,

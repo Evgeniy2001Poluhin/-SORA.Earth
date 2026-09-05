@@ -47,7 +47,10 @@ function Bar(props: { label: string; v: number; tone: string }) {
 function ResultCard(props: { side: Side; result: EvaluateResponse | undefined; loading: boolean; isWinner?: boolean; delta?: number }) {
   const r = props.result;
   if (props.loading) return <div className="cmp-result loading">Running…</div>;
-  if (!r) return <div className="cmp-result empty">Press Run to evaluate.</div>;
+  // `{}` is truthy, so this guard used to pass an empty 200 straight to
+  // `r.total_score.toFixed(1)` and take the page down (#236). Guarded on
+  // the score itself: a comparison with no score is not a result.
+  if (!r || r.total_score == null) return <div className="cmp-result empty">Press Run to evaluate.</div>;
   const tone = r.risk_level === "Low" ? "low" : r.risk_level === "High" ? "high" : "med";
   return (
     <div className={"cmp-result" + (props.isWinner ? " is-winner" : "")}>
