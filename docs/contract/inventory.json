@@ -1,6 +1,7 @@
 {
   "routes": [
     {
+      "consumers": 0,
       "decl_path": "/ab-comparison",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -17,14 +18,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/model/ab-comparison",
       "raise_count": 2,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/model",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/ab-comparison/plot",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -36,14 +40,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/model/ab-comparison/plot",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/model",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/predict",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -66,14 +73,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/ab/predict",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "/ab",
       "shape_conflict": true,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/stats",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -85,14 +95,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/ab/stats",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/ab",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/split",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -112,14 +125,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/ab/split",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "/ab",
       "shape_conflict": true,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/refresh",
       "dynamic_returns": 2,
       "exempt_reason": null,
@@ -131,14 +147,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/admin/ai/refresh",
       "raise_count": 0,
       "response_class": null,
       "response_model": "AIActionResponse",
       "return_count": 2,
+      "router_prefix": "/admin/ai",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/retrain",
       "dynamic_returns": 2,
       "exempt_reason": null,
@@ -150,14 +169,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/admin/ai/retrain",
       "raise_count": 0,
       "response_class": null,
       "response_model": "AIActionResponse",
       "return_count": 2,
+      "router_prefix": "/admin/ai",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/full-pipeline",
       "dynamic_returns": 2,
       "exempt_reason": null,
@@ -169,14 +191,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/admin/ai/full-pipeline",
       "raise_count": 0,
       "response_class": null,
       "response_model": "AIActionResponse",
       "return_count": 2,
+      "router_prefix": "/admin/ai",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/report",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -188,14 +213,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/admin/ai/report",
       "raise_count": 0,
       "response_class": null,
       "response_model": "AIActionResponse",
       "return_count": 1,
+      "router_prefix": "/admin/ai",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/refresh",
       "dynamic_returns": 2,
       "exempt_reason": null,
@@ -207,14 +235,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/admin/ai/refresh",
       "raise_count": 0,
       "response_class": null,
       "response_model": "AIActionResponse",
       "return_count": 2,
+      "router_prefix": "/admin/ai",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/retrain",
       "dynamic_returns": 2,
       "exempt_reason": null,
@@ -226,14 +257,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/admin/ai/retrain",
       "raise_count": 0,
       "response_class": null,
       "response_model": "AIActionResponse",
       "return_count": 2,
+      "router_prefix": "/admin/ai",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/report",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -245,14 +279,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/admin/ai/report",
       "raise_count": 0,
       "response_class": null,
       "response_model": "AIActionResponse",
       "return_count": 1,
+      "router_prefix": "/admin/ai",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/full-pipeline",
       "dynamic_returns": 2,
       "exempt_reason": null,
@@ -264,14 +301,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/admin/ai/full-pipeline",
       "raise_count": 0,
       "response_class": null,
       "response_model": "AIActionResponse",
       "return_count": 2,
+      "router_prefix": "/admin/ai",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/diagnostics",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -291,14 +331,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/admin/diagnostics",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/admin",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/retrain-log",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -310,14 +353,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/admin/retrain-log",
       "raise_count": 0,
       "response_class": null,
       "response_model": "RetrainLogPage",
       "return_count": 1,
+      "router_prefix": "/admin",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/snapshot",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -329,14 +375,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/admin/snapshot",
       "raise_count": 0,
       "response_class": null,
       "response_model": "AdminSnapshot",
       "return_count": 1,
+      "router_prefix": "/admin",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/timeline",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -354,14 +403,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/admin/timeline",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/admin",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/run",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -373,14 +425,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/admin/ai-teammate/run",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/admin/ai-teammate",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/status",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -392,14 +447,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/admin/ai-teammate/status",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/admin/ai-teammate",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/monte-carlo",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -411,14 +469,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/analytics/monte-carlo",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/analytics",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/model-compare",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -436,14 +497,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/analytics/model-compare",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/analytics",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/country-benchmark/{country}",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -461,14 +525,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/analytics/country-benchmark/{country}",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/analytics",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/country-ranking",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -487,14 +554,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/analytics/country-ranking",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/analytics",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/predictions-log",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -506,14 +576,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/analytics/predictions-log",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/analytics",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/metrics/model-health",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -532,14 +605,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/analytics/metrics/model-health",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/analytics",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/data-health",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -566,14 +642,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/analytics/data-health",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "/analytics",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/summary",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -598,14 +677,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/analytics/summary",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/analytics",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/auth/login",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -617,14 +699,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/auth/login",
       "raise_count": 1,
       "response_class": null,
       "response_model": "Token",
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/auth/me",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -641,14 +726,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/auth/me",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/admin/users",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -660,14 +748,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/admin/users",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/auth/verify",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -690,14 +781,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/auth/verify",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/admin/stats",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -714,14 +808,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/admin/stats",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/model/reliability-diagram",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -733,14 +830,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/model/reliability-diagram",
       "raise_count": 2,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/predict/uncertainty",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -761,14 +861,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/predict/uncertainty",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/calibration/discrepancy",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -780,14 +883,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/calibration/discrepancy",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/calibration/brier",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -806,14 +912,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/calibration/brier",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/calibration/reliability",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -835,14 +944,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/calibration/reliability",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/compare",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -854,14 +966,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/model/compare",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/model",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/compliance/frameworks",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -877,14 +992,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/compliance/frameworks",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/compliance/csrd",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -896,14 +1014,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/compliance/csrd",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/compliance/gap-analysis",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -924,14 +1045,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/compliance/gap-analysis",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/copilot/explain",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -943,14 +1067,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/copilot/explain",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/copilot/health",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -962,14 +1089,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/copilot/health",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/copilot/explain/stream",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -981,14 +1111,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/copilot/explain/stream",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/copilot/sessions",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1004,14 +1137,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/copilot/sessions",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/copilot/sessions/{session_id}",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1023,14 +1159,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/copilot/sessions/{session_id}",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/copilot/sessions/{session_id}",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1047,14 +1186,17 @@
       "methods": [
         "DELETE"
       ],
+      "public_path": "/api/v1/copilot/sessions/{session_id}",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/copilot/qa",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1066,14 +1208,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/copilot/qa",
       "raise_count": 1,
       "response_class": null,
       "response_model": "QAResponse",
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/refresh",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1094,14 +1239,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "AMBIGUOUS:/api/v1/data/refresh,/api/v1/model/data/refresh",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "/data",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/refresh/logs",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1113,14 +1261,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/data/refresh/logs",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/data",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/refresh/status",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1132,14 +1283,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/data/refresh/status",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/data",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/refresh-status",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1151,14 +1305,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/data/refresh-status",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/data",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/status",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1170,14 +1327,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/data/status",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/data",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/countries",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1194,14 +1354,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/data/countries",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/data",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/country/{name}",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1224,14 +1387,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/data/country/{name}",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 3,
+      "router_prefix": "/data",
       "shape_conflict": true,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/countries/supported",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1243,14 +1409,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/data/countries/supported",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/data",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/drift",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1281,14 +1450,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/model/drift",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 4,
+      "router_prefix": "/model",
       "shape_conflict": true,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/drift/mlflow-history",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1314,14 +1486,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/model/drift/mlflow-history",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 3,
+      "router_prefix": "/model",
       "shape_conflict": true,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/mlops/drift/baseline/fit",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1341,14 +1516,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/mlops/drift/baseline/fit",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/mlops/drift/observe",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1365,14 +1543,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/mlops/drift/observe",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 3,
       "decl_path": "/mlops/drift/baseline",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1394,14 +1575,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/mlops/drift/baseline",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 3,
       "decl_path": "/mlops/drift/baseline",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1417,14 +1601,17 @@
       "methods": [
         "DELETE"
       ],
+      "public_path": "/api/v1/mlops/drift/baseline",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/mlops/drift/simulate",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1449,14 +1636,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/mlops/drift/simulate",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "",
       "shape_conflict": true,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/drift/analyze",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1468,14 +1658,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/drift/analyze",
       "raise_count": 2,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/drift/test-alert",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1487,14 +1680,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/drift/test-alert",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/drift/compare",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1506,14 +1702,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/drift/compare",
       "raise_count": 3,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/drift/features/stats",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1530,14 +1729,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/drift/features/stats",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "",
       "dynamic_returns": 1,
       "exempt_reason": "response_class=HTMLResponse",
@@ -1549,14 +1751,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/embed",
       "raise_count": 0,
       "response_class": "HTMLResponse",
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/embed",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/snippet",
       "dynamic_returns": 1,
       "exempt_reason": "response_class=PlainTextResponse",
@@ -1568,14 +1773,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/embed/snippet",
       "raise_count": 0,
       "response_class": "PlainTextResponse",
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/embed",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/evaluate",
       "dynamic_returns": 2,
       "exempt_reason": null,
@@ -1587,14 +1795,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "AMBIGUOUS:/api/v1/batch/evaluate,/api/v1/evaluate",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/history",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1613,14 +1824,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "AMBIGUOUS:/api/v1/forecast/history,/api/v1/history,/api/v1/predictions/history,/api/v1/scheduler/retrain/history",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/history/{eval_id}",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1632,14 +1846,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/history/{eval_id}",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/history/{eval_id}",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1655,14 +1872,17 @@
       "methods": [
         "DELETE"
       ],
+      "public_path": "/api/v1/history/{eval_id}",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 4,
       "decl_path": "/history",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1678,14 +1898,17 @@
       "methods": [
         "DELETE"
       ],
+      "public_path": "/api/v1/history",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/export/csv",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1697,14 +1920,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "AMBIGUOUS:/api/v1/export/csv,/api/v1/predictions/export/csv",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/what-if",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1721,14 +1947,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/what-if",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/ghg-calculate",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1750,14 +1979,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/ghg-calculate",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/trends",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1769,14 +2001,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/trends",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/regions",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1788,14 +2023,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/regions",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/countries",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1807,14 +2045,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "AMBIGUOUS:/api/v1/countries,/api/v1/data/countries,/api/v1/map/countries",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/report/pdf",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1826,14 +2067,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/report/pdf",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/evaluate/ranking",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1850,14 +2094,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/evaluate/ranking",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/evaluate/monte-carlo",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1884,14 +2131,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/evaluate/monte-carlo",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "",
       "shape_conflict": true,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/predict/explain",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1914,14 +2164,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/predict/explain",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/predict/explain/waterfall",
       "dynamic_returns": 2,
       "exempt_reason": null,
@@ -1933,14 +2186,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/predict/explain/waterfall",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/explain/beeswarm",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -1952,14 +2208,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/explain/beeswarm",
       "raise_count": 2,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/explain/global",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -1978,14 +2237,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/explain/global",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/explain/local",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2005,14 +2267,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/explain/local",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 4,
       "decl_path": "/forecast",
       "dynamic_returns": 4,
       "exempt_reason": null,
@@ -2024,14 +2289,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/forecast",
       "raise_count": 0,
       "response_class": null,
       "response_model": "ForecastResponse",
       "return_count": 4,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/forecast/cache",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2043,14 +2311,17 @@
       "methods": [
         "DELETE"
       ],
+      "public_path": "/api/v1/forecast/cache",
       "raise_count": 0,
       "response_class": null,
       "response_model": "ForecastCacheStats",
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/forecast/cache",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2062,14 +2333,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/forecast/cache",
       "raise_count": 0,
       "response_class": null,
       "response_model": "ForecastCacheStats",
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/forecast/pretrain",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2081,14 +2355,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/forecast/pretrain",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/forecast/history",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2100,14 +2377,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/forecast/history",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/forecast/metrics/performance",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2124,14 +2404,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/forecast/metrics/performance",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/forecast/metrics/latest",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2143,14 +2426,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/forecast/metrics/latest",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/lstm-status",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2183,14 +2469,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/lstm-status",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "",
       "shape_conflict": true,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/batch/evaluate",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2211,14 +2500,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/batch/evaluate",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/batch/{batch_id}",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2241,14 +2533,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/batch/{batch_id}",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/batch",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2260,14 +2555,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/batch",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/ws/live",
       "dynamic_returns": 0,
       "exempt_reason": "websocket",
@@ -2279,14 +2577,17 @@
       "methods": [
         "WS"
       ],
+      "public_path": null,
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/ws/status",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2302,14 +2603,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/ws/status",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/cache/stats",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2321,14 +2625,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/cache/stats",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/cache/clear",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2344,14 +2651,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/cache/clear",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 4,
       "decl_path": "/mlops/drift",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2363,14 +2673,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/mlops/drift",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/mlops/health",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2389,14 +2702,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/mlops/health",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/mlflow/stats",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2408,14 +2724,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/mlflow/stats",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/rate-limit/status",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2427,14 +2746,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/rate-limit/status",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/metrics",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2446,14 +2768,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "AMBIGUOUS:/api/v1/metrics,/api/v1/model/metrics,/api/v1/system/metrics,/metrics",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/system/metrics",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2465,14 +2790,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/system/metrics",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/metrics/prometheus",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2484,14 +2812,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/metrics/prometheus",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/cache/redis",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2503,14 +2834,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/cache/redis",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/cache/redis/test",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2527,14 +2861,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/cache/redis/test",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/cache/redis/invalidate",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2555,14 +2892,17 @@
       "methods": [
         "DELETE"
       ],
+      "public_path": "/api/v1/cache/redis/invalidate",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "",
       "shape_conflict": true,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/cache/redis/invalidate/{prefix}",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2584,14 +2924,17 @@
       "methods": [
         "DELETE"
       ],
+      "public_path": "/api/v1/cache/redis/invalidate/{prefix}",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "",
       "shape_conflict": true,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/ingestion/attention",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2609,14 +2952,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/ingestion/attention",
       "raise_count": 0,
       "response_class": null,
       "response_model": "IngestionAttention",
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/infra/data-refresh-status",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2633,14 +2979,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/infra/data-refresh-status",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/mlops/auto-retrain",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2673,14 +3022,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/mlops/auto-retrain",
       "raise_count": 2,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "",
       "shape_conflict": true,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/mlops/full-pipeline",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2692,14 +3044,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/mlops/full-pipeline",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/infra/data-refresh/run",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2717,14 +3072,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/infra/data-refresh/run",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/observations",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2736,14 +3094,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/observations",
       "raise_count": 1,
       "response_class": null,
       "response_model": "ObservationPage",
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/observations/coverage",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2755,14 +3116,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/observations/coverage",
       "raise_count": 0,
       "response_class": null,
       "response_model": "ObservationCoverage",
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/map/countries",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2780,14 +3144,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/map/countries",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/map/countries/{code}",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2799,14 +3166,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/map/countries/{code}",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/predict",
       "dynamic_returns": 2,
       "exempt_reason": null,
@@ -2818,14 +3188,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "AMBIGUOUS:/api/v1/ab/predict,/api/v1/predict,/api/v2/predict",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/predict/neural",
       "dynamic_returns": 2,
       "exempt_reason": null,
@@ -2837,14 +3210,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/predict/neural",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/predict/stacking",
       "dynamic_returns": 2,
       "exempt_reason": null,
@@ -2856,14 +3232,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/predict/stacking",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/predict/compare",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2883,14 +3262,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/predict/compare",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/shap",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2907,14 +3289,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/shap",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/predictions/history",
       "dynamic_returns": 2,
       "exempt_reason": null,
@@ -2926,14 +3311,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/predictions/history",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/predictions/export/csv",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2945,14 +3333,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/predictions/export/csv",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/predict/v2",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -2976,14 +3367,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/predict/v2",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "/api/v1",
       "shape_conflict": true,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/model/registry-info",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -2995,14 +3389,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/model/registry-info",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/search",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -3019,14 +3416,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/rag/search",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1/rag",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/compliance.pdf",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3038,14 +3438,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/reports/compliance.pdf",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/reports",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/compliance-batch.pdf",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3057,14 +3460,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/reports/compliance-batch.pdf",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/reports",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/metrics",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -3082,14 +3488,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/model/metrics",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/model",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/status",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -3108,14 +3517,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/model/status",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/model",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/retrain",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3133,14 +3545,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/model/retrain",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "/model",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/feature-importance",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -3156,14 +3571,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/model/feature-importance",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/model",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/prediction-log/stats",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -3190,14 +3608,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/model/prediction-log/stats",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 3,
+      "router_prefix": "/model",
       "shape_conflict": true,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/data/refresh",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -3217,14 +3638,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/model/data/refresh",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/model",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/data/bulk-upload",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3236,14 +3660,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/model/data/bulk-upload",
       "raise_count": 2,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/model",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/data/bulk-upload/content",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3255,14 +3682,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/model/data/bulk-upload/content",
       "raise_count": 2,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/model",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/scheduler/status",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3274,14 +3704,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/scheduler/status",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/scheduler/retrain/history",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3293,14 +3726,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/scheduler/retrain/history",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/scheduler/retrain/trigger",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3312,14 +3748,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/scheduler/retrain/trigger",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/scheduler/refresh_external",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3331,14 +3770,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/scheduler/refresh_external",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/check",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3350,14 +3792,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/compliance/check",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1/compliance",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/status/uptime",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3369,14 +3814,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/status/uptime",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/health",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3388,14 +3836,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "AMBIGUOUS:/api/v1/copilot/health,/api/v1/health,/api/v1/mlops/health,/health,/system/health",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/ready",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3412,14 +3863,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/ready",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/ping",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -3435,14 +3889,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 2,
       "decl_path": "",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -3462,14 +3919,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/webhooks",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1/webhooks",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 2,
       "decl_path": "",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3481,14 +3941,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/webhooks",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1/webhooks",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/deliveries",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3500,14 +3963,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/webhooks/deliveries",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1/webhooks",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/{sub_id}",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -3523,14 +3989,17 @@
       "methods": [
         "DELETE"
       ],
+      "public_path": "/api/v1/webhooks/{sub_id}",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1/webhooks",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/auth/login",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3542,14 +4011,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/auth/login",
       "raise_count": 1,
       "response_class": null,
       "response_model": "Token",
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/auth/login-json",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3561,14 +4033,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/auth/login-json",
       "raise_count": 1,
       "response_class": null,
       "response_model": "Token",
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/auth/refresh",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3580,14 +4055,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v1/auth/refresh",
       "raise_count": 1,
       "response_class": null,
       "response_model": "Token",
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/auth/me",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -3604,14 +4082,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/auth/me",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/admin/users",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3623,14 +4104,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/admin/users",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/admin/stats",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -3647,14 +4131,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/admin/stats",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/auth/verify",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -3672,14 +4159,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/auth/verify",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/audit/log",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3691,14 +4181,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/audit/log",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3710,14 +4203,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/dev",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3729,14 +4225,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/health",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -3754,14 +4253,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/health",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/system/health",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -3781,14 +4283,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/model-info",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3800,14 +4305,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/model-metrics",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3819,14 +4327,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/admin",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3838,14 +4349,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/auth/login",
       "dynamic_returns": 1,
       "exempt_reason": "response_class=HTMLResponse",
@@ -3857,14 +4371,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 0,
       "response_class": "HTMLResponse",
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/app/{path:path}",
       "dynamic_returns": 1,
       "exempt_reason": "response_class=HTMLResponse",
@@ -3876,14 +4393,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 0,
       "response_class": "HTMLResponse",
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/admin/{path:path}",
       "dynamic_returns": 1,
       "exempt_reason": "response_class=HTMLResponse",
@@ -3895,14 +4415,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 0,
       "response_class": "HTMLResponse",
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/favicon.ico",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3914,14 +4437,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/{full_path:path}",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3933,14 +4459,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 3,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/{spa_path:path}",
       "dynamic_returns": 2,
       "exempt_reason": null,
@@ -3952,14 +4481,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 2,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/v2",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3971,14 +4503,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/v2/{full_path:path}",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -3990,14 +4525,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": null,
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/predict",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -4009,14 +4547,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v2/predict",
       "raise_count": 1,
       "response_class": null,
       "response_model": "PredictResponse",
       "return_count": 1,
+      "router_prefix": "/api/v2",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 1,
       "decl_path": "/model/version",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -4034,14 +4575,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v2/model/version",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v2",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/model/reload",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -4058,14 +4602,17 @@
       "methods": [
         "POST"
       ],
+      "public_path": "/api/v2/model/reload",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v2",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/model/calibration",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -4077,14 +4624,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v2/model/calibration",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v2",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/drift/features",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -4096,14 +4646,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v2/drift/features",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v2",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/drift/predictions",
       "dynamic_returns": 1,
       "exempt_reason": null,
@@ -4115,14 +4668,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v2/drift/predictions",
       "raise_count": 1,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v2",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/russia",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -4141,14 +4697,17 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/map/russia",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 1,
+      "router_prefix": "/api/v1/map",
       "shape_conflict": false,
       "status_code": null
     },
     {
+      "consumers": 0,
       "decl_path": "/russia/{region_code}",
       "dynamic_returns": 0,
       "exempt_reason": null,
@@ -4187,17 +4746,19 @@
       "methods": [
         "GET"
       ],
+      "public_path": "/api/v1/map/russia/{region_code}",
       "raise_count": 0,
       "response_class": null,
       "response_model": null,
       "return_count": 4,
+      "router_prefix": "/api/v1/map",
       "shape_conflict": true,
       "status_code": null
     }
   ],
   "summary": {
     "app_dir": "app",
-    "commit": "79e788c082b6aa9595770c76b53af208c385a4a7",
+    "commit": "82a3ffcd28d3e64fd99f961cc0a7e77dc2f73359",
     "considered": 181,
     "coverage_pct": 12.2,
     "exempt": 6,

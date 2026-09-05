@@ -29,16 +29,31 @@ Measured by `scripts/api_contract_inventory.py`, at commit `79e788c`:
 | declaring a `response_model` | **22** |
 | **coverage** | **12.2 %** |
 | handlers whose static returns disagree under one status | **14** |
+| of those, with a live frontend consumer | **5** |
+| declared but absent from the live OpenAPI document | **15** |
+| declared paths that could not be resolved unambiguously | **8** |
 
 Reproduce:
 
 ```bash
 python3 scripts/api_contract_inventory.py
-python3 scripts/api_contract_inventory.py --json docs/contract/inventory.json --csv docs/contract/inventory.csv
+python3 scripts/api_contract_inventory.py --openapi docs/contract/openapi-79e788c.json \
+    --json docs/contract/inventory.json --csv docs/contract/inventory.csv
 ```
 
 The machine-readable baseline is committed at `docs/contract/inventory.json`
 and `docs/contract/inventory.csv`. Regenerate it rather than editing it.
+
+The figures describe `app/` as it stands at `79e788c`, the tip of `main`; this
+PR adds no file under `app/`, so the measured tree is that one. The `commit`
+field inside the JSON records the checkout that generated it, which is this
+branch — the two differ by documents and this script, not by a route.
+
+`docs/contract/openapi-79e788c.json` is a snapshot of
+`https://sora-earth.online/openapi.json` taken on 2026-09-05, with production
+running `79e788c`. It is committed so the resolution step is reproducible
+without a running server; it goes stale when routes are mounted or moved, and
+should be refreshed alongside the inventory.
 
 ### How it is counted
 
@@ -57,18 +72,22 @@ counted as a defect would understate coverage and invite a pointless fix.
 
 ### The instrument was verified before its number was used
 
-`tests/test_api_contract_inventory.py` — 20 cases, each a fixture whose correct
+`tests/test_api_contract_inventory.py` — 29 cases, each a fixture whose correct
 answer is known by construction: coverage, exemption for every class in the
 exempt set, single-quoted paths, nested-function returns, key-order-insensitive
-shape comparison, non-route decorators, and the summary's arithmetic. One case
-is a negative control asserting the script finds real routes in the real
-package, because a collector that silently returned nothing would print
-"0 routes, 0 % coverage" and look like a finding.
+shape comparison, non-route decorators, the summary's arithmetic, prefix-based
+path resolution, recorded ambiguity, and consumer detection. One case is a
+negative control asserting the script finds real routes in the real package,
+because a collector that silently returned nothing would print "0 routes,
+0 % coverage" and look like a finding.
 
-Five mutations of the script's predicates were each confirmed to turn the suite
-red before being reverted: `covered` forced true, the websocket exemption
-removed, `shape_conflict` forced false, the nested-function skip removed, and
-exempt routes folded back into the denominator.
+Ten mutations of the script's predicates were each confirmed to turn the suite
+red before being reverted: `covered` forced true; the websocket exemption
+removed; `shape_conflict` forced false; the nested-function skip removed;
+exempt routes folded back into the denominator; path resolution matching by
+suffix without the prefix; ambiguity resolved by taking the first candidate;
+the router prefix not read; consumers searched only under `web/src/api`; and
+the HTTP method ignored when resolving.
 
 ### What this baseline does **not** prove
 
@@ -80,14 +99,32 @@ exempt routes folded back into the denominator.
   decorator. Real paths carry router prefixes, and this is not cosmetic:
   `app/api/drift.py` declares `/drift` but mounts under `prefix="/model"`, so
   the endpoint is `/api/v1/model/drift`. Issue #239 named the wrong URL for
-  exactly this reason and had to be corrected. Resolve paths against the live
-  `/openapi.json` before acting on any single row.
+  exactly this reason and had to be corrected.
+
+  `--openapi` resolves this, using the module's `APIRouter(prefix=…)` to pick
+  between candidates. Matching by suffix alone is **not** sufficient and gets
+  it wrong — `/drift` is a suffix of both `/api/v1/model/drift` and
+  `/api/v1/mlops/drift`, which are different endpoints with different
+  contracts. The first, ad-hoc version of this resolution made exactly that
+  mistake on exactly that route, which is why the rule now has a test. Where
+  the prefix does not settle it, the row records `AMBIGUOUS:` and the
+  candidates rather than guessing: a confidently wrong path sends the next
+  reader to a 404.
+
+- **15 declared routes are absent from the live document.** Declared in code,
+  not mounted, or mounted somewhere the suffix rule does not reach. They are
+  neither covered nor exempt; classifying them is Phase D work.
 - **Shape conflicts are a lower bound.** Only static dict literals are
   compared. A handler that builds its body dynamically is recorded as
   `dynamic_returns` and cannot be checked this way.
-- Consumers, side effects and existing contract tests are **not** yet in the
-  inventory. Adding them is Phase 2 work; today they are established per route
-  by hand.
+- **Consumer counts are textual.** `--web-dir` counts references to a resolved
+  public path across all of `web/src` — not just `web/src/api`, because several
+  components call `api("/lstm-status")` inline and a scan limited to the
+  endpoint modules reports those routes as unconsumed. A path assembled at
+  runtime from fragments would still be missed, so a zero means "no literal
+  reference found", not "no consumer".
+- Side effects and existing contract tests are **not** yet in the inventory;
+  today they are established per route by hand.
 
 ---
 
@@ -161,8 +198,22 @@ each one re-running the inventory so the number moves visibly.
 | **P3** | admin and diagnostic endpoints | operator-facing, small blast radius |
 | **exempt** | files, redirects, streams, metrics, websockets | classified, not defects |
 
-The 14 handlers whose static returns already disagree, in inventory order —
-these are the concrete P0/P1 starting set:
+### Start here: disagreeing shapes that already have a consumer
+
+Five of the fourteen are reached by the frontend today. These are the P0/P1
+starting set — not because they are the worst code, but because a consumer is
+already reading them.
+
+| public path | file |
+|---|---|
+| `GET /api/v1/model/drift` | `api/drift.py:17` — the #239 sample; live in production returning `{"status": "no_log", "drift": false}` |
+| `GET /api/v1/model/drift/mlflow-history` | `api/drift.py:61` |
+| `GET /api/v1/lstm-status` | `api/forecast.py:462` — consumed by `LSTMProgressWidget` |
+| `POST /api/v1/evaluate/monte-carlo` | `api/evaluate.py:552` — `{"error": …}` at HTTP 200 |
+| `POST /api/v1/mlops/drift/simulate` | `api/drift_baseline.py:91` |
+
+All fourteen, by declared path — the remaining nine have no frontend consumer
+found, which lowers their priority but does not make them correct:
 
 | route (declared) | file | shapes |
 |---|---|---|
@@ -182,10 +233,10 @@ these are the concrete P0/P1 starting set:
 | `GET /russia/{region_code}` | `routes/map_russia.py:139` | 4 shapes |
 
 Per-route inventory before migrating one: HTTP methods and statuses, number of
-return/raise branches, actual keys per branch, consumers (`grep` the path in
-`web/src`, **after** resolving the prefix), side effects, existing contract
-tests, its `/openapi.json` entry, and either a response type or a written
-exemption reason.
+return/raise branches, actual keys per branch, consumers, side effects,
+existing contract tests, its `/openapi.json` entry, and either a response type
+or a written exemption reason. The script now supplies the public path, the
+consumer count and everything except side effects and existing tests.
 
 ---
 

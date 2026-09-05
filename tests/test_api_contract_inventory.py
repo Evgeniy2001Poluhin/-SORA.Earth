@@ -247,3 +247,155 @@ def test_the_instrument_finds_the_real_package():
     assert len(routes) > 100, f"expected the real app to declare many routes, found {len(routes)}"
     assert any(r.covered for r in routes), "some real route declares a response_model"
     assert any(not r.covered and r.exempt_reason is None for r in routes), "and some do not"
+
+
+# --- resolving a declared path to the public one -----------------------------
+#
+# These exist because the ad-hoc version of this resolution, written while
+# analysing the same data, matched by suffix alone and reported
+# `app/api/drift.py`'s route as `/api/v1/mlops/drift`. It is
+# `/api/v1/model/drift`. That is the second time the same confusion produced a
+# wrong URL in this work -- the first put one into issue #239.
+
+DRIFT_OPENAPI = {
+    "paths": {
+        "/api/v1/model/drift": {"get": {}},
+        "/api/v1/mlops/drift": {"get": {}},
+    }
+}
+
+
+def test_the_router_prefix_is_read_from_the_module(tmp_path):
+    pkg = write(tmp_path, '''
+        router = APIRouter(prefix="/model", tags=["mlops"])
+
+        @router.get("/drift")
+        def handler():
+            return {"a": 1}
+    ''')
+    assert only(inv.collect(pkg)).router_prefix == "/model"
+
+
+def test_the_prefix_disambiguates_two_paths_sharing_a_suffix(tmp_path):
+    pkg = write(tmp_path, '''
+        router = APIRouter(prefix="/model")
+
+        @router.get("/drift")
+        def handler():
+            return {"a": 1}
+    ''')
+    routes = inv.collect(pkg)
+    inv.resolve_public_paths(routes, DRIFT_OPENAPI)
+    assert routes[0].public_path == "/api/v1/model/drift"
+
+
+def test_a_genuine_ambiguity_is_recorded_not_guessed(tmp_path):
+    # No prefix, so both candidates remain. Picking the first would send the
+    # next reader to the wrong endpoint; saying so does not.
+    pkg = write(tmp_path, '''
+        router = APIRouter()
+
+        @router.get("/drift")
+        def handler():
+            return {"a": 1}
+    ''')
+    routes = inv.collect(pkg)
+    inv.resolve_public_paths(routes, DRIFT_OPENAPI)
+    assert routes[0].public_path.startswith("AMBIGUOUS:")
+    assert "/api/v1/model/drift" in routes[0].public_path
+    assert "/api/v1/mlops/drift" in routes[0].public_path
+
+
+def test_a_declared_route_absent_from_openapi_resolves_to_nothing(tmp_path):
+    pkg = write(tmp_path, '''
+        @router.get("/never-mounted")
+        def handler():
+            return {"a": 1}
+    ''')
+    routes = inv.collect(pkg)
+    inv.resolve_public_paths(routes, DRIFT_OPENAPI)
+    assert routes[0].public_path is None
+
+
+def test_the_method_must_match_too(tmp_path):
+    pkg = write(tmp_path, '''
+        router = APIRouter(prefix="/model")
+
+        @router.post("/drift")
+        def handler():
+            return {"a": 1}
+    ''')
+    routes = inv.collect(pkg)
+    inv.resolve_public_paths(routes, DRIFT_OPENAPI)
+    assert routes[0].public_path is None, "the document declares GET, not POST"
+
+
+# --- consumers ---------------------------------------------------------------
+
+
+def _web(tmp_path, files: dict[str, str]) -> Path:
+    web = tmp_path / "web" / "src"
+    for rel, body in files.items():
+        f = web / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(body, encoding="utf-8")
+    return web
+
+
+def test_a_consumer_outside_the_api_directory_is_found(tmp_path):
+    # `LSTMProgressWidget` calls `api("/lstm-status")` inline. A scan limited
+    # to web/src/api reported that route as having no consumer, which is how
+    # it nearly got deprioritised.
+    pkg = write(tmp_path, '''
+        @router.get("/lstm-status")
+        def handler():
+            return {"a": 1}
+    ''')
+    routes = inv.collect(pkg)
+    inv.resolve_public_paths(routes, {"paths": {"/api/v1/lstm-status": {"get": {}}}})
+    web = _web(tmp_path, {"features/drift/Widget.tsx": 'api<S>("/lstm-status")'})
+    inv.attach_consumers(routes, web)
+    assert routes[0].consumers == 1
+
+
+def test_a_template_literal_call_with_a_query_string_counts(tmp_path):
+    pkg = write(tmp_path, '''
+        @router.post("/simulate")
+        def handler():
+            return {"a": 1}
+    ''')
+    routes = inv.collect(pkg)
+    inv.resolve_public_paths(routes, {"paths": {"/api/v1/simulate": {"post": {}}}})
+    web = _web(tmp_path, {"api/x.ts": "api(`/simulate?${q}`, {method:'POST'})"})
+    inv.attach_consumers(routes, web)
+    assert routes[0].consumers == 1
+
+
+def test_an_unconsumed_route_stays_at_zero(tmp_path):
+    pkg = write(tmp_path, '''
+        @router.get("/nobody-calls-this")
+        def handler():
+            return {"a": 1}
+    ''')
+    routes = inv.collect(pkg)
+    inv.resolve_public_paths(routes, {"paths": {"/api/v1/nobody-calls-this": {"get": {}}}})
+    web = _web(tmp_path, {"api/x.ts": 'api("/something-else")'})
+    inv.attach_consumers(routes, web)
+    assert routes[0].consumers == 0
+
+
+def test_an_ambiguous_path_is_not_credited_with_consumers(tmp_path):
+    # Counting references for a path we could not identify would attribute
+    # them to the wrong endpoint.
+    pkg = write(tmp_path, '''
+        router = APIRouter()
+
+        @router.get("/drift")
+        def handler():
+            return {"a": 1}
+    ''')
+    routes = inv.collect(pkg)
+    inv.resolve_public_paths(routes, DRIFT_OPENAPI)
+    web = _web(tmp_path, {"api/x.ts": 'api("/model/drift")'})
+    inv.attach_consumers(routes, web)
+    assert routes[0].consumers == 0

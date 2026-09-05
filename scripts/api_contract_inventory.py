@@ -67,6 +67,9 @@ class Route:
     raise_count: int
     literal_shapes: list[list[str]] = field(default_factory=list)
     dynamic_returns: int = 0
+    router_prefix: str = ""
+    public_path: Optional[str] = None
+    consumers: int = 0
 
     @property
     def covered(self) -> bool:
@@ -161,6 +164,66 @@ def _returns_in(fn: ast.AST) -> tuple[list[list[str]], int, int, int]:
     return literal_shapes, dynamic, returns, raises
 
 
+def _router_prefix(tree: ast.AST) -> str:
+    """The prefix this module's APIRouter declares, or "".
+
+    Needed to disambiguate a declared path against the public one. Suffix
+    matching alone is not enough and gets it wrong: `/drift` is a suffix of
+    both `/api/v1/model/drift` and `/api/v1/mlops/drift`, which are different
+    endpoints with different contracts. Issue #239 named the wrong URL for
+    exactly this reason.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _name_of(node.func) == "APIRouter":
+            for kw in node.keywords:
+                if kw.arg == "prefix":
+                    return _const_str(kw.value) or ""
+    return ""
+
+
+def resolve_public_paths(routes: list[Route], openapi: dict) -> None:
+    """Attach the public path from an OpenAPI document, in place.
+
+    Ambiguity is recorded as ambiguity, never resolved by picking the first
+    candidate -- a wrong path sends the next reader to a 404.
+    """
+    paths = openapi.get("paths", {})
+    for r in routes:
+        method = r.methods[0].lower()
+        if method == "ws":
+            continue
+        want = r.router_prefix + r.decl_path
+        exact = [p for p in paths if p.endswith(want) and method in paths[p]]
+        if len(exact) == 1:
+            r.public_path = exact[0]
+        elif len(exact) > 1:
+            r.public_path = "AMBIGUOUS:" + ",".join(sorted(exact))
+        else:
+            r.public_path = None
+
+
+def attach_consumers(routes: list[Route], web_dir: Path) -> None:
+    """Count references to each public path in the frontend source.
+
+    Scans the whole tree, not just the api/ directory: several components call
+    `api("/lstm-status")` inline, and a scan limited to the endpoint modules
+    reports them as having no consumer.
+    """
+    if not web_dir.is_dir():
+        return
+    seen: list[str] = []
+    for path in web_dir.rglob("*"):
+        if path.suffix in {".ts", ".tsx"} and path.is_file():
+            seen.append(path.read_text(encoding="utf-8", errors="replace"))
+    blob = "\n".join(seen)
+    for r in routes:
+        if not r.public_path or r.public_path.startswith("AMBIGUOUS"):
+            continue
+        # The client prepends its own base, so it names the path without it.
+        client_path = r.public_path.split("/api/v1", 1)[-1] if "/api/v1" in r.public_path else r.public_path
+        r.consumers = blob.count(f'"{client_path}"') + blob.count(f"`{client_path}") + blob.count(f"'{client_path}'")
+
+
 def collect(app_dir: Path) -> list[Route]:
     routes: list[Route] = []
     for path in sorted(app_dir.rglob("*.py")):
@@ -168,6 +231,7 @@ def collect(app_dir: Path) -> list[Route]:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:
             continue
+        prefix = _router_prefix(tree)
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -203,6 +267,7 @@ def collect(app_dir: Path) -> list[Route]:
                         response_class=response_class,
                         is_websocket=is_ws,
                         exempt_reason=exempt,
+                        router_prefix=prefix,
                         return_count=n_ret,
                         raise_count=n_raise,
                         literal_shapes=shapes,
@@ -248,6 +313,8 @@ def main() -> int:
         help="exit 1 if coverage%% falls below this -- for the ratchet, once a baseline exists",
     )
     ap.add_argument("--list-uncovered", action="store_true", help="print every route with no response_model")
+    ap.add_argument("--openapi", help="a saved /openapi.json; resolves declared paths to public ones")
+    ap.add_argument("--web-dir", default="web/src", help="frontend source, scanned for consumers")
     args = ap.parse_args()
 
     app_dir = Path(args.app_dir)
@@ -256,6 +323,13 @@ def main() -> int:
         return 2
 
     routes = collect(app_dir)
+    if args.openapi:
+        try:
+            resolve_public_paths(routes, json.loads(Path(args.openapi).read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"could not read --openapi {args.openapi}: {exc}", file=sys.stderr)
+            return 2
+        attach_consumers(routes, Path(args.web_dir))
     summary = summarise(routes)
     summary["commit"] = _head_sha()
     summary["app_dir"] = str(app_dir)
@@ -268,13 +342,15 @@ def main() -> int:
         with open(args.csv_out, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(
-                ["file", "line", "function", "decl_path", "methods", "status_code",
-                 "response_model", "response_class", "exempt_reason", "return_count",
-                 "raise_count", "dynamic_returns", "shape_conflict"]
+                ["file", "line", "function", "decl_path", "router_prefix", "public_path",
+                 "consumers", "methods", "status_code", "response_model", "response_class",
+                 "exempt_reason", "return_count", "raise_count", "dynamic_returns",
+                 "shape_conflict"]
             )
             for r in routes:
                 w.writerow(
-                    [r.file, r.line, r.function, r.decl_path, "|".join(r.methods), r.status_code or "",
+                    [r.file, r.line, r.function, r.decl_path, r.router_prefix,
+                     r.public_path or "", r.consumers, "|".join(r.methods), r.status_code or "",
                      r.response_model or "", r.response_class or "", r.exempt_reason or "",
                      r.return_count, r.raise_count, r.dynamic_returns, int(r.shape_conflict)]
                 )
@@ -286,6 +362,15 @@ def main() -> int:
     print(f"with response_model {summary['with_response_model']}")
     print(f"coverage            {summary['coverage_pct']}%")
     print(f"shape conflicts     {summary['shape_conflicts']}  (static returns disagreeing under one status)")
+    if args.openapi:
+        unresolved = [r for r in routes if not r.is_websocket and not r.public_path]
+        ambiguous = [r for r in routes if r.public_path and r.public_path.startswith("AMBIGUOUS")]
+        consumed = [r for r in routes if r.shape_conflict and r.consumers > 0]
+        print(f"  unmounted         {len(unresolved)}  (declared but absent from the OpenAPI document)")
+        print(f"  ambiguous         {len(ambiguous)}")
+        print(f"  conflicts with a live frontend consumer: {len(consumed)}")
+        for r in sorted(consumed, key=lambda r: r.public_path or ""):
+            print(f"    {'|'.join(r.methods):6} {r.public_path}")
 
     if args.list_uncovered:
         print("\nuncovered:")
