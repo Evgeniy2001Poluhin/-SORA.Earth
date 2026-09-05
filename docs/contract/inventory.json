@@ -1598,7 +1598,7 @@
       "file": "app/api/evaluate.py",
       "function": "evaluate_project",
       "is_websocket": false,
-      "line": 100,
+      "line": 109,
       "literal_shapes": [],
       "methods": [
         "POST"
@@ -1621,7 +1621,7 @@
       "file": "app/api/evaluate.py",
       "function": "get_history",
       "is_websocket": false,
-      "line": 214,
+      "line": 223,
       "literal_shapes": [
         [
           "items",
@@ -1651,7 +1651,7 @@
       "file": "app/api/evaluate.py",
       "function": "get_evaluation_by_id",
       "is_websocket": false,
-      "line": 248,
+      "line": 257,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -1674,7 +1674,7 @@
       "file": "app/api/evaluate.py",
       "function": "delete_evaluation",
       "is_websocket": false,
-      "line": 261,
+      "line": 270,
       "literal_shapes": [
         [
           "status"
@@ -1701,7 +1701,7 @@
       "file": "app/api/evaluate.py",
       "function": "clear_history",
       "is_websocket": false,
-      "line": 274,
+      "line": 283,
       "literal_shapes": [
         [
           "status"
@@ -1728,7 +1728,7 @@
       "file": "app/api/evaluate.py",
       "function": "export_csv",
       "is_websocket": false,
-      "line": 287,
+      "line": 296,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -1751,7 +1751,7 @@
       "file": "app/api/evaluate.py",
       "function": "what_if",
       "is_websocket": false,
-      "line": 319,
+      "line": 328,
       "literal_shapes": [
         [
           "base",
@@ -1779,7 +1779,7 @@
       "file": "app/api/evaluate.py",
       "function": "ghg_calculate",
       "is_websocket": false,
-      "line": 355,
+      "line": 364,
       "literal_shapes": [
         [
           "breakdown",
@@ -1812,7 +1812,7 @@
       "file": "app/api/evaluate.py",
       "function": "trends",
       "is_websocket": false,
-      "line": 388,
+      "line": 397,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -1835,7 +1835,7 @@
       "file": "app/api/evaluate.py",
       "function": "regions",
       "is_websocket": false,
-      "line": 407,
+      "line": 416,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -1858,7 +1858,7 @@
       "file": "app/api/evaluate.py",
       "function": "countries_list",
       "is_websocket": false,
-      "line": 413,
+      "line": 422,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -1881,7 +1881,7 @@
       "file": "app/api/evaluate.py",
       "function": "generate_pdf_report",
       "is_websocket": false,
-      "line": 419,
+      "line": 428,
       "literal_shapes": [],
       "methods": [
         "POST"
@@ -1904,7 +1904,7 @@
       "file": "app/api/evaluate.py",
       "function": "evaluate_ranking",
       "is_websocket": false,
-      "line": 514,
+      "line": 523,
       "literal_shapes": [
         [
           "count",
@@ -1927,38 +1927,23 @@
     {
       "consumers": 1,
       "decl_path": "/evaluate/monte-carlo",
-      "dynamic_returns": 0,
+      "dynamic_returns": 2,
       "exempt_reason": null,
       "file": "app/api/evaluate.py",
       "function": "evaluate_monte_carlo",
       "is_websocket": false,
-      "line": 552,
-      "literal_shapes": [
-        [
-          "error"
-        ],
-        [
-          "histogram",
-          "max",
-          "mean",
-          "min",
-          "n",
-          "p10",
-          "p50",
-          "p90",
-          "stdev"
-        ]
-      ],
+      "line": 599,
+      "literal_shapes": [],
       "methods": [
         "POST"
       ],
       "public_path": "/api/v1/evaluate/monte-carlo",
       "raise_count": 0,
       "response_class": null,
-      "response_model": null,
+      "response_model": "MonteCarloOk",
       "return_count": 2,
       "router_prefix": "",
-      "shape_conflict": true,
+      "shape_conflict": false,
       "status_code": null,
       "test_references": 0
     },
@@ -4684,16 +4669,16 @@
   ],
   "summary": {
     "app_dir": "app",
-    "app_tree_sha": "dd36744f0520843a0c0fb8b6a9b538a5f41d23788c5d2a274fe48173006d4ead",
+    "app_tree_sha": "1af126d8e8936accc93a67fef06c430525a9571f20b698379c1b4db114dda2ab",
     "considered": 172,
-    "coverage_pct": 11.0,
+    "coverage_pct": 11.6,
     "duplicate_public_paths": [],
     "exempt": 6,
     "openapi_drift_allowed": true,
     "openapi_file": "docs/contract/openapi-ebea7f8.json",
     "routes_total": 178,
-    "shape_conflicts": 12,
+    "shape_conflicts": 11,
     "snapshot_sha256": "d70f6cb4d835855a8e768d6d622e9cb253d11232336f037eb95cb84533768736",
-    "with_response_model": 19
+    "with_response_model": 20
   }
 }

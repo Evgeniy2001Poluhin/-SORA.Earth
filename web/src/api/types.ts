@@ -26,10 +26,21 @@ export type CountriesMap = Record<string, string>;
 
 // Shapes returned by POST /evaluate/monte-carlo, /evaluate/ranking and /what-if.
 // Keep these aligned with app/api/evaluate.py.
+/** POST /evaluate/monte-carlo, migrated to a declared contract.
+ *
+ *  `n` still means "simulations that produced a score" -- it always did, while
+ *  reading as the number requested. `requested` and `failed` are stated beside
+ *  it, and `requested === n + failed` holds, so a distribution built from part
+ *  of the sample can say so instead of looking like a smaller request.
+ *
+ *  A run where every simulation raised is a 503, not a 200 with no numbers. */
 export interface MonteCarloResponse {
-  n: number; mean: number; stdev: number; min: number; max: number;
+  status: "ok";
+  requested: number; n: number; failed: number;
+  mean: number; stdev: number; min: number; max: number;
   p10: number; p50: number; p90: number;
   histogram: { edges: number[]; counts: number[] };
+  reason_code: string | null;
 }
 
 export interface EvaluateRankingEntry {

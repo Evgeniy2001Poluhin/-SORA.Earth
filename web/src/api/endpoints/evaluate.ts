@@ -53,7 +53,9 @@ const mockMonteCarlo = (b: EvaluateProjectRequest): MonteCarloResponse => {
   const counts = new Array(nbins).fill(0);
   for (const s of scores) counts[Math.min(Math.floor((s - lo) / width), nbins - 1)]++;
   return {
-    n: scores.length, mean: +r.total_score.toFixed(2), stdev: 4.2,
+status: "ok" as const, reason_code: null,
+    requested: scores.length, failed: 0,
+        n: scores.length, mean: +r.total_score.toFixed(2), stdev: 4.2,
     min: +lo.toFixed(2), max: +hi.toFixed(2),
     p10: pct(10), p50: pct(50), p90: pct(90),
     histogram: { edges: Array.from({length: nbins + 1}, (_, i) => +(lo + i * width).toFixed(2)), counts },

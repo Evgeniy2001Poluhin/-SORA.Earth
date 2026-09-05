@@ -11,7 +11,7 @@
   },
   "counts": {
     "considered": 172,
-    "with_response_model": 19
+    "with_response_model": 20
   },
   "uncovered": [
     "DELETE /api/v1/webhooks/{sub_id} @app/api/webhooks.py",
@@ -138,7 +138,6 @@
     "POST /drift/compare @app/api/drift_monitor.py",
     "POST /drift/test-alert @app/api/drift_monitor.py",
     "POST /evaluate @app/api/evaluate.py",
-    "POST /evaluate/monte-carlo @app/api/evaluate.py",
     "POST /evaluate/ranking @app/api/evaluate.py",
     "POST /explain/local @app/api/explainability.py",
     "POST /forecast/pretrain @app/api/forecast.py",
