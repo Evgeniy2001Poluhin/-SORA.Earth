@@ -207,3 +207,96 @@ describe("DriftTimeline when an event arrives malformed", () => {
     expect(text).toContain("baseline-x");
   });
 });
+
+
+describe("the KS table against the migrated contract (#239)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const ks = (body: unknown) => {
+    // DriftTimeline issues two requests; both get the same stub, and only the
+    // KS label is asserted here.
+    stubJson(body);
+  };
+
+  it("says there is no prediction log rather than reporting zero features", async () => {
+    // The defect this migration exists for. `{status:"no_log"}` used to reach
+    // the screen as "0 features", which reads as a measurement: the KS test
+    // ran and found nothing to report. It never ran.
+    ks({ status: "no_log", drift_detected: null, window: 50, observations: 0, features: {}, reason_code: "prediction_log_absent" });
+
+    const { container } = renderWithQuery(<DriftTimeline />);
+
+    await waitFor(
+      () => expect(container.textContent ?? "").toContain("no prediction log yet"),
+      { timeout: 3000 },
+    );
+    expect(container.textContent ?? "").not.toContain("0 features");
+  });
+
+  it("says how short the window is rather than reporting zero features", async () => {
+    ks({ status: "insufficient_data", drift_detected: null, window: 50, observations: 4, features: {}, reason_code: "below_minimum_window" });
+
+    const { container } = renderWithQuery(<DriftTimeline />);
+
+    await waitFor(() => expect(container.textContent ?? "").toContain("4 of 10 rows"), {
+      timeout: 3000,
+    });
+    expect(container.textContent ?? "").not.toContain("0 features");
+  });
+
+  it("reports an unavailable service as unavailable, not as absence of drift", async () => {
+    // A 503 rejects in the client. What must not happen is the KS panel
+    // rendering an empty, calm table that reads as "nothing wrong".
+    stubStatus(503);
+
+    const { container } = renderWithQuery(<DriftTimeline />);
+
+    await waitFor(
+      () => expect(container.textContent ?? "").toContain("could not be run"),
+      { timeout: 3000 },
+    );
+    expect(container.textContent ?? "").not.toContain("0 features");
+  });
+
+  it("draws no feature rows for a status that measured nothing, even if some arrive", async () => {
+    // The rule: a non-empty `features` means "measured" only when status is
+    // "ok". The server's model permits the field on every status, so the
+    // client must not render it on the strength of its presence alone.
+    //
+    // This case needs the fixture to carry features on a not-measured status:
+    // with the server's usual empty map, guarding on status and not guarding
+    // produce the same empty table, and the assertion cannot tell them apart.
+    ks({
+      status: "insufficient_data", drift_detected: null, window: 50, observations: 4,
+      reason_code: "below_minimum_window",
+      features: { budget: { ks_stat: 0.9125, p_value: 0.0001, drift: true } },
+    });
+
+    const { container } = renderWithQuery(<DriftTimeline />);
+
+    await waitFor(() => expect(container.textContent ?? "").toContain("4 of 10 rows"), {
+      timeout: 3000,
+    });
+    expect(container.textContent ?? "").not.toContain("0.9125");
+  });
+
+  it("still counts the features when the server did measure them", async () => {
+    // The other half: a guard that hides a real answer is the worse bug.
+    ks({
+      status: "ok", drift_detected: true, window: 50, observations: 50, reason_code: null,
+      features: {
+        budget: { ks_stat: 0.6125, p_value: 0.0001, drift: true },
+        social_impact: { ks_stat: 0.1075, p_value: 0.4025, drift: false },
+      },
+    });
+
+    const { container } = renderWithQuery(<DriftTimeline />);
+
+    await waitFor(() => expect(container.textContent ?? "").toContain("2 features"), {
+      timeout: 3000,
+    });
+    expect(container.textContent ?? "").toContain("0.6125");
+  });
+});
