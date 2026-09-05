@@ -1,0 +1,4208 @@
+{
+  "routes": [
+    {
+      "decl_path": "/ab-comparison",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/ab_comparison.py",
+      "function": "ab_comparison",
+      "is_websocket": false,
+      "line": 15,
+      "literal_shapes": [
+        [
+          "models",
+          "winner"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 2,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/ab-comparison/plot",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/ab_comparison.py",
+      "function": "ab_comparison_plot",
+      "is_websocket": false,
+      "line": 84,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/predict",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/ab_test.py",
+      "function": "ab_predict",
+      "is_websocket": false,
+      "line": 28,
+      "literal_shapes": [
+        [
+          "error"
+        ],
+        [
+          "latency_ms",
+          "model",
+          "prediction",
+          "probability",
+          "traffic_split"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": true,
+      "status_code": null
+    },
+    {
+      "decl_path": "/stats",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/ab_test.py",
+      "function": "ab_stats",
+      "is_websocket": false,
+      "line": 59,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/split",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/ab_test.py",
+      "function": "set_split",
+      "is_websocket": false,
+      "line": 71,
+      "literal_shapes": [
+        [
+          "error"
+        ],
+        [
+          "status",
+          "traffic_split"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": true,
+      "status_code": null
+    },
+    {
+      "decl_path": "/refresh",
+      "dynamic_returns": 2,
+      "exempt_reason": null,
+      "file": "app/api/admin_ai.py",
+      "function": "ai_trigger_refresh",
+      "is_websocket": false,
+      "line": 20,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "AIActionResponse",
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/retrain",
+      "dynamic_returns": 2,
+      "exempt_reason": null,
+      "file": "app/api/admin_ai.py",
+      "function": "ai_trigger_retrain",
+      "is_websocket": false,
+      "line": 41,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "AIActionResponse",
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/full-pipeline",
+      "dynamic_returns": 2,
+      "exempt_reason": null,
+      "file": "app/api/admin_ai.py",
+      "function": "ai_trigger_full_pipeline",
+      "is_websocket": false,
+      "line": 61,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "AIActionResponse",
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/report",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/admin_ai.py",
+      "function": "ai_generate_report",
+      "is_websocket": false,
+      "line": 81,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "AIActionResponse",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/refresh",
+      "dynamic_returns": 2,
+      "exempt_reason": null,
+      "file": "app/api/admin_ai_control.py",
+      "function": "ai_trigger_refresh",
+      "is_websocket": false,
+      "line": 19,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "AIActionResponse",
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/retrain",
+      "dynamic_returns": 2,
+      "exempt_reason": null,
+      "file": "app/api/admin_ai_control.py",
+      "function": "ai_trigger_retrain",
+      "is_websocket": false,
+      "line": 30,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "AIActionResponse",
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/report",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/admin_ai_control.py",
+      "function": "ai_generate_report",
+      "is_websocket": false,
+      "line": 40,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "AIActionResponse",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/full-pipeline",
+      "dynamic_returns": 2,
+      "exempt_reason": null,
+      "file": "app/api/admin_ai_control.py",
+      "function": "ai_trigger_full_pipeline",
+      "is_websocket": false,
+      "line": 72,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "AIActionResponse",
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/diagnostics",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/admin_diagnostics.py",
+      "function": "admin_diagnostics",
+      "is_websocket": false,
+      "line": 23,
+      "literal_shapes": [
+        [
+          "data_refresh",
+          "period_hours",
+          "predictions",
+          "retrain",
+          "top_retrain_errors"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/retrain-log",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/admin_retrain_log.py",
+      "function": "list_retrain_log",
+      "is_websocket": false,
+      "line": 48,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "RetrainLogPage",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/snapshot",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/admin_snapshot.py",
+      "function": "get_admin_snapshot",
+      "is_websocket": false,
+      "line": 94,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "AdminSnapshot",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/timeline",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/admin_timeline.py",
+      "function": "admin_timeline",
+      "is_websocket": false,
+      "line": 22,
+      "literal_shapes": [
+        [
+          "events",
+          "hours",
+          "total_events"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/run",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/ai_teammate_routes.py",
+      "function": "run_teammate",
+      "is_websocket": false,
+      "line": 10,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/status",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/ai_teammate_routes.py",
+      "function": "teammate_status",
+      "is_websocket": false,
+      "line": 21,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/monte-carlo",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/analytics.py",
+      "function": "monte_carlo_simulation",
+      "is_websocket": false,
+      "line": 120,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/model-compare",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/analytics.py",
+      "function": "model_compare",
+      "is_websocket": false,
+      "line": 131,
+      "literal_shapes": [
+        [
+          "best_model",
+          "models",
+          "threshold"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/country-benchmark/{country}",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/analytics.py",
+      "function": "country_benchmark",
+      "is_websocket": false,
+      "line": 154,
+      "literal_shapes": [
+        [
+          "benchmarks",
+          "country",
+          "requested"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/country-ranking",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/analytics.py",
+      "function": "country_ranking",
+      "is_websocket": false,
+      "line": 171,
+      "literal_shapes": [
+        [
+          "data",
+          "limit",
+          "offset",
+          "total"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/predictions-log",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/analytics.py",
+      "function": "get_predictions_log",
+      "is_websocket": false,
+      "line": 186,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/metrics/model-health",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/analytics.py",
+      "function": "model_health",
+      "is_websocket": false,
+      "line": 203,
+      "literal_shapes": [
+        [
+          "models",
+          "predictions",
+          "status",
+          "training_metrics"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/data-health",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/analytics.py",
+      "function": "data_health",
+      "is_websocket": false,
+      "line": 264,
+      "literal_shapes": [
+        [
+          "null_rates",
+          "out_of_range_rates",
+          "prediction_distribution",
+          "total",
+          "window_hours"
+        ],
+        [
+          "null_rates",
+          "out_of_range_rates",
+          "prediction_distribution",
+          "total",
+          "window_hours"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/summary",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/analytics.py",
+      "function": "analytics_summary",
+      "is_websocket": false,
+      "line": 390,
+      "literal_shapes": [
+        [
+          "data_quality",
+          "insights",
+          "models_loaded",
+          "performance",
+          "prediction_quality_proxy",
+          "readiness",
+          "readiness_score",
+          "traffic",
+          "training_metrics",
+          "window_hours"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/auth/login",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/auth.py",
+      "function": "login",
+      "is_websocket": false,
+      "line": 14,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": "Token",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/auth/me",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/auth.py",
+      "function": "get_me",
+      "is_websocket": false,
+      "line": 27,
+      "literal_shapes": [
+        [
+          "role",
+          "username"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/admin/users",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/auth.py",
+      "function": "list_users",
+      "is_websocket": false,
+      "line": 31,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/auth/verify",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/auth.py",
+      "function": "verify_key",
+      "is_websocket": false,
+      "line": 35,
+      "literal_shapes": [
+        [
+          "authenticated",
+          "role",
+          "user"
+        ],
+        [
+          "authenticated",
+          "role",
+          "user"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/admin/stats",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/auth.py",
+      "function": "admin_stats",
+      "is_websocket": false,
+      "line": 41,
+      "literal_shapes": [
+        [
+          "authenticated_as",
+          "metrics"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/model/reliability-diagram",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/calibration.py",
+      "function": "reliability_diagram",
+      "is_websocket": false,
+      "line": 13,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 2,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/predict/uncertainty",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/calibration.py",
+      "function": "predict_with_uncertainty",
+      "is_websocket": false,
+      "line": 111,
+      "literal_shapes": [
+        [
+          "confidence",
+          "prediction",
+          "probability",
+          "reliability",
+          "tree_distribution",
+          "uncertainty"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/calibration/discrepancy",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/calibration.py",
+      "function": "calibration_discrepancy",
+      "is_websocket": false,
+      "line": 161,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/calibration/brier",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/calibration.py",
+      "function": "calibration_brier",
+      "is_websocket": false,
+      "line": 272,
+      "literal_shapes": [
+        [
+          "brier",
+          "ece",
+          "n_bins",
+          "n_samples"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/calibration/reliability",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/calibration.py",
+      "function": "calibration_reliability",
+      "is_websocket": false,
+      "line": 292,
+      "literal_shapes": [
+        [
+          "base_rate",
+          "brier",
+          "curve",
+          "ece",
+          "murphy",
+          "n_bins",
+          "n_samples"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/compare",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/compare.py",
+      "function": "compare_models",
+      "is_websocket": false,
+      "line": 113,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/compliance/frameworks",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/compliance.py",
+      "function": "list_frameworks",
+      "is_websocket": false,
+      "line": 7,
+      "literal_shapes": [
+        [
+          "frameworks"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/compliance/csrd",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/compliance.py",
+      "function": "csrd_check",
+      "is_websocket": false,
+      "line": 18,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/compliance/gap-analysis",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/compliance.py",
+      "function": "gap_analysis",
+      "is_websocket": false,
+      "line": 25,
+      "literal_shapes": [
+        [
+          "audit_ready",
+          "missing_evidence",
+          "overall_readiness",
+          "project_name",
+          "recommended_actions",
+          "status"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/copilot/explain",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/copilot_api.py",
+      "function": "explain",
+      "is_websocket": false,
+      "line": 64,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/copilot/health",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/copilot_api.py",
+      "function": "health",
+      "is_websocket": false,
+      "line": 79,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/copilot/explain/stream",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/copilot_api.py",
+      "function": "explain_stream",
+      "is_websocket": false,
+      "line": 97,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/copilot/sessions",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/copilot_api.py",
+      "function": "sessions_list",
+      "is_websocket": false,
+      "line": 174,
+      "literal_shapes": [
+        [
+          "sessions"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/copilot/sessions/{session_id}",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/copilot_api.py",
+      "function": "sessions_get",
+      "is_websocket": false,
+      "line": 179,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/copilot/sessions/{session_id}",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/copilot_api.py",
+      "function": "sessions_delete",
+      "is_websocket": false,
+      "line": 187,
+      "literal_shapes": [
+        [
+          "deleted",
+          "id"
+        ]
+      ],
+      "methods": [
+        "DELETE"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/copilot/qa",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/copilot_api.py",
+      "function": "qa",
+      "is_websocket": false,
+      "line": 230,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": "QAResponse",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/refresh",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/data_pipeline.py",
+      "function": "refresh_data",
+      "is_websocket": false,
+      "line": 20,
+      "literal_shapes": [
+        [
+          "message",
+          "status"
+        ],
+        [
+          "message",
+          "status"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/refresh/logs",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/data_pipeline.py",
+      "function": "refresh_logs",
+      "is_websocket": false,
+      "line": 37,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/refresh/status",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/data_pipeline.py",
+      "function": "refresh_job_status",
+      "is_websocket": false,
+      "line": 67,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/refresh-status",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/data_pipeline.py",
+      "function": "refresh_job_status",
+      "is_websocket": false,
+      "line": 68,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/status",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/data_pipeline.py",
+      "function": "data_status",
+      "is_websocket": false,
+      "line": 74,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/countries",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/data_pipeline.py",
+      "function": "all_countries",
+      "is_websocket": false,
+      "line": 80,
+      "literal_shapes": [
+        [
+          "count",
+          "countries"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/country/{name}",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/data_pipeline.py",
+      "function": "single_country",
+      "is_websocket": false,
+      "line": 87,
+      "literal_shapes": [
+        [
+          "country",
+          "indicators",
+          "source"
+        ],
+        [
+          "country",
+          "error",
+          "supported"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 3,
+      "shape_conflict": true,
+      "status_code": null
+    },
+    {
+      "decl_path": "/countries/supported",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/data_pipeline.py",
+      "function": "supported_countries",
+      "is_websocket": false,
+      "line": 111,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/drift",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/drift.py",
+      "function": "check_drift",
+      "is_websocket": false,
+      "line": 17,
+      "literal_shapes": [
+        [
+          "status"
+        ],
+        [
+          "drift",
+          "status"
+        ],
+        [
+          "drift",
+          "n",
+          "status"
+        ],
+        [
+          "drift_detected",
+          "features",
+          "status",
+          "window"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 4,
+      "shape_conflict": true,
+      "status_code": null
+    },
+    {
+      "decl_path": "/drift/mlflow-history",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/drift.py",
+      "function": "drift_mlflow_history",
+      "is_websocket": false,
+      "line": 61,
+      "literal_shapes": [
+        [
+          "count",
+          "error",
+          "events"
+        ],
+        [
+          "count",
+          "events"
+        ],
+        [
+          "count",
+          "events"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 3,
+      "shape_conflict": true,
+      "status_code": null
+    },
+    {
+      "decl_path": "/mlops/drift/baseline/fit",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/drift_baseline.py",
+      "function": "fit_baseline",
+      "is_websocket": false,
+      "line": 17,
+      "literal_shapes": [
+        [
+          "baseline_keys",
+          "features",
+          "n_samples",
+          "samples",
+          "status"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/mlops/drift/observe",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/drift_baseline.py",
+      "function": "observe",
+      "is_websocket": false,
+      "line": 44,
+      "literal_shapes": [
+        [
+          "observations",
+          "status"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/mlops/drift/baseline",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/drift_baseline.py",
+      "function": "baseline_status",
+      "is_websocket": false,
+      "line": 53,
+      "literal_shapes": [
+        [
+          "baseline_keys",
+          "exists",
+          "feature_count",
+          "fitted",
+          "n_features",
+          "n_samples",
+          "observations"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/mlops/drift/baseline",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/drift_baseline.py",
+      "function": "reset_baseline",
+      "is_websocket": false,
+      "line": 71,
+      "literal_shapes": [
+        [
+          "status"
+        ]
+      ],
+      "methods": [
+        "DELETE"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/mlops/drift/simulate",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/drift_baseline.py",
+      "function": "simulate_drift",
+      "is_websocket": false,
+      "line": 91,
+      "literal_shapes": [
+        [
+          "observations",
+          "reason",
+          "status"
+        ],
+        [
+          "mode",
+          "observations",
+          "shift_sigma",
+          "shifts",
+          "status"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": true,
+      "status_code": null
+    },
+    {
+      "decl_path": "/drift/analyze",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/drift_monitor.py",
+      "function": "analyze_drift",
+      "is_websocket": false,
+      "line": 13,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 2,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/drift/test-alert",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/drift_monitor.py",
+      "function": "test_alert",
+      "is_websocket": false,
+      "line": 51,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/drift/compare",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/drift_monitor.py",
+      "function": "compare_periods",
+      "is_websocket": false,
+      "line": 56,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 3,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/drift/features/stats",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/drift_monitor.py",
+      "function": "feature_stats",
+      "is_websocket": false,
+      "line": 89,
+      "literal_shapes": [
+        [
+          "samples",
+          "stats"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "",
+      "dynamic_returns": 1,
+      "exempt_reason": "response_class=HTMLResponse",
+      "file": "app/api/embed/api.py",
+      "function": "embed_widget",
+      "is_websocket": false,
+      "line": 145,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": "HTMLResponse",
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/snippet",
+      "dynamic_returns": 1,
+      "exempt_reason": "response_class=PlainTextResponse",
+      "file": "app/api/embed/api.py",
+      "function": "embed_snippet",
+      "is_websocket": false,
+      "line": 152,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": "PlainTextResponse",
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/evaluate",
+      "dynamic_returns": 2,
+      "exempt_reason": null,
+      "file": "app/api/evaluate.py",
+      "function": "evaluate_project",
+      "is_websocket": false,
+      "line": 100,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/history",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/evaluate.py",
+      "function": "get_history",
+      "is_websocket": false,
+      "line": 214,
+      "literal_shapes": [
+        [
+          "items",
+          "limit",
+          "offset",
+          "total"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/history/{eval_id}",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/evaluate.py",
+      "function": "get_evaluation_by_id",
+      "is_websocket": false,
+      "line": 248,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/history/{eval_id}",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/evaluate.py",
+      "function": "delete_evaluation",
+      "is_websocket": false,
+      "line": 261,
+      "literal_shapes": [
+        [
+          "status"
+        ]
+      ],
+      "methods": [
+        "DELETE"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/history",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/evaluate.py",
+      "function": "clear_history",
+      "is_websocket": false,
+      "line": 274,
+      "literal_shapes": [
+        [
+          "status"
+        ]
+      ],
+      "methods": [
+        "DELETE"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/export/csv",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/evaluate.py",
+      "function": "export_csv",
+      "is_websocket": false,
+      "line": 287,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/what-if",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/evaluate.py",
+      "function": "what_if",
+      "is_websocket": false,
+      "line": 319,
+      "literal_shapes": [
+        [
+          "base",
+          "variations"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/ghg-calculate",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/evaluate.py",
+      "function": "ghg_calculate",
+      "is_websocket": false,
+      "line": 355,
+      "literal_shapes": [
+        [
+          "breakdown",
+          "rating",
+          "scope1",
+          "scope2",
+          "scope3",
+          "tip",
+          "total_tons_co2"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/trends",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/evaluate.py",
+      "function": "trends",
+      "is_websocket": false,
+      "line": 388,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/regions",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/evaluate.py",
+      "function": "regions",
+      "is_websocket": false,
+      "line": 407,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/countries",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/evaluate.py",
+      "function": "countries_list",
+      "is_websocket": false,
+      "line": 413,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/report/pdf",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/evaluate.py",
+      "function": "generate_pdf_report",
+      "is_websocket": false,
+      "line": 419,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/evaluate/ranking",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/evaluate.py",
+      "function": "evaluate_ranking",
+      "is_websocket": false,
+      "line": 514,
+      "literal_shapes": [
+        [
+          "count",
+          "ranking"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/evaluate/monte-carlo",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/evaluate.py",
+      "function": "evaluate_monte_carlo",
+      "is_websocket": false,
+      "line": 552,
+      "literal_shapes": [
+        [
+          "error"
+        ],
+        [
+          "histogram",
+          "max",
+          "mean",
+          "min",
+          "n",
+          "p10",
+          "p50",
+          "p90",
+          "stdev"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": true,
+      "status_code": null
+    },
+    {
+      "decl_path": "/predict/explain",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/explain.py",
+      "function": "explain_prediction",
+      "is_websocket": false,
+      "line": 18,
+      "literal_shapes": [
+        [
+          "all_features",
+          "base_value",
+          "explanation",
+          "prediction",
+          "probability",
+          "top_factors",
+          "top_features",
+          "verdict"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/predict/explain/waterfall",
+      "dynamic_returns": 2,
+      "exempt_reason": null,
+      "file": "app/api/explain.py",
+      "function": "explain_waterfall",
+      "is_websocket": false,
+      "line": 106,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/explain/beeswarm",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/explain.py",
+      "function": "beeswarm_plot",
+      "is_websocket": false,
+      "line": 136,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 2,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/explain/global",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/explainability.py",
+      "function": "explain_global",
+      "is_websocket": false,
+      "line": 75,
+      "literal_shapes": [
+        [
+          "explainer",
+          "nsamples_per_row",
+          "samples",
+          "top_features"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/explain/local",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/explainability.py",
+      "function": "explain_local",
+      "is_websocket": false,
+      "line": 102,
+      "literal_shapes": [
+        [
+          "base_value",
+          "explainer",
+          "prediction",
+          "prediction_proba",
+          "top_contributions"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/forecast",
+      "dynamic_returns": 4,
+      "exempt_reason": null,
+      "file": "app/api/forecast.py",
+      "function": "forecast",
+      "is_websocket": false,
+      "line": 66,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "ForecastResponse",
+      "return_count": 4,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/forecast/cache",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/forecast.py",
+      "function": "invalidate_forecast_cache",
+      "is_websocket": false,
+      "line": 178,
+      "literal_shapes": [],
+      "methods": [
+        "DELETE"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "ForecastCacheStats",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/forecast/cache",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/forecast.py",
+      "function": "get_forecast_cache_stats",
+      "is_websocket": false,
+      "line": 185,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "ForecastCacheStats",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/forecast/pretrain",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/forecast.py",
+      "function": "trigger_pretrain",
+      "is_websocket": false,
+      "line": 191,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/forecast/history",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/forecast.py",
+      "function": "get_forecast_history",
+      "is_websocket": false,
+      "line": 277,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/forecast/metrics/performance",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/forecast.py",
+      "function": "get_forecast_model_performance",
+      "is_websocket": false,
+      "line": 315,
+      "literal_shapes": [
+        [
+          "metrics",
+          "total"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/forecast/metrics/latest",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/forecast.py",
+      "function": "get_latest_forecast_metrics",
+      "is_websocket": false,
+      "line": 390,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/lstm-status",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/forecast.py",
+      "function": "get_lstm_status",
+      "is_websocket": false,
+      "line": 462,
+      "literal_shapes": [
+        [
+          "active",
+          "days_remaining",
+          "last_evaluation_date",
+          "message",
+          "models_active",
+          "next_activation_date",
+          "samples",
+          "threshold",
+          "unique_days_raw",
+          "weights"
+        ],
+        [
+          "active",
+          "days_remaining",
+          "error",
+          "message",
+          "samples",
+          "threshold"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": true,
+      "status_code": null
+    },
+    {
+      "decl_path": "/batch/evaluate",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "batch_evaluate",
+      "is_websocket": false,
+      "line": 48,
+      "literal_shapes": [
+        [
+          "batch_id",
+          "failed",
+          "processing_time_ms",
+          "results",
+          "successful",
+          "total"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/batch/{batch_id}",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "get_batch",
+      "is_websocket": false,
+      "line": 98,
+      "literal_shapes": [
+        [
+          "batch_id",
+          "created_at",
+          "failed",
+          "processing_time_ms",
+          "results",
+          "status",
+          "successful",
+          "total"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/batch",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "list_batches",
+      "is_websocket": false,
+      "line": 116,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/ws/live",
+      "dynamic_returns": 0,
+      "exempt_reason": "websocket",
+      "file": "app/api/infra.py",
+      "function": "websocket_endpoint",
+      "is_websocket": true,
+      "line": 139,
+      "literal_shapes": [],
+      "methods": [
+        "WS"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/ws/status",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "ws_status",
+      "is_websocket": false,
+      "line": 155,
+      "literal_shapes": [
+        [
+          "active_connections"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/cache/stats",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "cache_stats",
+      "is_websocket": false,
+      "line": 161,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/cache/clear",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "clear_cache",
+      "is_websocket": false,
+      "line": 166,
+      "literal_shapes": [
+        [
+          "status"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/mlops/drift",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "check_drift_infra",
+      "is_websocket": false,
+      "line": 173,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/mlops/health",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "mlops_health",
+      "is_websocket": false,
+      "line": 178,
+      "literal_shapes": [
+        [
+          "drift_status",
+          "model_status",
+          "monitoring",
+          "observations_tracked"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/mlflow/stats",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "mlflow_stats",
+      "is_websocket": false,
+      "line": 194,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/rate-limit/status",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "rate_limit_status",
+      "is_websocket": false,
+      "line": 200,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/metrics",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "get_metrics",
+      "is_websocket": false,
+      "line": 252,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/system/metrics",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "get_system_metrics",
+      "is_websocket": false,
+      "line": 258,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/metrics/prometheus",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "prometheus_metrics",
+      "is_websocket": false,
+      "line": 315,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/cache/redis",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "get_redis_stats",
+      "is_websocket": false,
+      "line": 352,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/cache/redis/test",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "test_redis",
+      "is_websocket": false,
+      "line": 356,
+      "literal_shapes": [
+        [
+          "redis_available",
+          "test_result"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/cache/redis/invalidate",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "invalidate_cache",
+      "is_websocket": false,
+      "line": 362,
+      "literal_shapes": [
+        [
+          "cleared",
+          "error"
+        ],
+        [
+          "cleared",
+          "keys"
+        ]
+      ],
+      "methods": [
+        "DELETE"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": true,
+      "status_code": null
+    },
+    {
+      "decl_path": "/cache/redis/invalidate/{prefix}",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "invalidate_cache_prefix",
+      "is_websocket": false,
+      "line": 372,
+      "literal_shapes": [
+        [
+          "cleared",
+          "error"
+        ],
+        [
+          "cleared",
+          "keys",
+          "prefix"
+        ]
+      ],
+      "methods": [
+        "DELETE"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": true,
+      "status_code": null
+    },
+    {
+      "decl_path": "/ingestion/attention",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "ingestion_attention",
+      "is_websocket": false,
+      "line": 385,
+      "literal_shapes": [
+        [
+          "count",
+          "needs_attention",
+          "sources"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "IngestionAttention",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/infra/data-refresh-status",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "data_refresh_status",
+      "is_websocket": false,
+      "line": 491,
+      "literal_shapes": [
+        [
+          "count",
+          "entries"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/mlops/auto-retrain",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "auto_retrain_on_drift",
+      "is_websocket": false,
+      "line": 523,
+      "literal_shapes": [
+        [
+          "drift_detected",
+          "drift_result",
+          "reason",
+          "retrained",
+          "status"
+        ],
+        [
+          "drift_detected",
+          "drift_result",
+          "finalisation_error",
+          "forced",
+          "new_auc",
+          "old_auc",
+          "promoted",
+          "reject_reason",
+          "retrain_result",
+          "retrained",
+          "status"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 2,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": true,
+      "status_code": null
+    },
+    {
+      "decl_path": "/mlops/full-pipeline",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "run_full_pipeline",
+      "is_websocket": false,
+      "line": 661,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/infra/data-refresh/run",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "data_refresh_run",
+      "is_websocket": false,
+      "line": 668,
+      "literal_shapes": [
+        [
+          "fetched",
+          "status",
+          "total"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/observations",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "observations",
+      "is_websocket": false,
+      "line": 716,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": "ObservationPage",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/observations/coverage",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/infra.py",
+      "function": "observation_coverage",
+      "is_websocket": false,
+      "line": 880,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": "ObservationCoverage",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/map/countries",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/map_data.py",
+      "function": "map_countries",
+      "is_websocket": false,
+      "line": 77,
+      "literal_shapes": [
+        [
+          "bands",
+          "countries",
+          "total_countries"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/map/countries/{code}",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/map_data.py",
+      "function": "country_detail",
+      "is_websocket": false,
+      "line": 102,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/predict",
+      "dynamic_returns": 2,
+      "exempt_reason": null,
+      "file": "app/api/predict.py",
+      "function": "predict_project",
+      "is_websocket": false,
+      "line": 43,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/predict/neural",
+      "dynamic_returns": 2,
+      "exempt_reason": null,
+      "file": "app/api/predict.py",
+      "function": "predict_neural",
+      "is_websocket": false,
+      "line": 89,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/predict/stacking",
+      "dynamic_returns": 2,
+      "exempt_reason": null,
+      "file": "app/api/predict.py",
+      "function": "predict_stacking",
+      "is_websocket": false,
+      "line": 120,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/predict/compare",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/predict.py",
+      "function": "predict_compare",
+      "is_websocket": false,
+      "line": 163,
+      "literal_shapes": [
+        [
+          "NeuralNet",
+          "RandomForest",
+          "StackingEnsemble",
+          "XGBoost",
+          "projects"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/shap",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/predict.py",
+      "function": "shap_explain",
+      "is_websocket": false,
+      "line": 209,
+      "literal_shapes": [
+        [
+          "feature_names",
+          "shap_values"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/predictions/history",
+      "dynamic_returns": 2,
+      "exempt_reason": null,
+      "file": "app/api/predict.py",
+      "function": "predictions_history",
+      "is_websocket": false,
+      "line": 221,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/predictions/export/csv",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/predict.py",
+      "function": "export_predictions_csv",
+      "is_websocket": false,
+      "line": 233,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/predict/v2",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/predict_v2.py",
+      "function": "predict_v2",
+      "is_websocket": false,
+      "line": 20,
+      "literal_shapes": [
+        [
+          "error",
+          "fallback_to_v1",
+          "model",
+          "success_probability"
+        ],
+        [
+          "model",
+          "predicted_class",
+          "success_probability"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": true,
+      "status_code": null
+    },
+    {
+      "decl_path": "/model/registry-info",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/predict_v2.py",
+      "function": "registry_info",
+      "is_websocket": false,
+      "line": 38,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/search",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/rag_api.py",
+      "function": "search",
+      "is_websocket": false,
+      "line": 6,
+      "literal_shapes": [
+        [
+          "query",
+          "results"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/compliance.pdf",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/reports.py",
+      "function": "compliance_pdf",
+      "is_websocket": false,
+      "line": 158,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/compliance-batch.pdf",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/reports.py",
+      "function": "compliance_batch_pdf",
+      "is_websocket": false,
+      "line": 214,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/metrics",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/retrain.py",
+      "function": "model_metrics",
+      "is_websocket": false,
+      "line": 39,
+      "literal_shapes": [
+        [
+          "meta",
+          "metrics",
+          "models_available"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/status",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/retrain.py",
+      "function": "model_status",
+      "is_websocket": false,
+      "line": 58,
+      "literal_shapes": [
+        [
+          "current_threshold",
+          "meta",
+          "prediction_log_size",
+          "retrain_history"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/retrain",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/retrain.py",
+      "function": "retrain_model",
+      "is_websocket": false,
+      "line": 559,
+      "literal_shapes": [
+        [
+          "check_status",
+          "message",
+          "status"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/feature-importance",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/retrain.py",
+      "function": "feature_importance",
+      "is_websocket": false,
+      "line": 578,
+      "literal_shapes": [
+        [
+          "features"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/prediction-log/stats",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/retrain.py",
+      "function": "prediction_log_stats",
+      "is_websocket": false,
+      "line": 586,
+      "literal_shapes": [
+        [
+          "file_exists",
+          "total"
+        ],
+        [
+          "columns",
+          "file_exists",
+          "file_size_kb",
+          "total"
+        ],
+        [
+          "error",
+          "total"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 3,
+      "shape_conflict": true,
+      "status_code": null
+    },
+    {
+      "decl_path": "/data/refresh",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/retrain.py",
+      "function": "data_refresh",
+      "is_websocket": false,
+      "line": 612,
+      "literal_shapes": [
+        [
+          "auto_retrain_triggered",
+          "new_since_last_retrain",
+          "retrain_result",
+          "status",
+          "total_samples"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/data/bulk-upload",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/retrain.py",
+      "function": "data_bulk_upload",
+      "is_websocket": false,
+      "line": 926,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 2,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/data/bulk-upload/content",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/retrain.py",
+      "function": "data_bulk_upload_content",
+      "is_websocket": false,
+      "line": 976,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 2,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/scheduler/status",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/scheduler_routes.py",
+      "function": "scheduler_status",
+      "is_websocket": false,
+      "line": 12,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/scheduler/retrain/history",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/scheduler_routes.py",
+      "function": "retrain_history",
+      "is_websocket": false,
+      "line": 17,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/scheduler/retrain/trigger",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/scheduler_routes.py",
+      "function": "trigger_retrain",
+      "is_websocket": false,
+      "line": 22,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/scheduler/refresh_external",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/scheduler_routes.py",
+      "function": "trigger_external_refresh",
+      "is_websocket": false,
+      "line": 27,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/check",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/sentinel_api.py",
+      "function": "check_endpoint",
+      "is_websocket": false,
+      "line": 13,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/status/uptime",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/status_page.py",
+      "function": "status_uptime",
+      "is_websocket": false,
+      "line": 5,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/health",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/system.py",
+      "function": "health_check",
+      "is_websocket": false,
+      "line": 53,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/ready",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/system.py",
+      "function": "readiness",
+      "is_websocket": false,
+      "line": 77,
+      "literal_shapes": [
+        [
+          "status",
+          "version"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/ping",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/system.py",
+      "function": "ping",
+      "is_websocket": false,
+      "line": 84,
+      "literal_shapes": [
+        [
+          "pong"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/webhooks.py",
+      "function": "create_sub",
+      "is_websocket": false,
+      "line": 19,
+      "literal_shapes": [
+        [
+          "active",
+          "event_type",
+          "id",
+          "secret",
+          "url"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/webhooks.py",
+      "function": "list_subs",
+      "is_websocket": false,
+      "line": 25,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/deliveries",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/api/webhooks.py",
+      "function": "list_deliveries",
+      "is_websocket": false,
+      "line": 31,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/{sub_id}",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/api/webhooks.py",
+      "function": "delete_sub",
+      "is_websocket": false,
+      "line": 38,
+      "literal_shapes": [
+        [
+          "deleted"
+        ]
+      ],
+      "methods": [
+        "DELETE"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/auth/login",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/auth_routes.py",
+      "function": "login",
+      "is_websocket": false,
+      "line": 22,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": "Token",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/auth/login-json",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/auth_routes.py",
+      "function": "login_json",
+      "is_websocket": false,
+      "line": 43,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": "Token",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/auth/refresh",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/auth_routes.py",
+      "function": "refresh_token",
+      "is_websocket": false,
+      "line": 58,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": "Token",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/auth/me",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/auth_routes.py",
+      "function": "get_me",
+      "is_websocket": false,
+      "line": 87,
+      "literal_shapes": [
+        [
+          "role",
+          "username"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/admin/users",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/auth_routes.py",
+      "function": "list_users",
+      "is_websocket": false,
+      "line": 91,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/admin/stats",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/auth_routes.py",
+      "function": "admin_stats",
+      "is_websocket": false,
+      "line": 95,
+      "literal_shapes": [
+        [
+          "authenticated_as",
+          "metrics"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/auth/verify",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/auth_routes.py",
+      "function": "verify_key",
+      "is_websocket": false,
+      "line": 99,
+      "literal_shapes": [
+        [
+          "authenticated",
+          "role",
+          "user"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/audit/log",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/auth_routes.py",
+      "function": "get_audit",
+      "is_websocket": false,
+      "line": 103,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/main.py",
+      "function": "read_root",
+      "is_websocket": false,
+      "line": 807,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/dev",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/main.py",
+      "function": "dev_page",
+      "is_websocket": false,
+      "line": 818,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/health",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/main.py",
+      "function": "health",
+      "is_websocket": false,
+      "line": 825,
+      "literal_shapes": [
+        [
+          "models_loaded",
+          "status",
+          "version"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/system/health",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/main.py",
+      "function": "system_health",
+      "is_websocket": false,
+      "line": 830,
+      "literal_shapes": [
+        [
+          "app_version",
+          "components",
+          "python_version",
+          "server_time_utc",
+          "status"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/model-info",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/main.py",
+      "function": "model_info",
+      "is_websocket": false,
+      "line": 846,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/model-metrics",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/main.py",
+      "function": "get_model_metrics",
+      "is_websocket": false,
+      "line": 851,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/admin",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/main.py",
+      "function": "admin_dashboard",
+      "is_websocket": false,
+      "line": 918,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/auth/login",
+      "dynamic_returns": 1,
+      "exempt_reason": "response_class=HTMLResponse",
+      "file": "app/main.py",
+      "function": "_login_page",
+      "is_websocket": false,
+      "line": 938,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": "HTMLResponse",
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/app/{path:path}",
+      "dynamic_returns": 1,
+      "exempt_reason": "response_class=HTMLResponse",
+      "file": "app/main.py",
+      "function": "_app_shell",
+      "is_websocket": false,
+      "line": 942,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": "HTMLResponse",
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/admin/{path:path}",
+      "dynamic_returns": 1,
+      "exempt_reason": "response_class=HTMLResponse",
+      "file": "app/main.py",
+      "function": "_admin_shell",
+      "is_websocket": false,
+      "line": 946,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": "HTMLResponse",
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/favicon.ico",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/main.py",
+      "function": "_favicon",
+      "is_websocket": false,
+      "line": 952,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/{full_path:path}",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/main.py",
+      "function": "_spa_catchall",
+      "is_websocket": false,
+      "line": 1011,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 3,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/{spa_path:path}",
+      "dynamic_returns": 2,
+      "exempt_reason": null,
+      "file": "app/main.py",
+      "function": "_sora_spa",
+      "is_websocket": false,
+      "line": 977,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 2,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/v2",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/main.py",
+      "function": "_spa_v2_root",
+      "is_websocket": false,
+      "line": 997,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/v2/{full_path:path}",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/main.py",
+      "function": "_spa_v2_any",
+      "is_websocket": false,
+      "line": 1000,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/predict",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/ml/routes.py",
+      "function": "predict",
+      "is_websocket": false,
+      "line": 34,
+      "literal_shapes": [],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": "PredictResponse",
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/model/version",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/ml/routes.py",
+      "function": "model_version",
+      "is_websocket": false,
+      "line": 61,
+      "literal_shapes": [
+        [
+          "alias",
+          "name",
+          "version"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/model/reload",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/ml/routes.py",
+      "function": "model_reload",
+      "is_websocket": false,
+      "line": 89,
+      "literal_shapes": [
+        [
+          "status",
+          "version"
+        ]
+      ],
+      "methods": [
+        "POST"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/model/calibration",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/ml/routes.py",
+      "function": "model_calibration",
+      "is_websocket": false,
+      "line": 101,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/drift/features",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/ml/routes.py",
+      "function": "drift_features",
+      "is_websocket": false,
+      "line": 112,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/drift/predictions",
+      "dynamic_returns": 1,
+      "exempt_reason": null,
+      "file": "app/ml/routes.py",
+      "function": "drift_predictions",
+      "is_websocket": false,
+      "line": 121,
+      "literal_shapes": [],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 1,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/russia",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/routes/map_russia.py",
+      "function": "russia_regions",
+      "is_websocket": false,
+      "line": 122,
+      "literal_shapes": [
+        [
+          "count",
+          "generated_at",
+          "regions",
+          "source"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 1,
+      "shape_conflict": false,
+      "status_code": null
+    },
+    {
+      "decl_path": "/russia/{region_code}",
+      "dynamic_returns": 0,
+      "exempt_reason": null,
+      "file": "app/routes/map_russia.py",
+      "function": "region_detail",
+      "is_websocket": false,
+      "line": 139,
+      "literal_shapes": [
+        [
+          "error",
+          "region_code"
+        ],
+        [
+          "error",
+          "region_code"
+        ],
+        [
+          "error",
+          "region_code"
+        ],
+        [
+          "computed_at",
+          "confidence",
+          "esg",
+          "features",
+          "generated_at",
+          "indicators",
+          "indicators_count",
+          "model_version",
+          "region",
+          "signals_total",
+          "sources_missing",
+          "sources_used"
+        ]
+      ],
+      "methods": [
+        "GET"
+      ],
+      "raise_count": 0,
+      "response_class": null,
+      "response_model": null,
+      "return_count": 4,
+      "shape_conflict": true,
+      "status_code": null
+    }
+  ],
+  "summary": {
+    "app_dir": "app",
+    "commit": "79e788c082b6aa9595770c76b53af208c385a4a7",
+    "considered": 181,
+    "coverage_pct": 12.2,
+    "exempt": 6,
+    "routes_total": 187,
+    "shape_conflicts": 14,
+    "with_response_model": 22
+  }
+}
