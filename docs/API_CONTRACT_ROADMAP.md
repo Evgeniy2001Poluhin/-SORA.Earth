@@ -242,24 +242,46 @@ each one re-running the inventory so the number moves visibly.
 | **P3** | admin and diagnostic endpoints | operator-facing, small blast radius |
 | **exempt** | files, redirects, streams, metrics, websockets | classified, not defects |
 
-### Nine addresses are declared twice, and one declaration of each is dead
+### Nine addresses are claimed by two declarations, and nine routes are dead
 
-FastAPI answers with the first route registered for a path and method; a second
-declaration at the same address can never be reached.
+Two different observations, and the first draft of this section merged them
+into one wrong mechanism. It said FastAPI answers with the first route
+registered and the second is shadowed. The conclusion held; the cause did not.
+**Shadowing requires both routers to be registered, and neither of the dead
+ones is.** Parsing `app/main.py` for the 39 router names it registers settles
+it, and finds no genuine shadowing anywhere in the repository.
 
-- `app/api/auth.py` is imported by `app/main.py` and its router is **never
-  registered**. Its five routes — including `POST /auth/login` — are dead. That
-  login takes a JSON body (`LoginRequest`); the live one, in
-  `app/auth_routes.py`, takes a form (`OAuth2PasswordRequestForm`). Anyone
-  reading the dead file to write a client gets a 422. Confirmed from the live
-  document: `/api/v1/auth/login` accepts only
-  `application/x-www-form-urlencoded`.
-- `app/api/admin_ai.py` is not imported at all; `admin_ai_control.py` serves
-  those four addresses, confirmed by `operationId=ai_control_ai_trigger_retrain`.
+| cause | definition | routes |
+|---|---|---|
+| **router not included** | module imported, router never registered | **5** — `app/api/auth.py`, imported at `main.py:36` as `auth_api`, with no `include_router` for it |
+| **module not imported** | module takes no part in building the app | **4** — `app/api/admin_ai.py`, absent from `main.py` entirely |
+| **shadowed duplicate** | same path and method, an earlier-included handler answers | **0** — none found |
+| **missing from OpenAPI** | absent from the published schema, cause not established | **15** — a separate set, not the nine |
 
-Tracked as issue 241 — deleting dead handlers is not contract work, and the
+The last row is deliberately not folded into the others. "Absent from the
+schema" can mean non-registration, mounting under a path this resolver does not
+reach, or conditional registration, and none of those is proven yet.
+
+The consequence that matters is `POST /auth/login`. The dead one takes a JSON
+body (`LoginRequest`); the live one, in `app/auth_routes.py`, takes a form
+(`OAuth2PasswordRequestForm`) — confirmed from the published document, which
+accepts only `application/x-www-form-urlencoded`. Anyone opening the file with
+the obvious name and writing a client against it gets a 422, from code that
+looks entirely functional: it handles errors, writes an audit entry, returns a
+`Token`.
+
+Tracked as issue 241. Deleting dead handlers is not contract work, but the
 coverage figure above is computed over a denominator inflated by nine routes
-that cannot answer anything.
+that cannot answer anything: **removing them takes the denominator to 172 and
+the same 22 models to 12.8 % without a single contract being added.** That has
+to be said when the number is recomputed, or the metric will misreport the
+reason for its own improvement.
+
+The instrument's `duplicate_public_paths` detects *two declarations claiming one
+address*, not shadowing. Which one answers, and why the other does not, needs
+registration analysis the script does not do — it reads decorators, not
+`main.py`. Adding that would let the four causes be told apart mechanically
+instead of by hand.
 
 ### Start here: disagreeing shapes that already have a consumer
 
