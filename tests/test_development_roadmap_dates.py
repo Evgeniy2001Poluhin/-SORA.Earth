@@ -119,6 +119,17 @@ SUPERSEDED = (
 )
 HISTORICAL_BANNER = "HISTORICAL — not the current plan"
 
+#: A third category, added when `docs/API_CONTRACT_ROADMAP.md` tripped the
+#: banner check. That document is neither the project plan nor a historical
+#: one: it is a live plan for one subsystem. Marking it HISTORICAL would be a
+#: lie, and letting it pass unmarked would give it the apparent authority this
+#: file exists to prevent -- so it declares its scope in the same first lines,
+#: and a reader who stops at the title still learns it is not the roadmap.
+#:
+#: Renaming the file to dodge discovery was the other option and the wrong one:
+#: discovery matches on filename precisely because a hand-kept list goes stale.
+SCOPED_BANNER = "SCOPED — not the project plan"
+
 
 #: Belongs to that module and describes its own generator, not the project plan.
 OUT_OF_SCOPE = {"sora_ai_copilot/ROADMAP.md"}
@@ -178,21 +189,57 @@ def test_exactly_one_document_declares_itself_current():
     )
 
 
-def test_every_other_plan_says_it_is_historical_at_the_top():
-    """The banner has to be the first thing read, not a note further down."""
+def test_every_other_plan_declares_what_it_is_at_the_top():
+    """The banner has to be the first thing read, not a note further down.
+
+    Either banner satisfies this: a plan is historical, or it is current but
+    narrower than the project. What is not allowed is a plan-named document
+    that says neither, because that is the one a reader mistakes for the
+    roadmap.
+    """
     offenders = []
     for name in discover_roadmaps():
         if name == "docs/DEVELOPMENT_ROADMAP.md":
             continue
         with open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
             head = handle.read(600)
-        if HISTORICAL_BANNER not in head:
+        if HISTORICAL_BANNER not in head and SCOPED_BANNER not in head:
             offenders.append(name)
 
     assert not offenders, (
-        f"these plans do not carry the historical banner in their first lines: "
-        f"{offenders}. A reader who stops after the title will take them for "
-        "the current plan."
+        f"these plans declare neither banner in their first lines: {offenders}. "
+        f"A reader who stops after the title will take them for the current "
+        f"plan. Use {HISTORICAL_BANNER!r} for a superseded plan, or "
+        f"{SCOPED_BANNER!r} for a live plan covering one subsystem."
+    )
+
+
+def test_the_project_plan_claims_neither_banner():
+    """`DEVELOPMENT_ROADMAP.md` is the roadmap; both banners deny being it."""
+    with open(ROADMAP, encoding="utf-8") as handle:
+        head = handle.read(600)
+    assert HISTORICAL_BANNER not in head
+    assert SCOPED_BANNER not in head
+
+
+def test_a_superseded_plan_may_not_call_itself_merely_scoped():
+    """The new category must not become a way out of the old one.
+
+    Every plan in SUPERSEDED is finished. If one of them started claiming
+    SCOPED instead, it would read as live work and this file would have
+    licensed exactly the confusion it was written to stop.
+    """
+    mislabelled = []
+    for name in SUPERSEDED:
+        path = os.path.join(REPO_ROOT, name)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as handle:
+            head = handle.read(600)
+        if SCOPED_BANNER in head:
+            mislabelled.append(name)
+    assert not mislabelled, (
+        f"these superseded plans claim to be merely scoped: {mislabelled}"
     )
 
 

@@ -1,5 +1,10 @@
 # API response contract — baseline and migration plan
 
+**SCOPED — not the project plan.** This is a live plan for one subsystem: the
+shape of what the API returns. The project roadmap is
+`docs/DEVELOPMENT_ROADMAP.md`, and nothing here supersedes it.
+
+
 This plan exists because #236 was fixed in the wrong place. Twelve frontend
 components were taught to distrust their own API, and that was the right
 emergency measure, but it treats a symptom: the server does not say what it
