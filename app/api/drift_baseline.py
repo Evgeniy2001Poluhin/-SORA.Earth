@@ -1,5 +1,12 @@
 from fastapi import APIRouter, HTTPException, Query, Security
+from fastapi.responses import JSONResponse
 from app.auth import require_api_key
+from app.schemas import (
+    DriftSimulateOk,
+    DriftSimulateResponse,
+    DriftSimulateSkipped,
+    DriftSimulateUnavailable,
+)
 import pandas as pd
 import os
 import logging
@@ -88,18 +95,55 @@ def _gen_observation(base: dict, shifts: dict) -> dict:
     return obs
 
 
-@router.post("/mlops/drift/simulate", tags=["mlops"])
+@router.post(
+    "/mlops/drift/simulate",
+    tags=["mlops"],
+    response_model=DriftSimulateResponse,
+    responses={
+        400: {"description": "No baseline has been fitted, so there is nothing to simulate against."},
+        503: {"model": DriftSimulateUnavailable, "description": "The observation store could not be reached."},
+    },
+    summary="Replace the observation window with a generated sample",
+)
 def simulate_drift(
     mode: Optional[str] = Query(None, pattern="^(stable|drift|custom)$"),
     shift: float = 5.0,
     n: int = 80,
 ):
-    base = drift_detector.get_baseline()
+    """Overwrite the drift observation window with generated data.
+
+    **Destructive**: this deletes `drift:observations` and refills it. It is a
+    development and demonstration tool, not something to point at a system whose
+    observations matter.
+
+    Two 200s, distinguished since this contract was declared (#239 series): a
+    simulation, and a debounce skip. They used to differ only by which keys
+    happened to be present, and the frontend read neither -- its success handler
+    announced the mode it had asked for, so a skipped call still said
+    "Simulated stable".
+    """
+    try:
+        base = drift_detector.get_baseline()
+    except Exception as exc:
+        # `drift_detector._r` is a real Redis client with no fallback, so this
+        # used to leave the handler as an uncaught 500. An unreachable store is
+        # a fault, and it is not a simulation that happened to do nothing.
+        logger.warning("drift simulate unavailable: %s", type(exc).__name__)
+        return JSONResponse(
+            status_code=503,
+            content=DriftSimulateUnavailable(
+                status="unavailable", reason_code="observation_store_unavailable"
+            ).model_dump(),
+        )
     if not base:
         raise HTTPException(400, "fit baseline first")
 
     if not drift_detector._r.set("drift:last_sim", "1", nx=True, ex=2):
-        return {"status": "skipped", "reason": "debounced", "observations": drift_detector.count()}
+        return DriftSimulateSkipped(
+            status="skipped",
+            observations=drift_detector.count(),
+            reason_code="debounced",
+        )
 
     if mode == "stable":
         shifts = {f: 0.0 for f in NUM_FEATURES}
@@ -121,10 +165,11 @@ def simulate_drift(
     except Exception as _e:
         logger.warning("sim hook failed: %s", _e)
 
-    return {
-        "status": "simulated",
-        "mode": mode or "custom",
-        "shift_sigma": applied_shift,
-        "shifts": shifts,
-        "observations": drift_detector.count(),
-    }
+    return DriftSimulateOk(
+        status="simulated",
+        mode=mode or "custom",
+        shift_sigma=applied_shift,
+        shifts=shifts,
+        observations=drift_detector.count(),
+        reason_code=None,
+    )

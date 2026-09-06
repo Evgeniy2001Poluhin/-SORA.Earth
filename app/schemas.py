@@ -492,3 +492,70 @@ class LstmStatusUnavailable(BaseModel):
     last_evaluation_date: Optional[str] = None
     message: str
     reason_code: str
+
+
+# --- POST /api/v1/mlops/drift/simulate --------------------------------------
+#
+# Sixth and last migration in the series begun by #239.
+#
+# The endpoint has always had two 200 bodies with different field sets: a
+# simulation, and a debounce skip carrying only `status`, `reason` and
+# `observations`. The frontend never read either -- its success handler
+# discards the response and announces the mode it *asked for*, so a debounced
+# call reported "Simulated stable" while nothing had been simulated. The client
+# type declared `status: "simulated"` and nothing else, so the skip was
+# invisible in types as well as at runtime.
+#
+# `mode` and `shift_sigma` are null on the skip. The caller named a mode; the
+# server applied none, and reporting the requested one would describe work that
+# did not happen.
+
+
+class DriftSimulateOk(BaseModel):
+    """Observations were replaced with a generated sample."""
+
+    status: Literal["simulated"]
+    mode: Literal["stable", "drift", "custom"]
+    shift_sigma: float
+    shifts: Dict[str, float]
+    observations: int
+    reason_code: Optional[str] = None
+
+
+class DriftSimulateSkipped(BaseModel):
+    """Nothing was simulated, and that is a legitimate 200.
+
+    The endpoint debounces itself for two seconds. Being turned away is an
+    answer about the request, not a failure -- so it stays 200, and says which
+    of the two 200s it is.
+    """
+
+    status: Literal["skipped"]
+    mode: None = None
+    shift_sigma: None = None
+    shifts: Dict[str, float] = Field(default_factory=dict)
+    observations: int
+    reason_code: str
+
+
+class DriftSimulateUnavailable(BaseModel):
+    """The observation store could not be reached. Served with 503.
+
+    `drift_detector._r` is a real Redis client with no fallback, so an
+    unreachable Redis raised out of the handler as an uncaught 500. Counting
+    observations is impossible in that state, hence `observations: null` rather
+    than 0 -- zero is a measurement.
+    """
+
+    status: Literal["unavailable"]
+    mode: None = None
+    shift_sigma: None = None
+    shifts: Dict[str, float] = Field(default_factory=dict)
+    observations: None = None
+    reason_code: str
+
+
+DriftSimulateResponse = Annotated[
+    Union[DriftSimulateOk, DriftSimulateSkipped],
+    Field(discriminator="status"),
+]

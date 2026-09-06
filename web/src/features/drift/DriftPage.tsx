@@ -58,7 +58,18 @@ export function DriftPage() {
   });
   const simMut = useMutation({
     mutationFn: (mode: "stable" | "drift") => driftBaselineApi.simulate(mode, 50),
-    onSuccess: (_r, mode) => { toast.success("Simulated " + mode); qc.invalidateQueries({ queryKey: ["drift"] }); },
+    // Reads the answer instead of repeating the request. The endpoint
+    // debounces itself for two seconds and replies `skipped`; this used to
+    // announce "Simulated <mode>" for that too, so the user was told a
+    // simulation had run when the observation window had not been touched.
+    onSuccess: (r, mode) => {
+      if (r.status === "skipped") {
+        toast("Not simulated — another run started less than 2s ago");
+      } else {
+        toast.success("Simulated " + mode);
+      }
+      qc.invalidateQueries({ queryKey: ["drift"] });
+    },
     onError: (e: unknown) => { const msg = errorMessage(e, ""); if (msg.includes("fit baseline first")) toast("Fit baseline before simulating"); else toast.error("Simulate failed: " + (msg || "unknown")); },
   });
 

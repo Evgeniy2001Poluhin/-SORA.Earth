@@ -16,10 +16,25 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 vi.mock("@/api/mock", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/mock")>();
   return { ...actual, isMock: false };
+});
+
+// Toasts render inside sonner's <Toaster>, which this page does not mount, so
+// there is nothing in the DOM to assert on. The calls are the observable.
+const toastCalls: Array<{ kind: string; text: string }> = [];
+vi.mock("sonner", () => {
+  const record = (kind: string) => (text: string) => {
+    toastCalls.push({ kind, text: String(text) });
+  };
+  const toast = Object.assign(record("plain"), {
+    success: record("success"),
+    error: record("error"),
+  });
+  return { toast, Toaster: () => null };
 });
 
 import { DriftPage } from "./DriftPage";
@@ -249,6 +264,80 @@ describe("DriftTimeline when an event arrives malformed", () => {
   });
 });
 
+
+describe("the simulate button against its migrated contract", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Route each request by URL.
+   *
+   *  A single stub cannot serve this page: the drift query's guard rejects a
+   *  body with no `drift_score`, so feeding it the simulate response leaves
+   *  the page in its empty state with no buttons at all. The baseline has to
+   *  say `exists: true` as well, or the simulate buttons stay disabled.
+   */
+  const routed = (simulateBody: unknown) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const body = url.includes("/mlops/drift/simulate")
+        ? simulateBody
+        : url.includes("/mlops/drift/baseline")
+          ? { exists: true, n_samples: 500, feature_count: 4 }
+          : url.includes("/mlops/drift")
+            ? {
+                status: "stable", timestamp: "2026-09-06T00:00:00Z", observations: 50,
+                drift_detected: false, drift_score: 0.1, drifted_features: [],
+                features: {}, recent_alerts: [],
+              }
+            : { events: [], count: 0, status: "ok", reason_code: null };
+      return { ok: true, status: 200, statusText: "OK", json: async () => body } as Response;
+    }) as typeof fetch);
+  };
+
+  beforeEach(() => {
+    toastCalls.length = 0;
+  });
+
+  const clickSimulate = async () => {
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /Simulate stable/i }));
+  };
+
+  it("does not claim a simulation ran when the server skipped it", async () => {
+    // The endpoint debounces itself for two seconds and answers `skipped`.
+    // The success handler used to announce the mode it had *asked for*,
+    // ignoring the response entirely -- so the user was told a simulation had
+    // run while the observation window had not been touched.
+    routed({
+      status: "skipped", mode: null, shift_sigma: null, shifts: {},
+      observations: 42, reason_code: "debounced",
+    });
+
+    renderWithQuery(<DriftPage />);
+    await clickSimulate();
+
+    await waitFor(() => expect(toastCalls.some((t) => /Not simulated/i.test(t.text))).toBe(true), {
+      timeout: 3000,
+    });
+    expect(toastCalls.some((t) => /^Simulated /i.test(t.text))).toBe(false);
+  });
+
+  it("still confirms a simulation that did run", async () => {
+    routed({
+      status: "simulated", mode: "stable", shift_sigma: 0.0,
+      shifts: { budget: 0.0 }, observations: 80, reason_code: null,
+    });
+
+    renderWithQuery(<DriftPage />);
+    await clickSimulate();
+
+    await waitFor(() => expect(toastCalls.some((t) => /Simulated stable/i.test(t.text))).toBe(true), {
+      timeout: 3000,
+    });
+    expect(toastCalls.some((t) => /Not simulated/i.test(t.text))).toBe(false);
+  });
+});
 
 describe("the KS table against the migrated contract (#239)", () => {
   beforeEach(() => {
