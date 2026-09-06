@@ -34,10 +34,21 @@ from fastapi.testclient import TestClient
 # the blast radius to the case that needs it rather than replacing a shared
 # module for the whole session, which is what an earlier version of the
 # clamping test did to `app.main` and what broke this file in CI.
-_mlflow_stub = types.ModuleType("app.mlflow_tracking")
-_mlflow_stub.log_evaluation = lambda *a, **k: None  # type: ignore[attr-defined]
-_mlflow_stub.log_drift_event = lambda *a, **k: None  # type: ignore[attr-defined]
-sys.modules.setdefault("app.mlflow_tracking", _mlflow_stub)
+class _MlflowStub(types.ModuleType):
+    """Answers to any name with a no-op.
+
+    Listing the functions each test file happens to need makes the stub
+    order-dependent: whichever file installs it first wins, and the next one
+    fails on a name the first did not think of. That happened between the
+    simulate and Monte Carlo contract files -- `log_evaluation` was missing
+    from the stub the other had already installed.
+    """
+
+    def __getattr__(self, _name):
+        return lambda *a, **k: None
+
+
+sys.modules.setdefault("app.mlflow_tracking", _MlflowStub("app.mlflow_tracking"))
 
 evaluate_module = importlib.import_module("app.api.evaluate")
 

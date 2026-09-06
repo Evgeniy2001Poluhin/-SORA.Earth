@@ -37,7 +37,7 @@ export const driftBaselineApi={
   fit:(csv_path="data/projects.csv")=>isMock?delay<DriftBaselineFitResponse>({status:"fitted",n_samples:734,features:["budget","co2_reduction","social_impact","duration_months"]}):api<DriftBaselineFitResponse>(`/mlops/drift/baseline/fit?csv_path=${encodeURIComponent(csv_path)}`,{method:"POST"}),
   remove:()=>isMock?delay({status:"removed"}):api<{status:string}>("/mlops/drift/baseline",{method:"DELETE"}),
   simulate:(mode:"stable"|"drift"|"custom",n=50,shift?:number)=>{
-    if(isMock)return delay<DriftSimulateResponse>({status:"simulated",mode,shift_sigma:shift??(mode==="drift"?2:0),shifts:{},observations:n});
+    if(isMock)return delay<DriftSimulateResponse>({status:"simulated",mode,shift_sigma:shift??(mode==="drift"?2:0),shifts:{},observations:n,reason_code:null});
     const q=new URLSearchParams({mode,n:String(n)});if(shift!==undefined)q.set("shift",String(shift));
     return api<DriftSimulateResponse>(`/mlops/drift/simulate?${q}`,{method:"POST"});
   },

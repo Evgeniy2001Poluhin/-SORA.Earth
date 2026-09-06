@@ -1249,12 +1249,12 @@
     {
       "consumers": 1,
       "decl_path": "/drift",
-      "dynamic_returns": 5,
+      "dynamic_returns": 2,
       "exempt_reason": null,
       "file": "app/api/drift.py",
       "function": "check_drift",
       "is_websocket": false,
-      "line": 75,
+      "line": 74,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -1263,7 +1263,7 @@
       "raise_count": 0,
       "response_class": null,
       "response_model": "ModelDriftResponse",
-      "return_count": 5,
+      "return_count": 2,
       "router_prefix": "/model",
       "shape_conflict": false,
       "status_code": null,
@@ -1277,7 +1277,7 @@
       "file": "app/api/drift.py",
       "function": "drift_mlflow_history",
       "is_websocket": false,
-      "line": 135,
+      "line": 161,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -1300,7 +1300,7 @@
       "file": "app/api/drift_baseline.py",
       "function": "fit_baseline",
       "is_websocket": false,
-      "line": 17,
+      "line": 24,
       "literal_shapes": [
         [
           "baseline_keys",
@@ -1331,7 +1331,7 @@
       "file": "app/api/drift_baseline.py",
       "function": "observe",
       "is_websocket": false,
-      "line": 44,
+      "line": 51,
       "literal_shapes": [
         [
           "observations",
@@ -1359,7 +1359,7 @@
       "file": "app/api/drift_baseline.py",
       "function": "baseline_status",
       "is_websocket": false,
-      "line": 53,
+      "line": 60,
       "literal_shapes": [
         [
           "baseline_keys",
@@ -1382,7 +1382,7 @@
       "router_prefix": "",
       "shape_conflict": false,
       "status_code": null,
-      "test_references": 0
+      "test_references": 1
     },
     {
       "consumers": 2,
@@ -1392,7 +1392,7 @@
       "file": "app/api/drift_baseline.py",
       "function": "reset_baseline",
       "is_websocket": false,
-      "line": 71,
+      "line": 78,
       "literal_shapes": [
         [
           "status"
@@ -1409,43 +1409,30 @@
       "router_prefix": "",
       "shape_conflict": false,
       "status_code": null,
-      "test_references": 0
+      "test_references": 1
     },
     {
       "consumers": 1,
       "decl_path": "/mlops/drift/simulate",
-      "dynamic_returns": 0,
+      "dynamic_returns": 3,
       "exempt_reason": null,
       "file": "app/api/drift_baseline.py",
       "function": "simulate_drift",
       "is_websocket": false,
-      "line": 91,
-      "literal_shapes": [
-        [
-          "observations",
-          "reason",
-          "status"
-        ],
-        [
-          "mode",
-          "observations",
-          "shift_sigma",
-          "shifts",
-          "status"
-        ]
-      ],
+      "line": 98,
+      "literal_shapes": [],
       "methods": [
         "POST"
       ],
       "public_path": "/api/v1/mlops/drift/simulate",
       "raise_count": 1,
       "response_class": null,
-      "response_model": null,
-      "return_count": 2,
+      "response_model": "DriftSimulateResponse",
+      "return_count": 3,
       "router_prefix": "",
-      "shape_conflict": true,
+      "shape_conflict": false,
       "status_code": null,
-      "test_references": 0
+      "test_references": 1
     },
     {
       "consumers": 0,
@@ -2487,7 +2474,7 @@
       "router_prefix": "",
       "shape_conflict": false,
       "status_code": null,
-      "test_references": 0
+      "test_references": 1
     },
     {
       "consumers": 1,
@@ -2827,6 +2814,13 @@
         [
           "drift_detected",
           "drift_result",
+          "reason",
+          "retrained",
+          "status"
+        ],
+        [
+          "drift_detected",
+          "drift_result",
           "finalisation_error",
           "forced",
           "new_auc",
@@ -2845,7 +2839,7 @@
       "raise_count": 2,
       "response_class": null,
       "response_model": null,
-      "return_count": 2,
+      "return_count": 3,
       "router_prefix": "",
       "shape_conflict": true,
       "status_code": null,
@@ -2859,7 +2853,7 @@
       "file": "app/api/infra.py",
       "function": "run_full_pipeline",
       "is_websocket": false,
-      "line": 661,
+      "line": 674,
       "literal_shapes": [],
       "methods": [
         "POST"
@@ -2882,7 +2876,7 @@
       "file": "app/api/infra.py",
       "function": "data_refresh_run",
       "is_websocket": false,
-      "line": 668,
+      "line": 681,
       "literal_shapes": [
         [
           "fetched",
@@ -2911,7 +2905,7 @@
       "file": "app/api/infra.py",
       "function": "observations",
       "is_websocket": false,
-      "line": 716,
+      "line": 729,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -2934,7 +2928,7 @@
       "file": "app/api/infra.py",
       "function": "observation_coverage",
       "is_websocket": false,
-      "line": 880,
+      "line": 893,
       "literal_shapes": [],
       "methods": [
         "GET"
@@ -4648,16 +4642,16 @@
   ],
   "summary": {
     "app_dir": "app",
-    "app_tree_sha": "93b6831802253673b520a71d66aadbbfa216b598001f9017dc47d3919b5390d7",
+    "app_tree_sha": "5af6a5873fe0510513696ced0ab9c5738adf13ee3e971fa4d468af4f849d707e",
     "considered": 172,
-    "coverage_pct": 12.2,
+    "coverage_pct": 12.8,
     "duplicate_public_paths": [],
     "exempt": 6,
     "openapi_drift_allowed": true,
     "openapi_file": "docs/contract/openapi-ebea7f8.json",
     "routes_total": 178,
-    "shape_conflicts": 10,
+    "shape_conflicts": 9,
     "snapshot_sha256": "d70f6cb4d835855a8e768d6d622e9cb253d11232336f037eb95cb84533768736",
-    "with_response_model": 21
+    "with_response_model": 22
   }
 }

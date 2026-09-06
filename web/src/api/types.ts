@@ -167,14 +167,33 @@ export interface DriftBaselineStatusV2 extends DriftBaselineStatus {
   baseline_keys?: string[];
 }
 
-// Response of POST /api/v1/mlops/drift/simulate
-export interface DriftSimulateResponse {
-  status: "simulated";
-  mode: "stable" | "drift" | "custom";
-  shift_sigma: number;
-  shifts: Record<string, number>;
-  observations: number;
-}
+// Response of POST /api/v1/mlops/drift/simulate.
+//
+// Two 200s, and the type used to know only one. The endpoint debounces itself
+// for two seconds and answers `skipped` -- which the page reported as
+// "Simulated stable" anyway, because its success handler announced the mode it
+// had asked for instead of reading the answer.
+//
+// `mode` and `shift_sigma` are null on the skip: the caller named a mode, the
+// server applied none, and repeating the request back would describe work that
+// did not happen.
+export type DriftSimulateResponse =
+  | {
+      status: "simulated";
+      mode: "stable" | "drift" | "custom";
+      shift_sigma: number;
+      shifts: Record<string, number>;
+      observations: number;
+      reason_code: string | null;
+    }
+  | {
+      status: "skipped";
+      mode: null;
+      shift_sigma: null;
+      shifts: Record<string, number>;
+      observations: number;
+      reason_code: string;
+    };
 
 
 // === mlops control room ===
