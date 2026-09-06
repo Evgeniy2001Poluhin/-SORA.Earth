@@ -242,48 +242,49 @@ def test_the_docstring_names_every_module_level_importer():
 
 
 def test_application_startup_is_still_on_the_blocked_path():
-    """Startup reaches it through the routers, and that is enough to block.
+    """Importing `app.main` still pulls the module in.
 
-    This asserted `app/main.py` imports `mlflow_tracking` at module level,
-    which was true until #258 removed the telemetry call from `calculate_esg`.
-    The test failed in that commit rather than the claim quietly rotting --
-    which is what it was for.
+    Measured, not inferred from imports. Two earlier versions asserted the
+    wrong proxy: first that `app/main.py` imports `app.mlflow_tracking` at
+    module level, which #258 made false by taking the telemetry call out of
+    `calculate_esg`; then that a router imported by `app/main.py` at module
+    level does, which #262 made false by moving an `app.api.infra` import into
+    a function. Both times the property held and the test broke.
 
-    What matters is unchanged and is what is asserted now: importing
-    `app.main` still pulls the module in, because `app/main.py` includes
-    routers that import it at module level. The import is one frame further
-    away and no less on the startup path.
+    So the property is measured directly: import `app.main` and look at
+    `sys.modules`. That stays true however the routers are wired.
     """
-    import ast as ast_mod
+    program = """
+import sys
+import app.main  # noqa: F401
+print("PULLED_IN=%s" % ("app.mlflow_tracking" in sys.modules))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env={
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+            "HOME": "/tmp",
+            "SORA_OFFLINE": "1",            # the import must not dial out
+            "RUN_SCHEDULER": "false",
+            "DATABASE_URL": "sqlite:///./startup_probe.db",
+            "REDIS_URL": "redis://127.0.0.1:6399/0",
+            "SECRET_KEY": "test-secret",
+            "SORA_ADMIN_TOKEN": "test-admin",
+        },
+    )
 
-    main = ast_mod.parse((ROOT / "app" / "main.py").read_text())
-    routers = {
-        alias.name if isinstance(node, ast_mod.Import) else (node.module or "")
-        for node in main.body
-        for sub in ast_mod.walk(node)
-        if isinstance(sub, (ast_mod.Import, ast_mod.ImportFrom))
-        for alias, node in [(sub.names[0] if isinstance(sub, ast_mod.Import) else None, sub)]
-        if isinstance(node, (ast_mod.Import, ast_mod.ImportFrom))
-    }
-    api_modules = {r for r in routers if r.startswith("app.api.")}
-    assert api_modules, "app/main.py imports no app.api module at all"
-
-    importers = set()
-    for module in api_modules:
-        path = ROOT / (module.replace(".", "/") + ".py")
-        if not path.exists():
-            continue
-        tree = ast_mod.parse(path.read_text())
-        for node in tree.body:
-            for sub in ast_mod.walk(node):
-                names = ([a.name for a in sub.names] if isinstance(sub, ast_mod.Import)
-                         else [sub.module or ""] if isinstance(sub, ast_mod.ImportFrom) else [])
-                if any("mlflow_tracking" in n for n in names):
-                    importers.add(module)
-
-    assert importers, (
-        "no router imported by app/main.py pulls in mlflow_tracking; if that is "
-        "genuinely true now, this test and the docstring both need rewriting"
+    assert "PULLED_IN=" in result.stdout, (
+        f"importing app.main failed.\nstdout: {result.stdout}\n"
+        f"stderr: {result.stderr[-2000:]}"
+    )
+    assert "PULLED_IN=True" in result.stdout, (
+        "app.main no longer pulls in app.mlflow_tracking; if that is genuinely "
+        "true now, this test and the docstring in _ensure_experiment_once both "
+        "need rewriting rather than deleting"
     )
 
 

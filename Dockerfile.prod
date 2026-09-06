@@ -171,6 +171,12 @@ COPY --chown=app:app alembic/     ./alembic/
 # scripts/ at runtime, so nothing failed until it was needed.
 COPY --chown=app:app scripts/     ./scripts/
 COPY --chown=app:app entrypoint.sh ./
+# Passed to gunicorn as `-c gunicorn_conf.py` by entrypoint.sh (#262). Without
+# it in the image the server does not start at all -- the same shape as #99,
+# where scripts/ was in the repository and not in the image and nothing failed
+# until someone needed it. Here it would fail immediately, which is the better
+# half of the bargain, but only if the file is copied.
+COPY --chown=app:app gunicorn_conf.py ./
 RUN chmod +x ./entrypoint.sh
 
 # The mount point for the `runtime_models` volume, created here so that Docker

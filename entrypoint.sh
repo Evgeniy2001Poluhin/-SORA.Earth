@@ -69,8 +69,36 @@ if [ "$#" -gt 0 ]; then
     exec "$@"
 fi
 
+# Prometheus multiprocess mode (#262).
+#
+# Set here and nowhere else, so the scheduler -- which leaves above via the
+# override branch -- never shares this directory. It runs one process, serves
+# no HTTP and is scraped by nothing; pointing it at these files would mix a
+# second application's lifetime into the backend's series.
+#
+# Cleared exactly once, here in the master before the fork. Clearing it from a
+# worker would wipe its siblings' counters on every restart. The files are
+# per-process and are reaped by the `child_exit` hook in gunicorn_conf.py.
+PROMETHEUS_MULTIPROC_DIR="${PROMETHEUS_MULTIPROC_DIR:-/tmp/prometheus_multiproc}"
+export PROMETHEUS_MULTIPROC_DIR
+if ! mkdir -p "$PROMETHEUS_MULTIPROC_DIR"; then
+    echo "FATAL: cannot create PROMETHEUS_MULTIPROC_DIR=$PROMETHEUS_MULTIPROC_DIR" >&2
+    exit 1
+fi
+if ! rm -f "$PROMETHEUS_MULTIPROC_DIR"/*.db 2>/dev/null; then
+    :   # an empty directory is not an error
+fi
+if [ ! -w "$PROMETHEUS_MULTIPROC_DIR" ]; then
+    # Refuse rather than start: with the variable exported and the directory
+    # unwritable, every metric write raises inside a request handler.
+    echo "FATAL: PROMETHEUS_MULTIPROC_DIR is not writable: $PROMETHEUS_MULTIPROC_DIR" >&2
+    exit 1
+fi
+echo "Prometheus multiprocess dir: $PROMETHEUS_MULTIPROC_DIR (cleared)"
+
 echo "Starting server with Gunicorn (${WORKERS:-4} workers)..."
 exec gunicorn app.main:app \
+    -c gunicorn_conf.py \
     -k uvicorn.workers.UvicornWorker \
     -w ${WORKERS:-4} \
     -b 0.0.0.0:8000 \

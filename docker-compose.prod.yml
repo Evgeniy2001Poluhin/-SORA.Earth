@@ -113,6 +113,14 @@ services:
       # host directories would give each container its own lock file and no
       # mutual exclusion at all.
       - runtime_models:/app/runtime
+    # Prometheus multiprocess files (#262). A tmpfs, not a volume: they are
+    # per-process scratch that must not survive a container restart -- a
+    # surviving gauge file would report the state of a process from the
+    # previous life of the container. `entrypoint.sh` clears the directory in
+    # the master before the fork; this makes that cheap and makes it impossible
+    # for the files to outlive the container that wrote them.
+    tmpfs:
+      - /tmp/prometheus_multiproc:mode=0700,size=16m
     # The one place the application image is built. `migrate` and `scheduler`
     # reference the same tag, so all three are the same image by construction
     # rather than by resemblance.
