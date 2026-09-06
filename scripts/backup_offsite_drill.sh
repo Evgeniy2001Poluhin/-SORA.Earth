@@ -61,7 +61,11 @@ DRILL_DB="offsite_drill_$$"
 # Every exit path: success, a failed check, a signal, `set -e` on any command.
 # The plaintext dump lives in WORK, so leaving it behind is a disclosure, and a
 # leftover database is a surprise for whoever runs this next.
-# shellcheck disable=SC2329  # invoked by the trap below, not by name
+# Two codes for the same false positive, because two shellcheck versions name
+# it differently: 0.9.0 (which CI runs) reports SC2317 on each command in the
+# body, 0.11.0 reports SC2329 on the function. Verified against both binaries --
+# a local run of the newer one alone said this file was clean and CI disagreed.
+# shellcheck disable=SC2329,SC2317  # invoked by the trap below, not by name
 cleanup() {
     rm -rf "$WORK"
     pg_tool_stdin psql -U "$PGUSER" -d postgres -tAc \
