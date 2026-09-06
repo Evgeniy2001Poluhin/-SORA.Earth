@@ -1,6 +1,8 @@
+import contextlib
 import logging
 import os
 import re
+import threading
 import mlflow
 import mlflow.sklearn
 from datetime import datetime
@@ -37,23 +39,128 @@ EXPERIMENT_ARTIFACT_LOCATION = os.getenv(
 _OFFLINE = os.getenv("SORA_OFFLINE","0")=="1"  # _SORA_OFFLINE_GUARD
 
 
-def _ensure_experiment() -> None:
+def _ensure_experiment(api=None) -> None:
     """Point at the experiment, creating it with a proxied artifact location.
 
     `set_experiment` alone would create it with whatever the server defaults
     to, and that default is exactly what left experiments 0 and 1 unusable.
+
+    `api` is the injection seam described on `_registry_api`. It matters here
+    because this makes network calls: a caller that was handed a substitute
+    MLflow must not have one reached around it, or a test proving a path is
+    offline would be proving it about a different object than the one the
+    path uses.
     """
-    existing = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
+    api = mlflow if api is None else api
+    existing = api.get_experiment_by_name(EXPERIMENT_NAME)
     if existing is None:
-        mlflow.create_experiment(
+        api.create_experiment(
             EXPERIMENT_NAME, artifact_location=EXPERIMENT_ARTIFACT_LOCATION)
-    mlflow.set_experiment(EXPERIMENT_NAME)
+    api.set_experiment(EXPERIMENT_NAME)
+
+
+#: Set once the experiment has been resolved, so the network call below happens
+#: at most once per process.
+_experiment_ready = False
+
+#: Guards both the flag and the environment window in `_ensure_experiment_once`.
+#: FastAPI runs sync handlers in a threadpool, so "first use" can be several
+#: threads at once.
+_experiment_lock = threading.Lock()
+
+#: How long the *experiment lookup* may take, and how hard it may retry.
+#:
+#: Measured 2026-09-06 against a port nothing serves: one
+#: `get_experiment_by_name` on MLflow's defaults took **247 seconds** -- the
+#: documented 120s `MLFLOW_HTTP_REQUEST_TIMEOUT` applies per attempt, and the
+#: retry policy multiplies it. That is the wait that used to sit at import.
+#:
+#: Making the init lazy without this would move the same 247 seconds into the
+#: first prediction, which is worse than where it was: a slow startup is
+#: visible to whoever deployed, a slow request is not. So the metadata lookup
+#: is bounded here -- and only here. The global default is deliberately left
+#: alone, because the same setting covers model-artifact uploads during
+#: retraining, where a few seconds would break a legitimately long operation.
+_EXPERIMENT_LOOKUP_ENV = {
+    "MLFLOW_HTTP_REQUEST_TIMEOUT": "5",
+    "MLFLOW_HTTP_REQUEST_MAX_RETRIES": "1",
+    "MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR": "0",
+}
+
+
+@contextlib.contextmanager
+def _bounded_lookup():
+    """Apply `_EXPERIMENT_LOOKUP_ENV` for the length of one lookup.
+
+    MLflow reads these per request, so this is the only lever available -- the
+    client takes no timeout argument. It is process-global while it is set,
+    which is the cost: another thread uploading an artefact during this window
+    would get the short timeout too. The window is held under
+    `_experiment_lock`, happens at most once per process, and is bounded by the
+    five seconds it installs. Stated rather than hidden, because it is a real
+    if narrow hazard.
+    """
+    saved = {k: os.environ.get(k) for k in _EXPERIMENT_LOOKUP_ENV}
+    os.environ.update(_EXPERIMENT_LOOKUP_ENV)
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _ensure_experiment_once(api=None) -> None:
+    """Resolve the experiment on first use, never at import.
+
+    This used to run at module level, and `_ensure_experiment` makes an HTTP
+    call. **Importing this module therefore made a network request**, and on
+    MLflow's defaults that request costs 247 seconds against an unreachable
+    server (measured; see `_EXPERIMENT_LOOKUP_ENV`). So with a tracking server
+    configured but not answering, `import app.mlflow_tracking` blocked -- and
+    so did importing anything that imports it.
+
+    Nine modules import it at module level, measured by AST and asserted in
+    `tests/test_mlflow_import_makes_no_request.py`:
+    `app/main.py`, `app/drift_detection.py`, `app/registry_retry.py`,
+    `app/api/admin_snapshot.py`, `app/api/drift.py`, `app/api/evaluate.py`,
+    `app/api/infra.py`, `app/api/predict.py`, `app/api/retrain.py`.
+    None defers the import into a function, so `app.main` -- application
+    startup itself -- blocked directly rather than transitively.
+
+    The `try` around it caught exceptions and could not catch slowness, which
+    is why it looked safe. Measured 2026-09-05: `import mlflow` 1.1s, `import
+    app.mlflow_tracking` over 30s and still going; with `SORA_OFFLINE=1`, 1.0s
+    -- which is why CI never paid the cost and nobody saw it (issue 243).
+
+    A failure here is logged and not raised: callers already treat MLflow as
+    best-effort, and a tracking server being down must not fail a prediction.
+    The flag stays false in that case, so a later call retries.
+
+    `api` forwards the `_registry_api` injection seam. Without it this reached
+    around a substituted MLflow to the module global and opened a socket --
+    caught by `tests/test_mlflow_registry_isolation.py`, whose whole subject is
+    that the registration failure path is provable with no network at all.
+    """
+    global _experiment_ready
+    if _experiment_ready or _OFFLINE:
+        return
+    with _experiment_lock:
+        if _experiment_ready:  # resolved while this thread waited for the lock
+            return
+        try:
+            with _bounded_lookup():
+                _ensure_experiment(api)
+            _experiment_ready = True
+        except Exception as exc:
+            logger.warning("MLflow experiment not resolved: %s", _sanitized(exc))
 
 
 try:
+    # Local: this only records a URI on the client. No request is made.
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    if not _OFFLINE:
-        _ensure_experiment()
 except Exception as e:
     logger.warning("MLflow init failed: %s", e)
 
@@ -146,6 +253,7 @@ def log_prediction(
 ):
     if _OFFLINE:
         return None
+    _ensure_experiment_once()
     try:
         params = _to_dict(input_data)
 
@@ -199,6 +307,7 @@ def log_prediction(
 def log_evaluation(project_name: str, esg_scores: dict, risk_level: str):
     if _OFFLINE:
         return None
+    _ensure_experiment_once()
     try:
         with mlflow.start_run(run_name=f"eval_{project_name}_{datetime.now().strftime('%H%M%S')}"):
             metrics = {
@@ -259,6 +368,7 @@ def log_model_registry(model, model_name: str, metrics: dict, *, api=None) -> bo
     if _OFFLINE:
         return False
     api = _registry_api() if api is None else api
+    _ensure_experiment_once(api)
     try:
         with api.start_run(run_name=f"register_{model_name}"):
             api.log_metrics(metrics)
@@ -284,6 +394,8 @@ def get_experiment_stats():
     a fact about the system, and reporting the second as the first is what let
     this last.
     """
+    # Reads the database for metrics, but also queries MLflow below.
+    _ensure_experiment_once()
     import json
 
     from sqlalchemy.exc import SQLAlchemyError
@@ -370,6 +482,7 @@ def log_drift_event(analysis_result, baseline_id="default"):
     Stores PSI/KS metrics per feature, drift_score, drifted features.
     Tag type=drift_event for filtering in /drift/mlflow-history.
     """
+    _ensure_experiment_once()
     if not analysis_result or not analysis_result.get("drift_detected"):
         return
     try:

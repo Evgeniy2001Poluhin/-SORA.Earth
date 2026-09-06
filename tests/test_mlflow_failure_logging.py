@@ -26,8 +26,20 @@ class Boom(RuntimeError):
 
 @pytest.fixture
 def online(monkeypatch):
-    """Force the online path; the offline early-return is tested separately."""
+    """Force the online path; the offline early-return is tested separately.
+
+    `_experiment_ready` is set for the same reason `_OFFLINE` is cleared: to
+    put the module in the state these tests are about. Resolving the
+    experiment used to happen at import and now happens on first use (#243),
+    so without this every call below would first try to reach a tracking
+    server that is not running -- adding a network round trip and a
+    "not resolved" warning to tests whose subject is what `start_run` does.
+    The lazy resolution itself is covered by
+    `tests/test_mlflow_import_makes_no_request.py` and
+    `tests/test_mlflow_registry_isolation.py`.
+    """
     monkeypatch.setattr(mlflow_tracking, "_OFFLINE", False)
+    monkeypatch.setattr(mlflow_tracking, "_experiment_ready", True)
 
 
 def test_sanitizer_removes_uri_userinfo():
