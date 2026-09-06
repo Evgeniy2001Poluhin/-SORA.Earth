@@ -172,19 +172,41 @@ def test_an_unreachable_store_is_a_fault_not_an_empty_simulation(client, detecto
     assert body["observations"] is None, "zero would be a measurement nobody took"
 
 
-def test_no_baseline_still_refuses_with_the_phrase_the_client_matches(client, detector):
-    """400 and its wording are unchanged on purpose.
+def test_no_baseline_refuses_with_a_reason_code(client, detector):
+    """The 400 now says *which* refusal it is, structurally (#250).
 
-    The frontend distinguishes this case by `msg.includes("fit baseline
-    first")` -- fragile, and tracked in issue 250, which needs a change to the
-    API client rather than to this endpoint. Changing the phrase here would
-    break the user-facing hint before that fix exists.
+    Distinguishing this case used to be possible only by matching the English
+    sentence. Rewording it, adding a full stop or translating it would have
+    turned a helpful hint into a generic "Simulate failed", with nothing
+    failing anywhere to say so.
     """
     detector(baseline={})
 
     r = post(client, mode="drift", n=10)
 
     assert r.status_code == 400
+    body = r.json()
+    assert set(body) == KEYS | {"detail"}
+    assert body["status"] == "not_fitted"
+    assert body["reason_code"] == "baseline_not_fitted"
+    assert body["detail"] == "fit baseline first"
+    assert body["observations"] == 42, "the store answered, so this is a count and not an absence"
+
+
+def test_the_phrase_the_previous_bundle_matches_survives_verbatim(client, detector):
+    """A browser holding the old JS greps the raw body, and must keep working.
+
+    `web/src/api/client.ts` collapses an error response into
+    `"API 400: " + responseText`, and the previous `DriftPage` asked whether
+    that string contains "fit baseline first". Serving JSON instead of the bare
+    sentence keeps the substring present, so the hint survives the window
+    between a deploy and a reload. Asserted rather than assumed, because it is
+    the reason the wording is not free to change yet.
+    """
+    detector(baseline={})
+
+    r = post(client, mode="drift", n=10)
+
     assert "fit baseline first" in r.text
 
 
@@ -212,9 +234,13 @@ def test_openapi_declares_every_branch(client):
         assert code in op["responses"], code
 
     components = schema["components"]["schemas"]
-    for model in ("DriftSimulateOk", "DriftSimulateSkipped", "DriftSimulateUnavailable"):
+    for model in ("DriftSimulateOk", "DriftSimulateSkipped", "DriftSimulateUnavailable",
+                  "DriftSimulateNotFitted"):
         assert model in components, model
         assert KEYS <= set(components[model]["properties"]), model
 
     assert components["DriftSimulateSkipped"]["properties"]["mode"].get("type") == "null"
     assert components["DriftSimulateUnavailable"]["properties"]["observations"].get("type") == "null"
+    assert "reason_code" in components["DriftSimulateNotFitted"]["properties"], (
+        "the 400 branch has to be tellable apart without reading English prose (#250)"
+    )

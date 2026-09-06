@@ -4,7 +4,7 @@ import { driftBaselineApi } from "@/api/endpoints/driftBaseline";
 import type { DriftBaselineStatus } from "@/api/types";
 import { DriftTimeline } from "./DriftTimeline";
 import { LSTMProgressWidget } from "./LSTMProgressWidget";
-import { api } from "@/api/client";
+import { ApiError, api } from "@/api/client";
 import "./drift.css";
 import "./lstm-progress.css";
 import { errorMessage } from "@/lib/errors";
@@ -70,7 +70,26 @@ export function DriftPage() {
       }
       qc.invalidateQueries({ queryKey: ["drift"] });
     },
-    onError: (e: unknown) => { const msg = errorMessage(e, ""); if (msg.includes("fit baseline first")) toast("Fit baseline before simulating"); else toast.error("Simulate failed: " + (msg || "unknown")); },
+    // Selected by `reason_code`, not by the wording of the sentence (#250).
+    // This used to ask whether the message contained "fit baseline first", so
+    // rewording it, adding a full stop or translating it would have replaced
+    // the hint with a generic failure and nothing would have gone red.
+    //
+    // The substring is kept as a *transitional* fallback, and only that: it
+    // covers the window in which a freshly loaded bundle talks to a backend
+    // that has not been redeployed yet. Once this frontend and the endpoint
+    // are deployed together it is dead weight, and both branches are tested
+    // so removing it is a one-line change with a test that says whether it
+    // still matters.
+    onError: (e: unknown) => {
+      const msg = errorMessage(e, "");
+      const reason = e instanceof ApiError ? e.reasonCode : null;
+      if (reason === "baseline_not_fitted" || (reason === null && msg.includes("fit baseline first"))) {
+        toast("Fit baseline before simulating");
+      } else {
+        toast.error("Simulate failed: " + (msg || "unknown"));
+      }
+    },
   });
 
   if (q.isLoading) return <div className="card-body"><p style={{ color: "var(--muted)" }}>Loading drift status...</p></div>;

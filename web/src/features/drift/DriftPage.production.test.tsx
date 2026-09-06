@@ -299,6 +299,26 @@ describe("the simulate button against its migrated contract", () => {
     toastCalls.length = 0;
   });
 
+  /** The same routing, but the simulate call fails with a body. */
+  const routedFailure = (status: number, body: string) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes("/mlops/drift/simulate")) {
+        return new Response(body, { status, statusText: "Bad Request" });
+      }
+      const ok = url.includes("/mlops/drift/baseline")
+        ? { exists: true, n_samples: 500, feature_count: 4 }
+        : url.includes("/mlops/drift")
+          ? {
+              status: "stable", timestamp: "2026-09-06T00:00:00Z", observations: 50,
+              drift_detected: false, drift_score: 0.1, drifted_features: [],
+              features: {}, recent_alerts: [],
+            }
+          : { events: [], count: 0, status: "ok", reason_code: null };
+      return { ok: true, status: 200, statusText: "OK", json: async () => ok } as Response;
+    }) as typeof fetch);
+  };
+
   const clickSimulate = async () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: /Simulate stable/i }));
@@ -336,6 +356,90 @@ describe("the simulate button against its migrated contract", () => {
       timeout: 3000,
     });
     expect(toastCalls.some((t) => /Not simulated/i.test(t.text))).toBe(false);
+  });
+
+  /** The 400 branch, selected structurally rather than by prose (#250).
+   *
+   *  This handler used to ask `msg.includes("fit baseline first")`. Every case
+   *  below was green under that code except the reworded one -- which is the
+   *  whole point: the old test could not tell a working hint from one that
+   *  worked only because nobody had touched the sentence yet.
+   */
+  it("offers the baseline hint when the server says which refusal it is", async () => {
+    routedFailure(400, JSON.stringify({
+      status: "not_fitted", mode: null, shift_sigma: null, shifts: {},
+      observations: 0, reason_code: "baseline_not_fitted", detail: "fit baseline first",
+    }));
+
+    renderWithQuery(<DriftPage />);
+    await clickSimulate();
+
+    await waitFor(() => expect(toastCalls.some((t) => /Fit baseline before simulating/i.test(t.text))).toBe(true), {
+      timeout: 3000,
+    });
+    expect(toastCalls.some((t) => /Simulate failed/i.test(t.text))).toBe(false);
+  });
+
+  it("still offers it when the sentence is reworded, because it no longer reads the sentence", async () => {
+    // The exact failure the substring match could not survive. Under the old
+    // handler this produced "Simulate failed: ...", and the user lost the one
+    // instruction that would have unblocked them.
+    routedFailure(400, JSON.stringify({
+      status: "not_fitted", mode: null, shift_sigma: null, shifts: {},
+      observations: 0, reason_code: "baseline_not_fitted",
+      detail: "Базовая линия не обучена.",
+    }));
+
+    renderWithQuery(<DriftPage />);
+    await clickSimulate();
+
+    await waitFor(() => expect(toastCalls.some((t) => /Fit baseline before simulating/i.test(t.text))).toBe(true), {
+      timeout: 3000,
+    });
+  });
+
+  it("falls back to the old phrase while a stale backend is still answering", async () => {
+    // The transitional case: a freshly loaded bundle against a backend that
+    // has not been redeployed yet, so there is no reason_code to read. This is
+    // the only thing keeping the substring in the code, and it is why removing
+    // it later is a one-line change with a test that says whether it matters.
+    routedFailure(400, JSON.stringify({ detail: "fit baseline first" }));
+
+    renderWithQuery(<DriftPage />);
+    await clickSimulate();
+
+    await waitFor(() => expect(toastCalls.some((t) => /Fit baseline before simulating/i.test(t.text))).toBe(true), {
+      timeout: 3000,
+    });
+  });
+
+  it("does not offer the baseline hint for a different refusal", async () => {
+    // A reason_code that is present and is not this one must take the generic
+    // branch. Without this the fallback could quietly widen to "any 400".
+    routedFailure(400, JSON.stringify({
+      status: "not_fitted", reason_code: "observation_store_unavailable",
+      detail: "fit baseline first",
+    }));
+
+    renderWithQuery(<DriftPage />);
+    await clickSimulate();
+
+    await waitFor(() => expect(toastCalls.some((t) => /Simulate failed/i.test(t.text))).toBe(true), {
+      timeout: 3000,
+    });
+    expect(toastCalls.some((t) => /Fit baseline before simulating/i.test(t.text))).toBe(false);
+  });
+
+  it("reports an unrelated failure as a failure", async () => {
+    routedFailure(500, "internal error");
+
+    renderWithQuery(<DriftPage />);
+    await clickSimulate();
+
+    await waitFor(() => expect(toastCalls.some((t) => /Simulate failed/i.test(t.text))).toBe(true), {
+      timeout: 3000,
+    });
+    expect(toastCalls.some((t) => /Fit baseline before simulating/i.test(t.text))).toBe(false);
   });
 });
 

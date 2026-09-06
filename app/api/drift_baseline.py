@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Query, Security
 from fastapi.responses import JSONResponse
 from app.auth import require_api_key
 from app.schemas import (
+    DriftSimulateNotFitted,
     DriftSimulateOk,
     DriftSimulateResponse,
     DriftSimulateSkipped,
@@ -100,7 +101,7 @@ def _gen_observation(base: dict, shifts: dict) -> dict:
     tags=["mlops"],
     response_model=DriftSimulateResponse,
     responses={
-        400: {"description": "No baseline has been fitted, so there is nothing to simulate against."},
+        400: {"model": DriftSimulateNotFitted, "description": "No baseline has been fitted, so there is nothing to simulate against."},
         503: {"model": DriftSimulateUnavailable, "description": "The observation store could not be reached."},
     },
     summary="Replace the observation window with a generated sample",
@@ -136,7 +137,21 @@ def simulate_drift(
             ).model_dump(),
         )
     if not base:
-        raise HTTPException(400, "fit baseline first")
+        # The phrase is preserved **verbatim** inside the body. A browser still
+        # holding the previous bundle distinguishes this case by
+        # `msg.includes("fit baseline first")` over the raw response text, and
+        # that keeps working while `reason_code` is what new clients read
+        # (#250). The count is real: the store answered above, so zero here
+        # would be a measurement rather than an absence.
+        return JSONResponse(
+            status_code=400,
+            content=DriftSimulateNotFitted(
+                status="not_fitted",
+                observations=drift_detector.count(),
+                reason_code="baseline_not_fitted",
+                detail="fit baseline first",
+            ).model_dump(),
+        )
 
     if not drift_detector._r.set("drift:last_sim", "1", nx=True, ex=2):
         return DriftSimulateSkipped(
