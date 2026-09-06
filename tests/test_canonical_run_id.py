@@ -22,6 +22,23 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base, RetrainLog, count_physical_runs
 from app.scheduler import _start_retrain_log, new_run_id
 
+def _drift(detected: bool):
+    """A drift result shaped like the one `compute_drift` really returns.
+
+    These tests used to patch `app.api.drift.check_drift` with a plain dict.
+    That mock agreed with the caller while the real function stopped agreeing:
+    the contract migration changed the return to a Pydantic model, and
+    `drift_result.get(...)` would have raised AttributeError in production
+    without a single test going red. The mock now has the shape the real
+    function produces, so the next such change fails here.
+    """
+    from app.schemas import ModelDriftMeasured
+
+    return ModelDriftMeasured(
+        status="ok", drift_detected=detected, window=50,
+        observations=100, features={}, reason_code=None,
+    )
+
 
 @pytest.fixture
 def sessions(tmp_path, monkeypatch):
@@ -212,7 +229,7 @@ def test_the_closed_loop_gives_its_decision_the_training_run_id(monkeypatch, ses
         }
 
     monkeypatch.setattr("app.locks.RedisLock", lambda **kwargs: _Lock())
-    monkeypatch.setattr("app.api.drift.check_drift", lambda window=50: {"drift_detected": True})
+    monkeypatch.setattr("app.api.drift.compute_drift", lambda window=50: _drift(True))
     monkeypatch.setattr("app.api.retrain._get_current_metrics", lambda: {"roc_auc": 0.85})
     monkeypatch.setattr("app.api.retrain._do_retrain", fake_retrain)
 

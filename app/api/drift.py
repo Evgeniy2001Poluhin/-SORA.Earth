@@ -52,7 +52,7 @@ PRED_LOG = os.path.join(ROOT_DIR, "data", "predictions_log.csv")
 PROJ_CSV = os.path.join(ROOT_DIR, "data", "projects.csv")
 COLS = ["budget", "co2_reduction", "social_impact", "duration_months"]
 
-def _unavailable(window: int, reason: str) -> JSONResponse:
+def _unavailable(window: int, reason: str) -> ModelDriftUnavailable:
     """A fault in the deployment, not an answer about drift.
 
     503 rather than 200: scipy is a declared dependency (scipy==1.13.1 in both
@@ -66,10 +66,9 @@ def _unavailable(window: int, reason: str) -> JSONResponse:
     body is still built from the model, so the shape stays declared rather than
     hand-written -- and `responses={503: ...}` keeps it in the schema.
     """
-    body = ModelDriftUnavailable(
+    return ModelDriftUnavailable(
         status="unavailable", window=window, observations=0, features={}, reason_code=reason
     )
-    return JSONResponse(status_code=503, content=body.model_dump())
 
 
 @router.get(
@@ -79,6 +78,33 @@ def _unavailable(window: int, reason: str) -> JSONResponse:
     summary="Per-feature KS drift report (not the aggregate verdict)",
 )
 def check_drift(window: int = 50):
+    """HTTP wrapper around `compute_drift`.
+
+    Two callers inside the application use the result directly -- the closed
+    loop in `app/scheduler.py` and `POST /mlops/auto-retrain` -- and they need
+    the value, not a `Response`. They call `compute_drift`; this turns its
+    unavailable case into a 503.
+    """
+    result = compute_drift(window)
+    if result.status == "unavailable":
+        return JSONResponse(status_code=503, content=result.model_dump())
+    return result
+
+
+def compute_drift(window: int = 50):
+    """The KS report as a value, for callers that are not HTTP.
+
+    Split out because declaring the endpoint's contract changed what
+    `check_drift` returns -- a Pydantic model, or a `JSONResponse` on the
+    unavailable path -- while two callers inside the application still did
+    `drift_result.get("drift_detected", False)`. `.get` is a dict method;
+    neither a model nor a Response has one, so both callers would have raised
+    `AttributeError` the next time they ran.
+
+    Tests did not catch it because they patch `app.api.drift.check_drift` with
+    mocks that return dicts: replacing the function hides any disagreement
+    between what it really returns and what its caller expects.
+    """
     if not HAS_SCIPY:
         return _unavailable(window, "scipy_missing")
     if not os.path.exists(PROJ_CSV):

@@ -533,12 +533,25 @@ def auto_retrain_on_drift(
     2) if drift detected (or force=true) -> run synchronous retrain
     3) return unified orchestration result
     """
-    from app.api.drift import check_drift as drift_check
+    from app.api.drift import compute_drift
     from app.api.retrain import _do_retrain
 
-    drift = drift_check(window=window)
+    # `compute_drift` rather than the HTTP handler: that one returns a Response
+    # on the unavailable path, and this needs the value.
+    drift = compute_drift(window=window)
 
-    drift_detected = bool(drift.get("drift_detected", False))
+    if drift.status == "unavailable" and not force:
+        # A check that could not run is not "no drift". Without `force`, the
+        # honest answer is that nothing was decided.
+        return {
+            "status": "skipped",
+            "drift_detected": None,
+            "drift_result": drift.model_dump(),
+            "retrained": False,
+            "reason": "drift_check_unavailable",
+        }
+
+    drift_detected = bool(getattr(drift, "drift_detected", None))
     should_retrain = force or drift_detected
 
     if not should_retrain:

@@ -22,6 +22,23 @@ import pytest
 from app import mlflow_tracking
 from app import scheduler as sched
 
+def _drift(detected: bool):
+    """A drift result shaped like the one `compute_drift` really returns.
+
+    These tests used to patch `app.api.drift.check_drift` with a plain dict.
+    That mock agreed with the caller while the real function stopped agreeing:
+    the contract migration changed the return to a Pydantic model, and
+    `drift_result.get(...)` would have raised AttributeError in production
+    without a single test going red. The mock now has the shape the real
+    function produces, so the next such change fails here.
+    """
+    from app.schemas import ModelDriftMeasured
+
+    return ModelDriftMeasured(
+        status="ok", drift_detected=detected, window=50,
+        observations=100, features={}, reason_code=None,
+    )
+
 
 class _HeldLock:
     def acquire(self):
@@ -51,7 +68,7 @@ def run_closed_loop(monkeypatch, new_metrics, old_auc=0.85):
     monkeypatch.setattr(sched, "_start_retrain_log", lambda **kwargs: 1)
     monkeypatch.setattr(sched, "_finish_retrain_log", lambda **kwargs: journal.update(kwargs))
     monkeypatch.setattr("app.locks.RedisLock", lambda **kwargs: _HeldLock())
-    monkeypatch.setattr("app.api.drift.check_drift", lambda window=50: {"drift_detected": True})
+    monkeypatch.setattr("app.api.drift.compute_drift", lambda window=50: _drift(True))
     monkeypatch.setattr("app.api.retrain._get_current_metrics", lambda: {"roc_auc": old_auc})
     monkeypatch.setattr(
         "app.api.retrain._do_retrain",
