@@ -7,6 +7,7 @@
     "GET /api/v1/auth/login @app/main.py": "response_class=HTMLResponse",
     "GET /embed @app/api/embed/api.py": "response_class=HTMLResponse",
     "GET /embed/snippet @app/api/embed/api.py": "response_class=PlainTextResponse",
+    "GET /metrics @app/metrics_endpoint.py": "response_class=Response",
     "WS /ws/live @app/api/infra.py": "websocket"
   },
   "counts": {

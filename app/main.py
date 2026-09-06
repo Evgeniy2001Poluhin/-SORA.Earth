@@ -776,26 +776,25 @@ app.include_router(sentinel_api.router)
 from prometheus_client import Counter, Histogram, Gauge
 
 from app import prom_metrics  # noqa
-Instrumentator().instrument(app).expose(app)
 
-# The staleness gauge computes itself when collected, on whichever path does
-# the collecting (#188).
+# Instrumented here, exposed by `app/metrics_endpoint.py` (#262).
 #
-# It was refreshed from the handler of /api/v1/metrics/prometheus, and
-# infra/prometheus.yml scrapes /metrics at the root -- the endpoint the line
-# above creates. Measured on production 2026-08-15: the metric was published,
-# was scraped, and read 0.0 four hours after a successful retrain. It reached
-# Grafana and meant nothing.
+# `Instrumentator().expose(app)` used to serve `/metrics`, and it does handle
+# multiprocess mode. What it cannot do is the other half: the staleness gauge
+# below is meant to be computed by whoever collects, and `set_function` is
+# silently not collected once the metrics live in memory-mapped files --
+# accepted without error and simply absent, measured. So the route is ours and
+# it recomputes that gauge immediately before reading the registry.
 #
-# Registered after expose() so the endpoint exists; set_function is evaluated
-# at collection, so which endpoint runs stops being a question.
-try:
-    from app.api.infra import retrain_staleness_seconds
-    from app.prom_metrics import sora_retrain_seconds_since_success
+# The gauge itself dates from #188: refreshed from the handler of
+# /api/v1/metrics/prometheus while infra/prometheus.yml scrapes /metrics at the
+# root, it was published, scraped, and read 0.0 four hours after a successful
+# retrain. It reached Grafana and meant nothing.
+Instrumentator().instrument(app)
 
-    sora_retrain_seconds_since_success.set_function(retrain_staleness_seconds)
-except Exception as _e:  # pragma: no cover - telemetry must not block startup
-    logger.warning("could not wire the retrain staleness gauge: %s", _e)
+from app.metrics_endpoint import router as _metrics_router  # noqa: E402
+
+app.include_router(_metrics_router)
 
 
 # ===== MINIMAL ENDPOINTS (root, health, model-info) =====

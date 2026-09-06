@@ -452,9 +452,39 @@ Optional:
 
 ## Monitoring & Observability
 
-- **Prometheus metrics**: `/metrics` — the `prometheus_client` registry, custom
-  `sora_*` metrics plus HTTP instrumentation. This is the path
+- **Prometheus metrics**: `/metrics` — custom `sora_*` metrics plus HTTP
+  instrumentation, served by `app/metrics_endpoint.py`. This is the path
   `infra/prometheus.yml` scrapes, and the only one configured.
+
+  **Aggregated across gunicorn's four workers, and it was not until #262.**
+  `prometheus_client` keeps each metric in the memory of the process that
+  touched it. Measured on production 2026-09-06: five scrapes landed on two
+  different workers, one reporting two `sora_telemetry_tasks_total` series and
+  the other reporting none, for an event that had definitely happened. The
+  error was never "about four times low" — gunicorn does not distribute
+  round-robin, so a value could be anywhere between full and zero and moved
+  between scrapes.
+
+  `entrypoint.sh` sets `PROMETHEUS_MULTIPROC_DIR` and clears it once in the
+  master before the fork; the scheduler leaves through the override branch
+  above that line and never shares the directory. Three rules follow, and
+  breaking any of them makes a metric report nothing while looking healthy:
+
+  ```
+  every Gauge         declares a multiprocess_mode -- without one you get a
+                      series per process id, four where an alert expects one
+  no Info metrics     they construct and set without error, then never appear
+                      in the aggregated scrape (measured). Use a labelled
+                      Gauge: sora_app_info is one, and renders identically
+  no set_function     accepted, never collected (measured). Compute the value
+                      in app/metrics_endpoint.py, which recomputes the retrain
+                      staleness gauge immediately before reading the registry
+  ```
+
+  All twelve gauges use `mostrecent`: each is current state, not work done by a
+  process, so summing four workers would be meaningless. `mark_process_dead`
+  reaps only `live*` modes, so a worker recycle does not erase the last known
+  value — which is the behaviour wanted here.
   `/api/v1/metrics/prometheus` serves the same registry and is kept because
   several documents name it. `/metrics/prometheus` does not exist.
 

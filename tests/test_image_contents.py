@@ -40,6 +40,10 @@ REQUIRED = {
     "entrypoint.sh": ("/app/entrypoint.sh", "the image's entry point"),
     "scripts/": ("/app/scripts/", "operational entry points, run in the container (#99)"),
     "data/": ("/app/data/", "reference data read at startup"),
+    # entrypoint.sh passes `-c gunicorn_conf.py`; without the file in the image
+    # gunicorn refuses to start and the container never serves (#262). Caught
+    # here because the file was written and not copied.
+    "gunicorn_conf.py": ("/app/gunicorn_conf.py", "gunicorn's config, passed with -c (#262)"),
 }
 
 

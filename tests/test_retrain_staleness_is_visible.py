@@ -103,19 +103,57 @@ def test_an_unreadable_database_fires_the_alert(monkeypatch):
     assert _value() == -1
 
 
-def test_the_gauge_computes_itself_at_collection():
-    """Not from a handler.
+def test_the_gauge_is_computed_by_the_scrape_itself(monkeypatch):
+    """Not pushed by a runner, and not read from a handler nobody scrapes.
 
     Refreshing it inside /api/v1/metrics/prometheus published a metric that
     read 0.0 on production while a retrain had succeeded four hours earlier:
     infra/prometheus.yml scrapes /metrics at the root, which that handler never
     runs. A gauge depending on which endpoint was called reports on the
     endpoint.
+
+    This asserted that `app/main.py` contained the text
+    `set_function(retrain_staleness_seconds)`. Two things were wrong with that.
+    It tested the source rather than the behaviour, so it would have passed
+    with the wiring present and broken. And `set_function` had to go in #262:
+    under `PROMETHEUS_MULTIPROC_DIR` it is accepted and never collected --
+    measured -- so the gauge would have vanished from a four-worker scrape
+    while this test stayed green. The computation moved into the `/metrics`
+    handler; what is asserted now is that scraping performs it.
     """
-    import os
+    from fastapi.testclient import TestClient
 
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(root, "app", "main.py"), encoding="utf-8") as fh:
-        body = fh.read()
+    import app.api.infra as infra_module
+    import app.metrics_endpoint as endpoint
+    from app.main import app
 
-    assert "set_function(retrain_staleness_seconds)" in body
+    calls = []
+
+    def fake_staleness():
+        calls.append(1)
+        return 1234.0
+
+    monkeypatch.setattr(infra_module, "retrain_staleness_seconds", fake_staleness)
+
+    client = TestClient(app)
+    body = client.get("/metrics").text
+
+    assert calls, "the scrape did not compute the gauge"
+    assert "sora_retrain_seconds_since_success 1234.0" in body, [
+        line for line in body.splitlines()
+        if line.startswith("sora_retrain_seconds_since_success")
+    ]
+
+    # And again, with a different answer: a value cached from the first scrape
+    # would satisfy the assertion above forever.
+    calls.clear()
+
+    def later():
+        calls.append(1)
+        return 5678.0
+
+    monkeypatch.setattr(infra_module, "retrain_staleness_seconds", later)
+    body = client.get("/metrics").text
+
+    assert calls, "the second scrape reused the first value"
+    assert "sora_retrain_seconds_since_success 5678.0" in body
