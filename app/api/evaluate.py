@@ -16,7 +16,7 @@ from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 from app.cache import cache
 from app import external_data
 from app.drift_detection import drift_detector
-from app.mlflow_tracking import log_evaluation
+from app.mlflow_tracking import log_evaluation, log_simulation
 from app.middleware import METRICS
 from app.database import Evaluation
 
@@ -137,6 +137,12 @@ async def evaluate_project(request: Request, project: Project):
 
     latency_ms = round((time.perf_counter() - start) * 1000, 2)
 
+    # Not MLflow. `app.main.log_prediction` writes a row to the
+    # `predictions_log` **table**; it shares a name with
+    # `app.mlflow_tracking.log_prediction` and does something else entirely. I
+    # removed this call while reading it as a duplicate telemetry event, which
+    # it is not -- mutation testing said so, by leaving every assertion green
+    # when the call came back.
     from app.main import log_prediction
     log_prediction(
         "evaluate",
@@ -184,6 +190,8 @@ async def evaluate_project(request: Request, project: Project):
     result["lat"] = lat
     result["lon"] = lon
 
+    # The one MLflow event for this operation (#258). It used to be two: this
+    # one and an identical `log_evaluation` from inside `calculate_esg`.
     log_evaluation(project.name, result, result["risk_level"])
     drift_detector.add_observation(
         {
@@ -327,8 +335,12 @@ def export_csv():
 
 @router.post("/what-if")
 def what_if(project: Project):
+    import uuid
+
     from app.main import COUNTRIES, calculate_esg
 
+    started = time.perf_counter()
+    event_id = uuid.uuid4().hex[:12]
     cdata = COUNTRIES.get(project.region or "Germany", {"region": "Europe"})
     wi_region = cdata.get("region", "Europe")
     base = calculate_esg(project, wi_region)
@@ -358,6 +370,23 @@ def what_if(project: Project):
                 mr["success_probability"] - base["success_probability"], 2
             ),
         }
+    # One event for the sweep (#258). This used to write five evaluations --
+    # the baseline and four variants -- because `calculate_esg` logged each
+    # call itself. The aggregate is what a reader of the experiment wants
+    # anyway: where the baseline sat and how far the variants moved it.
+    changes = [v["score_change"] for v in variations.values()]
+    log_simulation(
+        "what_if",
+        metrics={
+            "variants": len(variations),
+            "baseline_score": base["total_score"],
+            "min_score_change": round(min(changes), 2) if changes else None,
+            "max_score_change": round(max(changes), 2) if changes else None,
+            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+        },
+        tags={"event_id": event_id, "region": wi_region,
+              "model_version": _model_version()},
+    )
     return {"base": base, "variations": variations}
 
 
@@ -522,7 +551,12 @@ def generate_pdf_report(project: Project):
 
 @router.post("/evaluate/ranking")
 async def evaluate_ranking(project: Project):
+    import uuid
+
     from app.main import calculate_esg, COUNTRIES
+
+    started = time.perf_counter()
+    event_id = uuid.uuid4().hex[:12]
     out = []
     for country, cdata in COUNTRIES.items():
         try:
@@ -544,6 +578,28 @@ async def evaluate_ranking(project: Project):
         except Exception as e:
             out.append({"country": country, "error": str(e)})
     out.sort(key=lambda x: x.get("total_score", -1), reverse=True)
+
+    # The third sweep, and the one the issue did not name (#258): twenty-seven
+    # countries, so twenty-seven evaluations logged for one request. Found by
+    # enumerating `calculate_esg`'s callers rather than by working from the
+    # list in the issue.
+    scored = [row["total_score"] for row in out if "total_score" in row]
+    log_simulation(
+        "country_ranking",
+        metrics={
+            "countries": len(out),
+            "succeeded": len(scored),
+            "failed": len(out) - len(scored),
+            "max_score": round(max(scored), 2) if scored else None,
+            "min_score": round(min(scored), 2) if scored else None,
+            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+        },
+        tags={
+            "event_id": event_id,
+            "model_version": _model_version(),
+            "partial_sample": "true" if len(scored) != len(out) else "false",
+        },
+    )
     return {"count": len(out), "ranking": out}
 
 
@@ -557,6 +613,23 @@ class _MCRequest(_BM_MC):
     project_duration_months: int
     n: int = 500
     noise: float = 0.15
+
+def _model_version() -> str:
+    """The serving model's identity, or `None` when it declares none.
+
+    A seam, like `_region_name`: it hides an `app.main` import that would
+    otherwise happen inside the request. `retrained_at` is what
+    `app/model_loader.py` already treats as the version -- nothing new is
+    invented here, and a model that carries no such field yields `None` rather
+    than a placeholder, because "unknown" written as a string reads like a
+    version somebody chose.
+    """
+    try:
+        from app.main import model_meta
+        return (model_meta or {}).get("retrained_at")
+    except Exception:
+        return None
+
 
 def _region_name(region: str) -> str:
     """The continent a country belongs to, or Europe.
@@ -620,7 +693,9 @@ async def evaluate_monte_carlo(req: _MCRequest):
     runs while reading as the number requested -- `requested` is stated beside
     it, so a distribution built from a fraction of the sample says so.
     """
-    import random, statistics
+    import random, statistics, uuid
+    started = time.perf_counter()
+    event_id = uuid.uuid4().hex[:12]
     rname = _region_name(req.region)
     n = max(50, min(int(req.n), 5000))
     noise = max(0.01, min(float(req.noise), 0.5))
@@ -646,8 +721,22 @@ async def evaluate_monte_carlo(req: _MCRequest):
         # simulations must not write a thousand tracebacks. The type is enough
         # to find it; the text stays out of the response.
         logger.warning(
-            "monte-carlo: all %d simulations raised; first failure was %s",
-            n, type(_first_failure).__name__,
+            "monte-carlo %s: all %d simulations raised; first failure was %s",
+            event_id, n, type(_first_failure).__name__,
+        )
+        # One event for the failed sweep too. The alternative the issue names
+        # -- an explicit counter and no event -- would leave the experiment
+        # unable to distinguish "nobody asked" from "everything raised".
+        log_simulation(
+            "monte_carlo",
+            metrics={
+                "requested": n, "succeeded": 0, "failed": _failed,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+            },
+            tags={
+                "event_id": event_id, "region": rname, "outcome": "no_successful_runs",
+                "model_version": _model_version(), "partial_sample": "true",
+            },
         )
         return JSONResponse(
             status_code=503,
@@ -672,9 +761,39 @@ async def evaluate_monte_carlo(req: _MCRequest):
         bins[idx] += 1
     if _failed:
         logger.warning(
-            "monte-carlo: %d of %d simulations raised; first failure was %s",
-            _failed, n, type(_first_failure).__name__,
+            "monte-carlo %s: %d of %d simulations raised; first failure was %s",
+            event_id, _failed, n, type(_first_failure).__name__,
         )
+
+    # **One** event for the whole sweep (#258). Each sample used to log its own
+    # evaluation through `calculate_esg`, so the default `n = 500` wrote five
+    # hundred MLflow runs for one request -- measured, and 444 of them landed
+    # on production from two probe calls on 2026-09-06. None of them was an
+    # evaluation anyone asked for.
+    #
+    # `event_id` also appears in the warnings above, so a log line and its run
+    # can be joined. No part of the request payload is included: an aggregate
+    # is a summary, and the project name is the caller's text.
+    log_simulation(
+        "monte_carlo",
+        metrics={
+            "requested": n,
+            "succeeded": len(scores),
+            "failed": _failed,
+            "mean": round(statistics.mean(scores), 2),
+            "stdev": round(statistics.pstdev(scores), 2),
+            "p05": pct(5),
+            "p50": pct(50),
+            "p95": pct(95),
+            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+        },
+        tags={
+            "event_id": event_id,
+            "region": rname,
+            "model_version": _model_version(),
+            "partial_sample": "true" if _failed else "false",
+        },
+    )
     return MonteCarloOk(
         status="ok",
         requested=n,
