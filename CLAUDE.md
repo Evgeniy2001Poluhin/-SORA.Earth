@@ -144,7 +144,8 @@ app/
 **Key files:**
 - `app/main.py:313` - `make_features()` creates 9-feature DataFrame for RF model
 - `app/main.py:387` - `calculate_esg()` computes ESG scores + region-aware recommendations
-- `app/scheduler.py` - Scheduled jobs: drift detection every 6h, retrain on drift
+- `app/scheduler.py` - Thirteen scheduled jobs; see the table below. Drift is
+  checked inside the daily closed loop, not by a job of its own.
 - `app/drift_detection.py` - KS-test based drift detection with PostgreSQL decision log
 - `run_scheduler.py` - Standalone scheduler process (runs in separate Docker container)
 
@@ -175,26 +176,59 @@ web/src/
 
 The closed-loop MLOps pipeline runs automatically via APScheduler in the `scheduler` service:
 
-1. **Drift Detection** (every 6h): `app/scheduler.py:check_drift_job()`
-   - Compares recent predictions (last 24h) vs training distribution
-   - KS-test on key features (budget, co2_reduction, social_impact, duration_months)
-   - Logs result to PostgreSQL `drift_log` table
+This section named three functions that do not exist -- `check_drift_job`,
+`auto_retrain_on_drift_job` and `refresh_external_data_job`, written there with
+call parentheses as though they could be found -- and gave
+periods no trigger in the code produces. On 2026-09-06 that cost a real
+mistake: an operator was told the closed loop would next run "in about six
+hours" because the document said every 12h. It runs daily at 03:00 UTC, and the
+wait was for a run that could not happen.
 
-2. **Auto-Retrain on Drift**: `app/scheduler.py:auto_retrain_on_drift_job()` (every 12h)
-   - Checks latest drift log: if drift detected → trigger retrain
-   - Retrains on historical `prediction_log` + labels from `evaluation` table
-   - Validates the new model on three independent refusals: the 95%
-     **lower bound** of its AUC must clear 0.80 -- not the point estimate,
-     since 0.85 measured on 171 rows has a lower bound of 0.78 -- the run
-     must have registered the model in MLflow, and it must not be more
-     than 0.02 below what is already serving. Any one of the three
-     rejects it. The closed loop in `app/scheduler.py` applies all three;
-     `POST /mlops/auto-retrain` currently applies only the last.
-   - Decision logged to `retrain_log` table
+The table below is generated from `scheduler.add_job(...)` and checked against
+it by `tests/test_scheduler_jobs_match_the_doc.py`. **Edit the code, then
+regenerate this; do not hand-edit the table.**
 
-3. **External Data Refresh** (daily): `app/scheduler.py:refresh_external_data_job()`
-   - Fetches country ESG data from World Bank API
-   - Updates `external_data` table in PostgreSQL
+<!-- BEGIN SCHEDULED JOBS -->
+
+| id | trigger | function |
+|---|---|---|
+| `refresh_forecast_metrics` | `IntervalTrigger(seconds=30)` | `refresh_forecast_metrics` |
+| `health_ping` | `IntervalTrigger(minutes=5)` | *(inline lambda -- records a health row)* |
+| `auto_source_health_check` | `IntervalTrigger(minutes=15)` | `scheduled_source_health_check` |
+| `auto_openmeteo_ingestion` | `IntervalTrigger(hours=1)` | `scheduled_openmeteo_ingestion` |
+| `auto_openmeteo_air_quality_ingestion` | `IntervalTrigger(hours=1)` | `scheduled_openmeteo_air_quality_ingestion` |
+| `auto_data_quality_aggregation` | `IntervalTrigger(hours=1)` | `scheduled_data_quality_aggregation` |
+| `auto_openaq_ingestion` | `IntervalTrigger(hours=1)` | `scheduled_openaq_ingestion` — **registered only when `_openaq_refusal is None`** |
+| `auto_refresh_external_data` | `IntervalTrigger(hours=6)` | `scheduled_refresh_external_data` |
+| `auto_pretrain_forecast` | `IntervalTrigger(hours=6)` | `scheduled_pretrain_forecast_models` |
+| `auto_crisis_detection` | `IntervalTrigger(hours=6)` | `_scheduled_crisis_detection` |
+| `auto_run_ingesters` | `IntervalTrigger(hours=24)` | `scheduled_run_ingesters` |
+| `auto_closed_loop_daily` | `CronTrigger(hour=3, minute=0)` | `closed_loop_retrain` |
+| `auto_full_pipeline_weekly` | `CronTrigger(day_of_week="sun", hour=3, minute=30)` | `full_pipeline_run` |
+
+<!-- END SCHEDULED JOBS -->
+
+Thirteen jobs, twelve of them unconditional. There is **no** separate drift-check
+job: drift is checked inside `closed_loop_retrain`, once a day.
+
+**What the closed loop does** (`app/scheduler.py:closed_loop_retrain`):
+
+- Calls `app.api.drift.compute_drift()` -- the value-returning function, not the
+  HTTP handler, which answers a `Response` on its unavailable branch.
+- A check that could not run is **not** "no drift". `compute_drift` answers
+  `status="unavailable"` and the loop declines to decide, returning
+  `reason: "drift_check_unavailable"`. Reading that as "no drift" is what a
+  `.get("drift_detected", False)` used to do, and it looks exactly like a
+  healthy model.
+- On drift, retrains on historical `prediction_log` plus labels from the
+  `evaluation` table.
+- Validates the new model on three independent refusals: the 95% **lower
+  bound** of its AUC must clear 0.80 -- not the point estimate, since 0.85
+  measured on 171 rows has a lower bound of 0.78 -- the run must have
+  registered the model in MLflow, and it must not be more than 0.02 below what
+  is already serving. Any one of the three rejects it. The closed loop applies
+  all three; `POST /mlops/auto-retrain` currently applies only the last.
+- Decision logged to the `retrain_log` table.
 
 **Manual triggers:** `/api/v1/model/retrain`, `/api/v1/mlops/full-pipeline` (admin only)
 
