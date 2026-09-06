@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app import mlflow_tracking
+from app import mlflow_tracking, telemetry
 
 
 PROJECT = {"total_score": 72.0, "environment_score": 70.0, "social_score": 74.0,
@@ -22,6 +22,21 @@ PROJECT = {"total_score": 72.0, "environment_score": 70.0, "social_score": 74.0,
 
 class Boom(RuntimeError):
     """Distinct class so the assertions can look for it by name."""
+
+
+@pytest.fixture(autouse=True)
+def quiet_telemetry_state():
+    """Reset the failure rate-limiter around every test in this file.
+
+    `_log_mlflow_failure` collapses repeats of the same operation for a minute
+    (#255), which is right in production and wrong in a file that provokes the
+    same failure several times in one second. Without this, whichever test ran
+    second saw no warning and failed for a reason unrelated to its subject.
+    """
+    mlflow_tracking._reset_failure_reporting()
+    yield
+    telemetry.drain(5)
+    mlflow_tracking._reset_failure_reporting()
 
 
 @pytest.fixture
@@ -80,6 +95,11 @@ def test_failure_is_logged_and_non_fatal(operation, call, online, caplog):
     with patch.object(mlflow_tracking.mlflow, "start_run", side_effect=Boom("upstream is down")):
         with caplog.at_level("WARNING", logger="app.mlflow_tracking"):
             call()  # must not raise
+            # Inside the patch, and inside the caplog window. These calls hand
+            # the MLflow work to a telemetry thread since #255: asserting
+            # before it has run reads an empty log, and leaving the patch
+            # first lets the thread reach the real `start_run` and dial out.
+            assert telemetry.drain(5) == 0, "the telemetry task did not finish"
 
     messages = [r.getMessage() for r in caplog.records]
     assert any(operation in m and "Boom" in m for m in messages), messages
@@ -136,6 +156,7 @@ def test_no_payload_or_model_contents_are_logged(online, caplog):
     with patch.object(mlflow_tracking.mlflow, "start_run", side_effect=Boom("failed")):
         with caplog.at_level("WARNING", logger="app.mlflow_tracking"):
             mlflow_tracking.log_prediction("rf_v1", secret_payload, prediction=1)
+            assert telemetry.drain(5) == 0, "the telemetry task did not finish"
 
     joined = " ".join(r.getMessage() for r in caplog.records)
     assert "super-secret-value" not in joined
@@ -179,6 +200,7 @@ def test_warning_arguments_carry_no_exception_object(online, caplog):
     with patch.object(mlflow_tracking.mlflow, "start_run", side_effect=Boom("x")):
         with caplog.at_level("WARNING", logger="app.mlflow_tracking"):
             mlflow_tracking.log_prediction("rf_v1", {"budget": 1})
+            assert telemetry.drain(5) == 0, "the telemetry task did not finish"
 
     record = next(r for r in caplog.records if "MLflow" in r.getMessage())
     assert all(isinstance(a, str) for a in record.args), record.args

@@ -39,6 +39,25 @@ sora_prediction_latency = Histogram(
 )
 sora_predictions_total  = Counter("sora_predictions_total",   "Predictions served", ["model"])
 
+#: MLflow telemetry dispatched off the request path (#255).
+#:
+#: Four outcomes and all four reachable: `scheduled` on submission,
+#: `succeeded` / `failed` when the task finishes, and `dropped` when the
+#: in-flight bound turns a submission away -- which a 500-sample monte-carlo
+#: against a slow tracking server reaches. `dropped` is the one worth alerting
+#: on: it means observability is being shed, and shedding it silently is how
+#: an outage looks like calm.
+#: Labelled by operation as well, because the two kinds of drop are not the
+#: same event. Measured 2026-09-06: one `POST /evaluate/monte-carlo` submits
+#: 500 `log_evaluation` tasks in about a millisecond -- faster than any worker
+#: can drain them -- so 94% are shed whatever MLflow's latency is. Without the
+#: label that noise buries `dropped{operation="log_prediction"}`, which is the
+#: one that means observability is actually being lost. The per-sample logging
+#: itself is #258; the label is what makes the counter readable until then.
+sora_telemetry_tasks_total = Counter(
+    "sora_telemetry_tasks_total", "MLflow telemetry tasks by outcome",
+    ["outcome", "operation"])
+
 # ── Model quality (set after retrain / on startup) ──
 sora_model_auc          = Gauge("sora_model_auc",     "Current model AUC-ROC")
 sora_model_accuracy     = Gauge("sora_model_accuracy", "Current model accuracy")

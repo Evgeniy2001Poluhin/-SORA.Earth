@@ -3,9 +3,12 @@ import logging
 import os
 import re
 import threading
+import time
 import mlflow
 import mlflow.sklearn
 from datetime import datetime
+
+from app import telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -203,16 +206,56 @@ def _sanitized(exc: Exception) -> str:
     return text
 
 
+#: When each operation last reported a failure, and how many it has swallowed
+#: since. Keyed by operation so a burst of one kind collapses while a new kind
+#: is still reported promptly.
+_failure_reports: dict = {}
+
+#: Minimum seconds between reports of the same operation failing.
+_FAILURE_LOG_INTERVAL = float(os.getenv("SORA_TELEMETRY_LOG_INTERVAL", "60"))
+
+#: `_failure_reports` is read and written from several telemetry threads at
+#: once, and a burst is exactly when that happens.
+_failure_lock = threading.Lock()
+
+
+def _reset_failure_reporting() -> None:
+    """Forget the rate-limiter's state. For tests, which share a process."""
+    with _failure_lock:
+        _failure_reports.clear()
+
+
 def _log_mlflow_failure(operation: str, exc: Exception) -> None:
     """MLflow is optional telemetry: report the failure, never raise from it.
 
     Without this the caller cannot tell an outage from a quiet success -- for
     get_experiment_stats in particular, a failure and an empty experiment both
     produced total_runs = 0.
+
+    **Aggregated, since #255.** These calls now run off the request path, and
+    `POST /evaluate/monte-carlo` makes five hundred of them for one request:
+    an unreachable tracking server produced five hundred identical warnings,
+    which is not a log an operator can read. The first failure of each
+    operation is reported immediately -- a new kind of failure must not wait a
+    minute to be seen -- and the rest are counted into the next report.
     """
-    logger.warning(
-        "MLflow %s failed: %s: %s", operation, type(exc).__name__, _sanitized(exc)
-    )
+    now = time.monotonic()
+    with _failure_lock:
+        last, suppressed = _failure_reports.get(operation, (None, 0))
+        if last is not None and now - last < _FAILURE_LOG_INTERVAL:
+            _failure_reports[operation] = (last, suppressed + 1)
+            return
+        _failure_reports[operation] = (now, 0)
+    if suppressed:
+        logger.warning(
+            "MLflow %s failed: %s: %s (and %d more in the last %.0fs)",
+            operation, type(exc).__name__, _sanitized(exc),
+            suppressed, _FAILURE_LOG_INTERVAL,
+        )
+    else:
+        logger.warning(
+            "MLflow %s failed: %s: %s", operation, type(exc).__name__, _sanitized(exc)
+        )
 
 
 def _to_dict(input_data):
@@ -241,7 +284,7 @@ def _extract_prediction(payload):
     return payload
 
 
-def log_prediction(
+def _log_prediction_now(
     model_name: str,
     input_data,
     prediction=None,
@@ -250,9 +293,13 @@ def log_prediction(
     latency_ms: float = None,
     confidence=None,
     esg_total_score: float = None,
-):
-    if _OFFLINE:
-        return None
+) -> bool:
+    """The MLflow work. Runs on a telemetry thread, never on the request path.
+
+    Returns whether it succeeded, so the dispatcher can count outcomes. It
+    still catches its own exception and reports it here, because this is where
+    the operation name and the sanitizer are.
+    """
     _ensure_experiment_once()
     try:
         params = _to_dict(input_data)
@@ -302,11 +349,31 @@ def log_prediction(
                 mlflow.set_tag("confidence", str(conf_value))
     except Exception as e:
         _log_mlflow_failure("log_prediction", e)
+        return False
+    return True
 
 
-def log_evaluation(project_name: str, esg_scores: dict, risk_level: str):
+def log_prediction(*args, **kwargs) -> None:
+    """Hand the MLflow call to a telemetry thread and return (#255).
+
+    This was called synchronously from `POST /predict`, `/predict/neural`,
+    `/predict/stacking`, `/evaluate` and `app/ml/routes.py`, and MLflow's
+    client has no bounded wait -- measured, 247 seconds against a port nothing
+    serves. Every one of those responses waited on it.
+
+    Returns `None` whichever way it goes. Nothing has ever used the return
+    value (checked by AST across `app/`), and a caller that branched on
+    whether a metric was recorded would be putting telemetry back into the
+    path this removes it from.
+    """
     if _OFFLINE:
         return None
+    telemetry.submit("log_prediction", _log_prediction_now, *args, **kwargs)
+    return None
+
+
+def _log_evaluation_now(project_name: str, esg_scores: dict, risk_level: str) -> bool:
+    """The MLflow work; see `_log_prediction_now`."""
     _ensure_experiment_once()
     try:
         with mlflow.start_run(run_name=f"eval_{project_name}_{datetime.now().strftime('%H%M%S')}"):
@@ -326,6 +393,24 @@ def log_evaluation(project_name: str, esg_scores: dict, risk_level: str):
             mlflow.set_tag("type", "evaluation")
     except Exception as e:
         _log_mlflow_failure("log_evaluation", e)
+        return False
+    return True
+
+
+def log_evaluation(*args, **kwargs) -> None:
+    """Hand the MLflow call to a telemetry thread and return (#255).
+
+    The worst caller is not a route handler. `calculate_esg` logs an evaluation
+    itself, and `POST /api/v1/evaluate/monte-carlo` calls it once per sample
+    with `n = 500` by default -- so one request created five hundred MLflow
+    runs, in line, before answering. That is the reason this dispatch lives
+    here rather than in the handlers: `BackgroundTasks` cannot be reached from
+    inside a loop several frames down.
+    """
+    if _OFFLINE:
+        return None
+    telemetry.submit("log_evaluation", _log_evaluation_now, *args, **kwargs)
+    return None
 
 
 def _registry_api():
@@ -474,17 +559,15 @@ def get_experiment_stats():
 
 
 
-def log_drift_event(analysis_result, baseline_id="default"):
-    if _OFFLINE:
-        return None
-    """Log drift detection event to MLflow.
+def _log_drift_event_now(analysis_result, baseline_id="default") -> bool:
+    """Log drift detection event to MLflow. Runs on a telemetry thread.
 
     Stores PSI/KS metrics per feature, drift_score, drifted features.
     Tag type=drift_event for filtering in /drift/mlflow-history.
     """
     _ensure_experiment_once()
     if not analysis_result or not analysis_result.get("drift_detected"):
-        return
+        return True
     try:
         from datetime import datetime as _dt
         run_name = "drift_" + _dt.now().strftime("%Y%m%d_%H%M%S")
@@ -515,7 +598,20 @@ def log_drift_event(analysis_result, baseline_id="default"):
             feats = analysis_result.get("features_analyzed", []) or []
             mlflow.log_param("features_analyzed", ",".join(str(x) for x in feats)[:250])
     except Exception as _e:
-        try:
-            print("[mlflow_drift] log failed:", _e)
-        except Exception:
-            pass
+        # Was a bare `print`, which reaches stdout and not the log the
+        # sanitizer and the aggregation apply to.
+        _log_mlflow_failure("log_drift_event", _e)
+        return False
+    return True
+
+
+def log_drift_event(*args, **kwargs) -> None:
+    """Hand the MLflow call to a telemetry thread and return (#255).
+
+    `GET /api/v1/drift/analyze` calls this on the request path; the scheduler
+    calls it from `app/drift_detection.py`. Neither uses the return value.
+    """
+    if _OFFLINE:
+        return None
+    telemetry.submit("log_drift_event", _log_drift_event_now, *args, **kwargs)
+    return None
