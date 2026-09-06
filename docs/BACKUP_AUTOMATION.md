@@ -164,7 +164,7 @@ journalctl -u sora-backup.service --since '2 days ago'
 | `BACKUP_S3_ENDPOINT` | any S3-compatible endpoint |
 | `BACKUP_S3_BUCKET`, `BACKUP_S3_PREFIX`, `BACKUP_S3_REGION` | object location |
 | `BACKUP_S3_ACCESS_KEY_FILE`, `BACKUP_S3_SECRET_KEY_FILE` | credentials, read from files |
-| `BACKUP_S3_CLIENT` | client executable, default `aws` |
+| `BACKUP_S3_CLIENT` | client executable, default `aws`; a test double at `tests/fakes/fake_s3` |
 | `BACKUP_KEEP_ROLLING`, `BACKUP_KEEP_WEEKLY` | retention, default 28 and 8 |
 | `BACKUP_ALERT_HOOK` | executable called on failure |
 | `BACKUP_PYTHON` | interpreter for `backup_crypt.py`, default `python3`; needs `cryptography` |
@@ -351,6 +351,38 @@ test — in every case the database was never touched:
 
 The first is what the header authentication is for. Signing only the ciphertext
 would have let that edit through to a reader that believed the algorithm line.
+
+### Two drills, and only one of them is about the off-site copy
+
+`scripts/backup_restore_drill.sh` starts from a dump it has just written. It
+proves the database can be lost and rebuilt, and it would pass with an empty
+bucket: it never downloads, never decrypts, and never reads a manifest.
+
+`scripts/backup_offsite_drill.sh` starts where a real disaster starts — with
+nothing but the store:
+
+```bash
+BACKUP_IDENTITY_KEY=/path/to/identity.pem \
+PG_CONTAINER=sora-drill-pg \
+    ./scripts/backup_offsite_drill.sh [backup-id]
+```
+
+It selects a **completed** set (one with a manifest — never the newest
+directory, which may be an upload that died), checks every part is present
+before downloading anything, verifies the ciphertext against the manifest's
+size and hash, refuses to decrypt if either disagrees, verifies the decrypted
+bytes against `dump_sha256`, reads the table of contents, restores into a
+temporary database of its own naming, and compares the result with the
+fingerprint stored beside the backup. The temporary database and the plaintext
+are removed on every exit path.
+
+`dump_sha256` was added with that drill. Sets written before it carry no
+plaintext hash, and the drill prints `SKIP` for that step rather than passing
+it — an unverifiable step must not read as a verified one.
+
+The IAM policies for the two identities this needs are in
+[BACKUP_S3_IAM.md](BACKUP_S3_IAM.md). Neither the bucket nor the credentials
+exist yet; that is an owner decision.
 
 ### What the drill proves, and what it does not
 

@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Answer the handful of queries the scripts ask, and nothing else."""
+import os
+import sys
+
+log = os.environ.get("FAKE_PG_LOG")
+if log:
+    with open(log, "a") as fh:
+        fh.write("psql " + " ".join(sys.argv[1:]) + "\n")
+
+argv = sys.argv[1:]
+query = ""
+for flag in ("-c", "-tAc"):
+    if flag in argv:
+        query = argv[argv.index(flag) + 1]
+if not query and not sys.stdin.isatty():
+    query = sys.stdin.read()
+
+lowered = query.lower()
+if "drop database" in lowered or "create database" in lowered:
+    sys.exit(0)
+if "pg_database" in lowered:
+    print("0")
+    sys.exit(0)
+
+# Everything else is a fingerprint query. One answer for the whole fingerprint
+# keeps it deterministic; a test that wants a mismatch sets the variable.
+print(os.environ.get("FAKE_PG_FINGERPRINT", "fingerprint-row"))
+sys.exit(0)

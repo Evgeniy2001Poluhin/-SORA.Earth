@@ -6,6 +6,8 @@ without a network or credentials. Faking at the client boundary keeps the
 scripts under test unmodified -- they call the same commands they would in
 production, and BACKUP_S3_CLIENT decides who answers.
 
+FAKE_S3_LOG names a file every invocation is appended to, argv verbatim.
+
 The bucket is a directory named by FAKE_S3_ROOT. FAKE_S3_FAIL_ON, when set to a
 substring, makes any upload whose key contains it fail -- which is how a partial
 upload is staged.
@@ -24,6 +26,14 @@ def local_of(uri: str) -> Path:
 
 
 def main(argv):
+    # Every invocation, verbatim, including the arguments the wrapper strips
+    # below. A test asserting on upload *order* or on the endpoint reaching the
+    # client needs the calls themselves, not their effects.
+    log = os.environ.get("FAKE_S3_LOG")
+    if log:
+        with open(log, "a") as fh:
+            fh.write(" ".join(argv) + "\n")
+
     args = [a for a in argv if a != "--endpoint-url" and not a.startswith("http")]
     if not args:
         return 2

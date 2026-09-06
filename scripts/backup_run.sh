@@ -104,6 +104,18 @@ pg_fingerprint "$DB" > "$WORK/fingerprint"
 pg_tool pg_dump -U "$PGUSER" -d "$DB" -F c > "$WORK/dump"
 [ -s "$WORK/dump" ] || { echo "the dump is empty" >&2; exit 1; }
 
+# The plaintext hash, taken before anything touches the bytes. The manifest
+# already carried `payload_sha256`, which is the *ciphertext* -- enough to
+# prove the download is intact, and unable to say anything about what comes
+# out of the decryption. A restore that decrypts to the wrong bytes with the
+# wrong key, or against a subtly different envelope, produces a file that
+# passes every check up to `pg_restore` and fails there, or worse, does not.
+if command -v sha256sum >/dev/null 2>&1; then
+    DUMP_SHA="$(sha256sum "$WORK/dump" | awk '{print $1}')"
+else
+    DUMP_SHA="$(shasum -a 256 "$WORK/dump" | awk '{print $1}')"
+fi
+
 echo "==> compress"
 gzip -9 -c "$WORK/dump" > "$WORK/dump.gz"
 rm -f "$WORK/dump"
@@ -128,6 +140,7 @@ cat > "$WORK/metadata.json" <<META
   "created_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "payload_sha256": "$PAYLOAD_SHA",
   "payload_bytes": $PAYLOAD_BYTES,
+  "dump_sha256": "$DUMP_SHA",
   "encryption": "rsa-oaep-sha256 + aes-256-cbc + hmac-sha256",
   "compression": "gzip"
 }
@@ -156,7 +169,8 @@ cat > "$WORK/manifest.json" <<MANIFEST
   "database": "$DB",
   "completed_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "payload_sha256": "$PAYLOAD_SHA",
-  "payload_bytes": $PAYLOAD_BYTES
+  "payload_bytes": $PAYLOAD_BYTES,
+  "dump_sha256": "$DUMP_SHA"
 }
 MANIFEST
 store_put "$WORK/manifest.json" "$BACKUP_ID/manifest.json"
