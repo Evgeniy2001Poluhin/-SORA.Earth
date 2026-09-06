@@ -241,23 +241,50 @@ def test_the_docstring_names_every_module_level_importer():
     )
 
 
-def test_application_startup_is_on_the_blocked_path():
-    """`app/main.py` imports it at module level, so this is not transitive.
+def test_application_startup_is_still_on_the_blocked_path():
+    """Startup reaches it through the routers, and that is enough to block.
 
-    Asserted separately from the list above because it is the fact that makes
-    the issue a startup defect rather than a slow endpoint, and a list check
-    would go green if `main.py` were simply dropped from both sides.
+    This asserted `app/main.py` imports `mlflow_tracking` at module level,
+    which was true until #258 removed the telemetry call from `calculate_esg`.
+    The test failed in that commit rather than the claim quietly rotting --
+    which is what it was for.
+
+    What matters is unchanged and is what is asserted now: importing
+    `app.main` still pulls the module in, because `app/main.py` includes
+    routers that import it at module level. The import is one frame further
+    away and no less on the startup path.
     """
     import ast as ast_mod
 
-    tree = ast_mod.parse((ROOT / "app" / "main.py").read_text())
-    at_module_level = any(
-        (isinstance(sub, ast_mod.Import) and any("mlflow_tracking" in a.name for a in sub.names))
-        or (isinstance(sub, ast_mod.ImportFrom) and "mlflow_tracking" in (sub.module or ""))
-        for node in tree.body
+    main = ast_mod.parse((ROOT / "app" / "main.py").read_text())
+    routers = {
+        alias.name if isinstance(node, ast_mod.Import) else (node.module or "")
+        for node in main.body
         for sub in ast_mod.walk(node)
+        if isinstance(sub, (ast_mod.Import, ast_mod.ImportFrom))
+        for alias, node in [(sub.names[0] if isinstance(sub, ast_mod.Import) else None, sub)]
+        if isinstance(node, (ast_mod.Import, ast_mod.ImportFrom))
+    }
+    api_modules = {r for r in routers if r.startswith("app.api.")}
+    assert api_modules, "app/main.py imports no app.api module at all"
+
+    importers = set()
+    for module in api_modules:
+        path = ROOT / (module.replace(".", "/") + ".py")
+        if not path.exists():
+            continue
+        tree = ast_mod.parse(path.read_text())
+        for node in tree.body:
+            for sub in ast_mod.walk(node):
+                names = ([a.name for a in sub.names] if isinstance(sub, ast_mod.Import)
+                         else [sub.module or ""] if isinstance(sub, ast_mod.ImportFrom) else [])
+                if any("mlflow_tracking" in n for n in names):
+                    importers.add(module)
+
+    assert importers, (
+        "no router imported by app/main.py pulls in mlflow_tracking; if that is "
+        "genuinely true now, this test and the docstring both need rewriting"
     )
-    assert at_module_level, "app/main.py no longer imports mlflow_tracking at module level"
 
 
 def test_the_experiment_lookup_is_bounded_and_the_bound_is_put_back(monkeypatch):

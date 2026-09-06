@@ -125,13 +125,19 @@ def _ensure_experiment_once(api=None) -> None:
     configured but not answering, `import app.mlflow_tracking` blocked -- and
     so did importing anything that imports it.
 
-    Nine modules import it at module level, measured by AST and asserted in
+    Eight modules import it at module level, measured by AST and asserted in
     `tests/test_mlflow_import_makes_no_request.py`:
-    `app/main.py`, `app/drift_detection.py`, `app/registry_retry.py`,
+    `app/drift_detection.py`, `app/registry_retry.py`,
     `app/api/admin_snapshot.py`, `app/api/drift.py`, `app/api/evaluate.py`,
     `app/api/infra.py`, `app/api/predict.py`, `app/api/retrain.py`.
-    None defers the import into a function, so `app.main` -- application
-    startup itself -- blocked directly rather than transitively.
+    None defers the import into a function, and `app.main` includes those
+    routers, so application startup still reaches it -- one frame further away
+    than it used to be, and no less blocked.
+
+    It was nine, `app.main` among them, until #258 took the telemetry call
+    out of `calculate_esg`. The guard here is what said so: the list went
+    stale in the same commit and the test failed rather than the sentence
+    quietly becoming wrong.
 
     The `try` around it caught exceptions and could not catch slowness, which
     is why it looked safe. Measured 2026-09-05: `import mlflow` 1.1s, `import
@@ -410,6 +416,57 @@ def log_evaluation(*args, **kwargs) -> None:
     if _OFFLINE:
         return None
     telemetry.submit("log_evaluation", _log_evaluation_now, *args, **kwargs)
+    return None
+
+
+def _log_simulation_now(operation: str, metrics: dict, tags: dict = None) -> bool:
+    """One event for one sweep. The MLflow work; see `_log_prediction_now`."""
+    _ensure_experiment_once()
+    try:
+        with mlflow.start_run(
+            run_name=f"{operation}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        ):
+            numeric = {}
+            for key, value in (metrics or {}).items():
+                if value is None:
+                    continue          # null is "not measured", and MLflow has no null
+                numeric[key] = float(value)
+            if numeric:
+                mlflow.log_metrics(numeric)
+            mlflow.set_tag("type", "simulation")
+            mlflow.set_tag("operation", operation)
+            for key, value in (tags or {}).items():
+                if value is not None:
+                    mlflow.set_tag(key, str(value)[:250])
+    except Exception as e:
+        _log_mlflow_failure("log_simulation", e)
+        return False
+    return True
+
+
+def log_simulation(operation: str, *, metrics: dict, tags: dict = None) -> None:
+    """One aggregated event for a sweep, instead of one per sample (#258).
+
+    `POST /evaluate/monte-carlo` ran `calculate_esg` once per sample and
+    `calculate_esg` logged an evaluation, so a request with the default
+    `n = 500` created five hundred MLflow runs -- measured, and 444 of them
+    reached production on 2026-09-06 from two probe requests. `/what-if` did
+    the same five times and `/evaluate/ranking` twenty-seven, once per country.
+    None of those samples is an evaluation anybody asked for.
+
+    Deliberately **not** named `log_evaluation`. A sweep is not an evaluation,
+    and reusing the name would leave the experiment unable to tell one from
+    five hundred, which is the state this replaces.
+
+    `metrics` takes numbers only and `tags` short strings; a `None` metric is
+    dropped rather than written as zero, because zero is a measurement. No
+    caller passes the request payload: an aggregate is a summary, and a
+    project name or free-text region has no business in it.
+    """
+    if _OFFLINE:
+        return None
+    telemetry.submit("log_simulation", _log_simulation_now, operation,
+                     metrics=metrics, tags=tags)
     return None
 
 

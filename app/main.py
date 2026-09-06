@@ -512,12 +512,10 @@ FEATURE_COLS = ["budget", "co2_reduction", "social_impact", "duration_months", "
 
 FEATURE_COLS_BASE = ["budget", "co2_reduction", "social_impact", "duration_months", "budget_per_month", "co2_per_dollar", "impact_per_month"]
 
-def log_evaluation(project_name, esg_scores, risk_level):
-    try:
-        from app.mlflow_tracking import log_evaluation as _log_eval
-        _log_eval(project_name, esg_scores, risk_level)
-    except Exception:
-        pass
+# `log_evaluation` used to be wrapped here for `calculate_esg` to call. The
+# call is gone (#258) -- a scoring function does not keep a journal -- and no
+# module imported this wrapper, so it went with it. `app/api/evaluate.py`
+# imports the real one from `app.mlflow_tracking` directly.
 
 
 def make_features(data):
@@ -703,8 +701,6 @@ def calculate_esg(project, region_name: str = "Europe"):
         "risk_level": risk_level,
         "esg_weights": {"environment": 0.4, "social": 0.3, "economic": 0.3},
     }
-    project_name = getattr(project, "name", "unknown")
-    log_evaluation(project_name, result, risk_level)
     return result
 
 
