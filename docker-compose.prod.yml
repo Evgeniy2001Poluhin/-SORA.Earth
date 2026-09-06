@@ -119,8 +119,13 @@ services:
     # previous life of the container. `entrypoint.sh` clears the directory in
     # the master before the fork; this makes that cheap and makes it impossible
     # for the files to outlive the container that wrote them.
+    # `uid`/`gid` are not decoration: a tmpfs declared with only `mode` is
+    # created **root-owned**, this service runs as 1000:1000, and the directory
+    # is then unwritable. Measured -- the first deployment of #262 refused to
+    # start for exactly this and rolled back. They must keep matching `user:`
+    # above; tests/test_prometheus_multiprocess.py asserts that they do.
     tmpfs:
-      - /tmp/prometheus_multiproc:mode=0700,size=16m
+      - /tmp/prometheus_multiproc:mode=0700,uid=1000,gid=1000,size=16m
     # The one place the application image is built. `migrate` and `scheduler`
     # reference the same tag, so all three are the same image by construction
     # rather than by resemblance.
