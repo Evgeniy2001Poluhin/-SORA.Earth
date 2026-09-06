@@ -402,3 +402,40 @@ def test_the_entrypoint_refuses_an_unwritable_directory(tmp_path):
 
     assert result.returncode != 0, "an unwritable directory was accepted"
     assert "not writable" in result.stderr, result.stderr
+
+
+def test_the_tmpfs_is_owned_by_the_user_the_container_runs_as():
+    """A tmpfs with only `mode` is created root-owned, and the service is not root.
+
+    Measured the hard way: the first deployment of #262 built, started, and
+    refused at the entrypoint's writability check, and the script rolled back.
+    The refusal was correct -- with the variable exported and the directory
+    unwritable, every metric write raises inside a request handler -- but
+    nothing had checked the declaration itself.
+
+    `uid`/`gid` on the mount must match the service's `user:`. Both are read
+    from the compose file here rather than hardcoded, so changing one and not
+    the other fails.
+    """
+    import yaml
+
+    compose = yaml.safe_load((ROOT / "docker-compose.prod.yml").read_text())
+    backend = compose["services"]["backend"]
+
+    mounts = [m for m in (backend.get("tmpfs") or []) if "prometheus_multiproc" in m]
+    assert mounts, "the backend declares no tmpfs for the multiprocess directory"
+
+    options = dict(
+        part.split("=", 1)
+        for part in mounts[0].split(":", 1)[1].split(",")
+        if "=" in part
+    )
+    uid, gid = str(backend["user"]).split(":")
+
+    assert options.get("uid") == uid, (
+        f"tmpfs uid={options.get('uid')} but the service runs as {uid}; "
+        "the directory would be root-owned and unwritable"
+    )
+    assert options.get("gid") == gid, (
+        f"tmpfs gid={options.get('gid')} but the service runs as gid {gid}"
+    )
