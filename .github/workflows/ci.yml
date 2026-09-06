@@ -685,6 +685,7 @@ jobs:
           echo "--- the owned set, every severity"
           shellcheck -S style \
             scripts/backup_local_daily.sh \
+            scripts/backup_offsite_drill.sh \
             tests/test_backup_local_daily.sh \
             tests/test_backup_local_integration.sh \
             tools/mutation_backup_local.sh \

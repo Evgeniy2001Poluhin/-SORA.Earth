@@ -730,3 +730,293 @@ def test_a_failed_restore_discards_the_staging_database():
     assert "drop_staging" in text
     assert "trap 'rm -rf \"$WORK\"; drop_staging' EXIT" in text, \
         "staging must be dropped on every exit path, not just the happy one"
+
+
+# ------------------------------------------------------- the off-site drill
+#
+# These run the real scripts. `pg_lib.sh` executes the PostgreSQL tools from
+# PATH when PG_CONTAINER is empty, so tests/fakes/pg stands in for the server
+# and `backup_run.sh` and `backup_offsite_drill.sh` are executed whole rather
+# than described.
+
+FAKE_PG = REPO / "tests" / "fakes" / "pg"
+
+
+def _store_env(store, keypair, **extra):
+    env = dict(store.env)
+    env.update(
+        PATH=f"{FAKE_PG}:{env['PATH']}",
+        PG_CONTAINER="",
+        PGUSER="sora",
+        BACKUP_RECIPIENT_KEY=str(keypair.recipient),
+        BACKUP_IDENTITY_KEY=str(keypair.identity),
+    )
+    env.update(extra)
+    return env
+
+
+def _make_backup(store, keypair, **extra):
+    """Run the real backup, against the fake store and the fake server."""
+    env = _store_env(store, keypair, **extra)
+    done = bash("./scripts/backup_run.sh sora_test", env=env)
+    return done, env
+
+
+@pytest.fixture()
+def a_backup(store, keypair):
+    done, env = _make_backup(store, keypair)
+    assert done.returncode == 0, done.stdout + done.stderr
+    ids = sorted(p.name for p in store.prefix.iterdir() if p.is_dir())
+    assert len(ids) == 1, ids
+    return types_ns(id=ids[0], env=env, dir=store.prefix / ids[0])
+
+
+def test_the_manifest_is_published_last_and_never_first(store, keypair):
+    """The completion contract, asserted on the order of the uploads.
+
+    S3 has no atomic rename, so "the set exists" cannot be a rename. It is the
+    manifest, and the manifest is only true if everything it describes is
+    already there. An upload order that put it first would make every partial
+    upload look like a finished backup -- discovered during a restore.
+    """
+    log = store.root / "upload.log"
+    done, _ = _make_backup(store, keypair, FAKE_S3_LOG=str(log))
+    assert done.returncode == 0, done.stdout + done.stderr
+
+    # argv verbatim: "s3 cp <local> s3://bucket/key". Uploads only -- a
+    # download has the s3:// on the other side.
+    uploads = []
+    for line in log.read_text().splitlines():
+        parts = line.split()
+        if parts[:2] == ["s3", "cp"] and parts[-1].startswith("s3://"):
+            uploads.append(parts[-1])
+    assert uploads, log.read_text()
+    manifests = [i for i, key in enumerate(uploads) if key.endswith("manifest.json")]
+
+    assert manifests, f"no manifest was uploaded: {uploads}"
+    assert manifests[0] == len(uploads) - 1, (
+        f"the manifest is not the last upload: {uploads}"
+    )
+    assert manifests[0] != 0, "the manifest was uploaded first"
+
+
+def test_a_newer_incomplete_set_is_skipped_for_an_older_complete_one(store, keypair, a_backup):
+    """Freshness is not the selector; completeness is.
+
+    A backup interrupted after the payload and before the manifest leaves a
+    directory that is newer than every good one. Choosing by name or by time
+    would pick it.
+    """
+    newer = store.prefix / "99999999T999999Z-deadbeef"
+    newer.mkdir()
+    (newer / "payload.enc").write_bytes(b"half an upload")
+
+    env = _store_env(store, keypair)
+    listed = bash("source scripts/backup_store.sh && store_list_backups", env=env)
+
+    assert a_backup.id in listed.stdout
+    assert "99999999T999999Z-deadbeef" not in listed.stdout, (
+        "an unfinished upload was offered as a restorable backup"
+    )
+
+    drill = bash("./scripts/backup_offsite_drill.sh", env=env)
+    assert f"chosen         : {a_backup.id}" in drill.stdout, drill.stdout
+
+
+def test_the_drill_restores_the_off_site_copy_and_matches_the_fingerprint(store, keypair, a_backup):
+    """The whole path, from the store: download, verify, decrypt, restore, compare."""
+    drill = bash("./scripts/backup_offsite_drill.sh", env=a_backup.env)
+
+    assert drill.returncode == 0, drill.stdout + drill.stderr
+    for step in ("all encryption parts present", "downloaded bytes",
+                 "ciphertext sha256", "dump sha256",
+                 "table of contents", "fingerprint matches"):
+        assert step in drill.stdout, f"{step!r} missing from:\n{drill.stdout}"
+    assert "SKIP" not in drill.stdout, drill.stdout
+
+
+def test_a_truncated_download_is_refused_before_decryption(store, keypair, a_backup):
+    """The bytes that arrived are checked against the manifest, not assumed.
+
+    **Where** it stops is the assertion, not merely that it stops. With the
+    size and hash checks removed the drill still failed -- one step later, in
+    `backup_crypt.sh`, whose message also contains "refusing to decrypt". The
+    first version of this test matched that substring and passed with the
+    checks gone. So it now asserts the decrypt stage was never entered.
+    """
+    payload = a_backup.dir / "payload.enc"
+    payload.write_bytes(payload.read_bytes()[:-64])
+
+    drill = bash("./scripts/backup_offsite_drill.sh", env=a_backup.env)
+
+    assert drill.returncode != 0
+    assert "FAIL  downloaded bytes" in drill.stdout, drill.stdout
+    assert "stopping before decryption" in drill.stderr, drill.stdout + drill.stderr
+    assert "5. decrypt" not in drill.stdout, (
+        "the drill went on to decrypt a payload it had already found wrong:\n"
+        + drill.stdout
+    )
+
+
+def test_a_set_missing_a_part_is_refused_before_anything_is_downloaded(store, keypair, a_backup):
+    """A manifest names a set. It does not prove the set arrived."""
+    (a_backup.dir / "payload.key").unlink()
+
+    drill = bash("./scripts/backup_offsite_drill.sh", env=a_backup.env)
+
+    assert drill.returncode != 0
+    assert "the set is incomplete: payload.key is missing" in drill.stderr, drill.stderr
+
+
+def test_the_wrong_identity_key_cannot_decrypt(store, keypair, a_backup, tmp_path):
+    """A different private key must fail loudly, not produce plausible bytes."""
+    other = tmp_path / "other.pem"
+    subprocess.run(["openssl", "genpkey", "-algorithm", "RSA",
+                    "-pkeyopt", "rsa_keygen_bits:3072", "-out", str(other)],
+                   check=True, capture_output=True)
+    env = dict(a_backup.env, BACKUP_IDENTITY_KEY=str(other))
+
+    drill = bash("./scripts/backup_offsite_drill.sh", env=env)
+
+    assert drill.returncode != 0
+    combined = drill.stdout + drill.stderr
+    assert "fingerprint matches" not in combined, combined
+
+
+def test_an_unreadable_archive_fails_at_the_table_of_contents(store, keypair, a_backup):
+    """`pg_restore --list` before any database is touched.
+
+    A payload that decrypts but is not an archive must be caught before a
+    database is created for it, or the drill leaves a mess behind to explain a
+    failure it already knew about.
+    """
+    env = dict(a_backup.env, FAKE_PG_LIST_FAIL="1")
+
+    drill = bash("./scripts/backup_offsite_drill.sh", env=env)
+
+    assert drill.returncode != 0
+    assert "pg_restore --list refused the archive" in drill.stdout, drill.stdout
+
+
+def test_a_client_failure_is_surfaced_and_not_swallowed(store, keypair, a_backup):
+    """A store that refuses must stop the drill, not produce a green run."""
+    env = dict(a_backup.env, FAKE_S3_FAIL_ON="payload.enc")
+
+    drill = bash("./scripts/backup_offsite_drill.sh", env=env)
+
+    assert drill.returncode != 0
+    assert "fingerprint matches" not in drill.stdout, drill.stdout
+
+
+def test_the_drill_drops_its_database_on_every_exit(store, keypair, a_backup):
+    """Success and failure both. A leftover database is the next operator's problem."""
+    log = store.root / "pg.log"
+
+    for extra in ({}, {"FAKE_PG_RESTORE_FAIL": "1"}):
+        log.write_text("")
+        env = dict(a_backup.env, FAKE_PG_LOG=str(log), **extra)
+        bash("./scripts/backup_offsite_drill.sh", env=env)
+
+        calls = log.read_text()
+        created = [l for l in calls.splitlines() if "CREATE DATABASE" in l]
+        dropped = [l for l in calls.splitlines() if "DROP DATABASE" in l]
+        assert created, f"no database was created, so the test proves nothing:\n{calls}"
+        assert any("WITH (FORCE)" in l for l in dropped), (
+            f"the drill did not drop its database ({extra or 'success path'}):\n{calls}"
+        )
+
+
+def test_a_retry_after_a_failed_upload_produces_a_usable_backup(store, keypair):
+    """Idempotent in the way that matters: the second run is a whole backup.
+
+    The first attempt dies after some parts are uploaded. Nothing cleans up --
+    deliberately, sweeping leftovers is a separate unhurried job -- so what
+    must hold is that the retry produces a *complete* set and that the debris
+    is never offered as one.
+    """
+    failed, _ = _make_backup(store, keypair, FAKE_S3_FAIL_ON="manifest.json")
+    assert failed.returncode != 0, failed.stdout
+
+    done, env = _make_backup(store, keypair)
+    assert done.returncode == 0, done.stdout + done.stderr
+
+    listed = bash("source scripts/backup_store.sh && store_list_backups", env=env)
+    complete = [i for i in listed.stdout.split() if i]
+    assert len(complete) == 1, f"expected one completed set, got {complete}"
+
+    drill = bash("./scripts/backup_offsite_drill.sh", env=env)
+    assert drill.returncode == 0, drill.stdout + drill.stderr
+
+
+def test_the_endpoint_url_reaches_the_client(store, keypair):
+    """Provider-neutrality is this one argument. If it is dropped, every call
+    goes to AWS instead of the configured endpoint -- with credentials."""
+    log = store.root / "endpoint.log"
+    env = _store_env(store, keypair,
+                     BACKUP_S3_ENDPOINT="https://s3.example.invalid",
+                     FAKE_S3_LOG=str(log))
+
+    bash("source scripts/backup_store.sh && store_exists 'nothing/at/all'", env=env)
+
+    assert log.exists(), "the client was never called"
+    assert "--endpoint-url https://s3.example.invalid" in log.read_text(), log.read_text()
+
+
+# ------------------------------------------------------------ the IAM example
+
+
+IAM_DOC = REPO / "docs" / "BACKUP_S3_IAM.md"
+
+
+def _iam_policies():
+    import re
+
+    blocks = re.findall(r"```json\n(.*?)```", IAM_DOC.read_text(), re.S)
+    return [json.loads(b) for b in blocks]
+
+
+def test_the_iam_example_is_three_valid_least_privilege_policies():
+    """The document makes claims. They are cheap to check, so they are checked.
+
+    An IAM example nobody validates is a snippet someone pastes into a console
+    at the moment they are least able to review it.
+    """
+    policies = _iam_policies()
+    assert len(policies) == 3, f"expected writer/restorer/janitor, got {len(policies)}"
+
+    for policy in policies:
+        for statement in policy["Statement"]:
+            actions = statement["Action"]
+            assert all(not a.endswith(":*") for a in actions), f"wildcard action: {actions}"
+            assert "*" not in actions, f"a bare wildcard action: {actions}"
+            resource = json.dumps(statement["Resource"])
+            assert "BUCKET-NAME" in resource, f"unscoped Resource: {resource}"
+
+
+def test_the_writer_cannot_delete_and_the_restorer_cannot_write():
+    """The division is the safety. A single identity with all three verbs means
+    a compromised backup host can erase the backups it just wrote -- which is
+    the failure an off-site copy exists to survive."""
+    writer, restorer, janitor = _iam_policies()
+
+    def verbs(policy):
+        return {a for s in policy["Statement"] for a in s["Action"]}
+
+    assert "s3:PutObject" in verbs(writer)
+    assert not {"s3:DeleteObject", "s3:ListBucket"} & verbs(writer), verbs(writer)
+
+    assert "s3:GetObject" in verbs(restorer)
+    assert not {"s3:PutObject", "s3:DeleteObject"} & verbs(restorer), verbs(restorer)
+
+    assert "s3:DeleteObject" in verbs(janitor)
+    assert "s3:PutObject" not in verbs(janitor), verbs(janitor)
+
+
+def test_the_document_contains_no_credential_shaped_string():
+    """Placeholders only. A real key id in a repository is a real key id."""
+    import re
+
+    text = IAM_DOC.read_text()
+    assert not re.search(r"\bAKIA[0-9A-Z]{16}\b", text), "an AWS access key id"
+    assert not re.search(r"\b[0-9]{12}\b", text), "what looks like an AWS account id"
+    assert "BUCKET-NAME" in text and "PREFIX" in text

@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""`--list` prints a table of contents; a restore consumes stdin and succeeds."""
+import os
+import sys
+
+log = os.environ.get("FAKE_PG_LOG")
+if log:
+    with open(log, "a") as fh:
+        fh.write("pg_restore " + " ".join(sys.argv[1:]) + "\n")
+
+data = sys.stdin.buffer.read()
+
+if "--list" in sys.argv:
+    if os.environ.get("FAKE_PG_LIST_FAIL"):
+        print("pg_restore: error: did not find magic string in file header", file=sys.stderr)
+        sys.exit(1)
+    if not data.startswith(b"PGDMP"):
+        print("pg_restore: error: input file does not appear to be a valid archive",
+              file=sys.stderr)
+        sys.exit(1)
+    for i in range(1, 4):
+        print(f"{i}; 1259 {16000 + i} TABLE public t{i} sora")
+    sys.exit(0)
+
+if os.environ.get("FAKE_PG_RESTORE_FAIL"):
+    print("pg_restore: error: could not execute query", file=sys.stderr)
+    sys.exit(1)
+sys.exit(0)
