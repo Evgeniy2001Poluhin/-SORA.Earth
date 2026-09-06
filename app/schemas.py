@@ -555,6 +555,30 @@ class DriftSimulateUnavailable(BaseModel):
     reason_code: str
 
 
+class DriftSimulateNotFitted(BaseModel):
+    """No baseline exists, so there is nothing to simulate against. Served with 400.
+
+    A refusal about the request, not a fault: the caller has an action, which
+    is to fit the baseline. It keeps its 4xx rather than joining the 200 union
+    precisely because the client has to treat it as an error branch.
+
+    `reason_code` is the point of #250. The frontend used to tell this case
+    apart by `msg.includes("fit baseline first")` -- rewording the sentence,
+    adding a full stop or translating it would silently turn a helpful hint
+    into "Simulate failed: ...". The prose stays in `detail` for display, and
+    survives verbatim inside the JSON, so a browser still holding the previous
+    bundle keeps matching it during a deploy.
+    """
+
+    status: Literal["not_fitted"]
+    mode: None = None
+    shift_sigma: None = None
+    shifts: Dict[str, float] = Field(default_factory=dict)
+    observations: int
+    reason_code: str
+    detail: str
+
+
 DriftSimulateResponse = Annotated[
     Union[DriftSimulateOk, DriftSimulateSkipped],
     Field(discriminator="status"),
