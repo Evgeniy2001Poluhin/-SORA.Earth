@@ -47,16 +47,23 @@ Direct invocation returns: `[info] drift: Drift check skipped: insufficient data
 
 ## 5. MLOps metrics
 
-8 Prometheus metrics exported via `/metrics`:
+Exported via `/metrics`, the ones this section refers to:
 
 - `sora_prediction_latency_ms_bucket` (histogram)
 - `sora_predictions_total` (counter)
 - `sora_drift_detected_total` (counter)
 - `sora_model_promoted_total`, `sora_model_rejected_total` (counters)
-- `sora_model_auc`, `sora_model_accuracy` (gauges)
-- `sora_app_info` (info)
+- `sora_external_refresh_total` (counter, by source and outcome)
+- `sora_app_info` (labelled gauge)
 
-5 Grafana alerts: drift surge, retrain failed, AUC<0.85, p95>500ms, app down.
+`sora_model_auc` and `sora_model_accuracy` were removed in #266. Neither was
+ever set by anything, so both were absent from every scrape, and a Grafana
+alert -- `sora_model_auc < 0.85` -- was configured against one of them. An
+alert whose expression matches no series never fires. They were not given
+writers instead because there is no single honest source for the number while
+the `duration_months` leak (#232) is open.
+
+4 Grafana alerts on these: drift surge, retrain failed, p95>500ms, app down.
 
 Dashboard "SORA MLOps Overview" with 4 panel sections.
 

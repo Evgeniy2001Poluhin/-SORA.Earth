@@ -1,170 +1,887 @@
 {
-  "annotations": {"list": []},
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "graphTooltip": 1,
   "id": null,
   "links": [],
   "panels": [
-    {"type": "row", "title": "Platform Overview", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}, "collapsed": false},
     {
-      "type": "stat", "title": "App Version",
-      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
-      "targets": [{"expr": "sora_app_info", "legendFormat": "{{version}}", "refId": "A"}],
-      "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"1": {"text": "v2.0.0", "color": "green"}}}], "thresholds": {"steps": [{"color": "green", "value": null}]}}}
+      "type": "row",
+      "title": "Platform Overview",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false
     },
     {
-      "type": "stat", "title": "HTTP Requests/sec",
-      "gridPos": {"h": 4, "w": 5, "x": 4, "y": 1},
-      "targets": [{"expr": "sum(rate(http_requests_total[5m]))", "legendFormat": "RPS", "refId": "A"}],
-      "fieldConfig": {"defaults": {"unit": "reqps", "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 10}, {"color": "red", "value": 50}]}}}
-    },
-    {
-      "type": "stat", "title": "Total Predictions",
-      "gridPos": {"h": 4, "w": 5, "x": 9, "y": 1},
-      "targets": [{"expr": "sum(sora_predictions_total)", "legendFormat": "total", "refId": "A"}],
-      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "blue", "value": null}]}}}
-    },
-    {
-      "type": "gauge", "title": "Current Model AUC",
-      "gridPos": {"h": 4, "w": 5, "x": 14, "y": 1},
-      "targets": [{"expr": "sora_model_auc", "legendFormat": "AUC", "refId": "A"}],
-      "fieldConfig": {"defaults": {"min": 0, "max": 1, "thresholds": {"steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.7}, {"color": "green", "value": 0.85}]}}}
-    },
-    {
-      "type": "gauge", "title": "Current Model Accuracy",
-      "gridPos": {"h": 4, "w": 5, "x": 19, "y": 1},
-      "targets": [{"expr": "sora_model_accuracy", "legendFormat": "Accuracy", "refId": "A"}],
-      "fieldConfig": {"defaults": {"min": 0, "max": 1, "thresholds": {"steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.7}, {"color": "green", "value": 0.85}]}}}
-    },
-    {"type": "row", "title": "HTTP Metrics", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5}, "collapsed": false},
-    {
-      "type": "timeseries", "title": "HTTP Request Rate (by status)",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
-      "targets": [{"expr": "sum by (status) (rate(http_requests_total[5m]))", "legendFormat": "{{status}}", "refId": "A"}],
-      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 15}}}
-    },
-    {
-      "type": "timeseries", "title": "HTTP Request Duration (p50 / p95 / p99)",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+      "type": "stat",
+      "title": "App Version",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
       "targets": [
-        {"expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "A"},
-        {"expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "B"},
-        {"expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "p99", "refId": "C"}
+        {
+          "expr": "sora_app_info",
+          "legendFormat": "{{version}}",
+          "refId": "A"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}}}
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "v2.0.0",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        }
+      }
     },
-    {"type": "row", "title": "ML Predictions", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14}, "collapsed": false},
     {
-      "type": "timeseries", "title": "Prediction Rate (by model)",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15},
-      "targets": [{"expr": "sum by (model) (rate(sora_predictions_total[5m]))", "legendFormat": "{{model}}", "refId": "A"}],
-      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "bars", "lineWidth": 1, "fillOpacity": 50}}}
-    },
-    {
-      "type": "timeseries", "title": "Prediction Latency (p50 / p95 / p99)",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15},
+      "type": "stat",
+      "title": "HTTP Requests/sec",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 4,
+        "y": 1
+      },
       "targets": [
-        {"expr": "histogram_quantile(0.50, sum by (le) (rate(sora_prediction_latency_ms_bucket[5m])))", "legendFormat": "p50", "refId": "A"},
-        {"expr": "histogram_quantile(0.95, sum by (le) (rate(sora_prediction_latency_ms_bucket[5m])))", "legendFormat": "p95", "refId": "B"},
-        {"expr": "histogram_quantile(0.99, sum by (le) (rate(sora_prediction_latency_ms_bucket[5m])))", "legendFormat": "p99", "refId": "C"}
+        {
+          "expr": "sum(rate(http_requests_total[5m]))",
+          "legendFormat": "RPS",
+          "refId": "A"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "ms", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 15}}}
-    },
-    {"type": "row", "title": "MLOps Lifecycle", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23}, "collapsed": false},
-    {
-      "type": "stat", "title": "Drift Events",
-      "gridPos": {"h": 5, "w": 4, "x": 0, "y": 24},
-      "targets": [{"expr": "sora_drift_detected_total", "legendFormat": "drift", "refId": "A"}],
-      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}, {"color": "red", "value": 5}]}}}
-    },
-    {
-      "type": "stat", "title": "Models Promoted",
-      "gridPos": {"h": 5, "w": 5, "x": 4, "y": 24},
-      "targets": [{"expr": "sora_model_promoted_total", "legendFormat": "promoted", "refId": "A"}],
-      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "green", "value": null}]}}}
-    },
-    {
-      "type": "stat", "title": "Models Rejected",
-      "gridPos": {"h": 5, "w": 5, "x": 9, "y": 24},
-      "targets": [{"expr": "sora_model_rejected_total", "legendFormat": "rejected", "refId": "A"}],
-      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}}
-    },
-    {
-      "type": "timeseries", "title": "Model AUC Over Time",
-      "gridPos": {"h": 5, "w": 10, "x": 14, "y": 24},
-      "targets": [{"expr": "sora_model_auc", "legendFormat": "AUC", "refId": "A"}],
-      "fieldConfig": {"defaults": {"min": 0, "max": 1, "unit": "percentunit", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "gradientMode": "scheme"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.7}, {"color": "green", "value": 0.85}]}, "color": {"mode": "thresholds"}}}
-    },
-    {"type": "row", "title": "Forecast Model Performance", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 29}, "collapsed": false},
-    {
-      "type": "gauge", "title": "Current Forecast MAE (Score)",
-      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 30},
-      "targets": [{"expr": "sora_forecast_mae_current{metric=\"score\", model=\"ensemble\"}", "legendFormat": "MAE", "refId": "A"}],
-      "fieldConfig": {"defaults": {"min": 0, "max": 20, "unit": "none", "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 5}, {"color": "orange", "value": 10}, {"color": "red", "value": 15}]}}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          }
+        }
+      }
     },
     {
-      "type": "gauge", "title": "Current Forecast RMSE (Score)",
-      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 30},
-      "targets": [{"expr": "sora_forecast_rmse_current{metric=\"score\", model=\"ensemble\"}", "legendFormat": "RMSE", "refId": "A"}],
-      "fieldConfig": {"defaults": {"min": 0, "max": 25, "unit": "none", "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 7}, {"color": "orange", "value": 12}, {"color": "red", "value": 18}]}}}
-    },
-    {
-      "type": "gauge", "title": "Current Forecast R² (Score)",
-      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 30},
-      "targets": [{"expr": "sora_forecast_r2_current{metric=\"score\", model=\"ensemble\"}", "legendFormat": "R²", "refId": "A"}],
-      "fieldConfig": {"defaults": {"min": -1, "max": 1, "unit": "percentunit", "thresholds": {"steps": [{"color": "red", "value": null}, {"color": "orange", "value": 0}, {"color": "yellow", "value": 0.5}, {"color": "green", "value": 0.8}]}}}
-    },
-    {
-      "type": "stat", "title": "Current Forecast MAPE (Score)",
-      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 30},
-      "targets": [{"expr": "sora_forecast_mape_current{metric=\"score\", model=\"ensemble\"}", "legendFormat": "MAPE", "refId": "A"}],
-      "fieldConfig": {"defaults": {"unit": "percent", "decimals": 2, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 5}, {"color": "orange", "value": 10}, {"color": "red", "value": 20}]}}}
-    },
-    {
-      "type": "timeseries", "title": "Forecast MAE Over Time (All Metrics)",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
+      "type": "stat",
+      "title": "Total Predictions",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 9,
+        "y": 1
+      },
       "targets": [
-        {"expr": "sora_forecast_mae_current{metric=\"score\"}", "legendFormat": "Score MAE", "refId": "A"},
-        {"expr": "sora_forecast_mae_current{metric=\"prob\"} * 100", "legendFormat": "Prob MAE (×100)", "refId": "B"},
-        {"expr": "sora_forecast_mae_current{metric=\"co2_reduction\"}", "legendFormat": "CO2 MAE", "refId": "C"}
+        {
+          "expr": "sum(sora_predictions_total)",
+          "legendFormat": "total",
+          "refId": "A"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "none", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "pointSize": 5}}}
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        }
+      }
     },
     {
-      "type": "timeseries", "title": "Forecast RMSE Over Time (All Metrics)",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
+      "type": "row",
+      "title": "HTTP Metrics",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP Request Rate (by status)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
       "targets": [
-        {"expr": "sora_forecast_rmse_current{metric=\"score\"}", "legendFormat": "Score RMSE", "refId": "A"},
-        {"expr": "sora_forecast_rmse_current{metric=\"prob\"} * 100", "legendFormat": "Prob RMSE (×100)", "refId": "B"},
-        {"expr": "sora_forecast_rmse_current{metric=\"co2_reduction\"}", "legendFormat": "CO2 RMSE", "refId": "C"}
+        {
+          "expr": "sum by (status) (rate(http_requests_total[5m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "none", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "pointSize": 5}}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15
+          }
+        }
+      }
     },
     {
-      "type": "table", "title": "Latest Forecast Metrics (All Models)",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 44},
+      "type": "timeseries",
+      "title": "HTTP Request Duration (p50 / p95 / p99)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
       "targets": [
-        {"expr": "sora_forecast_mae_current", "legendFormat": "{{metric}}/{{model}}", "refId": "A", "format": "table", "instant": true},
-        {"expr": "sora_forecast_rmse_current", "legendFormat": "{{metric}}/{{model}}", "refId": "B", "format": "table", "instant": true},
-        {"expr": "sora_forecast_r2_current", "legendFormat": "{{metric}}/{{model}}", "refId": "C", "format": "table", "instant": true},
-        {"expr": "sora_forecast_mape_current", "legendFormat": "{{metric}}/{{model}}", "refId": "D", "format": "table", "instant": true}
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "ML Predictions",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Prediction Rate (by model)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "targets": [
+        {
+          "expr": "sum by (model) (rate(sora_predictions_total[5m]))",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 50
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Prediction Latency (p50 / p95 / p99)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(sora_prediction_latency_ms_bucket[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(sora_prediction_latency_ms_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(sora_prediction_latency_ms_bucket[5m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15
+          }
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "MLOps Lifecycle",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "title": "Drift Events",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "sora_drift_detected_total",
+          "legendFormat": "drift",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Models Promoted",
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 4,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "sora_model_promoted_total",
+          "legendFormat": "promoted",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Models Rejected",
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 9,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "sora_model_rejected_total",
+          "legendFormat": "rejected",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Forecast Model Performance",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "collapsed": false
+    },
+    {
+      "type": "gauge",
+      "title": "Current Forecast MAE (Score)",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 30
+      },
+      "targets": [
+        {
+          "expr": "sora_forecast_mae_current{metric=\"score\", model=\"ensemble\"}",
+          "legendFormat": "MAE",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 20,
+          "unit": "none",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "orange",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 15
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "gauge",
+      "title": "Current Forecast RMSE (Score)",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 30
+      },
+      "targets": [
+        {
+          "expr": "sora_forecast_rmse_current{metric=\"score\", model=\"ensemble\"}",
+          "legendFormat": "RMSE",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 25,
+          "unit": "none",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 7
+              },
+              {
+                "color": "orange",
+                "value": 12
+              },
+              {
+                "color": "red",
+                "value": 18
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "gauge",
+      "title": "Current Forecast R\u00b2 (Score)",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 30
+      },
+      "targets": [
+        {
+          "expr": "sora_forecast_r2_current{metric=\"score\", model=\"ensemble\"}",
+          "legendFormat": "R\u00b2",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": -1,
+          "max": 1,
+          "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.8
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Current Forecast MAPE (Score)",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 30
+      },
+      "targets": [
+        {
+          "expr": "sora_forecast_mape_current{metric=\"score\", model=\"ensemble\"}",
+          "legendFormat": "MAPE",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "orange",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Forecast MAE Over Time (All Metrics)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
+      "targets": [
+        {
+          "expr": "sora_forecast_mae_current{metric=\"score\"}",
+          "legendFormat": "Score MAE",
+          "refId": "A"
+        },
+        {
+          "expr": "sora_forecast_mae_current{metric=\"prob\"} * 100",
+          "legendFormat": "Prob MAE (\u00d7100)",
+          "refId": "B"
+        },
+        {
+          "expr": "sora_forecast_mae_current{metric=\"co2_reduction\"}",
+          "legendFormat": "CO2 MAE",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "pointSize": 5
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Forecast RMSE Over Time (All Metrics)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "targets": [
+        {
+          "expr": "sora_forecast_rmse_current{metric=\"score\"}",
+          "legendFormat": "Score RMSE",
+          "refId": "A"
+        },
+        {
+          "expr": "sora_forecast_rmse_current{metric=\"prob\"} * 100",
+          "legendFormat": "Prob RMSE (\u00d7100)",
+          "refId": "B"
+        },
+        {
+          "expr": "sora_forecast_rmse_current{metric=\"co2_reduction\"}",
+          "legendFormat": "CO2 RMSE",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "pointSize": 5
+          }
+        }
+      }
+    },
+    {
+      "type": "table",
+      "title": "Latest Forecast Metrics (All Models)",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "targets": [
+        {
+          "expr": "sora_forecast_mae_current",
+          "legendFormat": "{{metric}}/{{model}}",
+          "refId": "A",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "sora_forecast_rmse_current",
+          "legendFormat": "{{metric}}/{{model}}",
+          "refId": "B",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "sora_forecast_r2_current",
+          "legendFormat": "{{metric}}/{{model}}",
+          "refId": "C",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "sora_forecast_mape_current",
+          "legendFormat": "{{metric}}/{{model}}",
+          "refId": "D",
+          "format": "table",
+          "instant": true
+        }
       ],
       "transformations": [
-        {"id": "merge"},
-        {"id": "organize", "options": {"excludeByName": {"Time": true}, "indexByName": {"metric": 0, "model": 1, "Value #A": 2, "Value #B": 3, "Value #C": 4, "Value #D": 5}, "renameByName": {"Value #A": "MAE", "Value #B": "RMSE", "Value #C": "R²", "Value #D": "MAPE (%)"}}}
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "metric": 0,
+              "model": 1,
+              "Value #A": 2,
+              "Value #B": 3,
+              "Value #C": 4,
+              "Value #D": 5
+            },
+            "renameByName": {
+              "Value #A": "MAE",
+              "Value #B": "RMSE",
+              "Value #C": "R\u00b2",
+              "Value #D": "MAPE (%)"
+            }
+          }
+        }
       ],
-      "fieldConfig": {"defaults": {"custom": {"align": "left", "displayMode": "auto"}}, "overrides": [
-        {"matcher": {"id": "byName", "options": "MAE"}, "properties": [{"id": "decimals", "value": 3}, {"id": "custom.displayMode", "value": "color-background"}, {"id": "thresholds", "value": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 5}, {"color": "red", "value": 10}]}}]},
-        {"matcher": {"id": "byName", "options": "RMSE"}, "properties": [{"id": "decimals", "value": 3}, {"id": "custom.displayMode", "value": "color-background"}, {"id": "thresholds", "value": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 7}, {"color": "red", "value": 12}]}}]},
-        {"matcher": {"id": "byName", "options": "R²"}, "properties": [{"id": "decimals", "value": 3}, {"id": "custom.displayMode", "value": "color-background"}, {"id": "thresholds", "value": {"steps": [{"color": "red", "value": null}, {"color": "orange", "value": 0}, {"color": "yellow", "value": 0.5}, {"color": "green", "value": 0.8}]}}]},
-        {"matcher": {"id": "byName", "options": "MAPE (%)"}, "properties": [{"id": "decimals", "value": 2}, {"id": "custom.displayMode", "value": "color-background"}, {"id": "thresholds", "value": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 5}, {"color": "red", "value": 10}]}}]}
-      ]}
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left",
+            "displayMode": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MAE"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 3
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 5
+                    },
+                    {
+                      "color": "red",
+                      "value": 10
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RMSE"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 3
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 7
+                    },
+                    {
+                      "color": "red",
+                      "value": 12
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "R\u00b2"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 3
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 0
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.5
+                    },
+                    {
+                      "color": "green",
+                      "value": 0.8
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MAPE (%)"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 5
+                    },
+                    {
+                      "color": "red",
+                      "value": 10
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
     }
   ],
   "schemaVersion": 39,
-  "tags": ["sora", "mlops", "fastapi"],
-  "templating": {"list": []},
-  "time": {"from": "now-6h", "to": "now"},
+  "tags": [
+    "sora",
+    "mlops",
+    "fastapi"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "SORA MLOps Overview",

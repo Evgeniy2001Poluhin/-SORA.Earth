@@ -1,6 +1,6 @@
 import logging
 
-from app.prom_metrics import (sora_retrain_total, sora_refresh_total, sora_full_pipeline_total,
+from app.prom_metrics import (sora_retrain_total, sora_full_pipeline_total,
                               sora_model_promoted, sora_model_rejected)
 from app.promotion import evaluate_promotion
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
