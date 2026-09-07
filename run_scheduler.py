@@ -10,7 +10,9 @@ logging.basicConfig(
 
 import time
 from datetime import datetime
+
 from app.scheduler import init_scheduler, scheduler
+from app.scheduler_metrics import start_metrics_server
 
 logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
 logger = logging.getLogger("run_scheduler")
@@ -47,6 +49,7 @@ def publish_scheduler_status():
 
 if __name__ == "__main__":
     logger.info("Starting dedicated scheduler process...")
+    start_metrics_server()
     init_scheduler()
     logger.info(
         "Scheduler state: running=%s, jobs=%d",
