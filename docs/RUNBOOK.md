@@ -32,7 +32,6 @@ curl -I http://127.0.0.1:8000/api/v1/health
 Ждём 30 секунд → `app, postgres, scheduler` должны быть `(healthy)`.
 
 ---
-```
 
 Эскалация через Timeweb VNC (Recovery Console):
 ```bash
