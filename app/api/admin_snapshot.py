@@ -83,6 +83,27 @@ class AdminSnapshot(BaseModel):
     retrain_log_summary: RetrainLogSummary
 
 
+
+def earliest_next_run(jobs) -> "str | None":
+    """The soonest scheduled run among `jobs`, or None when none is scheduled.
+
+    This was `jobs[0].get("next_run")` -- the first entry of a list in no
+    particular order, which is a wrong answer for twelve of the thirteen jobs
+    (#270). And until `run_scheduler.py` published `next_run` at all, the key
+    was absent and the result could not be anything but None, which reads as
+    "nothing is scheduled".
+
+    A function rather than three lines in the handler so a test can call it.
+    Jobs with no next run are skipped rather than sorted as empty strings: a
+    paused job is not the next one to fire.
+    """
+    upcoming = sorted(
+        job["next_run"] for job in jobs
+        if isinstance(job, dict) and job.get("next_run")
+    )
+    return upcoming[0] if upcoming else None
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -194,7 +215,7 @@ def get_admin_snapshot(
         sched = {}
 
     jobs = sched.get("jobs") or []
-    next_run_at = jobs[0].get("next_run") if jobs else None
+    next_run_at = earliest_next_run(jobs)
 
     # DB-fallback: scheduler may run in a separate container (RUN_SCHEDULER=false here)
     # Detect liveness via recent DataRefreshLog entries within 48h window

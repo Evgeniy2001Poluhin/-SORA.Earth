@@ -19,7 +19,24 @@ logger = logging.getLogger("run_scheduler")
 
 
 def publish_scheduler_status():
-    """Publish scheduler status to Redis for API consumption (hardcoded jobs)."""
+    """Publish what this process actually has, to Redis, for the API to read.
+
+    This published a **hardcoded list of five jobs** (#270). There are
+    thirteen, and one of the five carried a trigger the code has never had:
+    `interval[12:00:00]` for `auto_refresh_external_data`, which is
+    `IntervalTrigger(hours=6)`. `app/scheduler.py:get_scheduler_status()`
+    returned that literal to `GET /api/v1/scheduler/status` tagged
+    `source: "scheduler_container"` -- which reads as "this came from the
+    scheduler". The operator's dashboard rendered `jobs.length` and showed 5.
+
+    Same shape as the schedule section of CLAUDE.md before #252, but in the
+    product rather than a document.
+
+    `next_run` is included per job. Without it
+    `app/api/admin_snapshot.py` computed `next_run_at` from a key that was
+    never present, so the snapshot's "next run" could not be anything but
+    null -- a value indistinguishable from "nothing is scheduled".
+    """
     try:
         from app.redis_cache import redis_client, REDIS_AVAILABLE
         import json
@@ -27,18 +44,22 @@ def publish_scheduler_status():
         if not REDIS_AVAILABLE:
             return
 
-        logger.info("Publishing scheduler status to Redis...")
+        jobs = [
+            {
+                "id": job.id,
+                "name": job.name,
+                "trigger": str(job.trigger),
+                "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
+            }
+            for job in scheduler.get_jobs()
+        ]
 
         status = {
-            "running": True,
-            "jobs": [
-                {"id": "auto_closed_loop_daily", "name": "Daily closed-loop: drift -> retrain -> validate at 03:00 UTC", "trigger": "cron[hour='3', minute='0']"},
-                {"id": "auto_refresh_external_data", "name": "Refresh external ESG data every 12h", "trigger": "interval[12:00:00]"},
-                {"id": "auto_full_pipeline_weekly", "name": "Weekly full pipeline at Sun 03:30 UTC", "trigger": "cron[day_of_week='sun', hour='3', minute='30']"},
-                {"id": "auto_run_ingesters", "name": "Run all ingesters every 24h", "trigger": "interval[24:00:00]"},
-                {"id": "health_ping", "name": "Health ping every 5min", "trigger": "interval[0:05:00]"},
-            ],
-            "jobs_count": 5,
+            "running": scheduler.running,
+            "jobs": jobs,
+            # Derived, not stated. As a separate literal it was free to
+            # disagree with the list beside it, and did: five against thirteen.
+            "jobs_count": len(jobs),
             "last_updated": datetime.utcnow().isoformat() + "Z",
         }
         redis_client.set("sora:scheduler:status", json.dumps(status), ex=120)
