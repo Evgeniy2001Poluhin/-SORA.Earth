@@ -512,11 +512,40 @@ Optional:
 - **MLflow UI**: Tracking server at http://localhost:5000 (if running standalone MLflow)
 - **Health checks**: `/health`, `/api/v1/health` (detailed), `/api/v1/ready` (readiness probe)
 
-**Key metrics:**
-- `sora_predictions_total` - Total predictions served
-- `sora_drift_detected` - Drift events counter
-- `sora_retrain_success/failure` - Retrain outcomes
-- `sora_prediction_latency_seconds` - Prediction latency histogram
+**Key metrics.** Names, labels and the process that writes each — checked
+against the code by `tests/test_key_metrics_contract.py`, which fails if any
+row here stops being true.
+
+| metric | labels | written in | scrape job |
+|---|---|---|---|
+| `sora_predictions_total` | `model` | backend, `app/api/predict.py` | `sora-app` |
+| `sora_prediction_latency_ms` | — (histogram) | backend, `app/api/predict.py` | `sora-app` |
+| `sora_drift_detected_total` | — | scheduler, `app/scheduler.py` | `sora-scheduler` |
+| `sora_retrain_total` | `status` | scheduler, `app/scheduler.py` | `sora-scheduler` |
+| `sora_external_refresh_total` | `source`, `outcome` | scheduler, `app/scheduler.py` | `sora-scheduler` |
+
+**Always name the job.** Both processes export the same metric *names* — every
+`sora_*` symbol is defined once in `app/prom_metrics.py` and imported by both —
+so `sora_drift_detected_total` alone returns two series, one of which is
+permanently zero because that process never writes it. Query
+`sora_drift_detected_total{job="sora-scheduler"}` or `sum by (job) (...)`, never
+the bare name.
+
+This list previously read:
+
+```
+sora_predictions_total          the only one that was right
+sora_drift_detected             no such metric; the name is _total, and until
+                                #266 nothing incremented it — while a Grafana
+                                alert watched it
+sora_retrain_success/failure    no such metric; it is sora_retrain_total{status},
+                                and until #267 it was written in a process
+                                Prometheus did not scrape
+sora_prediction_latency_seconds no such metric; the name ends _ms
+```
+
+Three of the four could not have answered a question, and one of them had an
+alert configured against it (#264, split into #266, #267 and this).
 
 ## External Dependencies
 
