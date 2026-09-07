@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.auth import require_admin
-from app.database import SessionLocal, RetrainLog, DataRefreshLog
+from app.database import SessionLocal, RetrainLog, DataRefreshLog, count_physical_runs
 from app.external_data import get_refresh_status
 from app.drift_detection import drift_detector
 from app.mlflow_tracking import get_experiment_stats
@@ -117,15 +117,19 @@ def get_admin_snapshot(
     db=Depends(get_db),
     _admin=Depends(require_admin),
 ):
-    total = db.query(RetrainLog).count()
+    # Runs, not rows (#199 contract point 10). One closed-loop cycle writes two
+    # rows and `retrain_models` writes two both saying `success`, so a row count
+    # here reports one retrain as two. `count_physical_runs` groups by `run_id`
+    # and is the only definition of this figure in the project.
+    total = count_physical_runs(db)
     last = (
         db.query(RetrainLog)
         .order_by(RetrainLog.started_at.desc())
         .first()
     )
 
-    retrain_success = db.query(RetrainLog).filter(RetrainLog.status == "success").count()
-    retrain_failed = db.query(RetrainLog).filter(RetrainLog.status == "failed").count()
+    retrain_success = count_physical_runs(db, status="success")
+    retrain_failed = count_physical_runs(db, status="failed")
 
     retrain_summary = RetrainLogSummary(
         total=total,
