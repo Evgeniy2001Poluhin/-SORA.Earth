@@ -101,8 +101,9 @@ docker-compose up --build -d
 # Stop all services
 docker-compose down
 
-# Production deployment
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Production deployment is not a compose command, and this section is about
+# development. See "Production Server" below: ./scripts/deploy_production.sh
+# is the only supported way, and the reason is written there.
 ```
 
 ### Database Migrations
