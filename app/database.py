@@ -579,7 +579,7 @@ class EnvironmentalJobLog(Base):
     metadata_json = Column(JSON, nullable=True)  # Job-specific metadata
 
 
-def count_physical_runs(db, status=None) -> int:
+def count_physical_runs(db, status=None, since=None) -> int:
     """How many retrains happened, not how many rows were written (#199 phase 2A).
 
     A closed-loop cycle writes two rows and `retrain_models` writes two rows,
@@ -596,12 +596,20 @@ def count_physical_runs(db, status=None) -> int:
     the training and `rejected` for the decision, which is the normal shape --
     therefore counts once under each, and that is the honest answer: the run did
     both of those things.
+
+    `since` filters the same way, on `started_at`, so "runs in the last N hours"
+    is one run per `run_id` too. It is a parameter here rather than a second
+    grouping at the call site: this function is the only definition of what
+    "how many runs" means, and two implementations of that question is how the
+    project ended up with two promotion gates.
     """
     from sqlalchemy import func
 
     query = db.query(RetrainLog)
     if status is not None:
         query = query.filter(RetrainLog.status == status)
+    if since is not None:
+        query = query.filter(RetrainLog.started_at >= since)
 
     grouped = (
         query.filter(RetrainLog.run_id.isnot(None))

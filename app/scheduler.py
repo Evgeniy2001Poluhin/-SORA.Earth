@@ -518,11 +518,14 @@ def get_scheduler_status():
             if status_json:
                 status = json.loads(status_json)
 
-                # Add retrain history count
+                # Retrains, not the rows they wrote (#199 contract point 10).
+                # This loop writes two rows per cycle itself -- the training and
+                # the decision -- so a row count here reported its own work at
+                # double.
                 try:
-                    from app.database import SessionLocal, RetrainLog
+                    from app.database import SessionLocal, count_physical_runs
                     db = SessionLocal()
-                    status["retrain_history_count"] = db.query(RetrainLog).count()
+                    status["retrain_history_count"] = count_physical_runs(db)
                     db.close()
                 except Exception:
                     status["retrain_history_count"] = 0

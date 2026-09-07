@@ -7,7 +7,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
-from app.database import SessionLocal, RetrainLog, DataRefreshLog, PredictionLog
+from app.database import (SessionLocal, RetrainLog, DataRefreshLog, PredictionLog,
+                          count_physical_runs)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -27,10 +28,18 @@ def admin_diagnostics(
     _admin=Depends(require_admin),
 ):
     since = datetime.utcnow() - timedelta(hours=hours)
-    retrain_total = db.query(RetrainLog).count()
-    retrain_success = db.query(RetrainLog).filter(RetrainLog.status == "success").count()
-    retrain_failed = db.query(RetrainLog).filter(RetrainLog.status == "failed").count()
-    retrain_recent = db.query(RetrainLog).filter(RetrainLog.started_at >= since).count()
+    # Runs, not rows (#199 contract point 10). One closed-loop cycle writes two
+    # rows -- the training and the decision -- and `retrain_models` writes two
+    # both saying `success`, so `.count()` here reported one run as two.
+    #
+    # `count_physical_runs` groups by `run_id` and was written for exactly this,
+    # with `tests/test_canonical_run_id.py` behind it. It already backs
+    # `/admin/ai-control`; this endpoint was the reader that still counted rows,
+    # and the structural tests over it never looked at a value (#199).
+    retrain_total = count_physical_runs(db)
+    retrain_success = count_physical_runs(db, status="success")
+    retrain_failed = count_physical_runs(db, status="failed")
+    retrain_recent = count_physical_runs(db, since=since)
     last_retrain = db.query(RetrainLog).order_by(RetrainLog.started_at.desc()).first()
     refresh_total = db.query(DataRefreshLog).count()
     refresh_success = db.query(DataRefreshLog).filter(DataRefreshLog.status == "success").count()
