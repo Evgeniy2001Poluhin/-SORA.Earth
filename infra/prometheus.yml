@@ -5,3 +5,16 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["backend:8000"]
+
+  # The scheduler is a separate container and writes eleven `sora_*` metrics
+  # that exist nowhere else -- `sora_retrain_total`, `sora_full_pipeline_total`,
+  # the four forecast gauges and the five environmental ones. Until this target
+  # existed it served no HTTP and none of them reached Prometheus (#267).
+  #
+  # Its own job name rather than a second target under "sora-app": the two
+  # processes publish metrics of the same names, and a query that cannot tell
+  # them apart is worse than one that has to name which it means.
+  - job_name: "sora-scheduler"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["scheduler:9000"]

@@ -493,6 +493,19 @@ Optional:
   disagreeing with `/metrics` about four names it did carry. This section said
   otherwise, which is how the two were confused for months.
 
+- **The scheduler publishes its own** on `scheduler:9000/metrics`, scraped as a
+  separate Prometheus job (#267). Eleven `sora_*` metrics are written only in
+  that container — `sora_retrain_total`, `sora_full_pipeline_total`, the four
+  forecast gauges and the five environmental ones — and until that target
+  existed the process served no HTTP, so every one of them was set into memory
+  nobody read and lost on the next restart. Its own job name rather than a
+  second target under `sora-app`: both processes publish metrics of the same
+  names.
+
+  No multiprocess directory there. It is one process, and
+  `app/scheduler_metrics.py` refuses to serve if `PROMETHEUS_MULTIPROC_DIR` is
+  set rather than publishing whichever files it happens to find.
+
 - **Operational counters**: `/api/v1/metrics` (JSON) — request counts by
   endpoint and status, uptime, response times. Never scraped by Prometheus.
 - **Grafana dashboards**: http://localhost:3000 (admin/sora2026). Dashboard: "SORA MLOps Overview"
