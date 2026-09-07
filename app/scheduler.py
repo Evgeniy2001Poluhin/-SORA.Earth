@@ -185,7 +185,7 @@ def backend_base_url() -> str:
 # what hid this for as long as it lasted.
 from app.prom_metrics import (
     sora_retrain_total,
-    sora_refresh_total,
+    sora_external_refresh_total,
     sora_full_pipeline_total,
     sora_drift_detected as sora_drift_detected_total,
     sora_model_promoted as sora_model_promoted_total,
@@ -383,6 +383,12 @@ def retrain_models(trigger_source: str = "manual"):
 
     return status
 
+#: What `app/external_data.py:refresh_live_data` already records as the source
+#: of this refresh. Taken from there rather than invented, so the label means
+#: the same thing as the `data_refresh_log` row beside it.
+EXTERNAL_REFRESH_SOURCE = "world_bank_oecd"
+
+
 def scheduled_refresh_external_data():
     """Refresh external ESG data with distributed lock and DB logging."""
     from app.locks import RedisLock
@@ -391,6 +397,10 @@ def scheduled_refresh_external_data():
     lock = RedisLock(key="sora:lock:external_refresh", timeout=300)
     if not lock.acquire():
         logger.warning("External refresh skipped: another refresh is already running")
+        # Counted, not passed over: a refresh that keeps being skipped looks
+        # exactly like one that keeps succeeding if only successes are counted.
+        sora_external_refresh_total.labels(
+            source=EXTERNAL_REFRESH_SOURCE, outcome="skipped").inc()
         return {"status": "skipped", "reason": "lock_held"}
 
     db = SessionLocal()
@@ -416,6 +426,13 @@ def scheduled_refresh_external_data():
                 "total_countries": log.total_countries,
             },
         )
+        # The outcome the run recorded for itself, not "it did not raise":
+        # `refresh_live_data` reports its own partial and error states, and
+        # collapsing those into success is how a broken source reads as healthy.
+        sora_external_refresh_total.labels(
+            source=EXTERNAL_REFRESH_SOURCE,
+            outcome="success" if log.status == "success" else "failed",
+        ).inc()
         return result
 
     except Exception as e:
@@ -435,6 +452,8 @@ def scheduled_refresh_external_data():
             pass
 
         logger.exception("External data refresh failed: %s", e)
+        sora_external_refresh_total.labels(
+            source=EXTERNAL_REFRESH_SOURCE, outcome="failed").inc()
         return {"status": "error", "message": str(e)}
 
     finally:
@@ -581,6 +600,21 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         if not drift_detected:
             logger.info("Closed loop: no drift, skipping retrain")
             return {"status": "ok", "drift_detected": False, "retrained": False, "reason": "drift_not_detected"}
+
+        # The one place this counter moves (#266). It counts **measured**
+        # drift, so the two branches above are deliberately silent: an
+        # unavailable check is not "no drift", and "no drift" is not an event.
+        #
+        # Here rather than in `compute_drift`, because that function is also
+        # called by a read-only endpoint -- counting there would make looking
+        # at the drift page indistinguishable from drift occurring. Every path
+        # that acts on a drift verdict goes through this function, so one
+        # decision increments this once.
+        #
+        # A Grafana alert has been watching `increase(sora_drift_detected_total[5m]) > 0`
+        # since before this line existed. Nothing incremented it, so it could
+        # not fire.
+        sora_drift_detected_total.inc()
         old_auc = None
         try:
             from app.api.retrain import _get_current_metrics

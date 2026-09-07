@@ -83,25 +83,6 @@ groups:
         annotations:
           summary: "Model retrain was rejected (AUC degraded)"
 
-      - uid: sora-auc-degradation
-        title: AUC Below Threshold
-        condition: A
-        data:
-          - refId: A
-            relativeTimeRange:
-              from: 600
-              to: 0
-            datasourceUid: prometheus
-            model:
-              expr: sora_model_auc < 0.85
-              intervalMs: 1000
-              maxDataPoints: 43200
-        for: 5m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Model AUC dropped below 0.85"
-
       - uid: sora-high-latency
         title: High Prediction Latency
         condition: A

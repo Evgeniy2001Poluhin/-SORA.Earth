@@ -27,7 +27,18 @@ from prometheus_client import Counter, Histogram, Gauge
 
 # ── MLOps lifecycle ──
 sora_retrain_total      = Counter("sora_retrain_total",       "Retrain runs",          ["status"])
-sora_refresh_total      = Counter("sora_refresh_total",       "Data refresh runs",     ["status"])
+#: Replaces `sora_refresh_total`, which had a `status` label and no writer
+#: anywhere in `app/` (#266). A new name rather than new labels on the old one:
+#: changing a metric's label set in place breaks every query and dashboard that
+#: used it, silently, and this one is being given a writer at the same time --
+#: two changes hiding behind one name.
+#:
+#: `source` because the refresh already records one (`world_bank_oecd`, in
+#: `app/external_data.py`), and a second source is a matter of time. `outcome`
+#: rather than `status` because `skipped` is not a status of the data.
+sora_external_refresh_total = Counter(
+    "sora_external_refresh_total", "External data refresh runs",
+    ["source", "outcome"])
 sora_full_pipeline_total= Counter("sora_full_pipeline_total", "Full pipeline runs",    ["status"])
 sora_drift_detected     = Counter("sora_drift_detected_total","Drift detection events")
 sora_model_promoted     = Counter("sora_model_promoted_total","Models promoted")
@@ -83,17 +94,19 @@ sora_telemetry_tasks_total = Counter(
     "sora_telemetry_tasks_total", "MLflow telemetry tasks by outcome",
     ["outcome", "operation"])
 
-# ── Model quality (set after retrain / on startup) ──
+# ── Model quality ──
 #
-# `mostrecent`: the quality of the one model being served. Nothing in `app/`
-# sets either of these today -- grep found the definitions and no writer -- so
-# they publish nothing at all. That is a separate question from this one and is
-# left as it is; the mode is declared so that whoever starts setting them gets
-# one series rather than four.
-sora_model_auc          = Gauge("sora_model_auc",     "Current model AUC-ROC",
-                                multiprocess_mode="mostrecent")
-sora_model_accuracy     = Gauge("sora_model_accuracy", "Current model accuracy",
-                                multiprocess_mode="mostrecent")
+# `sora_model_auc` and `sora_model_accuracy` were removed (#266). Nothing set
+# either, so both were structurally absent from every scrape -- and a Grafana
+# alert, `sora_model_auc < 0.85`, was configured against one of them. An alert
+# whose expression matches no series never fires: it is worse than no alert,
+# because it looks like coverage.
+#
+# They were not given writers because there is no single honest source for the
+# number yet. The AUC of the serving model is exactly what #232 is about: 0.905
+# is unusable as evidence until the `duration_months` leak is quantified, and
+# publishing it as a gauge would put that figure on a dashboard as fact.
+# Accuracy has the same problem plus an unfixed threshold and split.
 
 # ── Forecast model performance (updated after walk-forward validation) ──
 # `mostrecent` throughout: each is the latest walk-forward result for one

@@ -18,7 +18,7 @@ import pytest
 
 COUNTERS = [
     "sora_retrain_total",
-    "sora_refresh_total",
+    "sora_external_refresh_total",
     "sora_full_pipeline_total",
     "sora_drift_detected_total",
     "sora_model_promoted_total",
@@ -36,7 +36,13 @@ def test_every_counter_is_a_real_counter():
 
 # Which counters carry a status label, taken from app/prom_metrics.py rather than
 # assumed: the three run-outcome counters do, the three event counters do not.
-LABELLED = {"sora_retrain_total", "sora_refresh_total", "sora_full_pipeline_total"}
+LABELLED = {"sora_retrain_total", "sora_full_pipeline_total"}
+
+# `sora_external_refresh_total` carries two labels rather than one `status`
+# (#266). It replaced `sora_refresh_total`, which had a label set and no writer;
+# a new name rather than new labels on the old one, because changing a label set
+# in place breaks every query that used it without saying so.
+TWO_LABELS = {"sora_external_refresh_total"}
 
 
 @pytest.mark.parametrize("name", COUNTERS)
@@ -50,7 +56,9 @@ def test_each_counter_works_with_its_real_call_pattern(name):
     import app.scheduler as scheduler
 
     counter = getattr(scheduler, name)
-    if name in LABELLED:
+    if name in TWO_LABELS:
+        counter.labels(source="test", outcome="success").inc()
+    elif name in LABELLED:
         counter.labels(status="test").inc()
     else:
         counter.inc()
