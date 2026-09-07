@@ -13,7 +13,10 @@ before measuring readiness against anything.
 
 ```
 Product      SORA.Earth ESG platform -- this file and README.md
-             In production, 162 published endpoints.
+             In production, 162 published endpoints -- that is 162 (path,
+             method) pairs under /api/, HEAD and OPTIONS excluded. The bare
+             number was right and said nothing about what it counted; the app
+             also has 180 unique paths and 157 of them under /api/ (#292).
              Remaining work is a punch-list, not a roadmap phase.
 
 Experiment   Environmental crisis analytics -- ROADMAP_ENV_CRISIS_2026.md
@@ -45,7 +48,7 @@ of the experiment -- forecasting weather and air quality over their 21 regions
 - Frontend: React 19 + TypeScript + Vite + TanStack Query + Zustand
 - ML: scikit-learn (RandomForest, XGBoost), PyTorch MLP, SHAP for explainability
 - Observability: Prometheus + Grafana + MLflow
-- Infrastructure: Docker Compose with 7 services
+- Infrastructure: Docker Compose -- 7 services in `docker-compose.yml` (development), 10 in `docker-compose.prod.yml` (nine long-running plus the one-shot `migrate`)
 
 **Deployment:** Docker Compose with separate `app` (FastAPI) and `scheduler` (APScheduler) containers, Nginx reverse proxy on port 80.
 
@@ -143,8 +146,8 @@ app/
 ```
 
 **Key files:**
-- `app/main.py:313` - `make_features()` creates 9-feature DataFrame for RF model
-- `app/main.py:387` - `calculate_esg()` computes ESG scores + region-aware recommendations
+- `app/main.py` → `make_features()` builds the 9-column frame the RF model expects
+- `app/main.py` → `calculate_esg()` computes ESG scores + region-aware recommendations
 - `app/scheduler.py` - Thirteen scheduled jobs; see the table below. Drift is
   checked inside the daily closed loop, not by a job of its own.
 - `app/drift_detection.py` - KS-test drift detection. It returns a verdict and
@@ -237,7 +240,10 @@ job: drift is checked inside `closed_loop_retrain`, once a day.
 
 ### Models
 
-Three models loaded at startup (`app/main.py:199-237`):
+Four models, loaded in `app/main.py` at import time. The heading said three
+while listing four, and the line range pointed at a comment about database
+defaults — the loads are spread across the file and move whenever it is edited
+(#292):
 - **RandomForest** (`models/model.pkl`) - Primary ESG success predictor (9 features)
 - **XGBoost** (`models/xgb_model.pkl`) - Alternative model (7 features)
 - **PyTorch MLP** (`models/pytorch_mlp.pth`) - Neural network (SoraNet class)
@@ -245,7 +251,7 @@ Three models loaded at startup (`app/main.py:199-237`):
 
 Feature engineering: `make_features()` computes derived features (budget_per_month, co2_per_dollar, efficiency_score) + temporal features (year, quarter).
 
-**SHAP explainability:** TreeExplainer initialized at startup (`app/main.py:261`). Endpoints: `/api/v1/predict/explain`, `/api/v1/explain/local`, `/api/v1/explain/global`.
+**SHAP explainability:** TreeExplainer is initialized at startup in `app/main.py`. Endpoints: `/api/v1/predict/explain`, `/api/v1/explain/local`, `/api/v1/explain/global`.
 
 ### Database Schema
 
@@ -369,7 +375,11 @@ UI shows "≈det" badge for near-deterministic predictions (see `web/src/feature
 ## Testing
 
 - **Test framework:** pytest with timeout=30s (`pytest.ini`)
-- **Coverage target:** 375/384 tests passing (97.7%)
+- **Suite size:** `pytest --collect-only tests/` reports 3082 cases. This line
+  read "375/384 tests passing (97.7%)" for months -- a ratio nobody recomputed,
+  wrong by a factor of eight. The passing figure is not restated here at all:
+  CI computes it on every commit, and a copy in a document can only go stale
+  (#292).
 - **Test structure:** `tests/test_<domain>.py` mirrors `app/api/<domain>.py`
 - **Fixtures:** `tests/conftest.py` provides FastAPI TestClient, mock database session
 
@@ -467,7 +477,7 @@ Optional:
 
 4. **Database Migrations**: Always create Alembic migrations for schema changes. The `migrations/` directory is mounted in Docker and runs on first `postgres` container startup.
 
-5. **CORS Configuration**: CORS origins hardcoded in `app/main.py:144-151`. Add new origins there if deploying to new domains.
+5. **CORS Configuration**: the origin list is hardcoded in `app/main.py`, in the `allow_origins` argument to `CORSMiddleware`. Add new origins there if deploying to new domains.
 
 6. **Rate Limiting**: `SlowAPIMiddleware` in `app/rate_limit.py` counts every HTTP
    request per caller address. 100 req/min by default; `/api/v1/model/retrain` gets
@@ -486,7 +496,7 @@ Optional:
    was a pass-through stub. Stating a control that does not exist is worse than
    stating none, because someone relies on it.
 
-7. **Head Requests**: Custom middleware at `app/main.py:118-141` converts HEAD to GET internally. Do not set Content-Length manually in responses.
+7. **Head Requests**: custom middleware in `app/main.py` converts HEAD to GET internally. Do not set Content-Length manually in responses.
 
 8. **Frontend Port**: Vite dev server runs on port 5173, proxies API requests to backend at port 8000 (configured in `web/vite.config.ts`).
 
