@@ -576,7 +576,7 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         logger.warning("Closed loop skipped: lock held")
         return {"status": "skipped", "reason": "lock_held"}
     try:
-        from app.api.drift import compute_drift
+        from app.api.drift import NOT_MEASURED_STATUSES, compute_drift
         drift_result = compute_drift(window=50)
         # `compute_drift`, not the HTTP handler: that one returns a Response on
         # the unavailable path, and this needs the value.
@@ -596,6 +596,27 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
                 "retrained": False,
                 "reason": "drift_check_unavailable",
             }
+        if drift_result.status in NOT_MEASURED_STATUSES:
+            # Not a fault, and not a verdict either: there was not enough to
+            # compute one. Reporting False here would assert that drift was
+            # looked for and not found -- which `ModelDriftNotMeasured` exists
+            # to forbid, and which this loop did until #274.
+            #
+            # Observed on production 2026-09-07 03:00:00Z: the daily run logged
+            # "Closed loop: no drift, skipping retrain" while
+            # `data/predictions_log.csv` did not exist.
+            logger.info(
+                "Closed loop: drift not measured (%s), skipping retrain",
+                drift_result.status,
+            )
+            return {
+                "status": "skipped",
+                "drift_detected": None,
+                "retrained": False,
+                "reason": "drift_not_measured",
+                "drift_status": drift_result.status,
+            }
+
         drift_detected = bool(drift_result.drift_detected)
         if not drift_detected:
             logger.info("Closed loop: no drift, skipping retrain")
