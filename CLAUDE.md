@@ -126,7 +126,7 @@ alembic downgrade -1
 ```
 app/
 ├── main.py                 # FastAPI app, middleware, route registration, model loading
-├── database.py            # SQLAlchemy models (Evaluation, PredictionLog, DriftLog, etc.)
+├── database.py            # SQLAlchemy models (Evaluation, PredictionLog, RetrainLog, ...)
 ├── schemas.py             # Pydantic models for request/response validation
 ├── api/                   # API route modules (evaluate, predict, analytics, drift, etc.)
 │   ├── evaluate.py        # /api/v1/evaluate - ESG scoring
@@ -147,7 +147,9 @@ app/
 - `app/main.py:387` - `calculate_esg()` computes ESG scores + region-aware recommendations
 - `app/scheduler.py` - Thirteen scheduled jobs; see the table below. Drift is
   checked inside the daily closed loop, not by a job of its own.
-- `app/drift_detection.py` - KS-test based drift detection with PostgreSQL decision log
+- `app/drift_detection.py` - KS-test drift detection. It returns a verdict and
+  writes nothing: the file holds no session, no `INSERT` and no table name.
+  This line said "with PostgreSQL decision log"; there is no such log (#282).
 - `run_scheduler.py` - Standalone scheduler process (runs in separate Docker container)
 
 ### Frontend Structure
@@ -247,14 +249,51 @@ Feature engineering: `make_features()` computes derived features (budget_per_mon
 
 ### Database Schema
 
-SQLAlchemy models in `app/database.py`:
-- `Evaluation` - ESG evaluation history (project_name, esg_scores, success_prob)
-- `PredictionLog` - Prediction logs with features + latency metrics
-- `DriftLog` - Drift detection results (drift_detected, p_values, features)
-- `RetrainLog` - Model retrain decisions (trigger, outcome, auc_old, auc_new)
-- `RefreshJob` - External data refresh job status
+Sixteen SQLAlchemy models in `app/database.py`, with the table each one
+creates. The table names are what `psql` needs, and they are not the class
+names lowercased: most are plural, two are not.
 
-**Connection:** PostgreSQL via SQLAlchemy async engine. Pool size: 10, max overflow: 20.
+| model | table |
+|---|---|
+| `Evaluation` | `evaluations` |
+| `PredictionLog` | `predictions_log` |
+| `DataRefreshLog` | `data_refresh_log` |
+| `CountryIndicatorHistory` | `country_indicator_history` |
+| `IngesterRun` | `ingester_runs` |
+| `RetrainLog` | `retrain_log` |
+| `BatchResultDB` | `batch_results` |
+| `ForecastHistory` | `forecast_history` |
+| `ForecastModelMetrics` | `forecast_model_metrics` |
+| `RegionSignal` | `region_signals` |
+| `RegionESGScore` | `region_esg_scores` |
+| `WebhookSubscription` | `webhook_subscriptions` |
+| `WebhookDelivery` | `webhook_deliveries` |
+| `HealthPing` | `health_pings` |
+| `EnvironmentalObservation` | `environmental_observations` |
+| `EnvironmentalJobLog` | `environmental_job_log` |
+
+The table is read from `__tablename__` and checked against the module by
+`tests/test_docs_name_real_tables.py`, which also refuses any SQL in this file
+that names a table no model creates. **Edit the code, then regenerate this; do
+not hand-edit the table.**
+
+**There is no `DriftLog` model and no `drift_log` table, and drift decisions
+are not persisted anywhere.** This section named `DriftLog` and `RefreshJob`;
+neither class exists -- the second one is `DataRefreshLog` -- and two debugging
+commands in this file selected from `drift_log`, which answers `ERROR:
+relation "drift_log" does not exist`. A list of five with two invented reads as
+complete, and the commands were offered as the way to look at drift history,
+which is when nobody is in a position to debug the documentation (#282).
+
+The closest durable record is `retrain_log`: what the closed loop decided, not
+what it measured. `compute_drift` computes a verdict and returns it; the
+scheduler logs the decision that followed.
+
+**Connection:** PostgreSQL through pgbouncer, via SQLAlchemy's **synchronous**
+`create_engine` with `pool_pre_ping=True` and no other pool arguments -- so the
+defaults apply, `pool_size=5` and `max_overflow=10`. This paragraph said "async
+engine. Pool size: 10, max overflow: 20", and all three numbers were figures
+nobody had set. `create_async_engine` appears nowhere in the codebase.
 
 **There is no `User` table, and user accounts are not persisted.** This list
 named one, "Auth users (hashed passwords with bcrypt)"; both halves were wrong,
@@ -568,8 +607,9 @@ alert configured against it (#264, split into #266, #267 and this).
 # Check scheduler logs for drift/retrain activity
 docker-compose logs -f scheduler | grep -E "(drift|retrain)"
 
-# Query drift log directly
-docker-compose exec postgres psql -U sora -d sora_earth -c "SELECT * FROM drift_log ORDER BY checked_at DESC LIMIT 5;"
+# What the closed loop decided. There is no drift_log table -- this command
+# used to select from one, and answered "relation does not exist" (#282).
+docker-compose exec postgres psql -U sora -d sora_earth -c "SELECT started_at, status, trigger_source FROM retrain_log ORDER BY started_at DESC LIMIT 5;"
 
 # Check Redis cache stats
 curl http://localhost:8000/api/v1/cache/redis
@@ -759,10 +799,11 @@ docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml exec postgres \
   pg_dump -U sora sora_earth > backup_$(date +%Y%m%d_%H%M%S).sql
 
-# View recent drift checks
+# View recent closed-loop decisions. Not drift checks: the verdict is computed
+# and returned, never stored, so retrain_log is the nearest durable record.
 docker compose -f docker-compose.prod.yml exec postgres \
   psql -U sora -d sora_earth -c \
-  "SELECT * FROM drift_log ORDER BY checked_at DESC LIMIT 5;"
+  "SELECT started_at, status, trigger_source FROM retrain_log ORDER BY started_at DESC LIMIT 5;"
 ```
 
 ### Monitoring Production
