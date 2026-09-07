@@ -117,9 +117,18 @@ jobs:
 
       - name: Run tests
         run: |
+          # test_api.py only: it is run by `integration-tests`, which has a
+          # PostgreSQL service this job does not.
+          #
+          # test_scoring_baseline.py used to be excluded here as well, with no
+          # reason recorded, and named by no other job -- 42 pinned ESG scores,
+          # five countries by four project types, executed nowhere since the
+          # initial commit. This job checks out with lfs:true, so the models it
+          # needs are real files, and it passes in 8s. Excluded 2026-05-07,
+          # restored 2026-09-07; nothing in between would have noticed the
+          # scores moving.
           python -m pytest tests/ \
             --ignore=tests/test_api.py \
-            --ignore=tests/test_scoring_baseline.py \
             -v --tb=short --timeout=60 \
             --cov=app --cov-report=term-missing \
             -q
@@ -602,8 +611,10 @@ jobs:
           RUN_SCHEDULER: "false"
 
   # The shell scripts had no CI at all. tests/test_backup_lock.sh has existed for
-  # a while and has never run here, which is the same as not having it: a test
+  # a while and had never run here, which is the same as not having it: a test
   # nobody executes cannot fail, and a green board said nothing about any of this.
+  # It is wired into `shell-scripts` as of 2026-09-07 -- this paragraph stated
+  # the problem and left it standing for months.
   api-contract-ratchet:
     name: response contract ratchet
     runs-on: ubuntu-latest
@@ -703,9 +714,24 @@ jobs:
 
       # Listed by name because this job runs shell tests one at a time; a file
       # that is not named here runs nowhere. Found before by
-      # tests/test_postgres_files_are_wired_into_ci.py, for the same reason.
+      # tests/test_postgres_files_are_wired_into_ci.py, which now also checks
+      # this list -- and its first run found the file below.
       - name: Behavioural tests for the backup freshness check
         run: bash tests/test_backup_age_check.sh
+
+      # Added 2026-09-07, and it had never run anywhere. The comment above the
+      # `response contract ratchet` job in this same file says so in as many
+      # words -- "tests/test_backup_lock.sh has existed for a while and has
+      # never run here, which is the same as not having it" -- and the file
+      # still was not listed. Naming a problem in a comment does not fix it;
+      # tests/test_postgres_files_are_wired_into_ci.py now does.
+      #
+      # 23 pass on Ubuntu 24.04, as root and as an unprivileged user, measured
+      # before wiring it: the ownership and staleness branches are reached by
+      # overriding _have_flock and _stat_owner inside the test process, so they
+      # need no privilege.
+      - name: Behavioural tests for the backup lock
+        run: bash tests/test_backup_lock.sh
 
       # The guard is almost entirely refusals, so the tests are almost entirely
       # refusals: a wrong branch, an unmerged rollback target, a container the
