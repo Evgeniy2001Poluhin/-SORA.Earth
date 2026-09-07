@@ -533,7 +533,7 @@ def auto_retrain_on_drift(
     2) if drift detected (or force=true) -> run synchronous retrain
     3) return unified orchestration result
     """
-    from app.api.drift import compute_drift
+    from app.api.drift import NOT_MEASURED_STATUSES, compute_drift
     from app.api.retrain import _do_retrain
 
     # `compute_drift` rather than the HTTP handler: that one returns a Response
@@ -549,6 +549,21 @@ def auto_retrain_on_drift(
             "drift_result": drift.model_dump(),
             "retrained": False,
             "reason": "drift_check_unavailable",
+        }
+
+    if drift.status in NOT_MEASURED_STATUSES and not force:
+        # The same distinction the closed loop makes (#274). Not a fault, and
+        # not a verdict: there was not enough to compute one, so `False` would
+        # be an assertion nobody measured. `force` still overrides, exactly as
+        # it does for the unavailable branch above -- it means "retrain
+        # regardless of the verdict", including the absence of one.
+        return {
+            "status": "skipped",
+            "drift_detected": None,
+            "drift_result": drift.model_dump(),
+            "retrained": False,
+            "reason": "drift_not_measured",
+            "drift_status": drift.status,
         }
 
     drift_detected = bool(getattr(drift, "drift_detected", None))

@@ -44,6 +44,17 @@ logger = logging.getLogger(__name__)
 #: Rows required before a KS test is worth running. Unchanged by #239 -- this
 #: PR moves the contract, not the algorithm or its thresholds.
 MIN_WINDOW_ROWS = 10
+
+#: The statuses that mean "no verdict was produced", as opposed to a verdict of
+#: no drift. `ModelDriftNotMeasured` says it plainly: `drift_detected` is null
+#: and not false, because false would assert that drift was looked for and not
+#: found.
+#:
+#: Named here, beside the code that produces them, so the two callers that act
+#: on a verdict cannot drift apart from it -- which is exactly what happened:
+#: #251 taught both to handle `unavailable`, and both went on coercing these
+#: two through `bool()` into False (#274).
+NOT_MEASURED_STATUSES = frozenset({"no_log", "insufficient_data"})
 SIGNIFICANCE = 0.05
 
 router = APIRouter(prefix="/model", tags=["mlops"])
