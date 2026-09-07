@@ -880,6 +880,38 @@ APP_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null
 # created; a git pull replaces the file and the container keeps reading the old
 # one. Observed, with `nginx -s reload` re-reading the stale copy.
 "${DC[@]}" up -d --force-recreate nginx
+
+# prometheus, for the same reason and with one difference.
+#
+# `infra/prometheus.yml` is a bind-mounted single file too, and Prometheus reads
+# it once at startup. Measured on 2026-09-07: after deploying a new scrape
+# target, the file on disk had it and the running container did not -- four days
+# uptime -- so #267 was deployed and inert, which from the outside is
+# indistinguishable from the scheduler serving nothing. Reloading over HTTP is
+# not an option here: `POST /-/reload` answers 403, because the container's
+# command is `--config.file=... --storage.tsdb.path=...` and nothing else, so
+# `--web.enable-lifecycle` is absent (both read off the running container on
+# 2026-09-07, #275).
+#
+# The difference from nginx: a failure here must not roll the deployment back.
+# nginx serves the site; prometheus watches it. Losing the watcher is worth
+# saying loudly and is not worth undoing a good deployment for, so this is
+# guarded rather than bare -- under `set -e` a bare command would abort.
+#
+# `--no-deps` because `up <service>` is not a scalpel. prometheus declares
+# `depends_on: backend`, and a compose that decided to recreate the dependency
+# would recreate the backend *after* nginx has already been recreated -- an
+# nginx holding an address that no longer exists, which is the 2026-08-09
+# incident exactly (#129). Measured on the host with `--dry-run` on 2026-09-07:
+# with and without the flag, only prometheus is touched. The flag is there so
+# that stays true rather than because it is true today.
+if "${DC[@]}" up -d --force-recreate --no-deps prometheus >/dev/null 2>&1; then
+    echo "  prometheus recreated, so it reads the current infra/prometheus.yml"
+else
+    echo "  WARNING: prometheus was not recreated; it is still running with the" >&2
+    echo "           configuration it started with. Scrape targets added in this" >&2
+    echo "           deployment are not being collected." >&2
+fi
 fi   # end of the mutating section, which finalize skips entirely
 
 # ---------------------------------------------------------------- verification
@@ -900,6 +932,23 @@ for svc in backend scheduler; do
     [ "$_img" = "$APP_IMAGE_ID" ] || fail \
         "$svc is running image $_img, not the $APP_IMAGE_ID the migration ran from"
 done
+
+# The scrape configuration prometheus is actually holding, not the one on disk.
+#
+# Recreating it above is the arrangement; this is the evidence. A container that
+# came up with the wrong mount, or an older image, reports the same exit status
+# as one that read the file. Warned about rather than fatal, for the same reason
+# the recreate is guarded: monitoring must not undo a good deployment (#275).
+if _live_prom="$("${DC[@]}" exec -T prometheus cat /etc/prometheus/prometheus.yml 2>/dev/null)"; then
+    if [ "$_live_prom" = "$(cat "$REPO/infra/prometheus.yml")" ]; then
+        echo "  prometheus is running the checked-in scrape configuration"
+    else
+        echo "  WARNING: prometheus holds a different scrape configuration than" >&2
+        echo "           infra/prometheus.yml. Targets added here are not collected." >&2
+    fi
+else
+    echo "  WARNING: could not read prometheus's configuration to compare it" >&2
+fi
 
 RUNNING="$("${DC[@]}" ps --format '{{.Service}}' | sort | tr '\n' ' ')"
 for svc in "${DECLARED[@]}"; do
@@ -1397,6 +1446,61 @@ fi
     || halt_without_rollback "POST $GET_ONLY_PATH answered $OUTSIDE_GET_ONLY through nginx, expected 405"
 
 echo "  behaviour matches inside the container and through nginx"
+
+step "monitoring is collecting"
+
+# The comparison in the verification step proves prometheus re-read the file. It
+# does not prove the file works: "the target is in the configuration" and "the
+# target is being scraped" are different claims, and #275 exists because the
+# second was false for four days while the first was true. The check that would
+# have missed it is the one that reads the configuration; this one asks
+# prometheus what it is actually scraping.
+#
+# Warned about, never fatal, for the reason the recreate is guarded: a target
+# that is down is a fact about that target, and undoing a good deployment over
+# it would be the wrong trade. Here rather than beside the other prometheus
+# check because a container recreated moments ago has not scraped yet -- by this
+# point the health retries and the behaviour probe have gone by.
+# Commented-out lines excluded: the file carries prose next to the job names,
+# and a job that is only described would otherwise be demanded here.
+PROM_JOBS="$(awk -F: '/job_name:/ && !/^[[:space:]]*#/ {print $2}' \
+    "$REPO/infra/prometheus.yml" 2>/dev/null \
+    | tr -d " \"'" | grep -v '^$' || true)"
+if [ -z "$PROM_JOBS" ]; then
+    echo "  WARNING: no job_name found in $REPO/infra/prometheus.yml; nothing to check" >&2
+else
+    _prom_missing="$PROM_JOBS"
+    _prom_attempt=1
+    while [ "$_prom_attempt" -le "$HEALTH_ATTEMPTS" ]; do
+        # `up` is prometheus's own record of the last scrape per target, so this
+        # is the collector answering about itself rather than the deployment
+        # answering about the collector. promtool prints one line per series,
+        # which is why it is used instead of the JSON API.
+        _prom_up="$("${DC[@]}" exec -T prometheus \
+            promtool query instant http://127.0.0.1:9090 up 2>/dev/null || true)"
+        _prom_missing=""
+        # The `=> 1` matters. A target that is declared, discovered and failing
+        # still appears in this output, with `=> 0` -- so matching the job name
+        # alone would report the exact state #275 was about as healthy.
+        while IFS= read -r _job; do
+            [ -n "$_job" ] || continue
+            case "$_prom_up" in
+                *"job=\"$_job\"} => 1"*) ;;
+                *) _prom_missing="$_prom_missing $_job" ;;
+            esac
+        done <<< "$PROM_JOBS"
+        [ -z "$_prom_missing" ] && break
+        [ "$_prom_attempt" -lt "$HEALTH_ATTEMPTS" ] && sleep "$HEALTH_DELAY"
+        _prom_attempt=$((_prom_attempt + 1))
+    done
+    if [ -z "$_prom_missing" ]; then
+        echo "  prometheus is scraping every declared job: $(printf '%s' "$PROM_JOBS" | tr '\n' ' ')"
+    else
+        echo "  WARNING: prometheus is not scraping:$_prom_missing" >&2
+        echo "           declared in infra/prometheus.yml and not up after" >&2
+        echo "           $HEALTH_ATTEMPTS attempts. Those metrics are not collected (#275)." >&2
+    fi
+fi
 
 step "recording what was deployed"
 

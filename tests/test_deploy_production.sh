@@ -72,6 +72,24 @@ new_sandbox() {
         echo "    server backend:8000;"
         echo "}"
     } > "$REPO/nginx/nginx.conf"
+    # Bind-mounted the same way nginx.conf is, and the reason #275 exists: the
+    # container pins the inode it started with, so the file changing on disk is
+    # not the file prometheus is reading.
+    mkdir -p "$REPO/infra"
+    {
+        echo "global:"
+        echo "  scrape_interval: 15s"
+        echo "scrape_configs:"
+        echo '  - job_name: "sora-app"'
+        echo "    static_configs:"
+        echo '      - targets: ["backend:8000"]'
+        # Two jobs, not one. With a single job "every declared job is up" and
+        # "the one job is up" are the same sentence, and a check that dropped
+        # all but the first would pass.
+        echo '  - job_name: "sora-scheduler"'
+        echo "    static_configs:"
+        echo '      - targets: ["scheduler:9000"]'
+    } > "$REPO/infra/prometheus.yml"
     echo "services: {}" > "$REPO/compose.yml"
     git -C "$REPO" add -A >/dev/null
     git -C "$REPO" commit -qm "first"
@@ -92,6 +110,16 @@ new_sandbox() {
     echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" >> "$STUB_DIR/running"
     echo "p-backend-1|backend|8000/tcp" >> "$STUB_DIR/running"
     echo "$CONF_SUM" > "$STUB_DIR/container_conf_sum"
+    # The default is a container that did read the repository's file, i.e. a
+    # correct deployment. A case that needs a stale container overwrites this.
+    cp "$REPO/infra/prometheus.yml" "$STUB_DIR/prometheus_live_conf"
+    # What `promtool query instant ... up` prints: one line per target, the
+    # trailing number being the last scrape's result. The default is both
+    # targets healthy; a case that needs a dead one rewrites the file.
+    {
+        echo 'up{instance="backend:8000", job="sora-app"} => 1 @[1788785159.269]'
+        echo 'up{instance="scheduler:9000", job="sora-scheduler"} => 1 @[1788785159.269]'
+    } > "$STUB_DIR/prometheus_up_lines"
     # `resolve` is required since #129: without it nginx caches the address
     # and a container recreate strands it.
     echo "    server backend:8000 resolve;" > "$STUB_DIR/upstream_line"
@@ -215,6 +243,25 @@ case "$argv" in
         echo "$n" > "$STUB_DIR/up_calls"
         if [ -f "$STUB_DIR/up_fails_after_first" ] && [ "$n" -gt 1 ]; then exit 1; fi
         exit 0 ;;
+    # Its own branch rather than falling through to `*)`, which succeeds
+    # unconditionally. The change under test is that this failing must not roll
+    # a good deployment back, and with no way to make it fail that assertion
+    # would pass against a bare, unguarded command too.
+    *"--force-recreate --no-deps prometheus"*)
+        touch "$STUB_DIR/prometheus_recreated"
+        [ -f "$STUB_DIR/prometheus_recreate_fails" ] && exit 1
+        exit 0 ;;
+    *"promtool query instant"*)
+        # `promtool_fails` is prometheus refusing to answer at all, which is a
+        # third state: not "scraping" and not "declared but down".
+        [ -f "$STUB_DIR/promtool_fails" ] && exit 1
+        cat "$STUB_DIR/prometheus_up_lines"; exit 0 ;;
+    *"exec -T prometheus cat /etc/prometheus/prometheus.yml"*)
+        # `prometheus_conf_unreadable` is the daemon answering non-zero with no
+        # output -- a container that is up but whose config cannot be read,
+        # which is not the same as one holding the wrong config.
+        [ -f "$STUB_DIR/prometheus_conf_unreadable" ] && exit 1
+        cat "$STUB_DIR/prometheus_live_conf"; exit 0 ;;
     *"ps -q nginx"*)        echo "cid-nginx"; exit 0 ;;
     *"ps -q"*)              echo "cid-x"; exit 0 ;;
     *"sha256sum /etc/nginx/nginx.conf"*)
@@ -1730,6 +1777,175 @@ printf '%s\n' '{"absent_path":"/api/v1/__deploy_probe_absent__","absent":404,"ge
     > "$STUB_DIR/probe_json"
 run_guard
 refused_because "no probeable routes stops the deployment" "cannot report on an application it could not read"
+rm -rf "$SANDBOX"
+
+echo "== prometheus is recreated, so it re-reads the scrape configuration =="
+# #275. `infra/prometheus.yml` is a bind-mounted single file, so the container
+# holds the inode it started with and a git pull does not reach it. Measured on
+# production 2026-09-07: the scrape target added by #267 was on disk and absent
+# from the running process, four days after it was deployed. Prometheus was
+# started without `--web.enable-lifecycle`, so there is no `/-/reload` to call
+# and recreating the container is the only lever the script has.
+new_sandbox
+run_guard
+check "the deployment succeeds" "$RC" "0"
+check "prometheus was recreated" \
+    "$([ -f "$STUB_DIR/prometheus_recreated" ] && echo yes || echo no)" "yes"
+check "and exactly once" \
+    "$(grep -c -- '--force-recreate --no-deps prometheus' "$STUB_DIR/calls")" "1"
+# Ordering carries the whole point. A recreate before the containers start is a
+# recreate against whatever `infra/prometheus.yml` said before this run, which
+# is the state being fixed -- and both orders leave the same file behind, so
+# only the sequence tells them apart.
+_UP_LINE="$(grep -n -- 'up -d --no-build --remove-orphans' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+_PROM_LINE="$(grep -n -- '--force-recreate --no-deps prometheus' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+check "after the containers start, not before" \
+    "$([ -n "$_UP_LINE" ] && [ -n "$_PROM_LINE" ] && [ "$_PROM_LINE" -gt "$_UP_LINE" ] \
+        && echo after || echo "not-after up=$_UP_LINE prom=$_PROM_LINE")" "after"
+check "it says so" \
+    "$(grep -c 'prometheus recreated, so it reads' "$SANDBOX/out")" "1"
+# --no-deps, and asserted rather than assumed. prometheus declares
+# `depends_on: backend`; without the flag a compose that chose to recreate the
+# dependency would recreate the backend after nginx was already recreated,
+# which is #129 -- nginx holding an address that no longer exists.
+check "and does not drag its dependencies with it" \
+    "$(grep -c -- '--no-deps prometheus' "$STUB_DIR/calls")" "1"
+# The recreate is the arrangement; this is the evidence. A container can come
+# back with the wrong mount and exit 0 all the same.
+check "and confirms what the container is actually holding" \
+    "$(grep -c 'prometheus is running the checked-in scrape configuration' "$SANDBOX/out")" "1"
+# Negative control for the case below: nothing here should have warned.
+check "with no warning about the configuration" \
+    "$(grep -c 'different scrape configuration' "$SANDBOX/out")" "0"
+rm -rf "$SANDBOX"
+
+echo "== a prometheus that will not come back does not undo the deployment =="
+# The reason the recreate is guarded rather than bare. Under `set -e` a bare
+# command here aborts, the EXIT trap runs, and a deployment whose site is
+# serving is rolled back because the thing that watches it did not restart.
+# nginx serves the site; prometheus watches it, and the two do not deserve the
+# same verdict.
+new_sandbox
+touch "$STUB_DIR/prometheus_recreate_fails"
+run_guard
+check "the deployment still succeeds" "$RC" "0"
+check "nothing was rolled back" \
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo rolled-back || echo kept)" "kept"
+check "and the failure is stated, not swallowed" \
+    "$(grep -c 'WARNING: prometheus was not recreated' "$SANDBOX/out")" "1"
+check "naming what stops being collected" \
+    "$(grep -c 'are not being collected' "$SANDBOX/out")" "1"
+rm -rf "$SANDBOX"
+
+echo "== a prometheus holding a different configuration is reported =="
+# The case the comparison exists for, and the negative control that makes the
+# passing line above mean something: an unconditional `echo` would print
+# "running the checked-in scrape configuration" here too.
+new_sandbox
+{
+    echo "global:"
+    echo "  scrape_interval: 15s"
+    echo "scrape_configs:"
+    echo '  - job_name: "sora-app"'
+} > "$STUB_DIR/prometheus_live_conf"
+run_guard
+check "the deployment is not refused over monitoring" "$RC" "0"
+check "nothing was rolled back" \
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo rolled-back || echo kept)" "kept"
+check "the mismatch is reported" \
+    "$(grep -c 'holds a different scrape configuration' "$SANDBOX/out")" "1"
+check "and it does not also claim the configuration matches" \
+    "$(grep -c 'prometheus is running the checked-in scrape configuration' "$SANDBOX/out")" "0"
+rm -rf "$SANDBOX"
+
+echo "== a configuration that cannot be read is not reported as a match =="
+# Distinct from the case above on purpose. `$(...)` of a failing command is the
+# empty string, and comparing that against a non-empty file gives "different" --
+# the right verdict for the wrong reason, and the wrong verdict the day the
+# repository file is empty. The status is checked, not the output.
+new_sandbox
+touch "$STUB_DIR/prometheus_conf_unreadable"
+run_guard
+check "the deployment still succeeds" "$RC" "0"
+check "the read failure is reported as itself" \
+    "$(grep -c "could not read prometheus's configuration" "$SANDBOX/out")" "1"
+check "not as a match" \
+    "$(grep -c 'prometheus is running the checked-in scrape configuration' "$SANDBOX/out")" "0"
+check "and not as a mismatch either" \
+    "$(grep -c 'holds a different scrape configuration' "$SANDBOX/out")" "0"
+rm -rf "$SANDBOX"
+
+echo "== the deployment reports whether prometheus is actually scraping =="
+# The other half of #275, and the half the issue named as its acceptance test:
+# "the target is in the configuration" and "the target is being scraped" are
+# different claims. Comparing the configuration answers the first one only, and
+# the first one was true for the whole four days the second was false.
+new_sandbox
+run_guard
+check "the deployment succeeds" "$RC" "0"
+check "every declared job is reported as scraped" \
+    "$(grep -c 'prometheus is scraping every declared job' "$SANDBOX/out")" "1"
+# Both names, not just the first: the extraction is a loop and a loop that stops
+# after one element produces the same sentence.
+check "naming sora-app" \
+    "$(grep -c 'every declared job.*sora-app' "$SANDBOX/out")" "1"
+check "and sora-scheduler" \
+    "$(grep -c 'every declared job.*sora-scheduler' "$SANDBOX/out")" "1"
+check "with nothing reported as missing" \
+    "$(grep -c 'is not scraping' "$SANDBOX/out")" "0"
+rm -rf "$SANDBOX"
+
+echo "== a declared target that is not being scraped is named =="
+# The state production was in: the job is in the file, prometheus knows nothing
+# about it, and every other signal is green.
+new_sandbox
+echo 'up{instance="backend:8000", job="sora-app"} => 1 @[1788785159.269]' \
+    > "$STUB_DIR/prometheus_up_lines"
+run_guard
+check "the deployment is not refused over monitoring" "$RC" "0"
+check "nothing was rolled back" \
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo rolled-back || echo kept)" "kept"
+check "the missing job is named" \
+    "$(grep -c 'is not scraping.*sora-scheduler' "$SANDBOX/out")" "1"
+check "the job that is fine is not named" \
+    "$(grep -c 'is not scraping.*sora-app' "$SANDBOX/out")" "0"
+check "and it does not also claim every job is scraped" \
+    "$(grep -c 'scraping every declared job' "$SANDBOX/out")" "0"
+rm -rf "$SANDBOX"
+
+echo "== a target that is down is not the same as a target that is up =="
+# `up` reports 0 for a target prometheus knows about and could not scrape, so
+# the series is present under its own job name. A check that matched the name
+# and not the value would call this healthy -- which is the failure mode the
+# whole issue is about, one layer down.
+new_sandbox
+{
+    echo 'up{instance="backend:8000", job="sora-app"} => 1 @[1788785159.269]'
+    echo 'up{instance="scheduler:9000", job="sora-scheduler"} => 0 @[1788785159.269]'
+} > "$STUB_DIR/prometheus_up_lines"
+run_guard
+check "the deployment still succeeds" "$RC" "0"
+check "the failing target is reported as not scraped" \
+    "$(grep -c 'is not scraping.*sora-scheduler' "$SANDBOX/out")" "1"
+check "and not as scraped" \
+    "$(grep -c 'scraping every declared job' "$SANDBOX/out")" "0"
+rm -rf "$SANDBOX"
+
+echo "== prometheus refusing to answer is reported, not read as healthy =="
+# Third state. An empty answer contains no job names, so the loop finds
+# everything missing -- the right verdict, and worth pinning: an implementation
+# that defaulted to "assume fine when the query fails" would be silent exactly
+# when the collector is broken.
+new_sandbox
+touch "$STUB_DIR/promtool_fails"
+run_guard
+check "the deployment still succeeds" "$RC" "0"
+check "nothing was rolled back" \
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo rolled-back || echo kept)" "kept"
+check "both jobs are reported as not scraped" \
+    "$(grep -c 'is not scraping.*sora-app.*sora-scheduler' "$SANDBOX/out")" "1"
+check "and nothing claims they are" \
+    "$(grep -c 'scraping every declared job' "$SANDBOX/out")" "0"
 rm -rf "$SANDBOX"
 
 echo "== a failing case fails the run, wherever it is written =="

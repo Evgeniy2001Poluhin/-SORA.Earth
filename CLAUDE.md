@@ -635,6 +635,25 @@ came from deploying by hand, and it is not a wrapper around convenience: it
 recreates nginx *after* the backend, runs `nginx -t`, checks the upstream, the
 certificate store, and finally `https://sora-earth.online/health` from outside.
 
+**Two configurations are bind-mounted single files, and a container pins the
+inode it started with.** `nginx/nginx.conf` and `infra/prometheus.yml` both
+change under a running container without reaching it -- a `git pull` replaces
+the file and the process keeps reading the old one. The script recreates both
+services for that reason, and then reads each configuration back out of its
+container rather than trusting that the recreate worked. Prometheus was found
+this way on 2026-09-07: the scrape target added by #267 had been on disk for
+four days and was not in the running process, so the change was deployed and
+inert (#275). Prometheus runs without `--web.enable-lifecycle`, so `POST
+/-/reload` answers 403 and recreating is the only lever.
+
+A prometheus failure warns and does not roll the deployment back: nginx serves
+the site, prometheus watches it, and undoing a working deployment because the
+watcher did not restart is the wrong trade. The last verification step asks
+prometheus itself which jobs it is scraping (`promtool query instant ... up`),
+because a target in the configuration and a target being collected are
+different claims -- the first was true for the whole four days the second was
+false.
+
 This section previously carried the manual command above. On 2026-08-09 it was
 followed, the backend was recreated, it took the address the scheduler had been
 using, nginx kept the old one, and the public site returned 502 for four and a
