@@ -47,3 +47,63 @@ def test_metrics_increment():
     assert r.status_code == 200
     after = PDF_GENERATED.labels(endpoint="compliance", lang="en")._value.get()
     assert after == before + 1
+
+
+def test_the_latency_histogram_gets_an_observation():
+    """The panel needs a series, and a histogram with no observations has none.
+
+    `sora_pdf_latency_seconds` was declared beside the counter and never
+    observed, so `histogram_quantile(...sora_pdf_latency_seconds_bucket...)`
+    in grafana/provisioning/dashboards/pdf_reports.json returned nothing at
+    all — which reads exactly like "no reports are being generated" (#299).
+
+    Asserted on `_count`, not on the value: how long a PDF takes is not a
+    claim this test can make, and a latency assertion would be flaky by
+    construction. That one observation happened is the whole property.
+    """
+    from prometheus_client import REGISTRY
+
+    from app.api.reports import PDF_LATENCY
+
+    if PDF_LATENCY is None:
+        return
+
+    def observations(endpoint):
+        return REGISTRY.get_sample_value(
+            "sora_pdf_latency_seconds_count", {"endpoint": endpoint}) or 0.0
+
+    before = observations("compliance")
+    r = client.post("/api/v1/reports/compliance.pdf", json=PAYLOAD)
+    assert r.status_code == 200
+
+    assert observations("compliance") - before == 1.0, (
+        "no observation reached sora_pdf_latency_seconds; the Grafana panel "
+        "drawing a P95 from it has no series to draw"
+    )
+
+
+def test_the_batch_endpoint_is_timed_under_its_own_label():
+    """Both endpoints, because the panel groups by `endpoint`.
+
+    A writer on one of them leaves the other's line permanently absent, and a
+    missing line in a `by (endpoint)` panel is not visibly different from an
+    endpoint nobody calls.
+    """
+    from prometheus_client import REGISTRY
+
+    from app.api.reports import PDF_LATENCY
+
+    if PDF_LATENCY is None:
+        return
+
+    def observations(endpoint):
+        return REGISTRY.get_sample_value(
+            "sora_pdf_latency_seconds_count", {"endpoint": endpoint}) or 0.0
+
+    before = observations("compliance_batch")
+    r = client.post("/api/v1/reports/compliance-batch.pdf", json=[PAYLOAD, PAYLOAD])
+    assert r.status_code == 200
+
+    assert observations("compliance_batch") - before == 1.0, (
+        "the batch endpoint records a count but no duration"
+    )
