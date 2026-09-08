@@ -677,7 +677,6 @@ fi   # end of the finalize / normal split for the state being replaced
 mapfile -t DECLARED < <("${DC[@]}" config --services | sort)
 [ "${#DECLARED[@]}" -gt 0 ] || fail "$COMPOSE declares no services"
 echo "  declared services: ${DECLARED[*]}"
-
 # --------------------------------------------------------------------- preflight
 
 # What this configuration *would* publish, checked before anything starts.
@@ -767,6 +766,62 @@ fi
 [ "$NGINX_80" = 1 ]  || fail "this configuration publishes no off-host 80/tcp for nginx"
 [ "$NGINX_443" = 1 ] || fail "this configuration publishes no off-host 443/tcp for nginx"
 echo "  only nginx 80/tcp and 443/tcp would be published off-host"
+
+# The guards must be armed in the configuration about to be deployed.
+#
+# `app/auth.py` refuses a development JWT key and refuses the built-in account
+# passwords, and `app/secret_validation.py` checks every production secret --
+# all three only when `SORA_ENV == "production"`. For months the compose file
+# said `ENV: production`, which is the right intent under a name nothing in
+# `app/` reads, so all three were off on a host whose configuration looked
+# correct. Reported privately as GHSA-x724-6jh7-g3fr.
+#
+# Read out of `config`, not out of the running container: this is a claim about
+# the deployment being made. What the container ended up with is checked after
+# it starts, further down, the same split the prometheus configuration uses.
+#
+# `SORA_ENV_ACKNOWLEDGE=<value>` exists for the one case this must not block:
+# deliberately deploying a non-production configuration to this host. It
+# carries the observed value, so it cannot be set from a runbook in advance.
+# Judged over the services the configuration actually declares. A compose file
+# without `backend` has no guard to arm, and demanding one there would refuse
+# for a reason that is not about secrets -- which is what the first version did
+# to eight unrelated cases in tests/test_deploy_production.sh, masking their
+# real refusals with this one.
+_declared_env="$("${DC[@]}" config --format json 2>/dev/null \
+    | python3 -c 'import json,sys
+cfg = json.load(sys.stdin)["services"]
+present = [s for s in ("backend", "scheduler") if s in cfg]
+if not present:
+    print("no-app-service")
+else:
+    print(",".join(
+        f"{s}=" + str((cfg[s].get("environment") or {}).get("SORA_ENV"))
+        for s in present))' 2>/dev/null || echo "unreadable")"
+
+case "$_declared_env" in
+    "no-app-service")
+        echo "  no backend or scheduler declared; no secret guard to arm here"
+        ;;
+    "backend=production,scheduler=production"|"backend=production"|"scheduler=production")
+        echo "  SORA_ENV=production for every declared app service: the secret guards are armed"
+        ;;
+    *)
+        [ "${SORA_ENV_ACKNOWLEDGE:-}" = "$_declared_env" ] || fail \
+"the deployment would not arm the production guards: $_declared_env
+
+     app/auth.py refuses a development JWT key and refuses the built-in
+     account passwords, and app/secret_validation.py checks every secret --
+     each only when SORA_ENV == \"production\". Without it the application
+     starts with the literals published in this repository.
+
+     Set SORA_ENV: production for backend and scheduler in
+     $(basename "$COMPOSE"), or, to deploy a non-production configuration
+     here deliberately, re-run with
+     SORA_ENV_ACKNOWLEDGE=$_declared_env"
+        echo "  WARNING: deploying without the production guards, acknowledged" >&2
+        ;;
+esac
 
 # ------------------------------------------------------------------- deployment
 
@@ -948,6 +1003,24 @@ if _live_prom="$("${DC[@]}" exec -T prometheus cat /etc/prometheus/prometheus.ym
     fi
 else
     echo "  WARNING: could not read prometheus's configuration to compare it" >&2
+fi
+
+# What the process actually received, not what the file declared.
+#
+# The declaration is checked in the preflight; this is the evidence. A value
+# can be declared and still not arrive -- an override file, a stale container,
+# a typo in a name -- and the whole point of GHSA-x724-6jh7-g3fr is that a
+# correct-looking declaration is not the same as a guard that fires.
+#
+# Only the name of the variable is printed. No secret is read here.
+_live_env="$("${DC[@]}" exec -T backend python3 -c \
+    'import app.auth as a; print(a.SORA_ENV)' 2>/dev/null | tr -d '\r')"
+if [ "$_live_env" = "production" ]; then
+    echo "  backend runs with SORA_ENV=production; the secret guards are active"
+else
+    echo "  WARNING: backend reports SORA_ENV=${_live_env:-<unreadable>}, so the" >&2
+    echo "           dev-secret refusals in app/auth.py and the whole of" >&2
+    echo "           app/secret_validation.py are inert (GHSA-x724-6jh7-g3fr)." >&2
 fi
 
 RUNNING="$("${DC[@]}" ps --format '{{.Service}}' | sort | tr '\n' ' ')"
