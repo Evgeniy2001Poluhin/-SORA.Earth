@@ -390,9 +390,25 @@ EXTERNAL_REFRESH_SOURCE = "world_bank_oecd"
 
 
 def scheduled_refresh_external_data():
-    """Refresh external ESG data with distributed lock and DB logging."""
+    """Refresh external ESG data under a distributed lock.
+
+    **This function writes no row.** `refresh_live_data` opens one before it
+    starts, with `started_at`, `source`, the trigger it was given and the
+    status it measured, and closes it in its own `finally` whether the run
+    succeeds, degrades or raises. There is nothing left for a wrapper to
+    record.
+
+    It used to add a second one anyway, and that row was invented rather than
+    merely redundant. It read `status`, `countries_fetched`, `total_countries`
+    and `message` out of the returned dictionary, which carried none of those
+    keys -- so every scheduled refresh appended a row saying `success`, 0 of 0
+    countries, no `started_at`, no `source`, and `trigger_source` left to the
+    column default of `manual`. On production that was 33 fabricated rows
+    beside 33 real ones: the counters in `/admin/diagnostics` doubled, every
+    automatic run was filed as manual, and a `degraded` refresh left one
+    honest row and one claiming success (#289).
+    """
     from app.locks import RedisLock
-    from app.database import SessionLocal, DataRefreshLog
 
     lock = RedisLock(key="sora:lock:external_refresh", timeout=300)
     if not lock.acquire():
@@ -403,54 +419,36 @@ def scheduled_refresh_external_data():
             source=EXTERNAL_REFRESH_SOURCE, outcome="skipped").inc()
         return {"status": "skipped", "reason": "lock_held"}
 
-    db = SessionLocal()
     try:
         from app.external_data import refresh_live_data
         result = refresh_live_data(trigger_source="auto_scheduler") or {}
 
-        log = DataRefreshLog(
-            status=result.get("status", "success"),
-            countries_fetched=int(result.get("countries_fetched", 0)),
-            total_countries=int(result.get("total_countries", 0)),
-            message=result.get("message"),
-            job_name="external_data_refresh",
-        )
-        db.add(log)
-        db.commit()
+        # Subscripted, not `.get(..., "success")`. The default was what made
+        # the old row unfalsifiable: a missing key answered "success" instead
+        # of raising, and nothing distinguished a healthy run from a contract
+        # that had quietly changed underneath.
+        status = result["status"]
 
         logger.info(
             "External data refresh completed: %s",
             {
-                "status": log.status,
-                "countries_fetched": log.countries_fetched,
-                "total_countries": log.total_countries,
+                "status": status,
+                "countries_fetched": result.get("countries_fetched"),
+                "total_countries": result.get("total_countries"),
             },
         )
         # The outcome the run recorded for itself, not "it did not raise":
         # `refresh_live_data` reports its own partial and error states, and
         # collapsing those into success is how a broken source reads as healthy.
+        # `degraded` counts as failed here rather than gaining a label value of
+        # its own, so the series Grafana already queries keeps its shape.
         sora_external_refresh_total.labels(
             source=EXTERNAL_REFRESH_SOURCE,
-            outcome="success" if log.status == "success" else "failed",
+            outcome="success" if status == "success" else "failed",
         ).inc()
         return result
 
     except Exception as e:
-        db.rollback()
-        try:
-            db.add(
-                DataRefreshLog(
-                    status="error",
-                    countries_fetched=0,
-                    total_countries=0,
-                    message=str(e)[:500],
-                    job_name="external_data_refresh",
-                )
-            )
-            db.commit()
-        except Exception:
-            pass
-
         logger.exception("External data refresh failed: %s", e)
         sora_external_refresh_total.labels(
             source=EXTERNAL_REFRESH_SOURCE, outcome="failed").inc()
@@ -458,7 +456,6 @@ def scheduled_refresh_external_data():
 
     finally:
         lock.release()
-        db.close()
 
 def get_retrain_log(limit: int = 20):
     from app.database import SessionLocal, RetrainLog
