@@ -104,9 +104,27 @@ def _esg_chart(env, social, gov, labels=None):
 
 
 import time as _time_pdf
-def _track_pdf(endpoint, lang):
+
+
+def _track_pdf(endpoint, lang, started):
+    """Record one generated report: the count and how long it took.
+
+    `PDF_LATENCY` was declared beside `PDF_GENERATED` and never observed, while
+    `grafana/provisioning/dashboards/pdf_reports.json` drew a P95 panel from
+    it. A histogram with no observations produces no series at all, so that
+    panel read "No data" whatever happened — indistinguishable from "no PDFs
+    are being generated", which is the one thing it could not tell you (#299).
+    The unused `import time as _time_pdf` above was the whole of the intent
+    that survived.
+
+    `started` has no default. A caller that forgets it fails here rather than
+    recording a count without a duration, which is the state this was in.
+    """
     if PDF_GENERATED:
         PDF_GENERATED.labels(endpoint=endpoint, lang=lang).inc()
+    if PDF_LATENCY:
+        PDF_LATENCY.labels(endpoint=endpoint).observe(
+            _time_pdf.perf_counter() - started)
 
 
 def _ml_shap_block(project, t, body, h2):
@@ -157,6 +175,7 @@ def _ml_shap_block(project, t, body, h2):
 
 @router.post("/compliance.pdf", summary="Generate ESG/CSRD compliance PDF")
 def compliance_pdf(project: ProjectInput, lang: str = Query("en", pattern="^(en|ru)$")):
+    _started = _time_pdf.perf_counter()
     t = I18N.get(lang, I18N["en"])
     res = _score(project)
     buf = io.BytesIO()
@@ -207,12 +226,13 @@ def compliance_pdf(project: ProjectInput, lang: str = Query("en", pattern="^(en|
     doc.build(story)
     buf.seek(0)
     fname = "compliance_" + project.name.replace(" ","_") + "_" + lang + ".pdf"
-    _track_pdf("compliance", lang)
+    _track_pdf("compliance", lang, _started)
     return StreamingResponse(buf, media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=" + fname})
 
 @router.post("/compliance-batch.pdf", summary="Generate batch ESG PDF for multiple projects")
 def compliance_batch_pdf(projects: List[ProjectInput], lang: str = Query("en", pattern="^(en|ru)$")):
+    _started = _time_pdf.perf_counter()
     t = I18N.get(lang, I18N["en"])
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm,
@@ -242,8 +262,7 @@ def compliance_batch_pdf(projects: List[ProjectInput], lang: str = Query("en", p
             story += [Paragraph("(SHAP block error: " + str(_e) + ")", body)]
     doc.build(story)
     buf.seek(0)
-    _track_pdf("compliance_batch", lang)
+    _track_pdf("compliance_batch", lang, _started)
     return StreamingResponse(buf, media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=compliance_batch_" + lang + ".pdf"})
-    # _track_pdf called below
 

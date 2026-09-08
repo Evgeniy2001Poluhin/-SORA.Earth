@@ -375,11 +375,14 @@ UI shows "≈det" badge for near-deterministic predictions (see `web/src/feature
 ## Testing
 
 - **Test framework:** pytest with timeout=30s (`pytest.ini`)
-- **Suite size:** `pytest --collect-only tests/` reports 3082 cases. This line
-  read "375/384 tests passing (97.7%)" for months -- a ratio nobody recomputed,
-  wrong by a factor of eight. The passing figure is not restated here at all:
-  CI computes it on every commit, and a copy in a document can only go stale
-  (#292).
+- **Suite size:** `pytest --collect-only tests/` counts it. The number is not
+  repeated here, and that is the second lesson from the same line. It read
+  "375/384 tests passing (97.7%)" for months -- a ratio nobody recomputed,
+  wrong by a factor of eight -- so on 2026-09-08 the ratio was dropped and
+  "reports 3082 cases" put in its place, with a sentence beside it saying a
+  copy in a document can only go stale. It was 3114 the same day, twelve hours
+  and five merged pull requests later. The paragraph explaining the trap was
+  itself the trap; the only cure is to state the command and no figure (#292).
 - **Test structure:** `tests/test_<domain>.py` mirrors `app/api/<domain>.py`
 - **Fixtures:** `tests/conftest.py` provides FastAPI TestClient, mock database session
 
@@ -555,6 +558,23 @@ Optional:
   No multiprocess directory there. It is one process, and
   `app/scheduler_metrics.py` refuses to serve if `PROMETHEUS_MULTIPROC_DIR` is
   set rather than publishing whichever files it happens to find.
+
+  **Four of those eleven are absent for up to six hours after every
+  deployment**, and it is not a fault. `sora_forecast_mae_current`,
+  `_rmse_current`, `_r2_current` and `_mape_current` are labelled gauges: a
+  series exists only once something calls `.labels(...).set(...)`. The only
+  caller is `auto_pretrain_forecast`, which runs on `IntervalTrigger(hours=6)`
+  and is **not** in `RUN_IMMEDIATELY_ON_STARTUP`, and a restart empties the
+  registry. So a scrape taken right after a deploy finds nothing, and the five
+  Grafana alerts standing on the first three cannot fire until the job runs.
+
+  This matters when reading a measurement rather than when operating: `series=0`
+  shortly after a deployment is that window, and is not evidence of a metric
+  nobody writes — the two look identical in `promtool query instant`, and #284
+  recorded the second reading. Distinguishing them needs the timing of the last
+  deployment, or a row in `forecast_model_metrics`. Whether the window should
+  exist at all is #156, which asks the same question of the four startup jobs
+  nobody chose.
 
 - **Operational counters**: `/api/v1/metrics` (JSON) — request counts by
   endpoint and status, uptime, response times. Never scraped by Prometheus.
