@@ -12,7 +12,7 @@
   },
   "counts": {
     "considered": 172,
-    "with_response_model": 23
+    "with_response_model": 24
   },
   "uncovered": [
     "DELETE /api/v1/webhooks/{sub_id} @app/api/webhooks.py",
@@ -121,7 +121,6 @@
     "POST /analytics/model-compare @app/api/analytics.py",
     "POST /analytics/monte-carlo @app/api/analytics.py",
     "POST /api/v1/compliance/check @app/api/sentinel_api.py",
-    "POST /api/v1/predict/v2 @app/api/predict_v2.py",
     "POST /api/v1/webhooks @app/api/webhooks.py",
     "POST /api/v2/model/reload @app/ml/routes.py",
     "POST /batch/evaluate @app/api/infra.py",
