@@ -32,15 +32,6 @@ ROOT = Path(__file__).resolve().parents[1]
 ALLOWED_WITHOUT_A_WRITER = {
     # Set in `app/prom_metrics.py` itself, at import, from constants.
     "sora_app_info": "set at import in prom_metrics.py",
-    # Declared in app/api/reports.py and never observed, while
-    # grafana/provisioning/dashboards/pdf_reports.json draws a P95 panel from
-    # it -- so that panel reads "No data" whatever happens. Exactly #266, in a
-    # file this scan did not read until now. Whether to give it a writer beside
-    # the PDF_GENERATED increment or to delete metric and panel together is the
-    # owner's call, the same call the #266 table made per metric. Listed here
-    # so the widened scan can be switched on now instead of never; the
-    # allowance goes when #299 is decided.
-    "sora_pdf_latency_seconds": "declared in app/api/reports.py, never observed (#299)",
 }
 
 
