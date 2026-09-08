@@ -37,6 +37,11 @@ explainable ML, country & regional analytics, closed-loop MLOps и operational m
 ### Drift
 - GET /api/v2/drift/predictions
 
+> **Раздел 3 утрачен.** Заголовок и текст уничтожены в первом коммите
+> `997de75` (7 мая). По уцелевшему соседству — предыдущий раздел кончается на
+> «### Drift» — тему определить нельзя, поэтому она не восстанавливается:
+> выдуманный раздел архитектуры неотличим от настоящего (#296).
+
 ## 4. Карта России (85 субъектов РФ)
 - Рендеринг: Leaflet (RussiaMap.tsx), полигоны из web/public/geo/russia.geo.json
   (FeatureCollection, EPSG:4326, properties {code, name}).
@@ -75,6 +80,10 @@ tion (DriftDetector.check_drift())
 5. promote / reject
 6. запись в retrain log (try/finally — статус всегда терминальный)
 Конкурентность защищена Redis-локом sora:lock:model_retrain.
+
+> **Раздел 7 утрачен**, там же и тогда же. Предыдущий раздел кончается
+> шагами цикла переобучения, следующий — про AI Teammate; чем был седьмой, из
+> файла не следует (#296).
 
 ## 8. AI Teammate
 Автономный agent: observe -> decide -> execute. Анализирует freshness данных и retrain,
