@@ -12,7 +12,7 @@
   },
   "counts": {
     "considered": 172,
-    "with_response_model": 22
+    "with_response_model": 23
   },
   "uncovered": [
     "DELETE /api/v1/webhooks/{sub_id} @app/api/webhooks.py",
@@ -143,7 +143,6 @@
     "POST /forecast/pretrain @app/api/forecast.py",
     "POST /ghg-calculate @app/api/evaluate.py",
     "POST /infra/data-refresh/run @app/api/infra.py",
-    "POST /mlops/auto-retrain @app/api/infra.py",
     "POST /mlops/drift/baseline/fit @app/api/drift_baseline.py",
     "POST /mlops/drift/observe @app/api/drift_baseline.py",
     "POST /mlops/full-pipeline @app/api/infra.py",
