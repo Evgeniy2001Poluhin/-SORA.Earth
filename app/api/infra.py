@@ -23,7 +23,7 @@ from app.drift_detection import drift_detector
 from app.mlflow_tracking import get_experiment_stats
 from app.rate_limit import rate_limiter
 from app.middleware import METRICS, START_TIME
-from app.schemas import (CoverageGap, IngestionAttention, ObservationCoverage,
+from app.schemas import (AutoRetrainResponse, CoverageGap, IngestionAttention, ObservationCoverage,
                          ObservationPage, ObservationRow,
                          ProjectInput as Project)
 
@@ -520,7 +520,11 @@ def data_refresh_status():
         db.close()
 
 
-@router.post("/mlops/auto-retrain", tags=["infrastructure"])
+@router.post(
+    "/mlops/auto-retrain",
+    tags=["infrastructure"],
+    response_model=AutoRetrainResponse,
+)
 def auto_retrain_on_drift(
     window: int = 50,
     min_samples: int = 50,

@@ -333,6 +333,103 @@ ModelDriftResponse = Annotated[
 ]
 
 
+# --- POST /api/v1/mlops/auto-retrain ----------------------------------------
+#
+# Migration under docs/API_CONTRACT_ROADMAP.md §4, priority P0: a retrain
+# verdict is acted on as a decision. The handler had two 200 shapes and no way
+# for a caller to tell which it was holding -- `promoted`, `old_auc`, `new_auc`
+# and `reject_reason` exist only when a retrain actually ran, and their absence
+# was indistinguishable from a run that produced none.
+#
+# Discriminated on `retrained`, not on `status`, because `status` does not
+# separate the cases: "we declined to decide" is `skipped` and "we decided not
+# to retrain" is `ok`, and both carry the same body. What a caller has to
+# branch on is whether a model was trained.
+
+AnyModelDrift = Annotated[
+    Union[ModelDriftMeasured, ModelDriftNotMeasured, ModelDriftUnavailable],
+    Field(discriminator="status"),
+]
+
+
+class _AutoRetrainBase(BaseModel):
+    """What every answer carries."""
+
+    status: Literal["ok", "skipped"] = Field(
+        ...,
+        description=(
+            "'skipped' means no verdict was reached -- the drift check could "
+            "not run, or there was not enough to measure. 'ok' means the "
+            "endpoint decided, which includes deciding not to retrain."
+        ),
+    )
+    drift_detected: Optional[bool] = Field(
+        ...,
+        description=(
+            "null when nothing was measured. Not false: false asserts that "
+            "drift was looked for and not found."
+        ),
+    )
+    drift_result: AnyModelDrift = Field(
+        ..., description="The drift answer this decision was taken on."
+    )
+    reason: Optional[str] = Field(
+        None, description="Machine-readable detail: why this branch was taken."
+    )
+
+
+class AutoRetrainNotRun(_AutoRetrainBase):
+    """No model was trained. Three ways to arrive here, told apart by `reason`.
+
+    `drift_check_unavailable` and `drift_not_measured` come with
+    `status='skipped'`; `drift_not_detected` with `status='ok'`, because that
+    one is a verdict.
+    """
+
+    retrained: Literal[False]
+    drift_status: Optional[str] = Field(
+        None,
+        description="The drift status that led to skipping, when it was measured.",
+    )
+
+
+class AutoRetrainRan(_AutoRetrainBase):
+    """A model was trained and the promotion gate answered.
+
+    `promoted` is the gate's verdict, not "training succeeded". A rejected
+    model is a normal outcome and still 200: the endpoint did what it was asked
+    and the answer is that the candidate is not better.
+    """
+
+    retrained: Literal[True]
+    forced: bool = Field(
+        ..., description="True when the caller passed force=true, bypassing the verdict."
+    )
+    promoted: bool
+    old_auc: Optional[float] = Field(None, description="AUC of the model that was serving.")
+    new_auc: Optional[float] = Field(None, description="AUC of the candidate.")
+    reject_reason: Optional[str] = Field(
+        None, description="Which of the promotion gate's refusals fired. Null when promoted."
+    )
+    # Deliberately untyped: this is `_do_retrain`'s contract, not this
+    # endpoint's, and tightening it here would declare a shape nobody has
+    # verified. It is its own migration.
+    retrain_result: Any = None
+    finalisation_error: Optional[str] = Field(
+        None,
+        description=(
+            "Set when the retrain_log row could not be updated. The training "
+            "and the verdict still happened; what failed is the record of them."
+        ),
+    )
+
+
+AutoRetrainResponse = Annotated[
+    Union[AutoRetrainNotRun, AutoRetrainRan],
+    Field(discriminator="retrained"),
+]
+
+
 # --- GET /api/v1/model/drift/mlflow-history ---------------------------------
 #
 # Second migration under docs/API_CONTRACT_ROADMAP.md. Three bodies became two,
