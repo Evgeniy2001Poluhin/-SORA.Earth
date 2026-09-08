@@ -48,7 +48,19 @@ docker compose up -d
 - risk level
 - recommendations
 
-### 3. Predic Germany
+### 3. Predict / Explain
+
+> **Тело раздела утрачено.** Заголовок читался как `### 3. Predic Germany` —
+> оборванное «Predict» и затёкший хвост от следующего раздела. Тема
+> восстановлена по списку скриншотов ниже (`03-predict-explain.png`), само
+> содержание — нет (#296).
+
+### 4. Country benchmark
+
+> **Раздел 4 утрачен целиком**, заголовок и текст, в первом коммите `997de75`
+> (7 мая). Тема восстановлена по `04-country-benchmark.png` и по слову
+> «Germany», уцелевшему в заголовке раздела 3; содержание восстановить нечем
+> (#296).
 
 ### 5. AI Teammate
 Показать:
@@ -69,7 +81,12 @@ docker compose up -d
 - latency
 - model metrics
 - alerts
- в `assets/screenshots/`:
+
+## Скриншоты
+
+Заголовок этого раздела тоже был уничтожен — от него осталось « в
+`assets/screenshots/`:». Все семь файлов на месте:
+
 - `01-swagger.png`
 - `02-evaluate.png`
 - `03-predict-explain.png`

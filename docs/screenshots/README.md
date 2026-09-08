@@ -14,6 +14,16 @@ Interpretability layer: per-feature SHAP contributions для конкретно
 ## 4. 04-mlops-control.png — MLOps Control Room
 Сводный экран наблюдаемости: 4 KPI (Active modeto / mlops_auto / manual_test) со статусами success / rejected; 9 feature importance bars (budget доминирует, year/quarter ~ 0).
 
+> **Раздел 5 утрачен.** Его текст затёк в раздел 4: «4 KPI (Active modeto /
+> mlops_auto / manual_test)» — это два описания, сросшиеся в одно, и «Active
+> modeto» тоже оборвано. Тему определить нечем (#296).
+>
+> Отдельно и важнее: **ни одного из описанных здесь файлов в этом каталоге
+> нет** — он содержит только этот README. Из семи названных имён шесть не
+> существуют нигде в репозитории; седьмое, `02-evaluate.png`, лежит в
+> `assets/screenshots/` и принадлежит другому набору — демонстрационному.
+> См. #297.
+
 ## 6. 06-drift-stable.png — Drift baseline (STABLE)
 Состояние после Fit baseline через UI: 7 features в LOW severity, |z| <= 0.04, баннер "Baseline fitted: 734 samples".
 
