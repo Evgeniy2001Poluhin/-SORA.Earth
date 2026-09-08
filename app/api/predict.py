@@ -245,7 +245,8 @@ def export_predictions_csv():
 
 
 import os as _os, csv as _csv
-_PRED_LOG = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), 'data', 'predictions_log.csv')
+from app.paths import data_dir as _data_dir
+_PRED_LOG = _os.path.join(_data_dir(), 'predictions_log.csv')
 def _log_csv(_project):
     _d = _project.model_dump()
     _row = {'budget': _d.get('budget_usd', _d.get('budget')), 'co2_reduction': _d.get('co2_reduction_tons_per_year', _d.get('co2_reduction')), 'social_impact': _d.get('social_impact_score', _d.get('social_impact')), 'duration_months': _d.get('project_duration_months', _d.get('duration_months'))}
