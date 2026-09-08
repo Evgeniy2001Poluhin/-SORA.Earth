@@ -176,18 +176,38 @@ def test_every_pair_lands_in_exactly_one_counter(monkeypatch):
     )
 
 
+def _capturing_log(captured):
+    """A `DataRefreshLog` double that stores what it is given.
+
+    Two copies of this used to live inline, and both only recorded the
+    assignments while keeping none of them -- so reading an attribute back
+    raised `AttributeError`. Nothing noticed while `refresh_live_data` never
+    read its own row. It does now, to return the verdict it recorded (#289),
+    and a double that cannot be read is precisely the shape that hides that
+    kind of change. One definition, so the next such change breaks or fixes
+    both at once.
+    """
+
+    class _Log:
+        def __init__(self, **kw):
+            for k, v in kw.items():
+                setattr(self, k, v)
+
+        def __setattr__(self, k, v):
+            captured[k] = v
+            object.__setattr__(self, k, v)
+
+    return _Log
+
+
 def _run_scheduled(monkeypatch, history):
     """refresh_live_data with everything but the counters stubbed out."""
     from unittest.mock import MagicMock
 
     captured = {}
 
-    class _Log:
-        def __setattr__(self, k, v):
-            captured[k] = v
-
     monkeypatch.setattr(ed, "SessionLocal", lambda: MagicMock())
-    monkeypatch.setattr(ed, "DataRefreshLog", lambda **kw: _Log())
+    monkeypatch.setattr(ed, "DataRefreshLog", _capturing_log(captured))
     monkeypatch.setattr(ed, "refresh_all_countries",
                         lambda: {"fetched": 1, "total": 1, "countries": {}})
     monkeypatch.setattr(ed, "refresh_indicator_history", lambda **kw: history)
@@ -289,15 +309,11 @@ def test_losing_the_lock_degrades_the_run(monkeypatch):
 
     captured = {}
 
-    class _Log:
-        def __setattr__(self, k, v):
-            captured[k] = v
-
     def raise_lock_lost(**kw):
         raise ed.HistoryRefreshLockLost("the refresh lock was lost mid-run")
 
     monkeypatch.setattr(ed, "SessionLocal", lambda: MagicMock())
-    monkeypatch.setattr(ed, "DataRefreshLog", lambda **kw: _Log())
+    monkeypatch.setattr(ed, "DataRefreshLog", _capturing_log(captured))
     monkeypatch.setattr(ed, "refresh_all_countries",
                         lambda: {"fetched": 1, "total": 1, "countries": {}})
     monkeypatch.setattr(ed, "refresh_indicator_history", raise_lock_lost)

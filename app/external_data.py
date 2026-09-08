@@ -918,11 +918,28 @@ def refresh_live_data(trigger_source: str = "manual") -> Dict:
         log.fetched_at = _end
         log.finished_at = _end
         log.duration_sec = round((_end - _start).total_seconds(), 2)
+        # Read out before the commit, and that is not a style choice:
+        # `SessionLocal` leaves `expire_on_commit` at its default, so the
+        # commit empties every attribute and `db.close()` detaches the
+        # instance -- a later `log.status` would be a lazy load on a dead
+        # session, not the value just written.
+        recorded = {
+            "status": log.status,
+            "countries_fetched": log.countries_fetched,
+            "total_countries": log.total_countries,
+            "message": log.message,
+        }
         try: db.commit()
         except Exception: db.rollback()
         finally: db.close()
     if exc is not None: raise exc
-    return result
+    # The verdict this run recorded for itself, beside the counts from
+    # `refresh_all_countries`. Callers used to guess it: the scheduler read
+    # `result.get("status", "success")` from a dictionary that has never had a
+    # `status` key, so every scheduled refresh reported success whatever
+    # happened, including the degraded ones this function labels correctly one
+    # row above (#289).
+    return {**(result or {}), **recorded}
 
 def get_refresh_status() -> Dict:
     """Current cache and refresh status — persisted via DataRefreshLog."""
