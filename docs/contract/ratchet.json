@@ -12,7 +12,7 @@
   },
   "counts": {
     "considered": 172,
-    "with_response_model": 24
+    "with_response_model": 26
   },
   "uncovered": [
     "DELETE /api/v1/webhooks/{sub_id} @app/api/webhooks.py",
@@ -115,8 +115,6 @@
     "GET /system/metrics @app/api/infra.py",
     "GET /trends @app/api/evaluate.py",
     "GET /ws/status @app/api/infra.py",
-    "POST /ab/predict @app/api/ab_test.py",
-    "POST /ab/split @app/api/ab_test.py",
     "POST /admin/ai-teammate/run @app/api/ai_teammate_routes.py",
     "POST /analytics/model-compare @app/api/analytics.py",
     "POST /analytics/monte-carlo @app/api/analytics.py",
