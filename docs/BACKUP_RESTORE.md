@@ -3,8 +3,11 @@
 How to back up this database, how to bring it back, and the evidence that
 bringing it back actually works.
 
-`docs/RUNBOOK.md` covers day-to-day operations; this file covers only backup
-and recovery.
+The "Production Server" section of `CLAUDE.md` covers day-to-day operations;
+this file covers only backup and recovery. It used to point at
+`docs/RUNBOOK.md`, which describes a host deleted in August and every entry
+point in it answers 530 or nothing (#286); that document is now in
+`docs/archive/` and marked historical.
 
 ---
 
