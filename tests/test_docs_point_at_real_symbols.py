@@ -179,3 +179,67 @@ def test_a_line_number_inside_a_fence_is_output_not_a_pointer():
 
     assert found == ["app/telemetry.py:12"], found
     assert "app/main.py:521" not in found, "sample output counted as a pointer"
+
+
+#: `"reports 3082 cases"` -- a suite size stated as a current fact. Quoted
+#: spans are stripped first, because the paragraph has to quote the wrong
+#: numbers in order to explain them.
+_SUITE_FIGURE = re.compile(r"\b\d[\d,]*\s+(?:cases|tests)\b")
+
+#: `"..."` and `«...»`, the two the document uses.
+_QUOTED = re.compile(r'"[^"]*"|«[^»]*»')
+
+
+def suite_size_bullet(text: str) -> str:
+    """The `- **Suite size:**` bullet, up to the next one."""
+    lines = text.splitlines()
+    start = next(n for n, l in enumerate(lines) if l.startswith("- **Suite size:**"))
+    end = next(
+        (n for n in range(start + 1, len(lines)) if lines[n].startswith("- **")),
+        len(lines),
+    )
+    return "\n".join(lines[start:end])
+
+
+def test_the_suite_size_is_a_command_and_not_a_number():
+    """The figure went stale twice, the second time in twelve hours.
+
+    "375/384 tests passing (97.7%)" stood for months, wrong by a factor of
+    eight. Replacing it with "reports 3082 cases" -- beside a sentence saying a
+    copy in a document can only go stale -- put the same defect back: five
+    merged pull requests the same day made it 3114.
+
+    Quoted spans are stripped before judging, because the paragraph has to
+    quote both wrong numbers to explain them. That is the whole subtlety, and
+    `test_a_quoted_figure_is_history_not_a_claim` is the case that pins it.
+    """
+    bullet = suite_size_bullet(DOC.read_text())
+
+    assert "--collect-only" in bullet, (
+        "the Suite size bullet no longer names the command that counts the "
+        "suite, so a reader has nothing but prose"
+    )
+
+    stated = _SUITE_FIGURE.findall(_QUOTED.sub(" ", bullet))
+    assert not stated, (
+        f"CLAUDE.md states a suite size as a current fact: {stated}. It cannot "
+        f"stay true -- every added test moves it and nothing here recomputes "
+        f"it. Name the command instead."
+    )
+
+
+def test_a_quoted_figure_is_history_not_a_claim():
+    """The discriminating case for the stripping.
+
+    Without it the bullet fails on its own explanation, which is a correct
+    edit; with it, a fresh claim outside quotes is still caught.
+    """
+    history = 'It read "reports 3082 cases", which was wrong the same day.'
+    claim = "`pytest --collect-only tests/` reports 3114 cases."
+
+    assert not _SUITE_FIGURE.findall(_QUOTED.sub(" ", history)), (
+        "a quoted historical figure was judged as a claim"
+    )
+    assert _SUITE_FIGURE.findall(_QUOTED.sub(" ", claim)), (
+        "a bare figure passed, so the rule cannot catch what it is for"
+    )
