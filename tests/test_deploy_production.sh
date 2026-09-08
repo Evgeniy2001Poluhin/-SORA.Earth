@@ -176,6 +176,14 @@ case "$argv" in
         # comparison alone cannot reject.
         cat "$STUB_DIR/container_created" 2>/dev/null || echo "2026-08-14T03:39:28.100020191Z"
         exit 0 ;;
+    # Before the behaviour-probe branch, which matches on
+    # `exec -T backend python3 -` and would otherwise swallow this: the probe's
+    # pattern is a prefix of `python3 -c`. That collision answered the guard
+    # question with a route table, and the guard check silently compared a JSON
+    # blob against the string "production".
+    *"exec -T backend python3 -c"*)
+        cat "$STUB_DIR/live_sora_env" 2>/dev/null || echo "production"
+        exit 0 ;;
     *"exec -T backend python3 -"*)
         # The post-deploy behaviour probe. Reads its own route table from the
         # running app, so the stub answers with a route table and the codes a
@@ -309,7 +317,9 @@ STUB
   "nginx":    {"ports": [{"target": 80,  "published": "80",  "protocol": "tcp", "mode": "ingress"},
                          {"target": 443, "published": "443", "protocol": "tcp", "mode": "ingress"}]},
   "app":      {"ports": [{"host_ip": "127.0.0.1", "target": 8000, "published": "8000", "protocol": "tcp", "mode": "ingress"}]},
-  "postgres": {"ports": [{"host_ip": "127.0.0.1", "target": 5432, "published": "5432", "protocol": "tcp", "mode": "ingress"}]}
+  "postgres": {"ports": [{"host_ip": "127.0.0.1", "target": 5432, "published": "5432", "protocol": "tcp", "mode": "ingress"}]},
+  "backend":   {"environment": {"SORA_ENV": "production"}},
+  "scheduler": {"environment": {"SORA_ENV": "production"}}
 }}
 JSON
 
@@ -1946,6 +1956,87 @@ check "both jobs are reported as not scraped" \
     "$(grep -c 'is not scraping.*sora-app.*sora-scheduler' "$SANDBOX/out")" "1"
 check "and nothing claims they are" \
     "$(grep -c 'scraping every declared job' "$SANDBOX/out")" "0"
+rm -rf "$SANDBOX"
+
+echo "== a deployment that would not arm the production guards is refused =="
+# GHSA-x724-6jh7-g3fr. `app/auth.py` refuses a development JWT key and refuses
+# the built-in account passwords, and `app/secret_validation.py` checks every
+# secret -- all three only when SORA_ENV == "production". The compose file said
+# `ENV: production` for months: the right intent under a name nothing in `app/`
+# reads, so all three were off on a host whose configuration looked correct.
+new_sandbox
+python3 - "$STUB_DIR/rendered" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["services"]["backend"]["environment"]["SORA_ENV"] = "development"
+json.dump(d, open(p, "w"))
+PY
+run_guard
+refused_because "the deployment is refused" "would not arm the production guards"
+# Twice on purpose: once in the reason, once in the SORA_ENV_ACKNOWLEDGE line
+# the operator has to copy. Asserted as "at least once" rather than exactly,
+# so rewording the message does not fail a test about the value being shown.
+check "and the observed value is named, so the acknowledgement cannot be prepared in advance" \
+    "$([ "$(grep -c 'backend=development,scheduler=production' "$SANDBOX/out")" -ge 1 ] && echo named || echo absent)" "named"
+# The refusal must land before anything is recreated: a deployment that is
+# going to be declined must not first replace the containers it is declining.
+check "nothing was started" \
+    "$(grep -c -- 'up -d --no-build --remove-orphans' "$STUB_DIR/calls")" "0"
+rm -rf "$SANDBOX"
+
+echo "== the acknowledgement carries the observed value, not a fixed word =="
+# Same shape as ROLLBACK_ACKNOWLEDGE: the operator has to read the output to
+# produce it, so it cannot be pasted from a runbook ahead of time.
+new_sandbox
+python3 - "$STUB_DIR/rendered" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["services"]["backend"]["environment"]["SORA_ENV"] = "development"
+json.dump(d, open(sys.argv[1], "w"))
+PY
+SORA_ENV_ACKNOWLEDGE="yes" run_guard
+refused_because "a wrong acknowledgement does not unlock it" "would not arm the production guards"
+rm -rf "$SANDBOX"
+
+new_sandbox
+python3 - "$STUB_DIR/rendered" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["services"]["backend"]["environment"]["SORA_ENV"] = "development"
+json.dump(d, open(sys.argv[1], "w"))
+PY
+SORA_ENV_ACKNOWLEDGE="backend=development,scheduler=production" run_guard
+check "the matching acknowledgement lets it through" "$RC" "0"
+check "and it says so, loudly" \
+    "$(grep -c 'WARNING: deploying without the production guards' "$SANDBOX/out")" "1"
+rm -rf "$SANDBOX"
+
+echo "== the value the container actually received is read back =="
+# The declaration is the arrangement; this is the evidence. A value can be
+# declared and still not arrive -- an override file, a stale container, a typo
+# in a name -- and this whole advisory is about a correct-looking declaration
+# that produced no guard.
+new_sandbox
+run_guard
+check "a normal deployment succeeds" "$RC" "0"
+check "and confirms the guards are active" \
+    "$(grep -c 'backend runs with SORA_ENV=production; the secret guards are active' "$SANDBOX/out")" "1"
+check "with no warning" \
+    "$(grep -c 'the secret guards are inert' "$SANDBOX/out")" "0"
+rm -rf "$SANDBOX"
+
+echo "== a container that did not receive it is reported, not silently accepted =="
+# The negative control for the line above: an unconditional echo would print
+# "guards are active" here too.
+new_sandbox
+echo "development" > "$STUB_DIR/live_sora_env"
+run_guard
+check "the deployment is not undone over it" "$RC" "0"
+check "the mismatch is reported" \
+    "$(grep -c 'backend reports SORA_ENV=development' "$SANDBOX/out")" "1"
+check "and it does not also claim the guards are active" \
+    "$(grep -c 'the secret guards are active' "$SANDBOX/out")" "0"
 rm -rf "$SANDBOX"
 
 echo "== a failing case fails the run, wherever it is written =="

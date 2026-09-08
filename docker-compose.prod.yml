@@ -147,15 +147,38 @@ services:
       WORKERS: "4"
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
-      ENV: production
+      # SORA_ENV, not ENV. `ENV: production` stood here for months -- the right
+      # intent under a name nothing in app/ reads, so the dev-JWT refusal
+      # (app/auth.py:28), the account-password refusal (app/auth.py:371) and the
+      # whole of app/secret_validation.py were all off on the running host while
+      # this file looked correctly configured. GHSA-x724-6jh7-g3fr.
+      SORA_ENV: production
       # Identical in both services on purpose; a mismatch would put the lock
       # file in two places and silently remove the mutual exclusion.
       SORA_RUNTIME_DIR: /app/runtime
       MLFLOW_TRACKING_URI: "http://mlflow:5556"
-      JWT_SECRET: ${JWT_SECRET}
+      # SORA_JWT_SECRET, not JWT_SECRET. The value in .env is 64 characters and
+      # properly generated; under the old name it reached the container and was
+      # discarded, and the process signed every token with the literal in
+      # app/auth.py:21 -- which is published in this repository.
+      SORA_JWT_SECRET: ${JWT_SECRET}
+      SORA_ADMIN_TOKEN: ${SORA_ADMIN_TOKEN}
+      # Read at app/auth.py:367 as f"SORA_DEFAULT_{role.upper()}_PASSWORD".
+      # Absent, the three built-in accounts fall back to the literals beside
+      # that line.
+      SORA_DEFAULT_ADMIN_PASSWORD: ${SORA_DEFAULT_ADMIN_PASSWORD}
+      SORA_DEFAULT_ANALYST_PASSWORD: ${SORA_DEFAULT_ANALYST_PASSWORD}
+      SORA_DEFAULT_VIEWER_PASSWORD: ${SORA_DEFAULT_VIEWER_PASSWORD}
+      # Demanded by app/secret_validation.py in production. The backend reaches
+      # the database through DATABASE_URL and has no other use for it; passed
+      # because the validator requires it, and that requirement is worth
+      # revisiting on its own.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       ADMIN_API_KEY: ${ADMIN_API_KEY}
-      HF_API_TOKEN: ${HF_API_TOKEN}
-      HF_MODEL_URL: ${HF_MODEL_URL:-https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3}
+      # HF_API_TOKEN and HF_MODEL_URL stood here and are gone: a repository-wide
+      # search finds no read of either name outside a test that checks secrets
+      # do not leak. A token handed to a process that never uses it is exposure
+      # without benefit.
     depends_on:
       pgbouncer:
         condition: service_started
@@ -177,7 +200,12 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
-      ENV: production
+      # SORA_ENV, not ENV. `ENV: production` stood here for months -- the right
+      # intent under a name nothing in app/ reads, so the dev-JWT refusal
+      # (app/auth.py:28), the account-password refusal (app/auth.py:371) and the
+      # whole of app/secret_validation.py were all off on the running host while
+      # this file looked correctly configured. GHSA-x724-6jh7-g3fr.
+      SORA_ENV: production
       # Identical in both services on purpose; a mismatch would put the lock
       # file in two places and silently remove the mutual exclusion.
       SORA_RUNTIME_DIR: /app/runtime
