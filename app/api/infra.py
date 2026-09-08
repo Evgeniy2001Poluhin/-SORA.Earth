@@ -695,49 +695,33 @@ def run_full_pipeline(current_user=Depends(require_admin)):
 
 @router.post("/infra/data-refresh/run", tags=["infrastructure"])
 def data_refresh_run():
-    """
-    Trigger full external ESG data refresh (World Bank/OECD + benchmarks).
-    Returns aggregated result and writes audit record to DB.
+    """Trigger a full external ESG data refresh (World Bank/OECD + benchmarks).
+
+    The audit record is written by `refresh_live_data`, which opens a
+    `data_refresh_log` row before it starts and closes it in its own `finally`
+    on every path. This endpoint wrote a second one and hardcoded its
+    `status="success"` -- not a bad default but a constant, so a degraded
+    refresh left one honest row and one that could not say anything else. The
+    same duplicate shape as the scheduler's, found by enumerating every
+    construction of `DataRefreshLog` rather than only the one #289 names.
+
+    `status` stays the envelope it has always been -- the request was handled;
+    a failure raises 500 -- and `refresh_status` is the verdict the run
+    recorded for itself.
     """
     from app.external_data import refresh_live_data
-    from app.database import SessionLocal, DataRefreshLog
 
-    db = SessionLocal()
     try:
         result = refresh_live_data(trigger_source="manual") or {}
-        fetched = int(result.get("fetched") or 0)
-        total = int(result.get("total") or 0)
-
-        log = DataRefreshLog(
-            status="success",
-            countries_fetched=fetched,
-            total_countries=total,
-            message=None,
-        )
-        db.add(log)
-        db.commit()
-
         return {
             "status": "ok",
-            "fetched": fetched,
-            "total": total,
+            "refresh_status": result["status"],
+            "message": result.get("message"),
+            "fetched": int(result.get("fetched") or 0),
+            "total": int(result.get("total") or 0),
         }
     except Exception as e:
-        db.rollback()
-        try:
-            log = DataRefreshLog(
-                status="failed",
-                countries_fetched=0,
-                total_countries=0,
-                message=str(e)[:500],
-            )
-            db.add(log)
-            db.commit()
-        except Exception:
-            pass
         raise HTTPException(status_code=500, detail=f"data refresh failed: {e}")
-    finally:
-        db.close()
 
 
 
