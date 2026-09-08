@@ -114,3 +114,67 @@ def test_every_function_the_document_names_exists():
     missing = sorted(n for n in named if f"def {n}" not in sources)
 
     assert not missing, f"named in CLAUDE.md but defined nowhere in app/: {missing}"
+
+
+#: Written out, because the paragraph this checks is prose. Only the intervals
+#: this scheduler actually uses.
+_IN_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 6: "six", 8: "eight",
+             12: "twelve", 24: "twenty-four"}
+
+
+def startup_jobs() -> set[str]:
+    """`RUN_IMMEDIATELY_ON_STARTUP`, read from the code."""
+    tree = ast.parse(SCHEDULER.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(x, ast.Name) and x.id == "RUN_IMMEDIATELY_ON_STARTUP"
+                   for x in node.targets):
+            continue
+        return {
+            e.value for e in getattr(node.value, "elts", [])
+            if isinstance(e, ast.Constant) and isinstance(e.value, str)
+        }
+    return set()
+
+
+def test_the_startup_tuple_is_readable_and_not_empty():
+    """Negative control. The assertion below passes over an empty set."""
+    jobs = startup_jobs()
+    assert len(jobs) >= 3, (
+        f"only {sorted(jobs)} parsed out of RUN_IMMEDIATELY_ON_STARTUP; the "
+        "check below judges nothing"
+    )
+    assert jobs <= set(jobs_in_code()), (
+        f"RUN_IMMEDIATELY_ON_STARTUP names jobs that are not registered: "
+        f"{sorted(jobs - set(jobs_in_code()))}"
+    )
+
+
+def test_the_forecast_blind_window_the_document_states_is_the_one_the_code_produces():
+    """The document claims a six-hour gap after every deployment. Both halves
+    of that claim are in the code, and both can move without anyone noticing.
+
+    `sora_forecast_mae_current` and its three neighbours are labelled gauges:
+    a series exists only after `.labels(...).set(...)` runs, a restart empties
+    the registry, and the only caller is this job. So the window is exactly
+    "the interval, unless the job also runs at startup" -- and #284 read a
+    `series=0` taken inside it as a metric nobody writes.
+    """
+    assert "auto_pretrain_forecast" not in startup_jobs(), (
+        "auto_pretrain_forecast now runs at startup, so the forecast gauges "
+        "are set right after a deployment and CLAUDE.md's paragraph about a "
+        "six-hour blind window is no longer true. See #156 for whether that "
+        "is the right trade -- this test only says the two must agree."
+    )
+
+    trigger = jobs_in_code()["auto_pretrain_forecast"]
+    hours = re.search(r"hours=(\d+)", trigger)
+    assert hours, f"auto_pretrain_forecast no longer runs on an hourly interval: {trigger}"
+
+    stated = _IN_WORDS.get(int(hours.group(1)))
+    assert stated, f"no word for an interval of {hours.group(1)} hours"
+    assert f"up to {stated} hours after every" in DOC.read_text(), (
+        f"the job runs every {hours.group(1)}h, and CLAUDE.md does not say the "
+        f"gauges are absent for up to {stated} hours after a deployment"
+    )

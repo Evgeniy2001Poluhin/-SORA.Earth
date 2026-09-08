@@ -111,10 +111,25 @@ sora_telemetry_tasks_total = Counter(
 # ── Forecast model performance (updated after walk-forward validation) ──
 # `mostrecent` throughout: each is the latest walk-forward result for one
 # (metric, model) pair, not work done by a process. These four are set in
-# `app/scheduler.py`, which runs in the **scheduler container** -- a separate
-# process that serves no HTTP and is scraped by nothing, so they do not reach
-# Prometheus from there today either way. Filed separately; the mode is right
-# regardless of which process ends up writing them.
+# `app/scheduler.py`, which runs in the **scheduler container** -- one process,
+# no multiprocess directory, and since #267 a scrape target of its own
+# (`job="sora-scheduler"`, `scheduler:9000`). The mode is still declared
+# because it is what an aggregated backend scrape would need if the writer
+# ever moved there.
+#
+# This comment used to end "a separate process that serves no HTTP and is
+# scraped by nothing, so they do not reach Prometheus from there today either
+# way". True when written, false the day #267 shipped, and left standing by
+# the change that made it false. `tests/test_scheduler_metrics_are_scraped.py`
+# has asserted the opposite ever since -- so a green suite and this comment
+# disagreed, and only one of them was checked (#284).
+#
+# What is true, and matters for the five Grafana alerts on these three
+# metrics: `auto_pretrain_forecast` runs on `IntervalTrigger(hours=6)` and is
+# **not** in `RUN_IMMEDIATELY_ON_STARTUP`, and a restart empties the registry.
+# So for up to six hours after every deployment these series do not exist, and
+# an alert on a metric with no series cannot fire. `series=0` measured shortly
+# after a deploy is that window, not proof of a metric nobody writes.
 sora_forecast_mae       = Gauge("sora_forecast_mae_current",  "Current forecast MAE",  ["metric", "model"],
                                 multiprocess_mode="mostrecent")
 sora_forecast_rmse      = Gauge("sora_forecast_rmse_current", "Current forecast RMSE", ["metric", "model"],

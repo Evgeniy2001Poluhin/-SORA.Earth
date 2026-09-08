@@ -559,6 +559,23 @@ Optional:
   `app/scheduler_metrics.py` refuses to serve if `PROMETHEUS_MULTIPROC_DIR` is
   set rather than publishing whichever files it happens to find.
 
+  **Four of those eleven are absent for up to six hours after every
+  deployment**, and it is not a fault. `sora_forecast_mae_current`,
+  `_rmse_current`, `_r2_current` and `_mape_current` are labelled gauges: a
+  series exists only once something calls `.labels(...).set(...)`. The only
+  caller is `auto_pretrain_forecast`, which runs on `IntervalTrigger(hours=6)`
+  and is **not** in `RUN_IMMEDIATELY_ON_STARTUP`, and a restart empties the
+  registry. So a scrape taken right after a deploy finds nothing, and the five
+  Grafana alerts standing on the first three cannot fire until the job runs.
+
+  This matters when reading a measurement rather than when operating: `series=0`
+  shortly after a deployment is that window, and is not evidence of a metric
+  nobody writes — the two look identical in `promtool query instant`, and #284
+  recorded the second reading. Distinguishing them needs the timing of the last
+  deployment, or a row in `forecast_model_metrics`. Whether the window should
+  exist at all is #156, which asks the same question of the four startup jobs
+  nobody chose.
+
 - **Operational counters**: `/api/v1/metrics` (JSON) — request counts by
   endpoint and status, uptime, response times. Never scraped by Prometheus.
 - **Grafana dashboards**: http://localhost:3000 (admin/sora2026). Dashboard: "SORA MLOps Overview"
