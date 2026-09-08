@@ -39,13 +39,25 @@ import yaml
 REPO = Path(__file__).resolve().parents[1]
 COMPOSE = REPO / "docker-compose.prod.yml"
 
+#: The file developers actually run. It cannot have this file's *production*
+#: defect -- there are no production guards to disarm and no secrets to lose --
+#: but it can have the other half: a variable under a name nothing reads. That
+#: half is what made the production one invisible, because a dead entry looks
+#: exactly like a live one in both files.
+DEV_COMPOSE = REPO / "docker-compose.yml"
+
+#: Services that run the application in the development file. The names differ
+#: from production on purpose: `app` there is `backend` here, and #278 is about
+#: what happens when the two compose files are merged and both appear.
+DEV_APP_SERVICES = ("app", "scheduler")
+
 #: Services that run the application. `postgres`, `pgbouncer` and `grafana`
 #: read their own configuration and are not in scope.
 APP_SERVICES = ("backend", "scheduler")
 
 
-def compose_environment(service: str) -> dict[str, str]:
-    spec = yaml.safe_load(COMPOSE.read_text())["services"][service]
+def compose_environment(service: str, path: Path = COMPOSE) -> dict[str, str]:
+    spec = yaml.safe_load(path.read_text())["services"][service]
     env = spec.get("environment", {})
     if isinstance(env, list):
         return dict(item.split("=", 1) for item in env if "=" in item)
@@ -242,3 +254,91 @@ def test_the_guard_reads_the_environment_and_not_only_its_argument():
         "off in production"
     )
     assert not any("tooshort" in f for f in faults), "a fault must not echo the value"
+
+
+#: Names belonging to other images, in both compose files. Kept beside the
+#: assertions that use it rather than inside one of them: the two files pass
+#: the same set, and a name exempted in one and not the other would be a
+#: difference nobody chose.
+NOT_OURS = frozenset({
+    "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB",
+    "DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME",
+    "POOL_MODE", "MAX_CLIENT_CONN", "DEFAULT_POOL_SIZE", "AUTH_TYPE",
+    "WORKERS",
+    "SORA_DEFAULT_ADMIN_PASSWORD",
+    "SORA_DEFAULT_ANALYST_PASSWORD",
+    "SORA_DEFAULT_VIEWER_PASSWORD",
+})
+
+
+def dev_services_that_run_this_code() -> set[str]:
+    """Services built from this repository, taken from the file.
+
+    Derived rather than listed, because the list is exactly what a narrowing
+    would quietly shrink: pointing `DEV_APP_SERVICES` at one service left
+    every assertion green while the other stopped being judged. Measured.
+    """
+    cfg = yaml.safe_load(DEV_COMPOSE.read_text())["services"]
+    return {name for name, spec in cfg.items() if spec.get("build")}
+
+
+def test_the_development_compose_is_read_and_every_built_service_is_judged():
+    """Negative control, in both directions the sweep can be wrong.
+
+    Too narrow and a service escapes the rule; empty and the rule judges
+    nothing. Both bounds come from the file, not from a number chosen here.
+    """
+    assert DEV_COMPOSE.exists(), f"{DEV_COMPOSE.name} is gone"
+
+    built = dev_services_that_run_this_code()
+    assert built, f"no service in {DEV_COMPOSE.name} is built from this repository"
+    assert built <= set(DEV_APP_SERVICES), (
+        f"these services run this code and are not judged: "
+        f"{sorted(built - set(DEV_APP_SERVICES))}"
+    )
+    assert set(DEV_APP_SERVICES) <= built, (
+        f"these are judged and do not run this code: "
+        f"{sorted(set(DEV_APP_SERVICES) - built)}"
+    )
+
+    for service in DEV_APP_SERVICES:
+        env = compose_environment(service, DEV_COMPOSE)
+        # A name known to be live, not a count: a threshold defends nothing
+        # once someone edits the threshold, and `RUN_SCHEDULER` is read by
+        # `run_scheduler.py` and decides which of the two services this is.
+        assert "RUN_SCHEDULER" in env, (
+            f"{service} no longer declares RUN_SCHEDULER; either the file "
+            f"changed shape or this check is reading the wrong service"
+        )
+
+
+@pytest.mark.parametrize("service", DEV_APP_SERVICES)
+def test_the_development_compose_passes_no_dead_name(service):
+    """The same rule as production, applied where people work every day.
+
+    Not the same *defect*: development has no guards to disarm and no secrets
+    to discard, so nothing here is a security matter. What is the same is the
+    shape -- a variable under a name `app/` never consults looks configured and
+    is not, and a developer who sets it and sees no effect has no way to tell
+    which of the two is true.
+
+    `SORA_ENV` is deliberately **not** required here. Development runs on
+    defaults on purpose; demanding it would push people towards setting
+    production values locally, which `app/secret_validation.py` says in its own
+    docstring is the trade to avoid.
+
+    Measured clean when this was written: seven services, ten variables between
+    them, none dead. The check exists to keep that true, not to fix something.
+    """
+    read = names_read_by_app()
+    ignored = sorted(
+        name
+        for name in compose_environment(service, DEV_COMPOSE)
+        if name not in read and name not in NOT_OURS and not name.startswith("GF_")
+    )
+
+    assert not ignored, (
+        f"{service} in {DEV_COMPOSE.name} is given names nothing in app/ reads, "
+        f"so their values are discarded on arrival: {ignored}. In production "
+        f"the same shape kept three guards switched off for four months."
+    )
