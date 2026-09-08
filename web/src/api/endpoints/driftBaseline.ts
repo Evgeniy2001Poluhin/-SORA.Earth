@@ -34,7 +34,11 @@ const MLFLOW:MlflowHistoryResp={status:"ok",reason_code:null,count:30,events:Arr
   "tags.baseline_id":"model_drift_endpoint","params.drifted_features":"budget,co2_reduction,social_impact,duration_months"}))};
 export const driftBaselineApi={
   status:()=>isMock?delay(STATUS):api<DriftBaselineStatus>("/mlops/drift/baseline"),
-  fit:(csv_path="data/projects.csv")=>isMock?delay<DriftBaselineFitResponse>({status:"fitted",n_samples:734,features:["budget","co2_reduction","social_impact","duration_months"]}):api<DriftBaselineFitResponse>(`/mlops/drift/baseline/fit?csv_path=${encodeURIComponent(csv_path)}`,{method:"POST"}),
+  /** The server chooses the file. `csv_path` used to be sent here and obeyed:
+   *  an unauthenticated caller named any path on the server and got back its
+   *  row count and per-column statistics (GHSA-2xr2-4767-23gm). The parameter
+   *  is gone from the handler and no longer sent. */
+  fit:()=>isMock?delay<DriftBaselineFitResponse>({status:"fitted",n_samples:734,features:["budget","co2_reduction","social_impact","duration_months"]}):api<DriftBaselineFitResponse>("/mlops/drift/baseline/fit",{method:"POST"}),
   remove:()=>isMock?delay({status:"removed"}):api<{status:string}>("/mlops/drift/baseline",{method:"DELETE"}),
   simulate:(mode:"stable"|"drift"|"custom",n=50,shift?:number)=>{
     if(isMock)return delay<DriftSimulateResponse>({status:"simulated",mode,shift_sigma:shift??(mode==="drift"?2:0),shifts:{},observations:n,reason_code:null});

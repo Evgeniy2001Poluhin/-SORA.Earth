@@ -5,12 +5,13 @@ from datetime import datetime as _dt
 import pandas as pd
 from fastapi import APIRouter
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from app.paths import data_dir
 
 router = APIRouter(prefix="/model", tags=["mlops"])
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MODELS = os.path.join(ROOT_DIR, "models")
-DATA_CSV = os.path.join(ROOT_DIR, "data", "projects.csv")
+DATA_CSV = os.path.join(data_dir(), "projects.csv")
 
 SCALER_COLS = [
     "budget", "co2_reduction", "social_impact", "duration_months",

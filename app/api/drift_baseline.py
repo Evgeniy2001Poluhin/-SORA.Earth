@@ -14,6 +14,7 @@ import logging
 import random
 from typing import Optional
 from app.drift_detection import drift_detector
+from app.paths import data_dir
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -23,11 +24,40 @@ NUM_FEATURES = ["budget", "co2_reduction", "social_impact", "duration_months",
 
 
 @router.post("/mlops/drift/baseline/fit", tags=["mlops"])
-def fit_baseline(
-    csv_path: str = "data/projects.csv",
-):
+def fit_baseline():
+    """Fit the drift baseline from this platform's own training set.
+
+    **The file is not chosen by the caller any more.** `csv_path` was a query
+    parameter with the default `"data/projects.csv"` -- a path on the server,
+    relative to whatever directory the process happened to start in, supplied
+    by whoever sent the request. This endpoint has no authentication (the one
+    below it, in this same file, requires an API key), so anyone reaching the
+    site could:
+
+        ask whether a path exists      -- 404 repeated the path back
+        read a file's shape            -- `samples` is its row count, and mean
+                                          and standard deviation come back for
+                                          every column pandas read as numeric
+        exhaust the worker             -- `pd.read_csv` on a large file or a
+                                          character device, unauthenticated
+
+    Reported privately as GHSA-2xr2-4767-23gm. Removing the parameter closes
+    all three; FastAPI ignores unknown query parameters, so callers that still
+    send `?csv_path=...` keep working and are simply not obeyed.
+
+    What is deliberately **not** changed here: the endpoint is still
+    unauthenticated, and it still overwrites the process-wide drift baseline.
+    The "Fit baseline" button in the SPA calls it from the browser and only
+    sends a key when `VITE_DEV_API_KEY` was set at build time, so requiring one
+    would break that button. Whether the button should be public is a product
+    decision, and it is in the advisory rather than in this diff.
+    """
+    csv_path = os.path.join(data_dir(), "projects.csv")
     if not os.path.exists(csv_path):
-        raise HTTPException(404, f"{csv_path} not found")
+        # No path in the message. Repeating it is what made the 404 an
+        # existence oracle, and now that the path is fixed it would only tell
+        # a caller about this deployment's layout.
+        raise HTTPException(404, "training data not found")
     df = pd.read_csv(csv_path)
     baseline = {}
     used = []

@@ -57,10 +57,12 @@ MIN_WINDOW_ROWS = 10
 NOT_MEASURED_STATUSES = frozenset({"no_log", "insufficient_data"})
 SIGNIFICANCE = 0.05
 
+from app.paths import data_dir
+
 router = APIRouter(prefix="/model", tags=["mlops"])
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PRED_LOG = os.path.join(ROOT_DIR, "data", "predictions_log.csv")
-PROJ_CSV = os.path.join(ROOT_DIR, "data", "projects.csv")
+PRED_LOG = os.path.join(data_dir(), "predictions_log.csv")
+PROJ_CSV = os.path.join(data_dir(), "projects.csv")
 COLS = ["budget", "co2_reduction", "social_impact", "duration_months"]
 
 def _unavailable(window: int, reason: str) -> ModelDriftUnavailable:

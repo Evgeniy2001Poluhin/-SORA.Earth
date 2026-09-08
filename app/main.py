@@ -56,10 +56,12 @@ from app.api import reports as reports_api
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("sora")
 
+from app.paths import data_dir
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
-DB_PATH = os.path.join(ROOT_DIR, "data", "history.db")
-PRED_LOG = os.path.join(ROOT_DIR, "data", "predictions_log.csv")
+DB_PATH = os.path.join(data_dir(), "history.db")
+PRED_LOG = os.path.join(data_dir(), "predictions_log.csv")
 
 
 def get_db():
