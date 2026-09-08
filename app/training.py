@@ -8,13 +8,14 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier,
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_recall_curve
 from sklearn.preprocessing import StandardScaler
+from app.paths import data_dir
 
 logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 MODEL_DIR = os.path.join(ROOT_DIR, "models")
-DATA_DIR = os.path.join(ROOT_DIR, "data")
+DATA_DIR = data_dir()
 
 
 def load_training_data():

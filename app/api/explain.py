@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from app.schemas import ProjectInput as Project
 from app.validators import ProjectInput as LegacyProjectInput
+from app.paths import data_dir
 
 router = APIRouter(tags=["explainability"])
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -122,7 +123,7 @@ def explain_waterfall(project: Project):
             data=explanation.data, feature_names=names,
         )
 
-    _cache_dir = os.path.join(ROOT, "data", "explanations")
+    _cache_dir = os.path.join(data_dir(), "explanations")
     os.makedirs(_cache_dir, exist_ok=True)
     _key = hashlib.sha1(repr(sorted(project.dict().items())).encode()).hexdigest()[:16]
     out = os.path.join(_cache_dir, "wf_" + _key + ".png")
@@ -141,7 +142,7 @@ def beeswarm_plot():
     import matplotlib.pyplot as plt
     import pandas as pd
 
-    csv_path = os.path.join(ROOT, "data", "projects.csv")
+    csv_path = os.path.join(data_dir(), "projects.csv")
     if not os.path.exists(csv_path):
         raise HTTPException(404, "Training data not found")
 
@@ -173,7 +174,7 @@ def beeswarm_plot():
             data=explanation.data, feature_names=list(X.columns),
         )
 
-    out = os.path.join(ROOT, "data", "shap_beeswarm.png")
+    out = os.path.join(data_dir(), "shap_beeswarm.png")
     shap.plots.beeswarm(explanation, show=False, max_display=len(X.columns))
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches="tight"); plt.close()
     return FileResponse(out, media_type="image/png", filename="shap_beeswarm.png")
