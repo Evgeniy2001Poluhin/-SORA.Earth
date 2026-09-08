@@ -375,11 +375,14 @@ UI shows "≈det" badge for near-deterministic predictions (see `web/src/feature
 ## Testing
 
 - **Test framework:** pytest with timeout=30s (`pytest.ini`)
-- **Suite size:** `pytest --collect-only tests/` reports 3082 cases. This line
-  read "375/384 tests passing (97.7%)" for months -- a ratio nobody recomputed,
-  wrong by a factor of eight. The passing figure is not restated here at all:
-  CI computes it on every commit, and a copy in a document can only go stale
-  (#292).
+- **Suite size:** `pytest --collect-only tests/` counts it. The number is not
+  repeated here, and that is the second lesson from the same line. It read
+  "375/384 tests passing (97.7%)" for months -- a ratio nobody recomputed,
+  wrong by a factor of eight -- so on 2026-09-08 the ratio was dropped and
+  "reports 3082 cases" put in its place, with a sentence beside it saying a
+  copy in a document can only go stale. It was 3114 the same day, twelve hours
+  and five merged pull requests later. The paragraph explaining the trap was
+  itself the trap; the only cure is to state the command and no figure (#292).
 - **Test structure:** `tests/test_<domain>.py` mirrors `app/api/<domain>.py`
 - **Fixtures:** `tests/conftest.py` provides FastAPI TestClient, mock database session
 
