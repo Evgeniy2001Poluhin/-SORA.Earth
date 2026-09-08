@@ -174,7 +174,17 @@ def get_admin_snapshot(
 
     refresh_log_total = db.query(DataRefreshLog).count()
     refresh_success = db.query(DataRefreshLog).filter(DataRefreshLog.status == "success").count()
-    refresh_failed = db.query(DataRefreshLog).filter(DataRefreshLog.status == "failed").count()
+    # Both spellings. `refresh_live_data` -- the only writer left after #289 --
+    # records a failure as `error`, so a filter on `failed` alone counted the
+    # rows of one removed duplicate write and nothing else: a counter that
+    # could only ever answer zero once that write was gone. `failed` stays in
+    # the filter for whatever historical rows that path wrote; how many is not
+    # known here, and the count on production was never taken.
+    refresh_failed = (
+        db.query(DataRefreshLog)
+        .filter(DataRefreshLog.status.in_(("error", "failed")))
+        .count()
+    )
     last_refresh_log = (
         db.query(DataRefreshLog)
         .order_by(DataRefreshLog.timestamp.desc())
