@@ -32,18 +32,74 @@ ROOT = Path(__file__).resolve().parents[1]
 ALLOWED_WITHOUT_A_WRITER = {
     # Set in `app/prom_metrics.py` itself, at import, from constants.
     "sora_app_info": "set at import in prom_metrics.py",
+    # Declared in app/api/reports.py and never observed, while
+    # grafana/provisioning/dashboards/pdf_reports.json draws a P95 panel from
+    # it -- so that panel reads "No data" whatever happens. Exactly #266, in a
+    # file this scan did not read until now. Whether to give it a writer beside
+    # the PDF_GENERATED increment or to delete metric and panel together is the
+    # owner's call, the same call the #266 table made per metric. Listed here
+    # so the widened scan can be switched on now instead of never; the
+    # allowance goes when #299 is decided.
+    "sora_pdf_latency_seconds": "declared in app/api/reports.py, never observed (#299)",
 }
 
 
 def _defined_metrics() -> dict[str, str]:
-    tree = ast.parse((ROOT / "app" / "prom_metrics.py").read_text())
+    """Every `sora_*` metric declared anywhere under `app/`, not just in
+    `app/prom_metrics.py`.
+
+    Scoping this to one module was a hole, not a rule: `app/api/reports.py`
+    declares two metrics of its own, so neither took part in the writer check,
+    the CLAUDE.md contract table, or the "always name the job" rule. One of
+    them turned out to have a dashboard panel and no writer (#299) -- the
+    defect this file exists to catch, sitting in the one file it did not read.
+    """
+    kinds = {"Counter", "Gauge", "Histogram", "Summary", "Info"}
     out = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
-            if getattr(node.value.func, "id", None) in {"Counter", "Gauge", "Histogram", "Info"}:
-                var = getattr(node.targets[0], "id", None)
-                if var and node.value.args:
-                    out[var] = node.value.args[0].value
+    for path in sorted((ROOT / "app").rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text())
+        except SyntaxError:
+            continue
+
+        # Local names bound to a prometheus_client metric class, per file.
+        # `from prometheus_client import Counter as _C` defeated a version of
+        # this scan that matched the bare class names -- found by mutating a
+        # third file to declare an aliased metric with no writer and watching
+        # the mutant survive. The alias is resolved the same way `_writers()`
+        # already resolves aliases on the metric variables themselves.
+        local = set(kinds)
+        module_aliases = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "prometheus_client":
+                for a in node.names:
+                    if a.name in kinds:
+                        local.add(a.asname or a.name)
+            elif isinstance(node, ast.Import):
+                for a in node.names:
+                    if a.name == "prometheus_client":
+                        module_aliases.add(a.asname or a.name)
+
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)):
+                continue
+            func = node.value.func
+            if isinstance(func, ast.Name):
+                constructs = func.id in local
+            elif isinstance(func, ast.Attribute):
+                constructs = func.attr in kinds and getattr(
+                    func.value, "id", None
+                ) in module_aliases
+            else:
+                constructs = False
+            if not constructs:
+                continue
+            var = getattr(node.targets[0], "id", None)
+            if not var or not node.value.args:
+                continue
+            name = node.value.args[0].value
+            if isinstance(name, str) and name.startswith("sora_"):
+                out[var] = name
     return out
 
 
