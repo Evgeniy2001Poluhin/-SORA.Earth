@@ -300,29 +300,61 @@ already reading them.
 | ~~`POST /api/v1/evaluate/monte-carlo`~~ | `api/evaluate.py` | migrated in #248 |
 | ~~`GET /api/v1/lstm-status`~~ | `api/forecast.py` | migrated in #249 |
 | ~~`POST /api/v1/mlops/drift/simulate`~~ | `api/drift_baseline.py` | migrated here |
-| `GET /api/v1/lstm-status` | `api/forecast.py:462` — consumed by `LSTMProgressWidget` |
-| `POST /api/v1/evaluate/monte-carlo` | `api/evaluate.py:552` — `{"error": …}` at HTTP 200 |
-| `POST /api/v1/mlops/drift/simulate` | `api/drift_baseline.py:91` |
+| ~~`POST /api/v1/mlops/auto-retrain`~~ | `api/infra.py` | migrated in #315 |
+| ~~`POST /api/v1/predict/v2`~~ | `api/predict_v2.py` | migrated in #316 |
+| ~~`POST /api/v1/ab/predict`~~ | `api/ab_test.py` | migrated in #317 |
+| ~~`POST /api/v1/ab/split`~~ | `api/ab_test.py` | migrated in #317 |
 
-All fourteen, by declared path — the remaining nine have no frontend consumer
-found, which lowers their priority but does not make them correct:
+The table above is the one that says what is done, and it is the only one:
+what is migrated is stated once, with the public path, and
+`tests/test_roadmap_records_what_migrated.py` checks each of those routes
+against the application's own route table. A second copy of the same fact in
+the inventory below would be a second copy to keep true.
+
+**The file column names the module, not a line in it.** It used to carry
+pointers of this shape, fourteen of them:
+
+```
+api/infra.py:523      landed on a decorator that had moved
+api/drift.py:17       landed in the middle of a comment
+api/evaluate.py:552   landed on a different endpoint entirely
+```
+
+**Six of the fourteen already pointed somewhere else** — measured on `main`,
+before any of these migrations. A line number is not a fact about a route; it
+is a fact about a file on the day somebody looked. The route's own method and
+path identify it and do not move. Same defect as #292, in a document that had
+no check until now.
+
+The three examples above sit in a fenced block on purpose, and that is not
+formatting. The rule this paragraph explains forbids `file.py:NNN` in prose,
+and the first version of it went red **on this paragraph** — the fourth time in
+one day that a check matched the text explaining it. Inside a fence they are
+sample output, which is what they are.
+
+All fourteen, by declared path — the inventory of shapes, not of progress:
 
 | route (declared) | file | shapes |
 |---|---|---|
-| `POST /predict` | `api/ab_test.py:28` | `{error}` vs the prediction |
-| `POST /split` | `api/ab_test.py:71` | `{error}` vs `{status, traffic_split}` |
-| `GET /country/{name}` | `api/data_pipeline.py:87` | 2 static + 1 dynamic |
-| `GET /drift` | `api/drift.py:17` | **4** shapes (#239) |
-| `GET /drift/mlflow-history` | `api/drift.py:61` | 3 shapes |
-| `POST /mlops/drift/simulate` | `api/drift_baseline.py:91` | 2 shapes |
-| `POST /evaluate/monte-carlo` | `api/evaluate.py:552` | `{error}` vs the histogram |
-| `GET /lstm-status` | `api/forecast.py:462` | 2 shapes |
-| `DELETE /cache/redis/invalidate` | `api/infra.py:362` | `{cleared, error}` vs `{cleared, keys}` |
-| `DELETE /cache/redis/invalidate/{prefix}` | `api/infra.py:372` | 2 shapes |
-| `POST /mlops/auto-retrain` | `api/infra.py:523` | 2 shapes |
-| `POST /predict/v2` | `api/predict_v2.py:20` | fallback vs prediction |
-| `GET /prediction-log/stats` | `api/retrain.py:586` | 3 shapes |
-| `GET /russia/{region_code}` | `routes/map_russia.py:139` | 4 shapes |
+| `POST /predict` | `api/ab_test.py` | `{error}` vs the prediction |
+| `POST /split` | `api/ab_test.py` | `{error}` vs `{status, traffic_split}` |
+| `GET /country/{name}` | `api/data_pipeline.py` | 2 static + 1 dynamic |
+| `GET /drift` | `api/drift.py` | **4** shapes (#239) |
+| `GET /drift/mlflow-history` | `api/drift.py` | 3 shapes |
+| `POST /mlops/drift/simulate` | `api/drift_baseline.py` | 2 shapes |
+| `POST /evaluate/monte-carlo` | `api/evaluate.py` | `{error}` vs the histogram |
+| `GET /lstm-status` | `api/forecast.py` | 2 shapes |
+| `DELETE /cache/redis/invalidate` | `api/infra.py` | `{cleared, error}` vs `{cleared, keys}` |
+| `DELETE /cache/redis/invalidate/{prefix}` | `api/infra.py` | 2 shapes |
+| `POST /mlops/auto-retrain` | `api/infra.py` | 2 shapes |
+| `POST /predict/v2` | `api/predict_v2.py` | fallback vs prediction |
+| `GET /prediction-log/stats` | `api/retrain.py` | 3 shapes |
+| `GET /russia/{region_code}` | `routes/map_russia.py` | 4 shapes |
+
+**Five remain, in four files:** the two cache invalidations,
+`GET /country/{name}`, `GET /prediction-log/stats` and
+`GET /russia/{region_code}`. None has a frontend consumer, which lowers their
+priority and does not make them correct.
 
 Per-route inventory before migrating one: HTTP methods and statuses, number of
 return/raise branches, actual keys per branch, consumers, side effects,
