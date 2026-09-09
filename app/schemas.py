@@ -333,6 +333,59 @@ ModelDriftResponse = Annotated[
 ]
 
 
+# --- POST /api/v1/predict/v2 ------------------------------------------------
+#
+# Migration under docs/API_CONTRACT_ROADMAP.md §4. Same trade as #247: a fault
+# stops being a 200.
+#
+# The registry being unreachable answered 200 with `success_probability: null`,
+# no `predicted_class` at all, and `fallback_to_v1: true`. Three problems in
+# one body:
+#
+#   a null probability rendered as 0 reads as "this project will fail" -- a
+#   prediction, not an outage
+#   `predicted_class` was absent, so `body.get("predicted_class")` is None,
+#   which a naive consumer coerces to 0: the same wrong verdict by another route
+#   `fallback_to_v1` claimed an action. Nothing here falls back, and the flag
+#   was read nowhere in this repository -- measured: one write, zero reads
+#
+# The flag is removed rather than documented. A field naming a behaviour nobody
+# performs is worse than no field: it tells the reader the system did something
+# it did not.
+
+
+class PredictV2Ok(BaseModel):
+    """A prediction from the registry champion."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    success_probability: float = Field(
+        ..., ge=0.0, le=1.0, description="Probability that the project succeeds."
+    )
+    predicted_class: int = Field(
+        ..., description="1 when the probability is at least 0.5, else 0."
+    )
+    model: Dict[str, Any] = Field(
+        default_factory=dict, description="Which model answered, from the registry."
+    )
+
+
+class PredictV2Unavailable(BaseModel):
+    """The registry could not answer. Served with 503, never 200.
+
+    No probability field at all, rather than a null one: a caller reading the
+    body of a 503 must not find a place where a number is supposed to be.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    reason_code: Literal["registry_unavailable"]
+    detail: str = Field(..., description="Human-readable, safe to show.")
+    model: Dict[str, Any] = Field(
+        default_factory=dict, description="What the registry reports about itself."
+    )
+
+
 # --- POST /api/v1/mlops/auto-retrain ----------------------------------------
 #
 # Migration under docs/API_CONTRACT_ROADMAP.md §4, priority P0: a retrain
