@@ -333,6 +333,56 @@ ModelDriftResponse = Annotated[
 ]
 
 
+# --- POST /api/v1/ab/predict and /api/v1/ab/split ---------------------------
+#
+# Migration under docs/API_CONTRACT_ROADMAP.md §4. Two routes, one file, the
+# same shape as /predict/v2 -- and one of them is worse, because it is a write.
+#
+#   /ab/predict  any exception answered 200 with {"error": str(e)}. No
+#                probability, so a consumer reading it finds nothing where a
+#                number belongs; and the exception text went to the caller,
+#                which #247 already removed from the MLflow path
+#   /ab/split    an out-of-range percentage answered 200 with
+#                {"error": "must be 0.0-1.0"} and did not change the split.
+#                A caller that sets 5.0 is told 200 and believes it took
+#
+# The split range is now a constraint on the parameter, so FastAPI refuses it
+# before the handler runs. The branch is not fixed, it is gone: a validation
+# rule written as an `if` inside a handler applies only where somebody
+# remembered to write it, and does not appear in the schema at all.
+
+
+class ABPredictOk(BaseModel):
+    """One A/B prediction, from whichever arm the split selected."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model: str = Field(..., description="Which arm answered: model_a_rf or model_b_ensemble_v2.")
+    probability: float = Field(..., ge=0.0, le=1.0)
+    prediction: Literal["approved", "rejected"]
+    latency_ms: float = Field(..., ge=0.0)
+    traffic_split: Dict[str, float]
+
+
+class ABPredictUnavailable(BaseModel):
+    """A model could not answer. 503, and no probability field at all.
+
+    `detail` is a fixed sentence, not the exception. The text of an unexpected
+    error names internals -- module paths, column names, occasionally values --
+    and the caller can do nothing with it. It goes to the log instead.
+    """
+
+    reason_code: Literal["model_unavailable"]
+    detail: str
+
+
+class ABSplitOk(BaseModel):
+    """The split after a successful change."""
+
+    status: Literal["ok"]
+    traffic_split: Dict[str, float]
+
+
 # --- POST /api/v1/predict/v2 ------------------------------------------------
 #
 # Migration under docs/API_CONTRACT_ROADMAP.md §4. Same trade as #247: a fault
