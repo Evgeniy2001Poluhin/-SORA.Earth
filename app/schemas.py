@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Annotated, Optional, List, Dict, Any, Literal, Union
+from typing import Annotated, Optional, List, Tuple, Dict, Any, Literal, Union
 
 class ProjectInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -783,3 +783,64 @@ DriftSimulateResponse = Annotated[
     Union[DriftSimulateOk, DriftSimulateSkipped],
     Field(discriminator="status"),
 ]
+
+
+# --- POST /api/v1/predict/uncertainty ---------------------------------------
+#
+# Migration under docs/API_CONTRACT_ROADMAP.md §4, P1. The shape was already
+# pinned at the test level in tests/test_uncertainty_contract.py before this
+# model existed -- this adds the OpenAPI declaration the tests were
+# substituting for, so the contract reaches /openapi.json and the frontend
+# type it already has (web/src/api/types.ts: UncertaintyResponse) stops being
+# a promise nobody but a test file checks.
+#
+# No business logic changes: fields, names and value ranges are copied from
+# the handler's one unconditional return and from the existing test, not
+# designed fresh. `app/api/calibration.py:predict_with_uncertainty` has no
+# error branch of its own -- an unhandled exception still falls through to
+# FastAPI's default 500, which this migration does not touch.
+
+
+class UncertaintyPrediction(BaseModel):
+    """Percentile summary of the RF forest's per-tree probabilities."""
+
+    mean: float
+    median: float
+    lower_90: float = Field(..., description="5th percentile across trees.")
+    upper_90: float = Field(..., description="95th percentile across trees.")
+
+
+class UncertaintyTreeDistribution(BaseModel):
+    """The same forest, described as a distribution rather than a summary."""
+
+    std: float
+    n_trees: int
+    min: float
+    max: float
+    p5: float = Field(..., description="Identical to prediction.lower_90.")
+    p95: float = Field(..., description="Identical to prediction.upper_90.")
+
+
+class UncertaintyDetail(BaseModel):
+    method: str
+    mean: float
+    std: float
+    ci_90: Tuple[float, float]
+    n_trees: int
+
+
+class UncertaintyOk(BaseModel):
+    """The one shape this endpoint has ever returned.
+
+    `confidence` and `reliability` are the same computed value under two
+    names -- the handler sets both from one variable -- and both are declared
+    here rather than one being derived, because collapsing them would assert
+    a relationship the handler does not guarantee against a future edit.
+    """
+
+    probability: float
+    prediction: UncertaintyPrediction
+    tree_distribution: UncertaintyTreeDistribution
+    confidence: Literal["high", "medium", "low"]
+    uncertainty: UncertaintyDetail
+    reliability: Literal["high", "medium", "low"]

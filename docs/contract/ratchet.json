@@ -12,7 +12,7 @@
   },
   "counts": {
     "considered": 172,
-    "with_response_model": 26
+    "with_response_model": 27
   },
   "uncovered": [
     "DELETE /api/v1/webhooks/{sub_id} @app/api/webhooks.py",
@@ -153,7 +153,6 @@
     "POST /predict/explain/waterfall @app/api/explain.py",
     "POST /predict/neural @app/api/predict.py",
     "POST /predict/stacking @app/api/predict.py",
-    "POST /predict/uncertainty @app/api/calibration.py",
     "POST /report/pdf @app/api/evaluate.py",
     "POST /reports/compliance-batch.pdf @app/api/reports.py",
     "POST /reports/compliance.pdf @app/api/reports.py",

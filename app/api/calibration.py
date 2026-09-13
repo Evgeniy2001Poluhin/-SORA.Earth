@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from app.paths import data_dir, models_dir
+from app.schemas import UncertaintyOk
 
 router = APIRouter(tags=["calibration"])
 
@@ -108,8 +109,15 @@ def reliability_diagram():
                         headers={"X-Metrics": json.dumps(metrics), "X-Samples": str(len(labels))})
 
 
-@router.post("/predict/uncertainty")
+@router.post("/predict/uncertainty", response_model=UncertaintyOk)
 def predict_with_uncertainty(project: dict):
+    """RF tree-variance uncertainty for one prediction.
+
+    Contract declared under docs/API_CONTRACT_ROADMAP.md §4, P1 -- see
+    app/schemas.py:UncertaintyOk for why the shape below is what it is. No
+    behaviour here changed; this docstring and the `response_model` above are
+    the entire diff to this function.
+    """
     import app.main as m
     from app.schemas import ProjectInput as Project
     from app.validators import ProjectInput as PI
