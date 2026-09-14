@@ -1,6 +1,7 @@
 """Tests for predict.py (76%) and retrain.py (69%) coverage boost."""
 import pytest
 from fastapi.testclient import TestClient
+import app.main as main_module
 from app.main import app
 
 client = TestClient(app)
@@ -73,18 +74,27 @@ class TestPredict:
         assert d["confidence"] in ["high", "medium", "low"]
         assert len(d["confidence_interval"]) == 2
 
+    # The three tests below required the neural network and passed without its
+    # weights, because a random network answered in its place (#320). They now
+    # follow the state the app is actually in; the loaded path is covered with
+    # real weights in tests/test_neural_weights_or_no_prediction.py.
+
     def test_predict_neural(self):
         r = client.post("/api/v1/predict/neural", json=SAMPLE)
-        assert r.status_code == 200
-        assert r.json()["model"] == "NeuralNet"
+        if main_module.nn_model is None:
+            assert r.status_code == 503
+            assert r.json()["reason_code"] == "neural_network_unavailable"
+        else:
+            assert r.status_code == 200
+            assert r.json()["model"] == "NeuralNet"
 
     def test_predict_stacking(self):
         r = client.post("/api/v1/predict/stacking", json=SAMPLE)
         assert r.status_code == 200
         d = r.json()
         assert d["model"] == "StackingEnsemble"
-        for m in ["rf", "xgb", "nn"]:
-            assert m in d["base_models"]
+        expected = {"rf", "xgb"} | ({"nn"} if main_module.nn_model is not None else set())
+        assert set(d["base_models"]) == expected
 
     def test_predict_compare(self):
         r = client.post("/api/v1/predict/compare", json={"projects": [SAMPLE, SAMPLE2]})
@@ -92,8 +102,9 @@ class TestPredict:
         d = r.json()
         assert len(d["projects"]) == 2
         assert d["projects"][0]["probability"] >= d["projects"][1]["probability"]
-        for key in ["RandomForest", "XGBoost", "NeuralNet", "StackingEnsemble"]:
+        for key in ["RandomForest", "XGBoost", "StackingEnsemble"]:
             assert key in d
+        assert ("NeuralNet" in d) == (main_module.nn_model is not None)
 
     def test_predict_explain(self):
         r = client.post("/api/v1/predict/explain", json=SAMPLE)

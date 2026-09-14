@@ -436,6 +436,18 @@ class PredictV2Unavailable(BaseModel):
     )
 
 
+class NeuralNetworkUnavailable(BaseModel):
+    """The neural network has no loaded weights. Served with 503, never 200.
+
+    Until #320 the route answered 200 from a randomly initialised network, and
+    each worker held a different one. No probability field, for the reason
+    PredictV2Unavailable gives: a 503 body must hold no place for a number.
+    """
+
+    reason_code: Literal["neural_network_unavailable"]
+    detail: str = Field(..., description="Human-readable, safe to show.")
+
+
 # --- POST /api/v1/mlops/auto-retrain ----------------------------------------
 #
 # Migration under docs/API_CONTRACT_ROADMAP.md §4, priority P0: a retrain

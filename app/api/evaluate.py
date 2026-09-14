@@ -475,12 +475,11 @@ def generate_pdf_report(project: Project):
     from app.main import rf_model, xgb_model, nn_model, make_features_xgb
 
     feats_7 = make_features_xgb(legacy)
-    rf_p = float(rf_model.predict_proba(feats_9)[0][1])
-    xgb_p = float(xgb_model.predict_proba(feats_7)[0][1])
-    from app.api.predict import _nn_forward
-    nn_p = _nn_forward(nn_model, feats_9)
+    from app.api.predict import _base_probabilities, _blend
 
-    prob = float((rf_p + xgb_p + nn_p) / 3.0)
+    # Only the models that are loaded (#320): this probability is printed in the
+    # PDF the interface downloads, and a third of it used to be a random network.
+    prob = _blend(_base_probabilities(rf_model, xgb_model, nn_model, feats_9, feats_7))
     prediction = int(prob >= best_threshold)
     risk = "Low" if esg["total_score"] >= 70 else "Medium" if esg["total_score"] >= 40 else "High"
 

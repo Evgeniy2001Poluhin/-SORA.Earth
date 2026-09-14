@@ -499,11 +499,38 @@ class SoraNet(tnn.Module):
         return self.net(x)
 
 
-nn_model = SoraNet()
 NN_PATH = os.path.join(ROOT_DIR, "models", "pytorch_mlp.pth")
-if os.path.exists(NN_PATH):
-    nn_model.load_state_dict(torch.load(NN_PATH, map_location="cpu"))
-    nn_model.eval()
+
+
+def load_neural_network(path):
+    """A network whose weights came from `path`, or None. Never a network without them.
+
+    This used to construct `SoraNet()` unconditionally and load weights only if
+    the file existed (#320). `pytorch_mlp.pth` is in neither Git nor the image,
+    so the network kept torch's random initialisation everywhere — a different
+    one in every worker, since nothing seeds torch — and was served as a
+    prediction while every indicator checked `is not None` and said loaded.
+
+    None is the whole contract: every consumer tests for it, and the network is
+    optional, so its absence degrades those routes rather than the application.
+    A file that exists but cannot be loaded is treated the same way; it used to
+    raise at import and take the process down.
+    """
+    if not os.path.exists(path):
+        logger.warning("neural network weights not found; /predict/neural will answer 503")
+        return None
+    network = SoraNet()
+    try:
+        network.load_state_dict(torch.load(path, map_location="cpu", weights_only=True))
+    except Exception as exc:
+        logger.warning("neural network weights could not be loaded (%s); /predict/neural will answer 503",
+                       type(exc).__name__)
+        return None
+    network.eval()
+    return network
+
+
+nn_model = load_neural_network(NN_PATH)
 
 logger.info("SORA.Earth AI Platform started")
 
@@ -832,7 +859,9 @@ def system_health():
         "server_time_utc": datetime.utcnow().isoformat() + "Z",
         "components": {
             "api": "ok",
-            "ml_models": "ok" if rf_model and xgb_model and nn_model else "warn",
+            # The neural network is optional (#320): it used to count here, and
+            # an unloaded one counted as present.
+            "ml_models": "ok" if rf_model and xgb_model else "warn",
             "pdf_report": "ok",
             "metrics": "ok",
         },
