@@ -67,6 +67,7 @@ import logging
 import os
 import re
 import shutil
+import time
 import uuid
 from dataclasses import dataclass
 from typing import List, Optional
@@ -91,10 +92,23 @@ REQUIRED_ARTEFACTS = ("model.pkl", "scaler.pkl", "best_threshold.pkl", "meta.jso
 OPTIONAL_ARTEFACTS = ("metrics.json",)
 
 #: Written into a staged directory while it is still being assembled, and
-#: removed when it is complete. Pruning and activation both refuse a directory
-#: carrying it, so a candidate being written cannot be deleted underneath its
-#: writer or promoted half-finished.
+#: removed when it is complete. Activation refuses a directory carrying it, and
+#: pruning leaves one alone until `ABANDONED_AFTER`, so a candidate being written
+#: cannot be deleted underneath its writer or promoted half-finished.
 INCOMPLETE_MARKER = ".incomplete"
+
+#: How long a marker stands before it is read as a writer that died.
+#:
+#: A retrain removes its marker when it finishes and its whole directory when it
+#: fails, so a marker still there is one whose process ran neither -- killed for
+#: memory, or in a container recreated mid-run. Nothing else would ever remove
+#: that directory.
+#:
+#: A day, against a marked phase that fits models and makes no network call: the
+#: registry step runs after the marker is gone. Being wrong costs a run that
+#: really was still writing -- its next write fails and it is recorded as failed.
+#: Never reclaiming costs the disk, without limit.
+ABANDONED_AFTER = 24 * 60 * 60
 
 #: Written into the champion when it is activated, and carried through the
 #: rename with it. It records which run produced the serving model.
@@ -377,45 +391,77 @@ def activate(run_id: str) -> ModelSource:
 def prune_staged(keep: int = STAGED_RETENTION, protect=()) -> List[str]:
     """Drop the oldest candidates, keeping the most recent `keep`.
 
-    Four things are never removed, whatever their age:
+    Never removed, whatever their age:
 
-    - a directory still being written (`INCOMPLETE_MARKER`);
-    - the candidate the current `active` was built from, matched by version, so
-      a rollback still has something to roll back to;
+    - the candidate the current `active` was built from, matched by the run id in
+      its activation manifest, so a rollback still has something to roll back to;
     - anything named in `protect` — the run being activated, or one a retry is
       about to re-register;
-    - nothing at all, if the staged root does not exist.
+    - a directory still being written: one carrying `INCOMPLETE_MARKER` that is
+      younger than `ABANDONED_AFTER`.
 
-    Retention is by modification time; run ids are UUIDs and carry no order.
+    A marked directory older than that is removed. Marked directories never count
+    toward `keep`: none of them is a model anyone could activate. An absent
+    staged root is not an error.
+
+    Both ages are the directory's modification time; run ids are UUIDs and carry
+    no order.
     """
     root = os.path.join(runtime_dir(), "staged")
     if not os.path.isdir(root):
         return []
 
     protected = {str(p) for p in protect}
-    # By run id, not by version: `retrained_at` has second resolution, so two
-    # runs finishing in the same second share it and pruning would spare the
-    # wrong candidate.
-    champion_run = _manifest_of(active_dir()).get("run_id")
 
     with _exclusive():
+        # Inside the lock. Read before it, an activation that finished while
+        # this process waited left its champion unprotected. By run id, not by
+        # version: `retrained_at` has second resolution, so two runs finishing
+        # in the same second share it and pruning would spare the wrong one.
+        champion_run = _manifest_of(active_dir()).get("run_id")
+        abandoned_before = time.time() - ABANDONED_AFTER
+
         entries = []
+        removed = []
         for name in os.listdir(root):
             path = os.path.join(root, name)
             if not os.path.isdir(path):
-                continue
-            if os.path.exists(os.path.join(path, INCOMPLETE_MARKER)):
                 continue
             if name in protected:
                 continue
             if champion_run is not None and name == champion_run:
                 continue
-            entries.append((os.path.getmtime(path), name))
+            modified = os.path.getmtime(path)
+            if os.path.exists(os.path.join(path, INCOMPLETE_MARKER)):
+                if modified < abandoned_before:
+                    shutil.rmtree(path)
+                    removed.append(name)
+                    logger.warning(
+                        "Removed staged candidate %s: unfinished and untouched "
+                        "for over %d hours, so its writer is gone",
+                        name, ABANDONED_AFTER // 3600,
+                    )
+                continue
+            entries.append((modified, name))
 
         entries.sort(reverse=True)
-        removed = []
         for _, name in entries[max(keep, 0):]:
             shutil.rmtree(os.path.join(root, name))
             removed.append(name)
 
     return removed
+
+
+def discard_unfinished(run_id: str) -> bool:
+    """Remove a candidate its own run gave up on. True if anything was removed.
+
+    Only while it still carries `INCOMPLETE_MARKER`. A run that fails after its
+    candidate is complete -- in recording the outcome, say -- leaves a whole model,
+    and whether to keep that is retention's decision, not this one's.
+    """
+    staged = staged_dir(run_id)
+    with _exclusive():
+        if not os.path.exists(os.path.join(staged, INCOMPLETE_MARKER)):
+            return False
+        shutil.rmtree(staged)
+    return True

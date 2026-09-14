@@ -17,7 +17,7 @@ from fastapi import (APIRouter, BackgroundTasks, Depends, File, HTTPException,
                      UploadFile)
 from app.auth import require_api_key
 from app.paths import data_dir, models_dir, staged_dir
-from app.model_source import INCOMPLETE_MARKER
+from app.model_source import INCOMPLETE_MARKER, discard_unfinished, prune_staged
 
 router = APIRouter(prefix="/model", tags=["mlops"])
 
@@ -149,11 +149,25 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
     log_id = _start_retrain_log(trigger_source=trigger_source, job_name="model_retrain",
                                 run_id=run_id)
 
+    # Retention is enforced here because every candidate is created here, by
+    # whichever caller asked for the run (#191). `prune_staged` existed and
+    # nothing called it, so every run's directory stayed. Before this run's own
+    # directory exists, so it is never among what gets pruned. Reported, not
+    # raised: a directory that cannot be removed must not stop every retrain
+    # after it.
+    try:
+        prune_staged()
+    except Exception as exc:
+        logger.warning(
+            "retrain: staged candidates were not pruned, so retention is not "
+            "being enforced: %s: %s", type(exc).__name__, exc,
+        )
+
     # The candidate's directory, created before anything is written into it, so
     # every write below addresses one place. The marker says "still being
-    # assembled": activation and pruning both refuse a directory carrying it, so
-    # a half-written candidate can be neither promoted nor deleted underneath
-    # its writer.
+    # assembled": activation refuses a directory carrying it and pruning leaves
+    # one alone until `ABANDONED_AFTER`, so a half-written candidate can be
+    # neither promoted nor deleted underneath its writer.
     staged = staged_dir(run_id)
     os.makedirs(staged, exist_ok=True)
     with open(os.path.join(staged, INCOMPLETE_MARKER), "w") as _marker:
@@ -472,6 +486,18 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
 
     except Exception as e:
         logger.exception("Retrain failed in _do_retrain: %s", e)
+        # A failed run removes what it started: left behind, its marker kept the
+        # directory out of pruning for good. Before the journal row, so a
+        # database error there cannot skip it, and never raised, so it cannot
+        # replace the failure being reported. A process killed outright runs
+        # none of this; `ABANDONED_AFTER` in app.model_source is for that one.
+        try:
+            discard_unfinished(run_id)
+        except Exception as cleanup:
+            logger.warning(
+                "retrain: the unfinished candidate %s was not removed: %s: %s",
+                run_id, type(cleanup).__name__, cleanup,
+            )
         _finish_retrain_log(
             log_id=log_id,
             training_status="failed",
