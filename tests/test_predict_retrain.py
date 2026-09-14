@@ -1,7 +1,5 @@
 """Tests for predict.py (76%) and retrain.py (69%) coverage boost."""
 import pytest
-import shutil
-import os
 from fastapi.testclient import TestClient
 from app.main import app
 
@@ -132,25 +130,18 @@ class TestPredict:
 
 
 class TestRetrain:
-    MODELS_DIR = "models"
-    BACKUP_DIR = "models/_test_backup"
+    # These tests used to copy every pkl into models/_test_backup and put them
+    # back afterwards. Both paths were the literal string "models", so the
+    # backup landed in the repository's own seed directory rather than the
+    # temporary copy conftest points SORA_MODELS_DIR at -- and a failed teardown
+    # left it there, where deploy_production.sh refuses a dirty tree.
+    #
+    # The protection was for a write that no longer happens: _do_retrain writes
+    # the candidate to runtime/staged/<run_id>/ and never touches the seed.
 
     def setup_method(self):
         from app.auth import require_admin
         app.dependency_overrides[require_admin] = lambda: {"username": "test_admin", "role": "admin"}
-        # Backup pkl files before retrain tests
-        os.makedirs(self.BACKUP_DIR, exist_ok=True)
-        for f in os.listdir(self.MODELS_DIR):
-            if f.endswith(".pkl"):
-                shutil.copy2(os.path.join(self.MODELS_DIR, f), os.path.join(self.BACKUP_DIR, f))
-
-    def teardown_method(self):
-        # Restore pkl files after retrain tests
-        if os.path.exists(self.BACKUP_DIR):
-            for f in os.listdir(self.BACKUP_DIR):
-                if f.endswith(".pkl"):
-                    shutil.copy2(os.path.join(self.BACKUP_DIR, f), os.path.join(self.MODELS_DIR, f))
-            shutil.rmtree(self.BACKUP_DIR, ignore_errors=True)
 
     def test_model_metrics(self):
         r = client.get("/api/v1/model/metrics")
