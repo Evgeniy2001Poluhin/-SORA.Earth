@@ -11,8 +11,9 @@ Three locations, decided by the owner:
 `resolve_model_source` does not look in `staged/` at all. A rejected candidate
 must never become the serving model, and the cheapest guarantee is that the
 serving path has no way to reach one. `activate` is the only writer of
-`active/`, so promotion is an act someone performed — today the serving model is
-replaced by the fact of training, before any gate has ruled.
+`active/`, so promotion is an act someone performed. Until #199 phase 4 it was
+not: `_do_retrain` assigned the new model into `app.main`, and the serving model
+was replaced by the fact of training, before any gate had ruled.
 
 ## Crash safety
 
@@ -38,28 +39,90 @@ Two activations racing would interleave their renames and produce a state no
 recovery could distinguish, so every mutation takes an exclusive `flock` on a
 file under the runtime root, and pruning takes it too.
 
-## A requirement this places on the next PR
+## Across containers
 
 `flock` excludes two processes only when both open **the same inode**. The
-subprocess test here proves the lock works between processes in one environment;
-it cannot prove it works between containers, because nothing yet mounts a shared
-runtime. Wiring the loader must therefore also establish, and check:
+subprocess test in `tests/test_model_source.py` proves the lock works between
+processes in one environment; it cannot prove it works between containers. This
+module landed before anything mounted a shared runtime, so it named four things
+the wiring would have to establish. Where each stands:
 
-- the backend and the scheduler mount one runtime volume;
-- both resolve the same `SORA_RUNTIME_DIR`;
-- the lock file is one inode, not one path in two filesystems;
-- an integration or deploy check demonstrates mutual exclusion across the two
-  containers, not merely across two processes.
+- the backend and the scheduler mount one runtime volume — established.
+  `docker-compose.prod.yml` mounts the named volume `runtime_models` at
+  `/app/runtime` in both, and `tests/test_runtime_volume_is_shared.py` refuses
+  two different sources or a bind mount;
+- both resolve the same `SORA_RUNTIME_DIR` — established. Both set
+  `/app/runtime`, checked by the same file;
+- the lock file is one inode — follows from the two above, and nothing observes
+  it: those tests read the compose file, not a running host;
+- a check demonstrating mutual exclusion across the two containers — **not
+  established**. No test, CI job or deployment step starts both containers and
+  contends for the lock, so the exclusion rests on the host running what the
+  compose file declares.
 
-Until then this module is a library nothing calls, so a defect here cannot
-change what production does.
+Every worker takes the lock as it starts, so the volume must also be writable by
+the containers' user: `Dockerfile.prod` creates `/app/runtime` so that Docker
+initialises an empty volume with that owner (#213).
+
+`docker-compose.yml`, the development file, declares no runtime volume and no
+`SORA_RUNTIME_DIR`. There `app` and `scheduler` each keep `runtime/` inside their
+own container: they share no lock, and the app never sees a model the scheduler
+activates.
+
+## What calls this
+
+When this module landed nothing called it, and this docstring concluded that a
+defect here could not change what production does. The loader (#207) and the
+gate (#209) ended that. The callers are listed by
+
+    grep -rn "model_source import" app/ --exclude=model_source.py
+
+and when this was written they were:
+
+- `app.model_loader.load_champion` calls `recover()` and then
+  `resolve_model_source()`, and `app.main` calls it at import. gunicorn is not
+  given `--preload`, so each backend worker imports the app itself and runs
+  recovery — a lock, and possibly renames and deletions under the runtime root —
+  as it starts.
+- `app.scheduler.closed_loop_retrain` calls `activate(run_id)` when
+  `app.promotion.evaluate_promotion` passes, then
+  `app.model_loader.reload_champion`. That reload replaces the model in the
+  process that ran the loop and in no other. The scheduled runs are in the
+  scheduler container, so the backend's workers keep the champion they loaded
+  until each starts again; a run triggered over HTTP reloads only the worker
+  that took the request.
+- `app.api.retrain._do_retrain` assembles every candidate in `staged_dir(run_id)`
+  under `INCOMPLETE_MARKER` and removes the marker once the set is complete.
+  Before creating that directory it calls `prune_staged()`, so retention holds
+  whichever caller started the run; a run that fails while its marker is still
+  there calls `discard_unfinished(run_id)` (#326).
+- `app.paths.staged_dir` passes every run id through `validate_run_id` before it
+  becomes a directory name.
+
+So a defect in `recover()` runs at the start of every worker, one in
+`resolve_model_source()` decides what answers predictions, and one in
+`activate()` decides what the closed loop leaves serving.
 
 ## What this does not do yet
 
-The seed files have not moved into `models/seed/`. `.gitattributes` tracks
-`models/*.pkl`, a pattern that is not recursive, so relocating them drops them
-out of LFS and a fresh clone fails on a missing artefact — which closed PR #196.
-Nothing calls this module yet either; wiring the loader is a separate slice.
+The seed has not moved into `models/seed/`, and that is no longer pending:
+`models/` was declared the seed on 2026-08-16, and `app.paths.seed_dir` records
+the measurement behind the decision. `.gitattributes` now carries
+`models/**/*.pkl` and `models/**/*.pth` beside `models/*.pkl` (#208), so a
+subdirectory added later would stay in LFS — protection, not a plan. The seed is
+read-only by enforcement rather than agreement: production mounts `./models`
+with `:ro` in both services, and `tests/test_seed_is_immutable.py` refuses a
+write to it under `app/` and a writable mount (#321).
+
+Still missing:
+
+- **Activation on the other gated path.** `POST /api/v1/mlops/auto-retrain`
+  (`app.api.infra.auto_retrain_on_drift`) applies the same `evaluate_promotion`
+  and writes `promoted` into `retrain_log`, but never calls `activate()`. The
+  candidate it approves stays in `staged/` and serves nothing.
+- **A record of which champion a deployment left serving.** The manifest
+  `scripts/deploy_production.sh` writes records the commit and the images, not
+  the `run_id` in `active/activation.json`.
 """
 import contextlib
 import fcntl
