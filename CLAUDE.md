@@ -564,11 +564,7 @@ Optional:
    Predictions are cached in Redis for the default TTL of
    `app/redis_cache.py` → `cache_set()`, under a key that does not include the
    model (`app/api/predict.py` → `_cache_key()`), so for that long an answer
-   can still come from the model that was serving before. This item said such
-   entries last "until TTL expires or manual invalidation", and the second half
-   does not hold: `DELETE /api/v1/cache/redis/invalidate` and its `/{prefix}`
-   form delete only keys under `sora:`, and prediction keys begin `predict:`,
-   `neural:` or `stacking:`.
+   can still come from the model that was serving before.
 
 4. **Database Migrations**: Always create Alembic migrations for schema changes. The `migrations/` directory is mounted in Docker and runs on first `postgres` container startup.
 
