@@ -275,6 +275,15 @@ for _dirname, _envvar in (("data", "SORA_DATA_DIR"), ("models", "SORA_MODELS_DIR
     shutil.copytree(os.path.join(_REPO_ROOT, _dirname), _scratch)
     os.environ[_envvar] = _scratch
 
+# The runtime as well, and onto an empty directory rather than a copy: a fresh
+# checkout, which is what CI runs, has no runtime/ at all, and a local one holds
+# whatever earlier runs left in it. Every real `_do_retrain` in the suite stages
+# a candidate there, so without this they piled up in the repository's own
+# runtime/staged/ -- and retraining now prunes the directory it stages into
+# (#191).
+if not os.environ.get("SORA_RUNTIME_DIR"):
+    os.environ["SORA_RUNTIME_DIR"] = os.path.join(_ARTIFACT_TMP, "runtime")
+
 
 def _dirty_artifacts():
     """Tracked paths under data/ and models/ that differ from HEAD."""
