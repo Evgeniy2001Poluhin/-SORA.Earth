@@ -507,7 +507,68 @@ Optional:
    `region`, `country_gdp_per_capita`. They are stored and unused by this
    model. Whether that is a decision or an oversight has not been recorded.
 
-3. **Model Versioning**: Models are loaded at app startup. To deploy a new model, replace files in `models/` directory and restart the `app` container. Old predictions remain cached in Redis until TTL expires or manual invalidation.
+3. **Model Versioning**: `models/` is the **seed**, and a new model is not
+   deployed by replacing files in it. This item said to do exactly that --
+   "replace files in `models/` directory and restart the `app` container" --
+   and production now refuses it: `docker-compose.prod.yml` mounts
+   `./models:/app/models:ro` into `backend` and `scheduler`, and
+   `tests/test_seed_is_immutable.py` refuses a write to the seed under `app/`
+   or a writable mount (#321). The seed ships in Git LFS, and in production it
+   changes only by a commit (#191).
+
+   **What serves.** The champion is the RandomForest set: `model.pkl`,
+   `scaler.pkl`, `best_threshold.pkl`, `meta.json`, and `metrics.json` when
+   present. `app/model_loader.py` → `load_champion()` loads it whole from
+   `runtime/active/` when that directory is complete and readable, and whole
+   from `models/` otherwise -- never one file from each. `/api/v1/health`
+   says which under `model_provenance` (`source`, `run_id`, `model_version`,
+   `fell_back`, `reason_code`).
+
+   **How a trained model gets there.** Whatever starts a retrain, the training
+   is `app/api/retrain.py` → `_do_retrain()`, and it writes the candidate to
+   `runtime/staged/<run_id>/`, which nothing serves -- after pruning the older
+   candidates there with `app/model_source.py` → `prune_staged()`, which spares
+   the one the champion was activated from (#326). The one way into
+   `runtime/active/` is `app/model_source.py` → `activate()`, and its one
+   caller is `app/scheduler.py` → `closed_loop_retrain()`, after the promotion
+   gate passes -- reached by the daily and weekly jobs and by the routes that
+   run the closed loop. Every other way to start a retrain stages and stops.
+   `POST /api/v1/mlops/auto-retrain` is the one that misleads: it applies the
+   same gate and records `promoted` in `retrain_log`, and never activates.
+
+   **A process keeps the champion it loaded.** Each `backend` worker loads it
+   once, when the worker starts. `app/model_loader.py` → `reload_champion()`
+   replaces it only in the process that activated. For the scheduled jobs that
+   is the `scheduler` container, so the activated model answers HTTP requests
+   only once the backend's workers start again; for a route it is the one
+   worker that took the request, and the others keep the previous champion.
+   `/api/v1/health` reports whichever the worker answering it holds.
+
+   **What a change to `models/` does.** For the champion set it changes the
+   fallback, which serves only while `runtime/active/` is absent, incomplete
+   or unreadable. XGBoost, the stacking and the ensemble-v2 models have no
+   staged or active copy and always load from `models/`. Either way the files
+   are read when a process starts. In production the change is a commit, and
+   `./scripts/deploy_production.sh` is the only supported deployment. That
+   script force-recreates nginx and prometheus but not `backend` or
+   `scheduler`, and `.dockerignore` keeps `models/` out of the image, so a
+   deployment that changes nothing but `models/` has not been shown to restart
+   them: check their uptime under "Common Production Operations" before
+   assuming the new files are loaded.
+
+   `docker-compose.yml`, the development file, mounts `./models` writable and
+   declares no runtime volume, so there `app` and `scheduler` each keep
+   `runtime/` inside their own container, and the app never serves what the
+   scheduler activates.
+
+   Predictions are cached in Redis for the default TTL of
+   `app/redis_cache.py` → `cache_set()`, under a key that does not include the
+   model (`app/api/predict.py` → `_cache_key()`), so for that long an answer
+   can still come from the model that was serving before. This item said such
+   entries last "until TTL expires or manual invalidation", and the second half
+   does not hold: `DELETE /api/v1/cache/redis/invalidate` and its `/{prefix}`
+   form delete only keys under `sora:`, and prediction keys begin `predict:`,
+   `neural:` or `stacking:`.
 
 4. **Database Migrations**: Always create Alembic migrations for schema changes. The `migrations/` directory is mounted in Docker and runs on first `postgres` container startup.
 
