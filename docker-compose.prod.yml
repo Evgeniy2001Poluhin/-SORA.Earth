@@ -106,7 +106,12 @@ services:
   backend:
     user: "1000:1000"
     volumes:
-      - ./models:/app/models
+      # Read-only, because this is the host's Git checkout (#191). A container
+      # that can write it can dirty the working tree, and deploy_production.sh
+      # then refuses every later deployment — which is how a month of retraining
+      # was lost. Nothing in app/ writes here; the candidate goes to
+      # runtime/staged/<run_id>/ and only a commit changes the seed.
+      - ./models:/app/models:ro
       # One named volume, mounted by backend and scheduler at the same path
       # (#191). The activation lock is an flock, and flock excludes two
       # processes only when both open the *same inode* — two bind mounts of two
@@ -190,7 +195,8 @@ services:
   scheduler:
     user: "1000:1000"
     volumes:
-      - ./models:/app/models
+      # Read-only for the same reason as backend: the seed is a Git checkout.
+      - ./models:/app/models:ro
       # The same named volume at the same path as backend. Both must agree, or
       # the lock protects nothing across containers.
       - runtime_models:/app/runtime

@@ -33,13 +33,10 @@ cd /opt/sora_earth_ai_platform
 # 1. Pull latest changes
 git pull
 
-# 2. Fix models directory permissions (one-time, if not done)
-chown -R 1000:1000 ./models
-
-# 3. Restart backend (includes security fix + MLflow fix)
+# 2. Restart backend (includes security fix + MLflow fix)
 docker compose -f docker-compose.prod.yml restart backend
 
-# 4. Restart scheduler (includes Redis status publishing)
+# 3. Restart scheduler (includes Redis status publishing)
 docker compose -f docker-compose.prod.yml restart scheduler
 ```
 
@@ -152,8 +149,7 @@ Add to Production Server section:
 
 **Order of operations:**
 1. git pull
-2. chown models (if not done)
-3. restart backend
-4. restart scheduler
-5. verify security fix (MUST CHECK!)
-6. monitor logs for 5 min
+2. restart backend
+3. restart scheduler
+4. verify security fix (MUST CHECK!)
+5. monitor logs for 5 min

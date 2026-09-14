@@ -139,20 +139,13 @@ class TestAuthEdgeCases:
 
 
 class TestRetrainEdgeCases:
-    _BACKUP = "models/_test_backup2"
+    # The backup into models/_test_backup2 that used to live here wrote to the
+    # repository's seed directory through a literal "models" path, bypassing the
+    # SORA_MODELS_DIR copy conftest sets up. It guarded against a seed write that
+    # _do_retrain no longer performs -- candidates go to runtime/staged/<run_id>/.
 
     def setup_method(self):
         app.dependency_overrides[require_admin] = _mock_admin
-        os.makedirs(self._BACKUP, exist_ok=True)
-        for f in os.listdir("models"):
-            if f.endswith(".pkl"):
-                shutil.copy2(f"models/{f}", f"{self._BACKUP}/{f}")
-
-    def teardown_method(self):
-        if os.path.exists(self._BACKUP):
-            for f in os.listdir(self._BACKUP):
-                shutil.copy2(f"{self._BACKUP}/{f}", f"models/{f}")
-            shutil.rmtree(self._BACKUP, ignore_errors=True)
 
     # The xfail here read "Background task response conflict" (#2). The
     # endpoint clamps min_samples to 100000 and refuses with 400 when the
