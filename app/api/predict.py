@@ -1,12 +1,13 @@
 from typing import List
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 import csv, io, os, time
 import numpy as np
 import torch
 from app.prom_metrics import sora_prediction_latency, sora_predictions_total
 
+from app.schemas import NeuralNetworkUnavailable
 from app.schemas import ProjectInput as Project
 from app.validators import ProjectInput as LegacyProjectInput
 from app.mlflow_tracking import log_prediction
@@ -38,6 +39,33 @@ def _nn_forward(nn_model, feats):
     nn_model.eval()
     with torch.no_grad():
         return float(nn_model(x).cpu().numpy()[0][0])
+
+
+def _base_probabilities(rf_model, xgb_model, nn_model, feats_9, feats_7):
+    """The probability from each model that is loaded, keyed as `base_models`.
+
+    The neural network is included only when its weights were loaded (#320). It
+    used to be averaged in unconditionally, so on every environment without
+    `pytorch_mlp.pth` a third of each blended probability came from a random
+    network. The three routes that blend share this so none can drift back.
+    """
+    probabilities = {
+        "rf": float(rf_model.predict_proba(feats_9)[0][1]),
+        "xgb": float(xgb_model.predict_proba(feats_7)[0][1]),
+    }
+    if nn_model is not None:
+        probabilities["nn"] = _nn_forward(nn_model, feats_9)
+    return probabilities
+
+
+def _blend(probabilities):
+    return float(sum(probabilities.values()) / len(probabilities))
+
+
+_NEURAL_UNAVAILABLE = NeuralNetworkUnavailable(
+    reason_code="neural_network_unavailable",
+    detail="The neural network has no loaded weights; no prediction was made.",
+)
 
 
 @router.post("/predict")
@@ -86,9 +114,21 @@ def predict_project(project: Project):
     return result
 
 
-@router.post("/predict/neural")
+@router.post(
+    "/predict/neural",
+    responses={
+        503: {
+            "model": NeuralNetworkUnavailable,
+            "description": "The neural network has no loaded weights.",
+        }
+    },
+)
 def predict_neural(project: Project):
     from app.main import nn_model, best_threshold, make_features_base
+
+    # Ahead of the cache, so the refusal cannot depend on what the cache holds.
+    if nn_model is None:
+        return JSONResponse(status_code=503, content=_NEURAL_UNAVAILABLE.model_dump())
 
     ck = _cache_key("neural", project.model_dump())
     cached = cache_get(ck)
@@ -121,7 +161,10 @@ def predict_neural(project: Project):
 def predict_stacking(project: Project):
     import app.main as m
 
-    ck = _cache_key("stacking", project.model_dump())
+    # The composition is part of the key, so a result blended from a different
+    # set of models is never served for this one.
+    composition = "rf+xgb+nn" if m.nn_model is not None else "rf+xgb"
+    ck = _cache_key("stacking:" + composition, project.model_dump())
     cached = cache_get(ck)
     if cached:
         cached["cached"] = True
@@ -132,11 +175,8 @@ def predict_stacking(project: Project):
     feats_9 = m.make_features_base(_to_legacy(project))
     feats_7 = m.make_features_xgb(_to_legacy(project))
 
-    rf_p = float(m.rf_model.predict_proba(feats_9)[0][1])
-    xgb_p = float(m.xgb_model.predict_proba(feats_7)[0][1])
-    nn_p = _nn_forward(m.nn_model, feats_9)
-
-    ens_p = float((rf_p + xgb_p + nn_p) / 3.0)
+    probabilities = _base_probabilities(m.rf_model, m.xgb_model, m.nn_model, feats_9, feats_7)
+    ens_p = _blend(probabilities)
     prediction = int(ens_p >= m.best_threshold)
 
     _lat = round((time.perf_counter() - start) * 1000, 2)
@@ -145,11 +185,7 @@ def predict_stacking(project: Project):
     result = {
         "prediction": prediction,
         "probability": round(ens_p * 100, 2),
-        "base_models": {
-            "rf": round(rf_p * 100, 2),
-            "xgb": round(xgb_p * 100, 2),
-            "nn": round(nn_p * 100, 2),
-        },
+        "base_models": {name: round(p * 100, 2) for name, p in probabilities.items()},
         "threshold": m.best_threshold,
         "model": "StackingEnsemble",
         "inference_time_ms": _lat,
@@ -169,41 +205,35 @@ def predict_compare(req: CompareRequest):
         feats_9 = m.make_features_base(_to_legacy(p))
         feats_7 = m.make_features_xgb(_to_legacy(p))
 
-        rf_p = float(m.rf_model.predict_proba(feats_9)[0][1])
-        xgb_p = float(m.xgb_model.predict_proba(feats_7)[0][1])
-        nn_p = _nn_forward(m.nn_model, feats_9)
-
-        ens_p = float((rf_p + xgb_p + nn_p) / 3.0)
+        probabilities = _base_probabilities(m.rf_model, m.xgb_model, m.nn_model, feats_9, feats_7)
+        ens_p = _blend(probabilities)
         prediction = int(ens_p >= m.best_threshold)
 
         results.append({
             "name": p.name,
             "prediction": prediction,
             "probability": round(ens_p * 100, 2),
-            "base_models": {
-                "rf": round(rf_p * 100, 2),
-                "xgb": round(xgb_p * 100, 2),
-                "nn": round(nn_p * 100, 2),
-            },
+            "base_models": {name: round(v * 100, 2) for name, v in probabilities.items()},
         })
 
     results_sorted = sorted(results, key=lambda x: x["probability"], reverse=True)
     METRICS["predictions_total"] = METRICS.get("predictions_total", 0) + len(req.projects)
-    return {
+
+    def per_model(key):
+        return {"results": [{"name": r["name"], "probability": r["base_models"][key]} for r in results_sorted]}
+
+    response = {
         "projects": results_sorted,
-        "RandomForest": {
-            "results": [{"name": r["name"], "probability": r["base_models"]["rf"]} for r in results_sorted]
-        },
-        "XGBoost": {
-            "results": [{"name": r["name"], "probability": r["base_models"]["xgb"]} for r in results_sorted]
-        },
-        "NeuralNet": {
-            "results": [{"name": r["name"], "probability": r["base_models"]["nn"]} for r in results_sorted]
-        },
-        "StackingEnsemble": {
-            "results": [{"name": r["name"], "probability": r["probability"]} for r in results_sorted]
-        },
+        "RandomForest": per_model("rf"),
+        "XGBoost": per_model("xgb"),
     }
+    # Omitted, not nulled, when the network has no weights (#320, as #316).
+    if m.nn_model is not None:
+        response["NeuralNet"] = per_model("nn")
+    response["StackingEnsemble"] = {
+        "results": [{"name": r["name"], "probability": r["probability"]} for r in results_sorted]
+    }
+    return response
 
 
 @router.post("/shap")

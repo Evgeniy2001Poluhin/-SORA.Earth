@@ -454,10 +454,11 @@ def analytics_summary(window_hours: int = 24, _: None = Depends(admin_auth)):
                 4
             )
 
+        # The neural network is optional (#320) and does not count toward
+        # readiness; `models_loaded.pytorch_mlp` below still reports its state.
         models_loaded = all([
             rf_model is not None,
             xgb_model is not None,
-            nn_model is not None,
             ensemble_model_v2 is not None,
         ])
 

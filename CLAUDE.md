@@ -246,8 +246,39 @@ defaults — the loads are spread across the file and move whenever it is edited
 (#292):
 - **RandomForest** (`models/model.pkl`) - Primary ESG success predictor (9 features)
 - **XGBoost** (`models/xgb_model.pkl`) - Alternative model (7 features)
-- **PyTorch MLP** (`models/pytorch_mlp.pth`) - Neural network (SoraNet class)
+- **PyTorch MLP** (`models/pytorch_mlp.pth`) - Neural network (SoraNet class). **Optional, and the weights are not in the repository** — see below.
 - **Stacking Ensemble v2** (`models/ensemble_model_v2_cal.pkl`) - Calibrated stacking (11 features with category/region encoding)
+
+**The neural network is optional, and its weights are absent** (#320).
+`pytorch_mlp.pth` is in neither Git nor the image, and `app.main.nn_model` is
+`None` unless `load_neural_network()` actually loaded weights — a missing file
+and an unreadable one are treated alike.
+
+It used to be constructed unconditionally and loaded only if the file existed.
+Without the file it kept torch's random initialisation, a different one in each
+gunicorn worker, and was served: `/predict/neural` answered 200 from it, and
+`/predict/stacking`, `/predict/compare` and `/report/pdf` averaged it in as a
+third of the probability. Every indicator checked `nn_model is not None`, which
+a constructed object always satisfies, so all of them said loaded. Measured on
+one project: `rf` 95.0, `xgb` 93.73, the random network 47.09 — a blended 78.6
+where the two trained models agree on about 94.
+
+What happens now without the weights:
+
+```
+/predict/neural          503 {"reason_code": "neural_network_unavailable", ...}
+                         -- checked before the cache
+/predict/stacking        average of rf and xgb; base_models lists only those
+/predict/compare         the same; the NeuralNet block is omitted, not nulled
+/report/pdf              average of rf and xgb
+/api/v1/ready            unaffected -- the network does not count toward readiness
+/api/v1/health           checks.models.neural_network_loaded: false
+analytics indicators     pytorch_mlp loaded: false
+```
+
+Making it required is a separate decision: it means training the network,
+putting it through the same quality gate as the champion, and shipping the
+weights through LFS. The code path then includes it again unchanged.
 
 Feature engineering: `make_features()` computes derived features (budget_per_month, co2_per_dollar, efficiency_score) + temporal features (year, quarter).
 

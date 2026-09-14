@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+import app.main as main_module
 from app.main import app
 
 client = TestClient(app)
@@ -74,8 +75,16 @@ def test_predict_compare():
     assert "XGBoost" in data
 
 def test_predict_neural():
+    # This asserted 200 and passed for months without the weights: the route
+    # was answering from a random network (#320). Where the weights are absent,
+    # as here, it refuses; the loaded path is exercised with real weights in
+    # tests/test_neural_weights_or_no_prediction.py.
     r = client.post("/api/v1/predict/neural", json=PROJECT)
-    assert r.status_code == 200
+    if main_module.nn_model is None:
+        assert r.status_code == 503
+        assert r.json()["reason_code"] == "neural_network_unavailable"
+    else:
+        assert r.status_code == 200
 
 def test_predict_stacking():
     r = client.post("/api/v1/predict/stacking", json=PROJECT)

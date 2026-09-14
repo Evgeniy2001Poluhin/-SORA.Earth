@@ -11,8 +11,15 @@ VERSION = "2.0.0"
 def _check_models():
     try:
         from app.main import rf_model, xgb_model, nn_model
-        ok = all([rf_model is not None, xgb_model is not None, nn_model is not None])
-        return {"status": "healthy" if ok else "degraded", "loaded": ok}
+        # The neural network is optional and reported, not required (#320). It
+        # was required here while an unloaded one counted as present; requiring
+        # it honestly would take readiness down wherever the weights are absent.
+        ok = all([rf_model is not None, xgb_model is not None])
+        return {
+            "status": "healthy" if ok else "degraded",
+            "loaded": ok,
+            "neural_network_loaded": nn_model is not None,
+        }
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
 
