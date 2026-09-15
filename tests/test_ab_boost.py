@@ -2,8 +2,17 @@
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
+from app.auth import require_admin
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _authorize_admin():
+    # /ab/split now requires admin (Security C); this suite tests behaviour.
+    app.dependency_overrides[require_admin] = lambda: {"username": "t", "role": "admin"}
+    yield
+    app.dependency_overrides.pop(require_admin, None)
 
 PROJECT = {
     "name": "AB Test", "budget": 150000, "co2_reduction": 60,

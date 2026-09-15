@@ -1,6 +1,7 @@
 """FastAPI routes powered by MLflow Registry model."""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from app.auth import require_admin
 from mlflow.exceptions import MlflowException
 import logging
 import time
@@ -86,7 +87,7 @@ def model_version():
             detail="no model registered under the configured name/alias yet")
 
 
-@router.post("/model/reload")
+@router.post("/model/reload", dependencies=[Depends(require_admin)])
 def model_reload():
     try:
         reload_model()

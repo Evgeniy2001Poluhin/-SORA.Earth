@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, Query, Security
+from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from fastapi.responses import JSONResponse
-from app.auth import require_api_key
+from app.auth import require_admin, require_api_key
 from app.schemas import (
     DriftSimulateNotFitted,
     DriftSimulateOk,
@@ -23,7 +23,8 @@ NUM_FEATURES = ["budget", "co2_reduction", "social_impact", "duration_months",
                 "budget_per_month", "co2_per_dollar", "efficiency_score"]
 
 
-@router.post("/mlops/drift/baseline/fit", tags=["mlops"])
+@router.post("/mlops/drift/baseline/fit", tags=["mlops"],
+             dependencies=[Depends(require_admin)])
 def fit_baseline():
     """Fit the drift baseline from this platform's own training set.
 
@@ -106,7 +107,8 @@ def baseline_status():
     }
 
 
-@router.delete("/mlops/drift/baseline", tags=["mlops"])
+@router.delete("/mlops/drift/baseline", tags=["mlops"],
+               dependencies=[Depends(require_admin)])
 def reset_baseline():
     drift_detector.set_baseline({})
     drift_detector._r.delete(drift_detector._k_obs)
@@ -129,6 +131,7 @@ def _gen_observation(base: dict, shifts: dict) -> dict:
 @router.post(
     "/mlops/drift/simulate",
     tags=["mlops"],
+    dependencies=[Depends(require_admin)],
     response_model=DriftSimulateResponse,
     responses={
         400: {"model": DriftSimulateNotFitted, "description": "No baseline has been fitted, so there is nothing to simulate against."},

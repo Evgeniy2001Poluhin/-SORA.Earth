@@ -32,10 +32,20 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.auth import require_admin
 
 client = TestClient(app)
 
 FIT = "/api/v1/mlops/drift/baseline/fit"
+
+
+@pytest.fixture(autouse=True)
+def _authorize_admin():
+    # POST /mlops/drift/baseline/fit now requires admin (Security C); this suite
+    # tests which file the baseline comes from, not authorization.
+    app.dependency_overrides[require_admin] = lambda: {"username": "t", "role": "admin"}
+    yield
+    app.dependency_overrides.pop(require_admin, None)
 
 
 def route():

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from app.auth import require_admin
 from app.drift_detection import run_drift_analysis
 from app.services.alerts import send_alert
 import pandas as pd
@@ -48,7 +49,8 @@ def analyze_drift(window_days: int = 7):
     return result
 
 
-@router.post("/drift/test-alert", summary="Manual drift alert test (Slack/Telegram/Email)")
+@router.post("/drift/test-alert", summary="Manual drift alert test (Slack/Telegram/Email)",
+             dependencies=[Depends(require_admin)])
 def test_alert(severity: str = "warning", message: str = "Test alert from /drift/test-alert"):
     return send_alert(message=message, severity=severity, title="SORA.Earth Test Alert")
 
