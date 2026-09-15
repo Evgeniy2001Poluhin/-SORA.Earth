@@ -66,6 +66,11 @@ ADMIN = {
     "/api/v2/model/reload",
     "/api/v1/ab/split",
     "/api/v1/drift/test-alert",
+    # The database writers, guarded here: DELETE /history was an unauthenticated
+    # mass delete of the evaluations table.
+    "/api/v1/history",
+    "/api/v1/history/{eval_id}",
+    "/api/v1/infra/data-refresh/run",
 }
 
 # Guarded already, by a different dependency, and left as they are.
@@ -81,10 +86,6 @@ GAP = {
     # The webhook SSRF chain — separate advisory (security/webhook-ssrf).
     "/api/v1/webhooks": "webhook SSRF advisory",
     "/api/v1/webhooks/{sub_id}": "webhook SSRF advisory",
-    # The database writers — security/unauthenticated-writers branch.
-    "/api/v1/history": "unauthenticated-writers branch",
-    "/api/v1/history/{eval_id}": "unauthenticated-writers branch",
-    "/api/v1/infra/data-refresh/run": "unauthenticated-writers branch",
     # Bulk write, abuse-bounded by the rate limiter; decision pending.
     "/api/v1/batch/evaluate": "bulk write, decision pending",
 }

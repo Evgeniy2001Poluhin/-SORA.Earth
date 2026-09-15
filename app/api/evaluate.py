@@ -2,8 +2,9 @@ import logging
 from typing import Optional
 from typing import List
 
-from fastapi import APIRouter, Request, Query
+from fastapi import APIRouter, Depends, Request, Query
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
+from app.auth import require_admin
 
 from app.schemas import (
     ProjectInput as Project,
@@ -275,7 +276,7 @@ def get_evaluation_by_id(eval_id: int):
     finally:
         db.close()
 
-@router.delete("/history/{eval_id}")
+@router.delete("/history/{eval_id}", dependencies=[Depends(require_admin)])
 def delete_evaluation(eval_id: int):
     from app.main import get_db_sync
 
@@ -288,7 +289,7 @@ def delete_evaluation(eval_id: int):
     return {"status": "deleted"}
 
 
-@router.delete("/history")
+@router.delete("/history", dependencies=[Depends(require_admin)])
 def clear_history():
     from app.main import get_db_sync
 
