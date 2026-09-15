@@ -63,13 +63,18 @@ class TestMonteCarlo:
 
 
 class TestModelCompare:
-    def test_compare_returns_all_models(self):
+    def test_compare_returns_the_loaded_models(self):
+        import app.main as main
+
         r = client.post("/api/v1/analytics/model-compare", json=PROJECT)
         assert r.status_code == 200
         d = r.json()
         assert "models" in d
-        for m in ["RandomForest", "XGBoost", "NeuralNet", "StackingEnsemble"]:
-            assert m in d["models"]
+        for name in ["RandomForest", "XGBoost", "StackingEnsemble"]:
+            assert name in d["models"]
+        # The neural network appears only when its weights are loaded (#320, #323):
+        # it used to be a hand-written formula that was always present.
+        assert ("NeuralNet" in d["models"]) == (main.nn_model is not None)
 
     def test_compare_has_best_model(self):
         r = client.post("/api/v1/analytics/model-compare", json=PROJECT)
