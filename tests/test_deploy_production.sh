@@ -617,6 +617,11 @@ check "exit status is 0"          "$RC" "0"
 check "a manifest was written"    "$(find "$SANDBOX/manifests" -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')" "1"
 MAN="$SANDBOX/manifests/$(readlink "$SANDBOX/manifests/latest")"
 check "it records the commit"     "$(grep -c "^commit         $SECOND" "$MAN")" "1"
+# The champion the deployment is serving, from the health endpoint's
+# model_provenance (PR C). Best-effort, so the stubbed curl (which returns no
+# usable body) records `unknown` -- but the line is always present, which is
+# what makes a manifest able to answer "which model was serving" at all.
+check "it records the active model" "$(grep -c '^active_model   ' "$MAN")" "1"
 check "it records the mode"       "$(grep -c '^mode           deploy' "$MAN")" "1"
 check "it records the config hash" "$(grep -c "^nginx_config   sha256:$CONF_SUM" "$MAN")" "1"
 # Without this a rollback has nothing to aim at: the manifest of the run that
