@@ -32,10 +32,11 @@ def test_closed_loop_no_drift():
 
 def test_closed_loop_drift_promote():
     from app.scheduler import closed_loop_retrain
-    with patch("app.api.drift.compute_drift") as mock_drift,          patch("app.api.retrain._do_retrain") as mock_retrain,          patch("app.api.retrain._get_current_metrics") as mock_metrics,          patch("app.locks.RedisLock") as MockLock,          patch("app.scheduler._start_retrain_log", return_value=99),          patch("app.scheduler._finish_retrain_log"):
+    from app.model_source import Baseline
+    with patch("app.api.drift.compute_drift") as mock_drift,          patch("app.api.retrain._do_retrain") as mock_retrain,          patch("app.model_source.serving_baseline") as mock_baseline,          patch("app.locks.RedisLock") as MockLock,          patch("app.scheduler._start_retrain_log", return_value=99),          patch("app.scheduler._finish_retrain_log"):
         MockLock.return_value.acquire.return_value = True
         mock_drift.return_value = _drift(True)
-        mock_metrics.return_value = {"roc_auc": 0.95}
+        mock_baseline.return_value = Baseline(auc=0.95, source="active", ok=True)
         mock_retrain.return_value = {"status": "success", "metrics": {"roc_auc": 0.96}}
         result = closed_loop_retrain(trigger_source="test")
     assert result["drift_detected"] is True
@@ -46,10 +47,11 @@ def test_closed_loop_drift_promote():
 
 def test_closed_loop_drift_reject():
     from app.scheduler import closed_loop_retrain
-    with patch("app.api.drift.compute_drift") as mock_drift,          patch("app.api.retrain._do_retrain") as mock_retrain,          patch("app.api.retrain._get_current_metrics") as mock_metrics,          patch("app.locks.RedisLock") as MockLock,          patch("app.scheduler._start_retrain_log", return_value=99),          patch("app.scheduler._finish_retrain_log"):
+    from app.model_source import Baseline
+    with patch("app.api.drift.compute_drift") as mock_drift,          patch("app.api.retrain._do_retrain") as mock_retrain,          patch("app.model_source.serving_baseline") as mock_baseline,          patch("app.locks.RedisLock") as MockLock,          patch("app.scheduler._start_retrain_log", return_value=99),          patch("app.scheduler._finish_retrain_log"):
         MockLock.return_value.acquire.return_value = True
         mock_drift.return_value = _drift(True)
-        mock_metrics.return_value = {"roc_auc": 0.95}
+        mock_baseline.return_value = Baseline(auc=0.95, source="active", ok=True)
         mock_retrain.return_value = {"status": "success", "metrics": {"roc_auc": 0.90}}
         result = closed_loop_retrain(trigger_source="test")
     assert result["drift_detected"] is True

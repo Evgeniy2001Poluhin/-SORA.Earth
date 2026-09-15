@@ -133,3 +133,22 @@ def evaluate_promotion(
                     % (float(old_auc), float(new_auc), auc_delta))
 
     return PromotionDecision(promoted=promoted, reject_reason=reject_reason)
+
+
+def gated_decision(new_metrics, baseline) -> PromotionDecision:
+    """The verdict against the model that is actually serving (#329).
+
+    `baseline` is a `app.model_source.Baseline` from `serving_baseline()`. When
+    it could not be established -- a champion is serving but its score is
+    unreadable, or its manifest and metadata disagree -- this refuses to promote
+    rather than fall back to comparing against the newest training row, which is
+    the defect #329 records. Otherwise the pure `evaluate_promotion` decides
+    against the champion's own AUC.
+
+    Kept out of `evaluate_promotion` so that function stays pure and free of the
+    filesystem read `serving_baseline` performs.
+    """
+    if not getattr(baseline, "ok", False):
+        reason = getattr(baseline, "reason", None) or "the serving model's metrics could not be read"
+        return PromotionDecision(promoted=False, reject_reason="baseline_unavailable: " + reason)
+    return evaluate_promotion(new_metrics, getattr(baseline, "auc", None))

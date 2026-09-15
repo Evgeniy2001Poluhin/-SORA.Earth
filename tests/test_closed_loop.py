@@ -46,9 +46,10 @@ def test_auto_retrain_skips_when_no_drift():
 
 def test_auto_retrain_runs_when_drift_detected():
     token = _admin_token()
-    with patch("app.api.drift.compute_drift") as mocked_drift,          patch("app.api.retrain._do_retrain") as mocked_retrain,          patch("app.api.retrain._get_current_metrics") as mocked_metrics:
+    from app.model_source import Baseline
+    with patch("app.api.drift.compute_drift") as mocked_drift,          patch("app.api.retrain._do_retrain") as mocked_retrain,          patch("app.model_source.serving_baseline") as mocked_baseline:
         mocked_drift.return_value = _drift(True, features={"budget": {"ks_stat": 0.7, "p_value": 0.001, "drift": True}})
-        mocked_metrics.return_value = {"roc_auc": 0.95}
+        mocked_baseline.return_value = Baseline(auc=0.95, source="active", ok=True)
         mocked_retrain.return_value = {"status": "success", "model_version": "test-v1", "metrics": {"roc_auc": 0.96}}
         resp = client.post("/api/v1/mlops/auto-retrain", params={"window": 50, "min_samples": 20}, headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
@@ -63,9 +64,10 @@ def test_auto_retrain_runs_when_drift_detected():
 
 def test_auto_retrain_rejects_degraded_model():
     token = _admin_token()
-    with patch("app.api.drift.compute_drift") as mocked_drift,          patch("app.api.retrain._do_retrain") as mocked_retrain,          patch("app.api.retrain._get_current_metrics") as mocked_metrics:
+    from app.model_source import Baseline
+    with patch("app.api.drift.compute_drift") as mocked_drift,          patch("app.api.retrain._do_retrain") as mocked_retrain,          patch("app.model_source.serving_baseline") as mocked_baseline:
         mocked_drift.return_value = _drift(True)
-        mocked_metrics.return_value = {"roc_auc": 0.95}
+        mocked_baseline.return_value = Baseline(auc=0.95, source="active", ok=True)
         mocked_retrain.return_value = {"status": "success", "metrics": {"roc_auc": 0.90}}
         resp = client.post("/api/v1/mlops/auto-retrain", params={"window": 50, "min_samples": 20, "force": True}, headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200

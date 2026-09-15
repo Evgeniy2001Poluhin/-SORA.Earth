@@ -296,6 +296,77 @@ def _version_of(path: str) -> Optional[str]:
         return None
 
 
+def _auc_of(path: str) -> Optional[float]:
+    """The champion's own AUC, from its `metrics.json`. Both spellings are read."""
+    import json
+
+    metrics = os.path.join(path, "metrics.json")
+    if not os.path.exists(metrics):
+        return None
+    try:
+        with open(metrics, encoding="utf-8") as handle:
+            data = json.load(handle) or {}
+    except (OSError, ValueError):
+        return None
+    value = data.get("auc_roc")
+    if value is None:
+        value = data.get("roc_auc")
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+@dataclass(frozen=True)
+class Baseline:
+    """What the serving model scored, for the promotion gate to compare against.
+
+    `ok` is the whole point. It is False only when a model is being served and
+    its score cannot be established -- the active directory is complete but has
+    no `metrics.json`, or its manifest and `meta.json` name different versions.
+    A caller must then refuse to promote rather than compare against something
+    else: `gated_decision` does exactly that. `ok` is True with `auc=None` only
+    for a genuine first model, which has no predecessor to be worse than.
+    """
+
+    auc: Optional[float]
+    source: str  # "active" | "seed"
+    ok: bool
+    reason: Optional[str] = None
+
+
+def serving_baseline() -> Baseline:
+    """The AUC of the model that is actually serving -- the champion, or the seed.
+
+    Read from the same place the loader serves from, so the number the gate
+    compares against is the number production answers with. Not from
+    `retrain_log`: the newest `success` row there is the most recently trained
+    candidate, which after a rejection is the rejected model itself (#329).
+    """
+    active = active_dir()
+    if _is_usable(active):
+        manifest_version = _manifest_of(active).get("model_version")
+        meta_version = _version_of(active)
+        if (manifest_version is not None and meta_version is not None
+                and manifest_version != meta_version):
+            return Baseline(
+                None, "active", False,
+                "the active model's version disagrees between its activation "
+                "manifest (%s) and meta.json (%s)" % (manifest_version, meta_version),
+            )
+        auc = _auc_of(active)
+        if auc is None:
+            return Baseline(
+                None, "active", False,
+                "the active model has no readable metrics to compare against",
+            )
+        return Baseline(auc, "active", True)
+
+    # Serving the seed. Its metrics may be absent -- a first deployment -- which
+    # is not a refusal: there is simply no predecessor.
+    return Baseline(_auc_of(seed_dir()), "seed", True)
+
+
 def _fsync_tree(path: str) -> None:
     """Get the bytes and the directory entries onto the disk before the swap.
 

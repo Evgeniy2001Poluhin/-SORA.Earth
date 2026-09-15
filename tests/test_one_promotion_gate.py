@@ -196,7 +196,7 @@ def test_neither_call_site_still_decides_for_itself():
         with open(os.path.join(root, relative), encoding="utf-8") as handle:
             body = handle.read()
 
-        assert "evaluate_promotion(" in body, (
+        assert "gated_decision(" in body, (
             f"{relative} does not call the shared gate")
         # The literals that were the duplicated rule. Comments explaining the
         # history are fine; a live comparison is not.
