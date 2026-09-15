@@ -65,6 +65,7 @@ def stub(monkeypatch):
     import app.api.drift as drift_module
     import app.api.infra as infra
     import app.api.retrain as retrain_module
+    from app.model_source import Baseline
     from app.promotion import PromotionDecision
 
     state = {"retrained": 0}
@@ -74,11 +75,15 @@ def stub(monkeypatch):
         return {"status": "ok", "metrics": {"auc_roc": 0.91}, "retrain_log_id": None}
 
     monkeypatch.setattr(retrain_module, "_do_retrain", _fake_retrain, raising=False)
-    monkeypatch.setattr(retrain_module, "_get_current_metrics",
-                        lambda: {"auc_roc": 0.80}, raising=False)
+    # The baseline is the serving champion now (#329), not the newest training
+    # row. gated_decision reads it through app.model_source.serving_baseline.
+    monkeypatch.setattr("app.model_source.serving_baseline",
+                        lambda: Baseline(auc=0.80, source="active", ok=True), raising=False)
+    # gated_decision calls evaluate_promotion in app.promotion; patch it there so
+    # the handler's own branching is what is under test.
     monkeypatch.setattr(
-        infra, "evaluate_promotion",
-        lambda metrics, old: PromotionDecision(promoted=True, reject_reason=None),
+        "app.promotion.evaluate_promotion",
+        lambda metrics, old=None: PromotionDecision(promoted=True, reject_reason=None),
         raising=False,
     )
     state["drift_module"] = drift_module

@@ -2,7 +2,6 @@ import logging
 
 from app.prom_metrics import (sora_retrain_total, sora_full_pipeline_total,
                               sora_model_promoted, sora_model_rejected)
-from app.promotion import evaluate_promotion
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from app.auth import require_admin
 from fastapi.responses import PlainTextResponse
@@ -582,10 +581,12 @@ def auto_retrain_on_drift(
             "reason": "drift_not_detected",
         }
 
-    # capture old AUC before retrain
-    from app.api.retrain import _get_current_metrics
-    old_metrics = _get_current_metrics()
-    old_auc = old_metrics.get("auc_roc") or old_metrics.get("roc_auc")
+    # The baseline is the serving champion, read before the candidate exists
+    # (#329) -- not the newest retrain_log success row, which after a rejection
+    # is the rejected candidate itself.
+    from app.model_source import serving_baseline
+    baseline = serving_baseline()
+    old_auc = baseline.auc
 
     retrain_result = _do_retrain(min_samples=min_samples, trigger_source="mlops_auto")
     new_metrics = retrain_result.get("metrics", {}) if isinstance(retrain_result, dict) else {}
@@ -602,8 +603,10 @@ def auto_retrain_on_drift(
     # champion through this endpoint alone.
     #
     # Not a policy difference to reconcile: a strict subset. Every model this
-    # now refuses was already being refused on the other path.
-    decision = evaluate_promotion(new_metrics, old_auc)
+    # now refuses was already being refused on the other path. gated_decision
+    # also refuses when the champion's score cannot be read (#329).
+    from app.promotion import gated_decision
+    decision = gated_decision(new_metrics, baseline)
     promoted = decision.promoted
     reject_reason = decision.reject_reason
 

@@ -195,7 +195,6 @@ from app.prom_metrics import (
 # The promotion decision, shared with the other caller that promotes. Imported at
 # module level rather than inside the job: it pulls in no client and touches no
 # socket, so there is nothing to defer.
-from app.promotion import evaluate_promotion
 
 
 
@@ -636,13 +635,12 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         # since before this line existed. Nothing incremented it, so it could
         # not fire.
         sora_drift_detected_total.inc()
-        old_auc = None
-        try:
-            from app.api.retrain import _get_current_metrics
-            old_m = _get_current_metrics()
-            old_auc = old_m.get("auc_roc") or old_m.get("roc_auc")
-        except Exception:
-            pass
+        # The baseline is the model serving right now, read before the candidate
+        # exists (#329). Not the newest retrain_log success row, which after a
+        # rejection is the rejected candidate's own score.
+        from app.model_source import serving_baseline
+        baseline = serving_baseline()
+        old_auc = baseline.auc
         from app.api.retrain import _do_retrain
         result = _do_retrain(min_samples=50, trigger_source=trigger_source)
         new_metrics = result.get("metrics", {}) if isinstance(result, dict) else {}
@@ -652,8 +650,11 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         # strict subset of these refusals -- the degradation rule with no floor
         # under it -- so the same candidate got two different verdicts depending
         # on who triggered the run. The rules below are unchanged; they are just
-        # no longer written twice (roadmap phase 5).
-        decision = evaluate_promotion(new_metrics, old_auc)
+        # no longer written twice (roadmap phase 5). gated_decision refuses when
+        # the champion's score cannot be established, rather than comparing
+        # against a stale training row (#329).
+        from app.promotion import gated_decision
+        decision = gated_decision(new_metrics, baseline)
         promoted = decision.promoted
         reject_reason = decision.reject_reason
 
