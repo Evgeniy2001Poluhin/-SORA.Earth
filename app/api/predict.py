@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-import csv, io, os, time
+import csv, hashlib, io, json, os, time
 import numpy as np
 import torch
 from app.prom_metrics import sora_prediction_latency, sora_predictions_total
@@ -17,10 +17,16 @@ from app.redis_cache import CACHE_NAMESPACE, cache_get, cache_set
 router = APIRouter()
 
 def _cache_key(prefix: str, payload) -> str:
-    # Under CACHE_NAMESPACE so the invalidation routes can actually reach these
-    # keys, and so a flush of the cache namespace never touches a lock. The
-    # per-process instability of hash(str(...)) is a separate defect (#325).
-    return f"{CACHE_NAMESPACE}{prefix}:{hash(str(payload))}"
+    # A stable digest, not hash(str(...)) (#325). Python salts str hashing per
+    # process and PYTHONHASHSEED is unset, so hash() gave a different key in each
+    # gunicorn worker and after every restart -- a cached result was only ever
+    # found by the worker that wrote it. sha256 over canonical JSON is stable
+    # across processes and independent of the payload dict's insertion order.
+    # Under CACHE_NAMESPACE so the invalidation routes reach these keys and a
+    # flush never touches a lock.
+    canonical = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return f"{CACHE_NAMESPACE}{prefix}:{digest}"
 
 
 
