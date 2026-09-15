@@ -60,11 +60,31 @@ def client() -> TestClient:
 
 @pytest.fixture()
 def paths(tmp_path, monkeypatch):
-    """Point the endpoint at a scratch baseline and log."""
+    """Point the endpoint at a scratch baseline, and feed the recent window.
+
+    The recent rows now come from the durable `predictions_log` table, not the
+    CSV (#281). These branch tests are about the response *contract*, not the
+    data source, so the recent window is injected through the real
+    `_recent_predictions` seam -- reading the same scratch CSV the tests write,
+    which stands in for the table. That the table itself is read correctly is
+    covered by tests/test_drift_reads_the_durable_log.py, which runs the real
+    query. The baseline is still a CSV and is read for real.
+    """
+    import os
+
+    import pandas as pd
+
     baseline = tmp_path / "projects.csv"
     log = tmp_path / "predictions_log.csv"
     monkeypatch.setattr(drift_module, "PROJ_CSV", str(baseline))
     monkeypatch.setattr(drift_module, "PRED_LOG", str(log))
+
+    def _recent_from_csv(window=50, db=None):
+        if not os.path.exists(str(log)):
+            return pd.DataFrame(columns=drift_module.COLS)
+        return pd.read_csv(str(log)).tail(window)
+
+    monkeypatch.setattr(drift_module, "_recent_predictions", _recent_from_csv)
     return baseline, log
 
 
