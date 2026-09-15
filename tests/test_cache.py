@@ -1,8 +1,19 @@
+import pytest
 from fastapi.testclient import TestClient
 from app.main import app
+from app.auth import require_admin
 from app.cache import LRUCache
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _authorize_admin():
+    # /cache/clear now requires admin (Security C); this suite tests behaviour,
+    # not authorization, so it acts as an authorized admin.
+    app.dependency_overrides[require_admin] = lambda: {"username": "t", "role": "admin"}
+    yield
+    app.dependency_overrides.pop(require_admin, None)
 
 
 def test_cache_stats():

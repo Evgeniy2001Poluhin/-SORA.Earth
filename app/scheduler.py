@@ -347,17 +347,15 @@ def retrain_models(trigger_source: str = "manual"):
         logger.exception("Retrain failed: %s", e)
 
     try:
-        from app.redis_cache import redis_client, REDIS_AVAILABLE
-
-        if REDIS_AVAILABLE:
-            keys = redis_client.keys("sora:*")
-            if keys:
-                redis_client.delete(*keys)
-            cache_cleared = len(keys)
-            status["cache_cleared"] = cache_cleared
-            logger.info("Cache invalidated: %d keys", cache_cleared)
-        else:
-            status["cache_cleared"] = 0
+        # Only the prediction cache. This used to delete every `sora:*` key,
+        # which includes the lock this very function holds and the locks of
+        # every other running job -- so a retrain released concurrent closed
+        # loops and ingests. invalidate_prediction_cache stays inside
+        # `sora:cache:*`.
+        from app.redis_cache import invalidate_prediction_cache
+        cache_cleared = invalidate_prediction_cache()
+        status["cache_cleared"] = cache_cleared
+        logger.info("Prediction cache invalidated: %d keys", cache_cleared)
     except Exception as e:
         status["cache_cleared"] = 0
         logger.warning("Cache invalidation failed: %s", e)
