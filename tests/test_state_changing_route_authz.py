@@ -51,6 +51,7 @@ ADMIN = {
     "/api/v1/mlops/auto-retrain", "/api/v1/mlops/full-pipeline",
     "/api/v1/model/data/bulk-upload", "/api/v1/model/data/bulk-upload/content",
     "/api/v1/model/data/refresh", "/api/v1/model/retrain",
+    "/api/v1/model/retrain/{retrain_log_id}/retry-registration",
     # Guarded by this fix.
     "/api/v1/cache/clear",
     "/api/v1/cache/redis/invalidate",
