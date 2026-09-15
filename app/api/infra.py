@@ -717,7 +717,8 @@ def run_full_pipeline(current_user=Depends(require_admin)):
     return full_pipeline_run(trigger_source="api_full_pipeline")
 
 
-@router.post("/infra/data-refresh/run", tags=["infrastructure"])
+@router.post("/infra/data-refresh/run", tags=["infrastructure"],
+             dependencies=[Depends(require_admin)])
 def data_refresh_run():
     """Trigger a full external ESG data refresh (World Bank/OECD + benchmarks).
 
