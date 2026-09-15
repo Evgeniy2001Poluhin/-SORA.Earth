@@ -93,6 +93,7 @@ def dispatch_webhooks(event_type, payload):
     """Send POST to all active DB subscriptions for event_type, HMAC-signed."""
     import hmac, hashlib, requests
     from app.database import SessionLocal, WebhookSubscription, WebhookDelivery
+    from app.services.outbound import ca_bundle, check_outbound_url, safe_error
     db = SessionLocal()
     results = []
     try:
@@ -102,15 +103,40 @@ def dispatch_webhooks(event_type, payload):
             sig = hmac.new(s.secret.encode(), body, hashlib.sha256).hexdigest()
             rec = WebhookDelivery(subscription_id=s.id, event_type=event_type)
             try:
-                r = requests.post(s.url, data=body, timeout=5, headers={
-                    "Content-Type": "application/json",
-                    "X-SORA-Event": event_type,
-                    "X-SORA-Signature": "sha256=" + sig,
-                })
-                rec.status_code = r.status_code
-                rec.ok = 200 <= r.status_code < 300
+                # Re-checked here, not only where it was stored. This narrows
+                # the window and does not close it: requests resolves the name
+                # again when it connects, and that lookup is not the one checked.
+                # See app/services/outbound.py on what closing it would take.
+                url = check_outbound_url(s.url)
+                # A Session, because trust_env is a Session attribute and not
+                # something Session.request accepts. With it left on, HTTP_PROXY
+                # and friends from the environment decide where the connection
+                # actually goes, which puts the destination back outside the
+                # check above. verify is set explicitly because trust_env=False
+                # also switches off REQUESTS_CA_BUNDLE; True is the system trust
+                # store, and there is no value here that disables verification.
+                with requests.Session() as session:
+                    session.trust_env = False
+                    session.verify = ca_bundle()
+                    r = session.post(url, data=body, timeout=5, headers={
+                        "Content-Type": "application/json",
+                        "X-SORA-Event": event_type,
+                        "X-SORA-Signature": "sha256=" + sig,
+                    }, allow_redirects=False)
+                # A permitted destination answering with a redirect to a
+                # forbidden one would otherwise reach it, so the hop is refused
+                # rather than followed: nothing here needs to.
+                if 300 <= r.status_code < 400:
+                    rec.error = "redirect refused"
+                    rec.ok = False
+                else:
+                    rec.status_code = r.status_code
+                    rec.ok = 200 <= r.status_code < 300
             except Exception as e:
-                rec.error = str(e)[:500]
+                # A category, not the network's own words. This row is readable
+                # through an admin endpoint, and "connection refused to
+                # 10.0.3.7:5432" is a port scan result.
+                rec.error = safe_error(e)
             db.add(rec)
             results.append({"url": s.url, "ok": rec.ok, "status": rec.status_code})
         db.commit()

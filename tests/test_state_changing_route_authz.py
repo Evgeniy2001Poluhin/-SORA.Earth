@@ -71,6 +71,10 @@ ADMIN = {
     "/api/v1/history",
     "/api/v1/history/{eval_id}",
     "/api/v1/infra/data-refresh/run",
+    # Webhook registration/deletion: an open registration let anyone make the
+    # server issue an outbound request to an address of their choosing (SSRF).
+    "/api/v1/webhooks",
+    "/api/v1/webhooks/{sub_id}",
 }
 
 # Guarded already, by a different dependency, and left as they are.
@@ -83,9 +87,6 @@ API_KEY = {
 GAP = {
     # IDOR: deletes any session by id. Needs ownership, not a blanket admin gate.
     "/api/v1/copilot/sessions/{session_id}": "needs owner-scope (#199 follow-up)",
-    # The webhook SSRF chain — separate advisory (security/webhook-ssrf).
-    "/api/v1/webhooks": "webhook SSRF advisory",
-    "/api/v1/webhooks/{sub_id}": "webhook SSRF advisory",
     # Bulk write, abuse-bounded by the rate limiter; decision pending.
     "/api/v1/batch/evaluate": "bulk write, decision pending",
 }

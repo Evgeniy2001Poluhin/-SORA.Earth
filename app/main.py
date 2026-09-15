@@ -885,6 +885,15 @@ _executor: ProcessPoolExecutor = None
 
 @app.on_event("startup")
 async def startup_event():
+    # A malformed webhook allowlist should surface here, where the deployment
+    # can see it, rather than when a drift event first reaches the dispatcher.
+    # At startup rather than at import, so alembic and the CLI tools -- which
+    # import the same modules and never send a webhook -- are not broken by a
+    # setting that does not concern them. An empty allowlist is not malformed:
+    # it warns and leaves webhooks fail-closed.
+    from app.services.outbound import validate_configuration
+    validate_configuration()
+
     import asyncio
 
     # First, and synchronously: if the schema is not there, nothing below is
