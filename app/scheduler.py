@@ -688,18 +688,9 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         # A failure to activate does not turn a promotion into a rejection: the
         # gate said yes and that stays true. It is reported, and the previously
         # active model keeps serving, which is the safe end state.
-        activation_error = None
-        if promoted and isinstance(result, dict) and result.get("run_id"):
-            try:
-                from app.model_loader import reload_champion
-                from app.model_source import activate
-
-                activate(result["run_id"])
-                reload_champion()
-            except Exception as exc:
-                activation_error = f"{type(exc).__name__}: {exc}"
-                logger.error("Promoted run %s could not be activated: %s",
-                             result.get("run_id"), activation_error)
+        from app.model_loader import activate_promoted_candidate
+        run_id = result.get("run_id") if isinstance(result, dict) else None
+        activation_error = activate_promoted_candidate(run_id if promoted else None)
 
         log_id = _start_retrain_log(
             trigger_source=trigger_source, job_name="closed_loop",
@@ -713,6 +704,7 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
             metrics={"old_auc": float(old_auc) if old_auc else None, "new_auc": float(new_auc) if new_auc else None, "promoted": promoted, "reject_reason": reject_reason},
         )
         return {"status": "ok", "drift_detected": True, "retrained": True, "promoted": promoted,
+                "activated": bool(promoted and run_id and activation_error is None),
                 "activation_error": activation_error, "old_auc": float(old_auc) if old_auc else None, "new_auc": float(new_auc) if new_auc else None, "reject_reason": reject_reason}
     except Exception as e:
         logger.exception("Closed loop failed: %s", e)
