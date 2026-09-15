@@ -11,8 +11,8 @@
     "WS /ws/live @app/api/infra.py": "websocket"
   },
   "counts": {
-    "considered": 172,
-    "with_response_model": 27
+    "considered": 173,
+    "with_response_model": 28
   },
   "uncovered": [
     "DELETE /api/v1/webhooks/{sub_id} @app/api/webhooks.py",

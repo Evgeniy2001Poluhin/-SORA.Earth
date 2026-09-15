@@ -18,6 +18,7 @@ from fastapi import (APIRouter, BackgroundTasks, Depends, File, HTTPException,
 from app.auth import require_api_key
 from app.paths import data_dir, models_dir, staged_dir
 from app.model_source import INCOMPLETE_MARKER, discard_unfinished, prune_staged
+from app.schemas import RegistryRetryResult
 
 router = APIRouter(prefix="/model", tags=["mlops"])
 
@@ -599,6 +600,21 @@ def retrain_model(background_tasks: BackgroundTasks, current_user=Depends(requir
         "message": "Retrain started in background",
         "check_status": "/model/status",
     }
+
+
+@router.post("/retrain/{retrain_log_id}/retry-registration",
+             response_model=RegistryRetryResult)
+def retry_model_registration(retrain_log_id: int, current_user=Depends(require_admin)):
+    """Re-register a run's already-trained model, from its staged candidate (#327).
+
+    For a run whose training succeeded but whose MLflow registration failed for
+    a transient reason: the model is still in `runtime/staged/<run_id>/`, so
+    this registers it without retraining. Every outcome is a 200 verdict (see
+    `RegistryRetryResult`); it refuses -- rather than guesses -- when the
+    candidate has been pruned or is still being written.
+    """
+    from app.registry_retry import retry_registration
+    return retry_registration(retrain_log_id)
 
 
 @router.get("/feature-importance")

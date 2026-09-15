@@ -17,7 +17,7 @@ ingesters and the Phase 0 audit as outstanding, and all three had shipped.
 
 ```
 Product      SORA.Earth ESG platform -- README.md, CLAUDE.md
-             In production, 162 endpoints. Punch-list empty.
+             In production, 163 endpoints. Punch-list empty.
 
 Experiment   Environmental crisis analytics -- ROADMAP_ENV_CRISIS_2026.md
              Phase 1 complete. M2 closed negative. M3 clock running.

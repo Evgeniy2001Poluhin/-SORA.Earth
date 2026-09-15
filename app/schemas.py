@@ -562,6 +562,27 @@ AutoRetrainResponse = Annotated[
 ]
 
 
+class RegistryRetryResult(BaseModel):
+    """The outcome of re-registering a run's already-trained model (#327).
+
+    `outcome` is one of the codes in `app/registry_retry.py`: `registered`,
+    `already_registered`, `staged_missing`, `still_writing`,
+    `registration_failed`, `no_model_version`, `no_run_id`, `not_found`. It is a
+    verdict, not an error -- every one is a 200, because the endpoint did what it
+    was asked and this says what it found.
+    """
+
+    outcome: str
+    retrain_log_id: int
+    detail: str
+    model_version: Optional[str] = Field(
+        None, description="The run's recorded model version, when the row carries one."
+    )
+    run_id: Optional[str] = Field(
+        None, description="The run whose staged candidate was addressed, when known."
+    )
+
+
 # --- GET /api/v1/model/drift/mlflow-history ---------------------------------
 #
 # Second migration under docs/API_CONTRACT_ROADMAP.md. Three bodies became two,
