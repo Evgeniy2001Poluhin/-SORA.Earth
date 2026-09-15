@@ -130,25 +130,37 @@ async def monte_carlo_simulation(req: MonteCarloRequest, _: None = Depends(monte
 
 @router.post("/model-compare", summary="Compare all ML models on a project")
 async def model_compare(project: ModelCompareRequest):
-    base = project.co2_reduction / 100.0
-    soc = project.social_impact / 10.0
-    dur = 1.0 - min(project.duration_months, 120) / 160.0
-    eco = min(project.budget / 200000.0, 1.0)
+    # The real models, not hand-written linear formulas (#323). This used to
+    # compute four "probabilities" from a weighted sum of the inputs and label
+    # them RandomForest / XGBoost / NeuralNet / StackingEnsemble -- numbers with
+    # nothing to do with any model, served to the compare panel in app.js. It now
+    # runs the same models the prediction routes do, through the shared blend, so
+    # a change to a model shows here too.
+    import app.main as m
+    from app.api.predict import _base_probabilities, _blend
+    from app.validators import ProjectInput as LegacyProjectInput
 
-    rf_p = max(0.0, min(1.0, 0.30 * base + 0.30 * soc + 0.25 * dur + 0.15 * eco))
-    xgb_p = max(0.0, min(1.0, 0.34 * base + 0.28 * soc + 0.23 * dur + 0.15 * eco))
-    nn_p = max(0.0, min(1.0, 0.28 * base + 0.34 * soc + 0.23 * dur + 0.15 * eco))
-    ens_p = max(0.0, min(1.0, (rf_p + xgb_p + nn_p) / 3.0))
+    legacy = LegacyProjectInput(
+        budget=project.budget, co2_reduction=project.co2_reduction,
+        social_impact=project.social_impact, duration_months=project.duration_months,
+    )
+    feats_9 = m.make_features_base(legacy)
+    feats_7 = m.make_features_xgb(legacy)
 
-    best_threshold = 0.5
+    # rf, xgb, and nn only when its weights are loaded (#320); the ensemble is
+    # the blend of whatever ran, as /predict/stacking serves it.
+    probabilities = _base_probabilities(m.rf_model, m.xgb_model, m.nn_model, feats_9, feats_7)
+    ens_p = _blend(probabilities)
+    thr = m.best_threshold
+
+    display = {"rf": "RandomForest", "xgb": "XGBoost", "nn": "NeuralNet"}
     models = {
-        "RandomForest": {"probability": round(rf_p * 100, 2), "prediction": int(rf_p >= best_threshold)},
-        "XGBoost": {"probability": round(xgb_p * 100, 2), "prediction": int(xgb_p >= best_threshold)},
-        "NeuralNet": {"probability": round(nn_p * 100, 2), "prediction": int(nn_p >= best_threshold)},
-        "StackingEnsemble": {"probability": round(ens_p * 100, 2), "prediction": int(ens_p >= best_threshold)},
+        display[name]: {"probability": round(p * 100, 2), "prediction": int(p >= thr)}
+        for name, p in probabilities.items()
     }
+    models["StackingEnsemble"] = {"probability": round(ens_p * 100, 2), "prediction": int(ens_p >= thr)}
     best = max(models.items(), key=lambda x: x[1]["probability"])
-    return {"models": models, "best_model": best[0], "threshold": best_threshold}
+    return {"models": models, "best_model": best[0], "threshold": thr}
 
 
 @router.get("/country-benchmark/{country}", summary="ESG benchmark data for a country")
