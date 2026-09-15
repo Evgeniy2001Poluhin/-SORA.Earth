@@ -13,7 +13,7 @@ before measuring readiness against anything.
 
 ```
 Product      SORA.Earth ESG platform -- this file and README.md
-             In production, 162 published endpoints -- that is 162 (path,
+             In production, 163 published endpoints -- that is 163 (path,
              method) pairs under /api/, HEAD and OPTIONS excluded. The bare
              number was right and said nothing about what it counted; the app
              also has 180 unique paths and 157 of them under /api/ (#292).
