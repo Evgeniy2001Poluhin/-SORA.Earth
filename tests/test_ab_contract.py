@@ -48,6 +48,16 @@ def _restore_split():
     _traffic_split.update(before)
 
 
+@pytest.fixture(autouse=True)
+def _authorize_admin():
+    # POST /ab/split now requires admin (Security C); this suite tests behaviour.
+    from app.auth import require_admin
+
+    app.dependency_overrides[require_admin] = lambda: {"username": "t", "role": "admin"}
+    yield
+    app.dependency_overrides.pop(require_admin, None)
+
+
 def test_both_routes_declare_their_shapes():
     """The migration itself, read from the route table.
 

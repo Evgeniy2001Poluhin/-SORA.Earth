@@ -162,7 +162,7 @@ def cache_stats():
     return cache.stats()
 
 
-@router.post("/cache/clear", tags=["cache"])
+@router.post("/cache/clear", tags=["cache"], dependencies=[Depends(require_admin)])
 def clear_cache():
     cache.clear()
     return {"status": "cache cleared"}
@@ -346,7 +346,8 @@ async def prometheus_metrics():
         media_type=CONTENT_TYPE_LATEST,
     )
 # --- Redis Cache ---
-from app.redis_cache import cache_stats as redis_stats, cache_get, cache_set, REDIS_AVAILABLE
+from app.redis_cache import (cache_stats as redis_stats, cache_get, cache_set,
+                             invalidate_prediction_cache, REDIS_AVAILABLE)
 
 @router.get('/cache/redis', summary='Redis cache stats')
 def get_redis_stats():
@@ -358,26 +359,29 @@ def test_redis():
     result = cache_get('test_key')
     return {'redis_available': REDIS_AVAILABLE, 'test_result': result}
 
-@router.delete('/cache/redis/invalidate', summary='Invalidate all prediction cache')
+@router.delete('/cache/redis/invalidate', summary='Invalidate the prediction cache',
+               dependencies=[Depends(require_admin)])
 def invalidate_cache():
-    from app.redis_cache import redis_client
+    # Only the prediction-cache namespace. This used to delete every `sora:*`
+    # key, which on this system is the distributed locks and the scheduler
+    # status and no cache at all -- so a "cache flush" released other processes'
+    # locks. The deleted key names are no longer returned: they were a readout
+    # of the namespace to an unauthenticated caller, and the route is now admin
+    # anyway. See app/redis_cache.py::invalidate_prediction_cache.
     if not REDIS_AVAILABLE:
         return {'cleared': 0, 'error': 'Redis unavailable'}
-    keys = redis_client.keys('sora:*')
-    if keys:
-        redis_client.delete(*keys)
-    return {'cleared': len(keys), 'keys': keys}
+    return {'cleared': invalidate_prediction_cache()}
 
-@router.delete('/cache/redis/invalidate/{prefix}', summary='Invalidate cache by prefix')
+@router.delete('/cache/redis/invalidate/{prefix}', summary='Invalidate cache by model prefix',
+               dependencies=[Depends(require_admin)])
 def invalidate_cache_prefix(prefix: str):
-    from app.redis_cache import redis_client
     if not REDIS_AVAILABLE:
         return {'cleared': 0, 'error': 'Redis unavailable'}
-    pattern = 'sora:' + prefix + ':*'
-    keys = redis_client.keys(pattern)
-    if keys:
-        redis_client.delete(*keys)
-    return {'cleared': len(keys), 'prefix': prefix, 'keys': keys}
+    try:
+        cleared = invalidate_prediction_cache(prefix)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid cache prefix")
+    return {'cleared': cleared, 'prefix': prefix}
 
 
 

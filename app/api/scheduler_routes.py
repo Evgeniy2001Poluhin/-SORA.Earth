@@ -1,4 +1,5 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from app.auth import require_admin
 from app.scheduler import (
     get_scheduler_status,
     get_retrain_log,
@@ -19,11 +20,13 @@ def retrain_history():
     return get_retrain_log()
 
 
-@router.post("/scheduler/retrain/trigger", summary="Trigger manual retrain now")
+@router.post("/scheduler/retrain/trigger", summary="Trigger manual retrain now",
+             dependencies=[Depends(require_admin)])
 def trigger_retrain():
     return retrain_models()
 
 
-@router.post("/scheduler/refresh_external", summary="Trigger external ESG data refresh now")
+@router.post("/scheduler/refresh_external", summary="Trigger external ESG data refresh now",
+             dependencies=[Depends(require_admin)])
 def trigger_external_refresh():
     return scheduled_refresh_external_data()

@@ -11,6 +11,7 @@ import pandas as pd
 import logging
 from fastapi import APIRouter, Query, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from app.auth import require_admin
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -183,7 +184,8 @@ async def forecast(
     return _linear_forecast(df, horizon, metric, history)
 
 
-@router.delete("/forecast/cache", response_model=ForecastCacheStats)
+@router.delete("/forecast/cache", response_model=ForecastCacheStats,
+               dependencies=[Depends(require_admin)])
 async def invalidate_forecast_cache(model_name: str = Query(None)):
     """Invalidate forecast model cache (all or specific model)."""
     invalidated = forecast_cache.invalidate(model_name)
@@ -196,7 +198,7 @@ async def get_forecast_cache_stats():
     return ForecastCacheStats(cache_size=forecast_cache.size)
 
 
-@router.post("/forecast/pretrain")
+@router.post("/forecast/pretrain", dependencies=[Depends(require_admin)])
 async def trigger_pretrain():
     """Manually trigger forecast model pre-training (admin)."""
     loop = asyncio.get_event_loop()

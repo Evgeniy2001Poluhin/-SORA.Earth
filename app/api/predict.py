@@ -12,12 +12,15 @@ from app.schemas import ProjectInput as Project
 from app.validators import ProjectInput as LegacyProjectInput
 from app.mlflow_tracking import log_prediction
 from app.middleware import METRICS
-from app.redis_cache import cache_get, cache_set
+from app.redis_cache import CACHE_NAMESPACE, cache_get, cache_set
 
 router = APIRouter()
 
 def _cache_key(prefix: str, payload) -> str:
-    return f"{prefix}:{hash(str(payload))}"
+    # Under CACHE_NAMESPACE so the invalidation routes can actually reach these
+    # keys, and so a flush of the cache namespace never touches a lock. The
+    # per-process instability of hash(str(...)) is a separate defect (#325).
+    return f"{CACHE_NAMESPACE}{prefix}:{hash(str(payload))}"
 
 
 

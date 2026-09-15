@@ -1,7 +1,8 @@
 import logging
 import os, random, time
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Depends
 from fastapi.responses import JSONResponse
+from app.auth import require_admin
 from pydantic import BaseModel
 from collections import defaultdict
 
@@ -91,7 +92,7 @@ def ab_stats():
     return result
 
 
-@router.post('/split', response_model=ABSplitOk)
+@router.post('/split', response_model=ABSplitOk, dependencies=[Depends(require_admin)])
 def set_split(model_a_pct: float = Body(..., embed=True, ge=0.0, le=1.0)):
     """Set the share of traffic going to arm A.
 

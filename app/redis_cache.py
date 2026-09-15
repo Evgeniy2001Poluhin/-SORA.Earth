@@ -6,6 +6,13 @@ import logging
 logger = logging.getLogger(__name__)
 REDIS_URL = os.getenv('REDIS_URL', 'redis://redis:6379/0')
 
+#: Every key that invalidation is allowed to delete lives under this prefix, and
+#: nothing else does. Locks (`sora:lock:*`), scheduler status
+#: (`sora:scheduler:*`), token revocation (`auth:*`) and drift state (`drift:*`)
+#: are deliberately outside it, so a flush cannot reach coordination state. This
+#: is why invalidation matches `CACHE_NAMESPACE + '*'` rather than `sora:*`.
+CACHE_NAMESPACE = "sora:cache:"
+
 try:
     redis_client = redis.from_url(REDIS_URL, decode_responses=True)
     redis_client.ping()
@@ -42,6 +49,38 @@ def cache_delete(key):
         return True
     except Exception:
         return False
+
+def invalidate_prediction_cache(prefix=None):
+    """Delete prediction-cache keys, and only those. Returns how many were removed.
+
+    Walks `sora:cache:*` (or `sora:cache:<prefix>:*` for one model family) with
+    SCAN, never KEYS: KEYS is O(N) and blocks Redis for the length of the walk,
+    which is not something an HTTP handler should do. Locks and every other
+    `sora:*` key are outside this namespace and are never seen here.
+
+    `prefix` is a caller-supplied path segment. It is checked against a strict
+    allowlist so it cannot smuggle a `*` or a `:` and widen the pattern past the
+    cache namespace; an illegal prefix raises rather than deleting anything.
+    """
+    if not REDIS_AVAILABLE:
+        return 0
+    if prefix is not None:
+        if not isinstance(prefix, str) or not prefix or not all(
+            ch.isalnum() or ch in "._-+" for ch in prefix
+        ):
+            raise ValueError(f"invalid cache prefix: {prefix!r}")
+        pattern = f"{CACHE_NAMESPACE}{prefix}:*"
+    else:
+        pattern = f"{CACHE_NAMESPACE}*"
+    removed = 0
+    try:
+        for key in redis_client.scan_iter(match=pattern):
+            redis_client.delete(key)
+            removed += 1
+    except Exception as exc:
+        logger.warning("cache invalidation failed for %s: %s", pattern, exc)
+    return removed
+
 
 def cache_stats():
     if not REDIS_AVAILABLE:

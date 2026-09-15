@@ -102,8 +102,13 @@ def detector(monkeypatch):
 
 @pytest.fixture()
 def client() -> TestClient:
+    from app.auth import require_admin
+
     app = FastAPI()
     app.include_router(baseline_module.router, prefix="/api/v1")
+    # POST /mlops/drift/simulate now requires admin (Security C); this contract
+    # suite exercises the handler as an authorized admin.
+    app.dependency_overrides[require_admin] = lambda: {"username": "t", "role": "admin"}
     return TestClient(app, raise_server_exceptions=False)
 
 

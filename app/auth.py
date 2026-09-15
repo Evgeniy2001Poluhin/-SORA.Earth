@@ -533,16 +533,26 @@ def require_analyst_or_admin(authorization: str = Header(None)) -> UserInfo:
     return user
 
 def _build_api_keys() -> dict:
-    keys = {
-        "demo-key-2026": {"name": "Demo User", "role": "user", "rate_limit": 100},
-        "admin-key-2026": {"name": "Admin", "role": "admin", "rate_limit": 1000},
-    }
+    """API keys, from the environment only.
+
+    The literal `demo-key-2026` and `admin-key-2026` used to be here
+    unconditionally, so `admin-key-2026` was a published admin credential:
+    anyone reading the public source could send it as `X-API-Key` and satisfy
+    `require_admin_apikey`. They are gone. Keys now come only from
+    `ADMIN_API_KEY` / `API_KEY`, and outside production two named dev keys are
+    provided for local use — never in production, where their absence is what
+    makes the store fail closed.
+    """
+    keys: dict = {}
     env_admin = os.getenv("ADMIN_API_KEY")
     if env_admin:
         keys[env_admin] = {"name": "Admin (env)", "role": "admin", "rate_limit": 1000}
     env_user = os.getenv("API_KEY")
     if env_user:
         keys[env_user] = {"name": "User (env)", "role": "user", "rate_limit": 100}
+    if SORA_ENV != "production":
+        keys.setdefault("dev-admin-key", {"name": "Admin (dev)", "role": "admin", "rate_limit": 1000})
+        keys.setdefault("dev-user-key", {"name": "User (dev)", "role": "user", "rate_limit": 100})
     return keys
 
 API_KEYS: dict = _build_api_keys()
