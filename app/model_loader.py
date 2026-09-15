@@ -206,3 +206,36 @@ def reload_champion() -> ModelSource:
     logger.info("Now serving the model from run %s (version %s)",
                 champion.source.run_id, champion.source.version)
     return champion.source
+
+
+def activate_promoted_candidate(run_id) -> Optional[str]:
+    """Activate the promoted candidate and reload the champion in this process.
+
+    One activation sequence for both gated paths -- `closed_loop_retrain` and
+    `POST /mlops/auto-retrain` -- so a promotion means the same on each: the
+    gate approved and activation was attempted. `auto-retrain` used to skip this
+    entirely, recording `promoted` while the candidate stayed in `staged/`.
+
+    Returns an error string when activation failed, or None on success and when
+    there is no run to activate. A failure does not undo the gate's decision:
+    the previously active model keeps serving, and the caller reports the error
+    rather than claiming a promotion that never reached `active/`.
+
+    This reloads only the process that calls it. A run triggered over HTTP
+    reloads the one backend worker that took the request; the scheduled jobs run
+    in the scheduler container. The other backend workers keep the champion they
+    loaded until they restart -- delivering an activation to the whole fleet is a
+    separate, operational step.
+    """
+    if not run_id:
+        return None
+    try:
+        from app.model_source import activate
+
+        activate(run_id)
+        reload_champion()
+        return None
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        logger.error("Promoted run %s could not be activated: %s", run_id, error)
+        return error

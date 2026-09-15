@@ -521,6 +521,23 @@ class AutoRetrainRan(_AutoRetrainBase):
         ..., description="True when the caller passed force=true, bypassing the verdict."
     )
     promoted: bool
+    activated: bool = Field(
+        False,
+        description=(
+            "True when a promoted candidate was activated into runtime/active "
+            "and the worker answering this request reloaded it. The other "
+            "backend workers keep the previous champion until they restart, so "
+            "this is not a claim that the whole fleet is serving the new model."
+        ),
+    )
+    activation_error: Optional[str] = Field(
+        None,
+        description=(
+            "Set when a promoted candidate could not be activated. The gate's "
+            "verdict stands and the previous champion keeps serving; what failed "
+            "is moving the new model into place."
+        ),
+    )
     old_auc: Optional[float] = Field(None, description="AUC of the model that was serving.")
     new_auc: Optional[float] = Field(None, description="AUC of the candidate.")
     reject_reason: Optional[str] = Field(

@@ -620,6 +620,17 @@ def auto_retrain_on_drift(
         if sora_model_rejected: sora_model_rejected.inc()
         logger.warning("Auto-retrain: model REJECTED - %s", reject_reason)
 
+    # Promotion is an act, through the same helper the closed loop uses (#199
+    # phase 4). This endpoint used to write `promoted` and return it while never
+    # calling activate(), so the candidate stayed in staged/ and nothing served
+    # it. `activated` says whether the promoted candidate reached active/ and
+    # this worker reloaded it; a failure is reported, not turned into a
+    # rejection.
+    run_id = retrain_result.get("run_id") if isinstance(retrain_result, dict) else None
+    from app.model_loader import activate_promoted_candidate
+    activation_error = activate_promoted_candidate(run_id if promoted else None)
+    activated = bool(promoted and run_id and activation_error is None)
+
     # The row this run owns, not "the newest one that looks like ours" (#199).
     #
     # The lookup here was `trigger_source == "mlops_auto"` ordered by id
@@ -686,6 +697,8 @@ def auto_retrain_on_drift(
         "retrained": True,
         "forced": force,
         "promoted": promoted,
+        "activated": activated,
+        "activation_error": activation_error,
         "old_auc": float(old_auc) if old_auc else None,
         "new_auc": float(new_auc) if new_auc else None,
         "reject_reason": reject_reason,
