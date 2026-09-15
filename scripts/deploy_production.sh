@@ -823,6 +823,19 @@ case "$_declared_env" in
         ;;
 esac
 
+# ----------------------------------------------------------------- the seed
+
+step "the model seed is materialized"
+
+# A checkout where git-lfs did not smudge leaves models/*.pkl and *.pth as
+# pointer stubs; a container built from one loads a pointer as a model and fails
+# at the first prediction, with health green until then (the shape of #196).
+# Refuse before building. Still in the preflight, so a refusal here has nothing
+# to roll back. The guard reads only tracked files under models/, so a checkout
+# with none -- this deploy guard's own test sandbox -- passes.
+SEED_CHECKOUT="$REPO" bash "$(dirname "$0")/check_seed_materialized.sh" \
+    || fail "the model seed is not materialized in $REPO; run 'git lfs pull' and retry"
+
 # ------------------------------------------------------------------- deployment
 
 step "deploying"
@@ -1590,6 +1603,24 @@ mkdir -p "$MANIFEST_DIR"
 # nothing depends on it: mktemp guarantees the file is new, and `latest` decides
 # which one is current.
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+# The run id of the model actually serving, read from the health endpoint's
+# model_provenance (#191, #329). The commit above says what code was deployed;
+# this says which champion it is serving, which a commit cannot -- the champion
+# changes by activation on a named volume, not by a commit. Best-effort: an
+# accepted deployment still gets a manifest, recording `unknown` rather than
+# refusing over a field the record does not depend on.
+ACTIVE_MODEL_RUN=unknown
+if _health_body="$(curl -fsS -A "$DEPLOY_PROBE_UA" "$SITE/api/v1/health" 2>/dev/null)"; then
+    ACTIVE_MODEL_RUN="$(printf '%s' "$_health_body" | python3 -c '
+import json, sys
+try:
+    provenance = (json.load(sys.stdin) or {}).get("model_provenance") or {}
+    print(provenance.get("run_id") or "unknown")
+except Exception:
+    print("unknown")
+' 2>/dev/null || echo unknown)"
+fi
+
 MANIFEST="$(mktemp "$MANIFEST_DIR/$STAMP-XXXXXX.txt")"
 TMP_MANIFEST="$MANIFEST.tmp"
 {
@@ -1597,6 +1628,7 @@ TMP_MANIFEST="$MANIFEST.tmp"
     echo "mode           $MODE"
     echo "commit         $TARGET"
     echo "origin_main    $ORIGIN_MAIN"
+    echo "active_model   $ACTIVE_MODEL_RUN"
     echo "compose_file   $(basename "$COMPOSE")"
     echo "project        $PROJECT"
     echo "nginx_config   sha256:$REPO_SUM"

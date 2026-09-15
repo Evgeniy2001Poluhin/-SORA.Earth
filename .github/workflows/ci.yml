@@ -701,6 +701,7 @@ jobs:
             tests/test_backup_local_integration.sh \
             tools/mutation_backup_local.sh \
             scripts/deploy_production.sh \
+            scripts/check_seed_materialized.sh \
             tests/test_deploy_production.sh \
             tools/mutation_backfill_periods.sh \
             tools/wait_for.sh \
