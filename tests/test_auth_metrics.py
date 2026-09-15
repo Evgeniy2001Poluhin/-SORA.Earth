@@ -17,7 +17,7 @@ def test_auth_invalid_key():
     assert resp.status_code in [200, 401, 403]
 
 def test_auth_valid_key():
-    resp = client.get("/api/v1/auth/verify", headers={"X-API-Key": "demo-key-2026"})
+    resp = client.get("/api/v1/auth/verify", headers={"X-API-Key": "dev-user-key"})
     assert resp.status_code == 200
     data = resp.json()
     assert data["authenticated"] is True
