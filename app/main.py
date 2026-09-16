@@ -845,26 +845,61 @@ async def dev_page():
 
 
 
+def _models_loaded() -> bool:
+    """Whether the champion set that serves predictions is actually loaded.
+
+    The RandomForest and XGBoost models. Read at call time, so this reflects the
+    process's real state rather than a literal. `models_loaded: True` used to be
+    hard-coded here and could not fail (#324): a worker that loaded nothing
+    reported the same as one that loaded everything.
+    """
+    return bool(rf_model is not None and xgb_model is not None)
+
+
+def _pdf_report_status() -> str:
+    """Whether the PDF-report capability's dependency is importable."""
+    import importlib.util
+    return "ok" if importlib.util.find_spec("fpdf") is not None else "unavailable"
+
+
+def _metrics_status() -> str:
+    """Whether the Prometheus registry the metrics endpoints serve is importable."""
+    import importlib.util
+    return "ok" if importlib.util.find_spec("prometheus_client") is not None else "unavailable"
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "models_loaded": True, "version": "2.0.0"}
+    # A liveness probe: 200 means the process answered. `models_loaded` is the
+    # real state now, not a hard-coded True (#324) -- readiness is /api/v1/ready.
+    return {"status": "ok", "models_loaded": _models_loaded(), "version": "2.0.0"}
 
 
 @app.get("/system/health", tags=["monitoring"])
 def system_health():
+    components = {
+        "api": "ok",
+        # The neural network is optional (#320): it used to count here, and an
+        # unloaded one counted as present. "warn" is acceptable, not degraded.
+        "ml_models": "ok" if _models_loaded() else "warn",
+        "pdf_report": _pdf_report_status(),
+        "metrics": _metrics_status(),
+    }
+    # Derived from the components, so it can actually change: "ok", "warn", or
+    # "degraded" once any component is worse than a warning. It used to be a
+    # literal "ok" (#324).
+    if any(v not in ("ok", "warn") for v in components.values()):
+        status = "degraded"
+    elif any(v == "warn" for v in components.values()):
+        status = "warn"
+    else:
+        status = "ok"
     return {
-        "status": "ok",
+        "status": status,
         "app_version": "2.0.0",
         "python_version": platform.python_version(),
         "server_time_utc": datetime.utcnow().isoformat() + "Z",
-        "components": {
-            "api": "ok",
-            # The neural network is optional (#320): it used to count here, and
-            # an unloaded one counted as present.
-            "ml_models": "ok" if rf_model and xgb_model else "warn",
-            "pdf_report": "ok",
-            "metrics": "ok",
-        },
+        "components": components,
     }
 
 
