@@ -16,6 +16,12 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
+              # Deliberately NOT job-pinned. `sora_drift_detected_total` is
+              # incremented in closed_loop_retrain (app/scheduler.py), which
+              # also runs in the backend via the AI-teammate route
+              # (app/agents/ai_teammate.py, registered in app/main.py). Pinning
+              # either job would drop drift detected from the other process
+              # (#284). Leave unnamed, or use sum by (...).
               expr: increase(sora_drift_detected_total[5m]) > 0
               intervalMs: 1000
               maxDataPoints: 43200
@@ -49,7 +55,16 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: sora_retrain_seconds_since_success > 1209600 or sora_retrain_seconds_since_success == -1
+              # job named because this gauge has a single writer: the backend,
+              # in app/metrics_endpoint.py, recomputed on each /metrics scrape.
+              # The scheduler exports the same name with the default 0 (it never
+              # sets it), so an unnamed selector would also match a series that
+              # is permanently 0 and can never carry the -1 this alert needs to
+              # see. "Always name the job" (CLAUDE.md), pinned to the one that
+              # writes it -- and pinned to sora-app, not the sora-scheduler a
+              # naive reading would choose, which is exactly what would break
+              # this alert (#284).
+              expr: sora_retrain_seconds_since_success{job="sora-app"} > 1209600 or sora_retrain_seconds_since_success{job="sora-app"} == -1
               intervalMs: 1000
               maxDataPoints: 43200
         for: 15m
@@ -74,6 +89,10 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
+              # Deliberately NOT job-pinned. `sora_model_rejected_total` is
+              # incremented in the scheduler (app/scheduler.py) AND in the
+              # backend (app/api/infra.py, POST /mlops/auto-retrain). Pinning
+              # one job would hide rejections made through the other (#284).
               expr: increase(sora_model_rejected_total[10m]) > 0
               intervalMs: 1000
               maxDataPoints: 43200
@@ -93,7 +112,11 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: histogram_quantile(0.95, rate(sora_prediction_latency_ms_bucket[5m])) > 500
+              # job named: prediction latency is observed only in the backend
+              # (app/api/predict.py); the scheduler serves no predictions, so
+              # its bucket series are all empty. Naming the job keeps the p95
+              # from being computed across an empty second series.
+              expr: histogram_quantile(0.95, rate(sora_prediction_latency_ms_bucket{job="sora-app"}[5m])) > 500
               intervalMs: 1000
               maxDataPoints: 43200
         for: 2m
