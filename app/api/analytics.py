@@ -271,7 +271,11 @@ def model_health(_: None = Depends(admin_auth)):
             "avg_latency_ms_evaluate": round(avg_latency_eval, 2) if avg_latency_eval else None,
             "endpoint_counts": endpoint_counts,
         },
-        "status": "healthy",
+        # Derived, not a literal: this endpoint is named model-health and reports
+        # each model's loaded flag, so its status must reflect them. The champion
+        # is RandomForest + XGBoost (the neural network is optional, #320); a
+        # missing one is "degraded", never "healthy" (#324 class).
+        "status": "healthy" if (rf_model is not None and xgb_model is not None) else "degraded",
     }
 @router.get("/data-health")
 def data_health(window_hours: int = 24):

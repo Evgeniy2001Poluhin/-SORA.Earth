@@ -161,6 +161,28 @@ def test_model_health_says_the_network_is_not_loaded(admin):
     assert r.json()["models"]["pytorch_mlp"]["loaded"] is False
 
 
+def test_model_health_status_reflects_the_champion_load_state(admin, monkeypatch):
+    """`status` is derived, not a literal.
+
+    The endpoint is named `model-health` and reports each model's `loaded` flag,
+    yet it used to return `"status": "healthy"` unconditionally -- so a champion
+    that failed to load looked exactly like one that answered. Both states in
+    one test, so a field that always says "healthy" cannot pass (the #324 class,
+    the same defect fixed for /health and /system/health).
+    """
+    import app.main as main
+
+    healthy = client.get("/api/v1/analytics/metrics/model-health").json()
+    assert healthy["status"] == "healthy", healthy
+
+    monkeypatch.setattr(main, "rf_model", None)
+    degraded = client.get("/api/v1/analytics/metrics/model-health").json()
+    assert degraded["status"] == "degraded", (
+        "status stayed 'healthy' with the RandomForest champion unloaded"
+    )
+    assert degraded["models"]["random_forest"]["loaded"] is False
+
+
 def test_the_summary_says_the_network_is_not_loaded(admin):
     r = client.get("/api/v1/analytics/summary")
     assert r.status_code == 200, r.text
