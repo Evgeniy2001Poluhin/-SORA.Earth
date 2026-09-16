@@ -104,7 +104,62 @@ def check_drift(window: int = 50):
     return result
 
 
-def compute_drift(window: int = 50):
+def _recent_predictions(window: int, db=None):
+    """The last `window` logged predictions, as a DataFrame of `COLS`.
+
+    Read from the durable `predictions_log` table -- not the CSV this used to
+    read (#281). That file lived in the container's writable layer, under
+    `/app/data`, which is mounted from nowhere: it was destroyed on every
+    redeploy, rollback and `--force-recreate`, so the drift check measured a
+    file that emptied faster than it filled while the same predictions were
+    being written durably to a table it never read. The four `COLS` are exactly
+    the columns `PredictionLog` stores.
+
+    `db` is optional so the three callers -- the closed loop, `POST
+    /mlops/auto-retrain` and the HTTP handler -- keep calling `compute_drift`
+    unchanged; when it is None a short-lived session is opened and closed here.
+
+    Returns None when the table cannot be read, so the caller reports a fault
+    (`unavailable`) rather than reading a broken query as "no drift" -- the
+    same distinction #274 drew for the check that could not run at all.
+    """
+    own = db is None
+    if own:
+        # SessionLocal directly, not app.main.get_db_sync: that pulls app.main
+        # (Redis client, model loading) into the drift path for a bare session.
+        from app.database import SessionLocal
+        db = SessionLocal()
+    try:
+        from app.database import PredictionLog
+
+        rows = (
+            db.query(
+                PredictionLog.budget,
+                PredictionLog.co2_reduction,
+                PredictionLog.social_impact,
+                PredictionLog.duration_months,
+            )
+            .order_by(PredictionLog.id.desc())
+            .limit(window)
+            .all()
+        )
+        # order does not matter to a two-sample KS test; the columns are
+        # selected in COLS order so the frame lines up with the baseline.
+        return pd.DataFrame(rows, columns=COLS)
+    except Exception as exc:  # a broken session, a missing table, a driver fault
+        logging.getLogger(__name__).warning(
+            "drift: could not read predictions_log: %s", exc
+        )
+        return None
+    finally:
+        if own:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
+def compute_drift(window: int = 50, db=None):
     """The KS report as a value, for callers that are not HTTP.
 
     Split out because declaring the endpoint's contract changed what
@@ -123,12 +178,22 @@ def compute_drift(window: int = 50):
     if not os.path.exists(PROJ_CSV):
         return _unavailable(window, "baseline_missing")
     baseline = pd.read_csv(PROJ_CSV)
-    if not os.path.exists(PRED_LOG):
+
+    # The recent window comes from the durable `predictions_log` table, not the
+    # ephemeral CSV that every redeploy wiped (#281). The three not-measured /
+    # fault branches below carry the same statuses and reason codes as before,
+    # so the endpoint contract is unchanged: only the source of the rows moved.
+    recent = _recent_predictions(window, db)
+    if recent is None:
+        # The durable log could not be read -- a deployment fault, not a
+        # verdict of no drift, exactly like a missing baseline. The closed loop
+        # and auto-retrain decline on `unavailable`; `check_drift` answers 503.
+        return _unavailable(window, "prediction_log_unavailable")
+    if len(recent) == 0:
         return ModelDriftNotMeasured(
             status="no_log", window=window, observations=0, features={},
             reason_code="prediction_log_absent",
         )
-    recent = pd.read_csv(PRED_LOG).tail(window)
     if len(recent) < MIN_WINDOW_ROWS:
         return ModelDriftNotMeasured(
             status="insufficient_data", window=window, observations=len(recent), features={},

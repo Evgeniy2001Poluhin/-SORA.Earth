@@ -102,15 +102,18 @@ class TestDrift:
     def test_drift_no_log(self):
         """No prediction log is a domain state: 200, and no verdict.
 
-        The patch used to be `os.path.exists -> False` for everything, which
-        after #239 means the baseline is missing too -- and that is a 503, not
-        a "no log" answer. The blanket patch was describing a condition nobody
-        meant. It now says exactly which file is absent.
+        The recent window now comes from the durable `predictions_log` table,
+        not a CSV (#281), so "no log" is an empty result from
+        `_recent_predictions`. This used to fake the state by patching
+        `os.path.exists` so the CSV looked absent; the endpoint no longer reads
+        that file, so it is injected through the real seam instead.
         """
-        def only_the_log_is_missing(path):
-            return path != drift_api.PRED_LOG
+        import pandas as pd
 
-        with patch("app.api.drift.os.path.exists", side_effect=only_the_log_is_missing):
+        def empty(window=50, db=None):
+            return pd.DataFrame(columns=drift_api.COLS)
+
+        with patch("app.api.drift._recent_predictions", side_effect=empty):
             r = client.get("/api/v1/model/drift")
 
         assert r.status_code == 200
@@ -120,5 +123,14 @@ class TestDrift:
         assert body["observations"] == 0
 
     def test_drift_small_window(self):
-        r = client.get("/api/v1/model/drift?window=5")
+        import pandas as pd
+
+        def few(window=50, db=None):
+            return pd.DataFrame(
+                {"budget": [1.0, 2.0], "co2_reduction": [1.0, 2.0],
+                 "social_impact": [1.0, 2.0], "duration_months": [12, 12]}
+            )
+
+        with patch("app.api.drift._recent_predictions", side_effect=few):
+            r = client.get("/api/v1/model/drift?window=5")
         assert r.status_code == 200

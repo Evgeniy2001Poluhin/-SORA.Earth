@@ -46,11 +46,23 @@ def unavailable(monkeypatch):
 
 @pytest.fixture()
 def no_log(monkeypatch, tmp_path):
-    """A working install with nothing to compare yet."""
+    """A working install with nothing to compare yet.
+
+    The recent window now comes from the durable table (#281), so "nothing to
+    compare yet" is an empty result from `_recent_predictions`, not an absent
+    CSV. Injected deterministically here so the closed loop sees `no_log`
+    regardless of what the shared test database happens to hold.
+    """
+    import pandas as pd
+
     baseline = tmp_path / "projects.csv"
     baseline.write_text("budget,co2_reduction,social_impact,duration_months\n1,2,3,4\n", encoding="utf-8")
     monkeypatch.setattr(drift_module, "PROJ_CSV", str(baseline))
     monkeypatch.setattr(drift_module, "PRED_LOG", str(tmp_path / "absent.csv"))
+    monkeypatch.setattr(
+        drift_module, "_recent_predictions",
+        lambda window=50, db=None: pd.DataFrame(columns=drift_module.COLS),
+    )
 
 
 def test_compute_drift_returns_a_value_on_every_branch(unavailable):
