@@ -119,8 +119,8 @@ models_backup_*/
 # --- models policy (clean) ---
 models/all-MiniLM-L6-v2/
 data/*.png
+data/explanations/*.png
 data/predictions_log.csv
-data/*.png
 models/*.json
 nginx.conf.bak
 certs/
