@@ -103,3 +103,39 @@ widen the gap between the leakage sets and the clean sets, not close it.
 The retrain/promotion block in #232 should stay until item 1 is resolved: the
 ablation confirms that promotion on this metric would reward leakage, not
 quality.
+
+## Resolution (2026-09): Option C — `success` is a heuristic, its AUC is not quality evidence
+
+Three options were weighed for redefining `success`:
+
+- **A** — an independent evaluation label (WB IEG outcome ratings): the correct
+  label, but it needs a new data source + a join by project id (and
+  `data/projects.csv` carries no `source_project_id`). **Deferred**, not rejected —
+  this is the path to a metric that *can* be trusted.
+- **B** — a disbursement-based label from the existing fetch: **measured
+  infeasible.** `disbursement_percentage` is present in **0 / 4000** projects
+  sampled evenly across the WB v2 projects API, so the label would be degenerate
+  (all-zero). Disbursement data lives in a separate WB Finances API (new-source
+  plumbing, and a weaker signal than outcome). Off the table.
+- **C** — retire the quality claim. **Chosen.**
+
+**Decision: C.** `success` stays a heuristic target. Its AUC (≈0.87–0.91) is
+**leakage-inflated and is NOT validated evidence of model quality**: the ablation
+above shows the two closing-date-derived features (`duration_months`,
+`budget_per_month`) reproduce almost the whole score, and the label itself is
+built from the same closing-date fact. Consequently:
+
+- Do **not** present the classifier's AUC/accuracy as a quality metric, and do
+  **not** use it as promotion evidence. The promotion gate's `MIN_AUC_THRESHOLD`
+  is a floor/regression guard against a leaky metric, not proof of quality
+  (annotated in `app/promotion.py`).
+- The `success_probability` the product returns is a heuristic, not a validated
+  prediction of real-world project success.
+- Retrain/promotion stays gated on this label: no model can be called "better"
+  by this AUC. A real, **independent** label — **Option A (WB IEG ratings)** — is
+  the prerequisite for trusting any AUC, and is the deferred follow-up.
+
+This resolves #232: item 2 (quantitative isolation) is done by the ablation;
+item 1 (decide the target) is resolved as C with A deferred; item 3
+(grouped/temporal split) is moot for a label we are explicitly not treating as
+quality evidence.
