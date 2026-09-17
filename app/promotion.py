@@ -51,6 +51,15 @@ MIN_AUC_THRESHOLD = 0.80
 #: is a separate question from whether it is good enough in isolation.
 MAX_AUC_REGRESSION = 0.02
 
+# NB (#232, resolved as "retire the quality claim"): clearing MIN_AUC_THRESHOLD
+# is NOT evidence of model quality. The `success` label leaks via
+# closing-date-derived features (`duration_months`, `budget_per_month`) — the
+# ablation in docs/DATASET_LEAKAGE_ABLATION_2026-09-16.md shows those alone
+# reproduce almost the whole AUC. So this gate is a floor / regression guard
+# against a leaky metric, not proof that a model is good. A real quality claim
+# needs an independent label (Option A / WB IEG outcome ratings), which is
+# deferred. Do not cite this AUC as quality evidence anywhere.
+
 
 @dataclass(frozen=True)
 class PromotionDecision:
