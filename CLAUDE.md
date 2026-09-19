@@ -148,7 +148,7 @@ app/
 **Key files:**
 - `app/main.py` → `make_features()` builds the 9-column frame the RF model expects
 - `app/main.py` → `calculate_esg()` computes ESG scores + region-aware recommendations
-- `app/scheduler.py` - Thirteen scheduled jobs; see the table below. Drift is
+- `app/scheduler.py` - Fourteen scheduled jobs; see the table below. Drift is
   checked inside the daily closed loop, not by a job of its own.
 - `app/drift_detection.py` - KS-test drift detection. It returns a verdict and
   writes nothing: the file holds no session, no `INSERT` and no table name.
@@ -199,6 +199,7 @@ regenerate this; do not hand-edit the table.**
 | id | trigger | function |
 |---|---|---|
 | `refresh_forecast_metrics` | `IntervalTrigger(seconds=30)` | `refresh_forecast_metrics` |
+| `auto_observation_coverage` | `IntervalTrigger(minutes=15)` | `scheduled_observation_coverage` |
 | `health_ping` | `IntervalTrigger(minutes=5)` | *(inline lambda -- records a health row)* |
 | `auto_source_health_check` | `IntervalTrigger(minutes=15)` | `scheduled_source_health_check` |
 | `auto_openmeteo_ingestion` | `IntervalTrigger(hours=1)` | `scheduled_openmeteo_ingestion` |
@@ -214,8 +215,8 @@ regenerate this; do not hand-edit the table.**
 
 <!-- END SCHEDULED JOBS -->
 
-Thirteen jobs, twelve of them unconditional. There is **no** separate drift-check
-job: drift is checked inside `closed_loop_retrain`, once a day.
+Fourteen jobs, thirteen of them unconditional. There is **no** separate
+drift-check job: drift is checked inside `closed_loop_retrain`, once a day.
 
 **What the closed loop does** (`app/scheduler.py:closed_loop_retrain`):
 
@@ -635,11 +636,27 @@ Optional:
   otherwise, which is how the two were confused for months.
 
 - **The scheduler publishes its own** on `scheduler:9000/metrics`, scraped as a
-  separate Prometheus job (#267). Eleven `sora_*` metrics are written only in
-  that container — `sora_retrain_total`, `sora_full_pipeline_total`, the four
-  forecast gauges and the five environmental ones — and until that target
-  existed the process served no HTTP, so every one of them was set into memory
-  nobody read and lost on the next restart. Its own job name rather than a
+  separate Prometheus job (#267). **Sixteen** `sora_*` metrics are written only
+  in that container, and until that target existed the process served no HTTP,
+  so every one of them was set into memory nobody read and lost on the next
+  restart.
+
+  This said "Eleven", enumerated as `sora_retrain_total`,
+  `sora_full_pipeline_total`, the four forecast gauges and the five
+  environmental ones. Counted 2026-09-19, the set was thirteen even then: the
+  enumeration silently omitted `sora_drift_detected_total` and
+  `sora_external_refresh_total`, both of which the key-metrics table below
+  names as scheduler-written. The three observation-coverage gauges make
+  sixteen.
+
+  Do not trust this number either — derive it:
+
+  ```
+  python -c "import sys; sys.path.insert(0,'tests'); \
+    from test_scheduler_metrics_are_scraped import _writers_by_metric, SCHEDULER_MODULES; \
+    w=_writers_by_metric(); \
+    print(sorted(m for m,f in w.items() if f and all(x.startswith(SCHEDULER_MODULES) for x in f)))"
+  ``` Its own job name rather than a
   second target under `sora-app`: both processes publish metrics of the same
   names.
 
@@ -647,7 +664,7 @@ Optional:
   `app/scheduler_metrics.py` refuses to serve if `PROMETHEUS_MULTIPROC_DIR` is
   set rather than publishing whichever files it happens to find.
 
-  **Four of those eleven are absent for up to six hours after every
+  **Four of those sixteen are absent for up to six hours after every
   deployment**, and it is not a fault. `sora_forecast_mae_current`,
   `_rmse_current`, `_r2_current` and `_mape_current` are labelled gauges: a
   series exists only once something calls `.labels(...).set(...)`. The only
