@@ -1,10 +1,17 @@
 """Reading country_indicator_history as of a past moment.
 
-Issue #75. Measured before writing any of this: the table already keeps every
-row it has ever written -- `fetched_at` is populated on all 95,024 production
-rows across 542 distinct fetch times, the refresh only ever inserts, and no
-path deletes. So a point-in-time answer needs no new table; it needs a query
-that asks for one, a guarantee that the property keeps holding, and an index.
+Issue #75. Measured before writing any of this: the table keeps every row it
+has ever written -- `fetched_at` is populated on every row, the refresh only
+ever inserts, and no path deletes. So a point-in-time answer needs no new
+table; it needs a query that asks for one, a guarantee that the property keeps
+holding, and an index.
+
+The row counts that used to stand here (95,024 rows, 542 fetch times) were
+measured on a production database that was deleted in 2026-08. The rebuilt one
+holds none: the history pass is gated behind `SORA_HISTORY_REFRESH`, which is
+unset there. These tests never depended on those figures -- they build their
+own rows -- and the numbers are gone rather than updated, because a count in a
+docstring can only go stale again.
 
 What these tests pin is the *reading* semantics, which nothing expressed
 before. `app/services/forecasting/features.py` used to take whatever the table
