@@ -524,6 +524,28 @@ Optional:
    says which under `model_provenance` (`source`, `run_id`, `model_version`,
    `fell_back`, `reason_code`).
 
+   **Which data a champion trained on** is in its `meta.json`, as
+   `data_version` -- `sha256:` over the bytes of `data/projects.csv` as the run
+   read them -- beside `data_rows_read` (before inf/NaN rows are dropped) and
+   `total_samples` (after). The same digest is written to
+   `retrain_log.data_version`, so the journal an operator reads and the artefact
+   agree.
+
+   Until 2026-09-20 neither carried it: the column was declared and not one of
+   the eight `_finish_retrain_log` call sites passed it, and `meta.json` recorded
+   how many rows rather than which. The dataset is not static -- `POST
+   /model/data/bulk-upload/content` replaces it atomically, and `_do_retrain`'s
+   own comment notes it is appended to by more than that path -- so two
+   champions trained a week apart were indistinguishable in the record except by
+   a timestamp and a count.
+
+   The digest does not reproduce the data. It decides whether two runs saw the
+   same bytes, which is what "was this reproduced?" reduces to in practice.
+   `retrain_models` and `closed_loop_retrain` each write a **second** row for the
+   same physical run and neither passes it, so those rows still carry NULL; that
+   is the same double-row shape #199 carries and is fixed with it, not
+   separately.
+
    **How a trained model gets there.** Whatever starts a retrain, the training
    is `app/api/retrain.py` → `_do_retrain()`, and it writes the candidate to
    `runtime/staged/<run_id>/`, which nothing serves -- after pruning the older
