@@ -100,6 +100,13 @@ in the header, and not derived from the data afterwards.
 
 Until this file is merged, accumulation is data and not a milestone.
 
+> **Superseded by Amendments 1.1 and 1.2.** That clock started 2026-08-14 and was
+> voided on 2026-09-02 when the observations were lost. The clock now running
+> started **2026-09-03**, measured, and the rule it was measured by was fixed in
+> advance by Amendment 1.1. The paragraph above is left as declared because the
+> principle it states -- a start is fixed beforehand, never derived from the data
+> afterwards -- is what made the restart legitimate rather than a choice.
+
 ### What that leaves
 
 The gate is `REQUIRED_WINDOWS = 12` with `TRAINING_DAYS = {7: 90, 30: 180}`, so:
