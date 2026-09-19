@@ -1,9 +1,9 @@
 # M3 — forecast target declaration (preregistration)
 
-    version              1.1
+    version              1.3
     declared             2026-08-14
-    amended              2026-09-02  (see "Amendment 1.1" below)
-    clock start (§7)     VOID — pending restart, see Amendment 1.1
+    amended              2026-09-02  (1.1), 2026-09-19  (1.2, 1.3)
+    clock start (§7)     2026-09-03 — measured, see Amendment 1.2
     supersedes           nothing
     amendable            only by a numbered version with a date and a reason
 
@@ -87,6 +87,12 @@ could drift apart.
 **An absent day is absent.** It is not interpolated: §7.1 of the M2 protocol
 lists an interpolated point among the things that do not count as movement.
 
+> **Read this section through Amendment 1.3 (2026-09-19).** "Observations" above
+> means **distinct UTC hours**, not rows. The wording assumed one row per hour;
+> the ingester can write several, and the two readings disagree on real data.
+> The original text is left as declared -- a preregistration is not rewritten --
+> and the arithmetic that supersedes it is in Amendment 1.3.
+
 ## 4. When the clock starts
 
 At the merge commit of this file. Not at the first measurement, not at the date
@@ -157,6 +163,122 @@ Restarting moves both later by however long the outage plus the rebuild takes,
 day for day. The loss of two days of data is the small part; the outage is the
 large one.
 
+## Amendment 1.2 — the clock restarts, entered by measurement
+
+**Date:** 2026-09-19. **Reason:** collection has resumed on the rebuilt
+deployment, so the start that Amendment 1.1 deliberately left blank can now be
+measured rather than chosen.
+
+Amendment 1.1 fixed the rule in advance: the clock starts at **the first day on
+the restored deployment that meets the coverage rule in §3**. Applying that rule
+to production on 2026-09-19, over `environmental_observations` where
+`source = 'openmeteo'` and `indicator = 'temperature'`, across all 21 declared
+points:
+
+| day | points meeting §3 | hours covered |
+|---|---:|---|
+| 2026-09-02 | **0 of 21** | 4 of 24 — collection began part-way through the day |
+| 2026-09-03 | **21 of 21** | 24 of 24 at every point |
+
+### Clock start: 2026-09-03
+
+Not 2026-09-02, which is the first day with data and does not meet the rule.
+Not the date of this amendment. Not the date the server was rebuilt.
+
+The date is also **not sensitive to the ambiguity Amendment 1.3 resolves**:
+2026-09-02 fails and 2026-09-03 passes under either reading of §3, so recording
+the start here does not depend on that question being settled first.
+
+### Earliest evidential runs
+
+From the gate constants, which are untouched — `REQUIRED_WINDOWS = 12`,
+`TRAINING_DAYS = {7: 90, 30: 180}`:
+
+| horizon | days | earliest evidential run |
+|---|---:|---|
+| h=7 | 174 | **2027-02-24** |
+| h=30 | 540 | **2028-02-25** |
+
+The voided clock implied 2027-02-04 and 2028-02-05. The outage and the rebuild
+cost **20 days**, day for day, which is what Amendment 1.1 said the restart
+would cost and is recorded here so it is not understated later.
+
+`tests/test_development_roadmap_dates.py` now carries `CLOCK_START` as a date
+rather than `None`, which turns its inverse check back into the forward one: the
+roadmap must state exactly these two dates and no others.
+
+---
+
+## Amendment 1.3 — §3 is read in hours, not in rows
+
+**Date:** 2026-09-19. **Reason:** the data can satisfy §3 two ways, and they
+disagree. Measured, not anticipated.
+
+§3 says a day exists if there are "at least 19 of 24" observations, and that the
+target is their mean. That wording assumes one observation per hour. The
+ingester does not produce that: it reads Open-Meteo's `current` block, whose
+`time` advances at **15-minute** resolution, so two runs more than 15 minutes
+apart inside one hour write two rows with different `event_time`s. Restarting
+the scheduler — which every deployment does, since `auto_openmeteo_ingestion` is
+in `RUN_IMMEDIATELY_ON_STARTUP` — adds such a row.
+
+Measured on production 2026-09-19:
+
+```
+3620 point-hours hold more than one row (3620 rows beyond one per hour)
+DEU temperature 2026-09-04: 27 rows across 24 hours; 05:15 and 05:45 both
+present, 16:15 and 16:45 both present
+```
+
+**What the two readings cost.** Counting rows, every one of 2026-09-03..09-18
+passes for all 21 points. Counting hours, three days do not:
+
+| day | points meeting the rule, by hours | worst point |
+|---|---:|---:|
+| 2026-09-09 | 19 of 21 | 18 hours |
+| 2026-09-10 | 20 of 21 | 18 hours |
+| 2026-09-14 | 20 of 21 | 16 hours |
+
+So the row reading turns a gap in the day into a pass — the failure mode the
+coverage floor exists to catch.
+
+It also moves the target itself. The mean over rows weights an hour sampled
+twice double; the mean over hours does not:
+
+```
+max difference on a point-day   0.665 C   (2026-09-02)
+typical difference              0.05-0.19 C
+difference on days with exactly one sample per hour   0.000 C
+```
+
+A target that moves by up to two thirds of a degree according to how often the
+ingester was restarted that day is the defect §3's own rationale names: the
+reason it chose the mean over the last reading was that "moving the scheduler by
+an hour would change the target without the weather changing". The row reading
+reintroduces exactly that.
+
+### The rule, restated
+
+```
+hour(point, h)   = mean(temperature) over observations whose event_time falls in
+                   UTC hour h
+target(point,day)= mean(hour(point, h)) over the hours h present in that UTC
+                   calendar day, if at least 19 of the 24 hours are present;
+                   otherwise the day is absent
+```
+
+Unchanged: the target variable, the point set, the horizons, `MIN_COVERAGE`,
+`REQUIRED_WINDOWS`, `TRAINING_DAYS`, and the rule that an absent day is absent
+rather than interpolated.
+
+**Why this is amendable now and would not be later.** No window has been
+completed and no backtest has been run, so there is no result this could be a
+choice of — the condition M2's §9 exists to protect. Once history accumulates
+under the ambiguous reading, changing it becomes a choice made with results in
+view, and the safe moment is gone. This is a tightening made in the safe window,
+and the diff may be checked against that claim: nothing but §3's arithmetic and
+the record below is edited.
+
 ## 5. What this declaration does not do
 
 - It does not claim M2 demonstrated anything. M2 is closed with a negative
@@ -167,7 +289,18 @@ large one.
 
 ## 6. Amendment record
 
-None. This is version 1.0.
+| version | date | reason |
+|---|---|---|
+| 1.1 | 2026-09-02 | Total loss of the accumulated observations: the production server was deleted for non-payment and `environmental_observations` went with it. The §7 clock was voided pending a measured restart. |
+| 1.2 | 2026-09-19 | Collection resumed on the rebuilt deployment, so the clock start Amendment 1.1 deliberately left blank was entered by measurement: **2026-09-03**. |
+| 1.3 | 2026-09-19 | §3 could be read in rows or in hours and the two disagree on production data. Read in hours. A tightening made before any window exists. |
+
+This table read "None. This is version 1.0." until 2026-09-19 -- while Amendment
+1.1 had been in the document since 2026-09-02, and a test asserted that sentence
+was still there. The record section exists so that an amendment cannot be made
+quietly, and it had already failed at that once. `tests/test_m3_declaration_is_recorded.py`
+now reads the amendment headings out of the document and requires each one to
+appear here with a date, so the omission cannot repeat.
 
 An amendment tightening a condition before any run exists is the safe case; one
 made quietly after results exist is what this record is for. Any change requires

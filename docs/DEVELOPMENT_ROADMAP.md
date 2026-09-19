@@ -139,25 +139,35 @@ must be recorded under a canonical run to be aggregatable at all.
 
 | Result | Not before | Condition |
 |---|---|---|
-| M3, horizon 7 | **unknown — the clock is void** | collection must resume first |
-| M3, horizon 30 | **unknown — the clock is void** | collection must resume first |
+| M3, horizon 7 | **2027-02-24** | 12 admissible windows, no day below 80% coverage |
+| M3, horizon 30 | **2028-02-25** | the same, over 30-day windows |
 | Any claim of beating a baseline | after the corresponding backtest | Rolling-origin, CI and regional slices |
 | Crisis warning quality | after an event-labelled benchmark | Real events, negatives and lead time |
 | Specialist assessment | after UAT | 5–10 specialists, 30–50 scenarios |
 
-Both dates would be `TRAINING_DAYS[h] + REQUIRED_WINDOWS × h` days from the M3
-clock start, with the constants in
-`app/services/forecasting/entry_conditions.py`. **There is no clock start right
-now.** Amendment 1.1 of `docs/M3_FORECAST_DECLARATION.md` voided it on
-2026-09-02: the production server was deleted for non-payment and the
-accumulated observations went with it, so nothing has begun that a date could be
-counted from. It restarts at the first day on the restored deployment meeting
-the 80% coverage rule, entered by measurement in amendment 1.2.
+Both dates are `TRAINING_DAYS[h] + REQUIRED_WINDOWS × h` days from the M3 clock
+start, with the constants in `app/services/forecasting/entry_conditions.py`.
+They are recomputed from those constants by
+`tests/test_development_roadmap_dates.py` rather than trusted as prose here: if
+a constant moves and this document does not, the suite fails.
 
-The figures the original clock implied are recorded in that amendment and are
-deliberately not repeated here. A date in a plan reads as a target however it is
-captioned, and these are no longer derivable from anything. **Every day below 80% coverage
-moves them further out.** No effort brings them closer.
+**The clock runs from 2026-09-03.** Amendment 1.1 of
+`docs/M3_FORECAST_DECLARATION.md` voided the original one on 2026-09-02, when
+the production server was deleted for non-payment and the accumulated
+observations went with it. Amendment 1.2 restarted it on 2026-09-19 by
+measurement, at the first day on the rebuilt deployment meeting the 80% coverage
+rule: 2026-09-02 covered 4 hours of 24 and fails, 2026-09-03 covered 24 of 24 at
+every one of the 21 points.
+
+The outage and rebuild cost **20 days** against the voided clock. What that
+clock implied is recorded in Amendment 1.2 of the declaration and deliberately
+not repeated here: a superseded date left beside a live one in a plan is read as
+a plan, and `tests/test_development_roadmap_dates.py` fails this document for
+naming any future date but the two above.
+
+These two are not targets, and no effort brings them closer: they are the
+earliest dates at which evidence could exist. **Every day below 80% coverage
+moves them further out.**
 
 ## Deferred until a measured need exists
 
