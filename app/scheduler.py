@@ -271,17 +271,26 @@ scheduler = BackgroundScheduler(timezone="UTC")
 #     specifically to check whether the source works shows nothing for an hour.
 #     Only half of that pair was ever written down (#82); this is the other half,
 #     not a new argument.
-#     repeat: derived, not measured -- an observed row's identity is
-#     `{region}_{metric}_{event_time}`, and Open-Meteo timestamps an hour to a
-#     fixed instant, so a second run inside the same hour upserts rather than
-#     inserts.
+#     repeat: measured 2026-09-19, and it does NOT upsert. This line used to
+#     read "derived, not measured" and say that a second run inside the same
+#     hour upserts, on the theory that a row's identity is
+#     `{region}_{metric}_{event_time}` and Open-Meteo timestamps an hour to a
+#     fixed instant. The ingester reads the API's `current` block, whose `time`
+#     advances at 15-minute resolution, so a run 15 minutes after another
+#     carries a different event_time and INSERTS. On production 3620 point-hours
+#     hold more than one row (3620 rows beyond one per hour). The cost of a
+#     startup run is therefore ~210 real rows (21 points x 10 indicators), not
+#     zero -- they are genuine readings of current conditions rather than
+#     duplicates of one instant, which is why this stays a bounded cost and not
+#     a correctness problem.
 #
 #   auto_openmeteo_air_quality_ingestion
 #     one Open-Meteo fetch, writes `observed` rows.
 #     why at startup: STATED (#82) -- without it the first air-quality rows
 #     arrive an hour after a deployment, and a restart made specifically to
 #     check whether the source works shows nothing for an hour.
-#     repeat: same identity rule as above.
+#     repeat: same as above -- it inserts rather than upserts, ~126 rows per
+#     startup run (21 points x 6 indicators).
 #
 # auto_openaq_ingestion is deliberately absent: the job is not registered unless
 # SORA_OPENAQ_ENABLED is set, and an immediate run of a job that does not exist
