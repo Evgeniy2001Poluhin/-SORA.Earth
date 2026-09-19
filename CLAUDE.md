@@ -469,14 +469,17 @@ Optional:
 
    | job | side effect | why at startup | repeating it |
    |---|---|---|---|
-   | `auto_run_ingesters` | rosstat + sber rows | **not stated** (a6d5ede) | safe, measured: same revision → `inserted=0`, zero row delta (#121) |
-   | `auto_refresh_external_data` | World Bank pass + one `data_refresh_log` row | **not stated** (a6d5ede); the behaviour was known — the full history pass is gated behind `SORA_HISTORY_REFRESH` *because* this runs at startup | log row appended by design; heavy history pass off by default |
-   | `refresh_forecast_metrics` | reads, sets Prometheus gauges | **not stated** (#11) | safe — gauges are set, never incremented |
-   | `auto_openmeteo_ingestion` | one Open-Meteo fetch, `observed` rows | **not stated** (#11) | derived: identity is `{region}_{metric}_{event_time}`, so a repeat inside the same hour upserts |
+   | `auto_run_ingesters` | rosstat + sber rows | **decided** (#156): the trigger is 24h, so without it the first snapshot pass after a release is up to a day away and freshness depends on when the last deploy happened | safe, measured: same revision → `inserted=0`, zero row delta (#121) |
+   | `auto_refresh_external_data` | World Bank pass + one `data_refresh_log` row | **decided** (#156): the trigger is 6h, so a release would otherwise serve up to six hours on the previous process's values; the full history pass is gated behind `SORA_HISTORY_REFRESH` *because* this runs at startup, which bounds the cost to one ordinary pass | log row appended by design; heavy history pass off by default |
+   | `refresh_forecast_metrics` | reads, sets Prometheus gauges | **decided** (#156), for the opposite reason to the others: its trigger is 30s so the gap is negligible, but it is the only entry that neither writes nor calls out, so keeping it is free. It does **not** close the 6h empty-series window — that is `auto_pretrain_forecast`, deliberately not here | safe — gauges are set, never incremented |
+   | `auto_openmeteo_ingestion` | one Open-Meteo fetch, `observed` rows | **decided** (#156): the same argument as its air-quality twin below — same source, same 1h trigger — of which only one half had been written down | derived: identity is `{region}_{metric}_{event_time}`, so a repeat inside the same hour upserts |
    | `auto_openmeteo_air_quality_ingestion` | one Open-Meteo fetch, `observed` rows | **stated** (#82): otherwise the first rows arrive an hour after a deploy, and a restart to check the source shows nothing for an hour | same identity rule |
 
-   One of the five has a written reason; four were inherited. Being in the tuple
-   is not the same as having been chosen — whether the four should stay is #156.
+   All five are chosen, and #156 is closed. One reason was written when the job
+   was added (#82); the other four were supplied by the decision of 2026-09-19,
+   because the commits that added them genuinely say nothing. What was decided is
+   the operational intent — a gap in ingestion or external data should start at a
+   schedule, never at a release — and it is what a sixth entry has to meet.
 
    **What this means for acceptance.** The listed startup jobs may write during
    the deployment window. Attribute any change through `ingester_runs`, `source`

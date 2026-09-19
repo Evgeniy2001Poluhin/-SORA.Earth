@@ -214,38 +214,63 @@ scheduler = BackgroundScheduler(timezone="UTC")
 # first fire time a full interval away, so an interval job left alone does
 # nothing at startup. These are forced with `modify_job(next_run_time=now)`.
 #
-# One of the five has a written reason. The other four were inherited: a6d5ede
-# added the first two under the message "scheduler: run interval
-# ingesters/refresh immediately on startup" with an empty body, and #11 added
-# two more without saying why. Being in the tuple is not the same as having
-# been chosen, and this table says which is which rather than presenting all
-# five as one deliberate contract.
+# All five were kept, and the four that arrived without a reason now have one
+# (#156, decided 2026-09-19). Until then only one did: a6d5ede added the first
+# two under the message "scheduler: run interval ingesters/refresh immediately
+# on startup" with an empty body, and #11 added two more without saying why.
+# Being in the tuple was not the same as having been chosen, so each entry below
+# says what its startup run buys and what it costs. The decision was to supply
+# the missing four rather than drop them: each closes a gap that would otherwise
+# start at a deployment rather than at a schedule, and none of the four costs
+# more than a no-op upsert or a single bounded API pass.
 #
 #   auto_run_ingesters
 #     writes rosstat + sber rows.
-#     why at startup: NOT STATED (a6d5ede).
+#     why at startup: decided in #156. The trigger is IntervalTrigger(hours=24),
+#     so without the startup run the first snapshot pass after a release is up
+#     to a day away and the freshness of rosstat/sber data depends on when the
+#     last deployment happened rather than on the schedule. The cost of closing
+#     that gap is measured at zero rows (see repeat, below).
 #     repeat: safe, measured on production -- an unchanged snapshot yields the
 #     same revision, so the upsert reports inserted=0 and a zero row delta
 #     (#121, acceptance round 2).
 #
 #   auto_refresh_external_data
 #     one World Bank API pass, plus one data_refresh_log row per run.
-#     why at startup: NOT STATED (a6d5ede) -- but the behaviour was known:
-#     app/external_data.py gates the full history pass behind
+#     why at startup: decided in #156. The trigger is IntervalTrigger(hours=6),
+#     so a release would otherwise run for up to six hours on whatever World
+#     Bank values the previous process last wrote. The behaviour was already
+#     designed around: app/external_data.py gates the full history pass behind
 #     SORA_HISTORY_REFRESH *because* this job runs at startup, so that "the
-#     first mass ingestion" is not a side effect of a deployment.
+#     first mass ingestion" is not a side effect of a deployment -- which bounds
+#     the startup cost to one ordinary pass.
 #     repeat: the log row is appended by design; the heavy history pass is off
 #     by default. Quota impact per deploy is one pass, not one per country.
 #
 #   refresh_forecast_metrics
 #     reads, and sets Prometheus gauges.
-#     why at startup: NOT STATED (#11). Plausibly so a scraped dashboard is not
-#     empty for the first 30 seconds, but that is a guess and is labelled one.
+#     why at startup: decided in #156, and kept for the opposite reason to the
+#     others. Its trigger is IntervalTrigger(seconds=30), so the gap it closes
+#     is half a minute and is not worth much on its own -- but it is the only
+#     member of this tuple that neither writes to the database nor calls an
+#     external API, so the objection that each entry costs something per release
+#     does not apply to it at all. Keeping it is free; removing it would buy
+#     nothing.
+#     NB: this job does *not* close the window where the forecast gauges have no
+#     series after a deployment. That window is up to six hours long and belongs
+#     to auto_pretrain_forecast (IntervalTrigger(hours=6)), which is deliberately
+#     not in this tuple -- see the monitoring section of CLAUDE.md and #284.
 #     repeat: safe -- gauges are set, never incremented.
 #
 #   auto_openmeteo_ingestion
 #     one Open-Meteo fetch, writes `observed` rows.
-#     why at startup: NOT STATED (#11).
+#     why at startup: decided in #156, and it is the reason already written for
+#     its air-quality twin below. The two are the same job shape against the same
+#     source on the same IntervalTrigger(hours=1); without the startup run the
+#     first weather rows arrive an hour after a deployment, and a restart made
+#     specifically to check whether the source works shows nothing for an hour.
+#     Only half of that pair was ever written down (#82); this is the other half,
+#     not a new argument.
 #     repeat: derived, not measured -- an observed row's identity is
 #     `{region}_{metric}_{event_time}`, and Open-Meteo timestamps an hour to a
 #     fixed instant, so a second run inside the same hour upserts rather than
@@ -262,10 +287,14 @@ scheduler = BackgroundScheduler(timezone="UTC")
 # SORA_OPENAQ_ENABLED is set, and an immediate run of a job that does not exist
 # is not an error worth logging.
 #
-# Whether the four unstated entries should stay is #156, not a question for
-# whoever edits this next. Each costs a write or an external call on every
-# release, and "it was already in the tuple" is not a reason; deciding needs the
-# operational intent rather than more archaeology.
+# #156 is closed: all five stay, and the four reasons above were supplied by the
+# decision rather than found by more archaeology -- the commits genuinely do not
+# say why. What was decided is the operational intent, not the history: a gap in
+# ingestion or in external data should start at a schedule, never at a release,
+# and none of the five costs more than a no-op upsert or one bounded API pass.
+#
+# That reasoning is what a sixth entry has to meet. "It was already in the tuple"
+# is still not a reason, and neither is "the other five are there".
 #
 # tests/test_startup_jobs_contract.py pins the membership. Adding a sixth entry
 # has to be a decision rather than something that happens while editing nearby.
