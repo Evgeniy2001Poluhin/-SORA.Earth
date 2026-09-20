@@ -460,7 +460,46 @@ UI shows "≈det" badge for near-deterministic predictions (see `web/src/feature
 
 ## Testing
 
-- **Test framework:** pytest with timeout=30s (`pytest.ini`)
+- **Test framework:** pytest. `pytest.ini` gives each test **30s**; CI gives it
+  **60s**, and that difference is the reason a local run reports failures CI
+  does not have. Run it the way CI does:
+
+  ```bash
+  DATABASE_URL="sqlite:///./test.db" REDIS_URL="" SECRET_KEY="ci-test-secret" \
+  SORA_ADMIN_TOKEN="ci-test-admin" SORA_OFFLINE="1" RUN_SCHEDULER="false" \
+    python -m pytest tests/ --ignore=tests/test_api.py --timeout=60 -q
+  ```
+
+  Both flags matter and for different reasons: `--ignore` decides what runs,
+  `--timeout` decides what passes. `tests/test_api.py` is excluded here because
+  it needs the PostgreSQL service the `integration-tests` job has and this one
+  does not -- it is **not** unrun. Do not add `MLFLOW_TRACKING_URI`; CI does not
+  set it.
+
+  **Before fixing a test that failed locally, find out whether it fails in CI:**
+
+  ```bash
+  gh run view <run-id> --log --job <job-id> | grep tests/test_<name>.py
+  ```
+
+  A passing file prints one dot per test, so the line answers it directly.
+
+  Measured on 2026-09-20: a local full run with `pytest.ini`'s defaults reported
+  **four** failures; the same tree run the way CI runs it reported **none**
+  (3174 passed, 203 skipped). Every one of the four was the harness, not the
+  code.
+
+- **A single test run alone is not a smaller version of the suite run.** Two of
+  those four still failed at 60s when invoked on their own, and passed inside
+  the full run on the same machine. A targeted run charges the test the cost of
+  importing `app.main` -- torch, SHAP and transformers -- which a full run has
+  already paid by the time it gets there. `app/api/evaluate.py` records the same
+  effect from the other side: extracting `_simulate_once` as a seam was what
+  stopped "a targeted run of eight cases" taking four minutes.
+
+  So a test that fails alone and passes in the suite is reporting the import,
+  and `-k` or a single node id is the wrong tool for confirming a failure. Run
+  the file, or the suite.
 - **Suite size:** `pytest --collect-only tests/` counts it. The number is not
   repeated here, and that is the second lesson from the same line. It read
   "375/384 tests passing (97.7%)" for months -- a ratio nobody recomputed,
