@@ -122,7 +122,7 @@ remain open while GAP-011 does, and `M0_COMPLETION_REPORT.md` does not exist.
 | Category | SEC |
 | Severity | P0 — CRITICAL |
 | Status | CLOSED |
-| Verified 2026-07-30 | PR #24 requires admin and confines the path. The remaining architectural change — replacing a server-side `file_path` with a multipart upload — is tracked separately as issue #26 and is not this gap. |
+| Verified 2026-07-30 | PR #24 requires admin and confines the path. #26 (closed 2026-09-19) replaced `file_path` with a content-upload route (`POST .../bulk-upload/content`, shipped in #171); the old route is deprecated but still registered, its removal deliberately deferred to evidence of no use. #26's own closing comment offered to file that removal as its own issue "so it is not lost" -- nothing shows that happened, so it is currently untracked, not tracked separately as this line said. |
 | Evidence (as raised 2026-07-24) | `app/api/retrain.py:398-404` — `file_path` parameter used without validation |
 | Root Cause (as raised) | No path sanitization before `pd.read_csv(file_path)` |
 | Impact (as raised) | Arbitrary file read on server |
