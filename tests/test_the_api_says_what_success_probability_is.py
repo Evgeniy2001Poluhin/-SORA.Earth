@@ -27,14 +27,17 @@ import pytest
 
 
 @pytest.fixture(scope="module")
-def schema():
+def spec():
     from fastapi.openapi.utils import get_openapi
 
     import app.main as main
 
-    return get_openapi(
-        title="t", version="0", routes=main.app.routes,
-    )["components"]["schemas"]
+    return get_openapi(title="t", version="0", routes=main.app.routes)
+
+
+@pytest.fixture(scope="module")
+def schema(spec):
+    return spec["components"]["schemas"]
 
 
 def _description(schema, model, field):
@@ -87,26 +90,35 @@ def test_the_field_says_what_the_label_actually_is(schema, model):
         f"the measurement, so a reader who wants the figures has nowhere to go"
     )
 
-def test_the_evaluate_route_publishes_no_schema_at_all(schema):
+def test_the_evaluate_route_publishes_no_schema_at_all(spec):
     """Recorded, not fixed here, because fixing it is an API change.
 
     `POST /api/v1/evaluate` declares no `response_model`, so the OpenAPI page
     describes none of what it returns -- and it is the endpoint an ESG user
-    would reach for first. `ESGResult` in app/schemas.py looks like that
-    schema and is wired to nothing: defined once, referenced by no route,
-    absent from the published components.
+    would reach for first.
 
     Giving the route a response_model is not a docstring change. FastAPI would
     then filter the response to the declared fields, so anything the handler
     returns and the model omits disappears -- a silent break for a consumer
-    reading it today. That needs the field list checked against a real
-    response, and it is the owner's call.
+    reading it today. The handler returns keys no candidate model currently
+    declares (`success_probability_v2`, `country_benchmark`, `external_context`),
+    so the list has to be checked against a real response. That is the owner's
+    call.
 
-    This test fails the day someone wires it, which is the moment to delete the
-    test and the note with it.
+    This asserts on the **route**, which is what its name claims. It first
+    asserted `"ESGResult" not in schema` -- a class no route references -- and
+    that would have stayed true under the realistic fix: a new or extended
+    response model leaves `ESGResult` unpublished, so the test would have gone
+    on passing at exactly the moment the gap it guards was closed. A check that
+    cannot notice the thing being fixed is the defect class this file was
+    written against.
     """
-    assert "ESGResult" not in schema, (
-        "ESGResult is now published -- if /evaluate gained a response_model, "
-        "check that every field the handler returns is declared, and remove "
-        "this test"
+    responses = spec["paths"]["/api/v1/evaluate"]["post"]["responses"]
+    declared = responses["200"]["content"]["application/json"]["schema"]
+
+    assert declared == {}, (
+        f"/api/v1/evaluate now declares a response schema ({declared}). FastAPI "
+        f"filters the body to the declared fields, so check that every key the "
+        f"handler returns is in it -- then delete this test and the note in "
+        f"app/schemas.py it backs."
     )
