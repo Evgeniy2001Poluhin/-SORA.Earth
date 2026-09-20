@@ -204,7 +204,9 @@ def test_it_is_admin_only(client, uploads_dir):
 
 def test_the_path_based_route_is_marked_deprecated(client):
     """Marked, not removed: the audit line it writes is the evidence for
-    removing it, and evidence needs a release to accumulate (#26)."""
+    removing it. #26 closed (2026-09-19) without that removal -- its own
+    closing comment offered to file it as a fresh issue "so it is not lost",
+    and nothing shows that happened, so removal is currently untracked."""
     from app.main import app
 
     op = app.openapi()["paths"]["/api/v1/model/data/bulk-upload"]["post"]

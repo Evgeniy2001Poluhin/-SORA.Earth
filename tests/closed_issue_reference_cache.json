@@ -1,0 +1,797 @@
+{
+  "1": {
+    "state": "CLOSED",
+    "title": "retrain: ValueError \"Input y contains NaN\" in _do_retrain",
+    "type": "Issue"
+  },
+  "10": {
+    "state": "MERGED",
+    "title": "feat: OpenAQ data quality pipeline - Phase 1 Step 4",
+    "type": "PullRequest"
+  },
+  "101": {
+    "state": "MERGED",
+    "title": "feat: count pairs by outcome, and let a transient failure degrade the run",
+    "type": "PullRequest"
+  },
+  "11": {
+    "state": "MERGED",
+    "title": "feat: Environmental Data Scheduler Jobs - Phase 1 Step 5",
+    "type": "PullRequest"
+  },
+  "114": {
+    "state": "CLOSED",
+    "title": "Define and collect a canonical daily regional score (prerequisite for M2)",
+    "type": "Issue"
+  },
+  "115": {
+    "state": "CLOSED",
+    "title": "EnsembleForecaster docstring states weighting thresholds the code does not have",
+    "type": "Issue"
+  },
+  "116": {
+    "state": "CLOSED",
+    "title": "esg_aggregator recomputes region scores from a table dead since 2026-07-30, and reports ok",
+    "type": "Issue"
+  },
+  "117": {
+    "state": "CLOSED",
+    "title": "openaq ingests zero observations, and the ESG score silently drops its metric",
+    "type": "Issue"
+  },
+  "119": {
+    "state": "MERGED",
+    "title": "fix: parse the response openaq v3 actually returns (#117)",
+    "type": "PullRequest"
+  },
+  "12": {
+    "state": "MERGED",
+    "title": "fix(environmental): persist hourly ingestion signals",
+    "type": "PullRequest"
+  },
+  "121": {
+    "state": "CLOSED",
+    "title": "Ingesters stamp event_time=now on static literals, claiming today's observation",
+    "type": "Issue"
+  },
+  "122": {
+    "state": "CLOSED",
+    "title": "data_loader docstring documents a synthetic backfill that was removed as a critical bug",
+    "type": "Issue"
+  },
+  "123": {
+    "state": "CLOSED",
+    "title": "Module docstring describes a LinearTrend fallback chain that does not exist",
+    "type": "Issue"
+  },
+  "124": {
+    "state": "MERGED",
+    "title": "feat: stand OpenAQ down from scheduled ingestion (#57)",
+    "type": "PullRequest"
+  },
+  "125": {
+    "state": "CLOSED",
+    "title": "Backend and scheduler both run Alembic migrations concurrently at container startup",
+    "type": "Issue"
+  },
+  "127": {
+    "state": "CLOSED",
+    "title": "P1: scheduled_pretrain_forecast_models leaks one idle-in-transaction connection per metric",
+    "type": "Issue"
+  },
+  "129": {
+    "state": "CLOSED",
+    "title": "P1: recreating backend can strand nginx on the old container IP, and every status says healthy",
+    "type": "Issue"
+  },
+  "132": {
+    "state": "CLOSED",
+    "title": "Forecasting readiness counts interpolated days as observations and smoothing rewrites measured values",
+    "type": "Issue"
+  },
+  "134": {
+    "state": "CLOSED",
+    "title": "api/forecast.py docstring still promises the synthetic extension removed in e555560",
+    "type": "Issue"
+  },
+  "137": {
+    "state": "CLOSED",
+    "title": "mlflow_tracking reads a hardcoded SQLite path, so metrics never load in production",
+    "type": "Issue"
+  },
+  "145": {
+    "state": "MERGED",
+    "title": "feat(m2): declare the region set as ru-regions-v1 (\u00a71.4)",
+    "type": "PullRequest"
+  },
+  "146": {
+    "state": "CLOSED",
+    "title": "\u0418\u043d\u0433\u0435\u0441\u0442\u0435\u0440\u044b \u043d\u0435 \u043c\u043e\u0433\u0443\u0442 \u0437\u0430\u043f\u0438\u0441\u0430\u0442\u044c \u043d\u0438 \u043e\u0434\u043d\u043e\u0439 \u0441\u0442\u0440\u043e\u043a\u0438: 71-\u0441\u0438\u043c\u0432\u043e\u043b\u044c\u043d\u0430\u044f \u0440\u0435\u0432\u0438\u0437\u0438\u044f \u0432 VARCHAR(64)",
+    "type": "Issue"
+  },
+  "154": {
+    "state": "CLOSED",
+    "title": "\u041f\u0435\u0440\u0435\u0441\u043e\u0437\u0434\u0430\u043d\u0438\u0435 scheduler \u043d\u0435\u043c\u0435\u0434\u043b\u0435\u043d\u043d\u043e \u0437\u0430\u043f\u0443\u0441\u043a\u0430\u0435\u0442 \u0432\u0441\u0435 \u0438\u043d\u0433\u0435\u0441\u0442\u0435\u0440\u044b: \u0434\u0435\u043f\u043b\u043e\u0439 \u2014 \u043f\u043e\u0431\u043e\u0447\u043d\u044b\u0439 \u0442\u0440\u0438\u0433\u0433\u0435\u0440 \u0438\u043d\u0433\u0435\u0441\u0442\u0438\u0438",
+    "type": "Issue"
+  },
+  "156": {
+    "state": "CLOSED",
+    "title": "\u0420\u0435\u0448\u0438\u0442\u044c \u0441\u0443\u0434\u044c\u0431\u0443 \u0447\u0435\u0442\u044b\u0440\u0451\u0445 \u0443\u043d\u0430\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u043d\u043d\u044b\u0445 startup-\u0434\u0436\u043e\u0431",
+    "type": "Issue"
+  },
+  "158": {
+    "state": "MERGED",
+    "title": "docs(m2): \u0437\u0430\u043a\u0440\u044b\u0442\u044c M2 \u043e\u0442\u0440\u0438\u0446\u0430\u0442\u0435\u043b\u044c\u043d\u044b\u043c \u0440\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442\u043e\u043c \u0438 \u0437\u0430\u043a\u0440\u044b\u0442\u044c \u0432\u043e\u0440\u043e\u0442\u0430, \u043a\u043e\u0442\u043e\u0440\u044b\u0435 \u043e\u043d \u043c\u043e\u0433 \u043f\u0440\u043e\u0439\u0442\u0438",
+    "type": "PullRequest"
+  },
+  "160": {
+    "state": "CLOSED",
+    "title": "\u0414\u0435\u043f\u043b\u043e\u0439, \u043f\u0435\u0440\u0435\u0436\u0438\u0432\u0448\u0438\u0439 \u043e\u0431\u0440\u044b\u0432 \u0441\u0435\u0441\u0441\u0438\u0438, \u043e\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u0442 production \u0432\u044b\u043a\u0430\u0447\u0435\u043d\u043d\u044b\u043c, \u043d\u043e \u043d\u0435\u0437\u0430\u043f\u0438\u0441\u0430\u043d\u043d\u044b\u043c",
+    "type": "Issue"
+  },
+  "164": {
+    "state": "OPEN",
+    "title": "\u0418\u0441\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u043f\u0435\u0440\u0438\u043e\u0434\u0430 \u043f\u0435\u0440\u0435\u043f\u0438\u0441\u044b\u0432\u0430\u0435\u0442 \u0441\u0442\u0440\u043e\u043a\u0443 \u043d\u0430 \u043c\u0435\u0441\u0442\u0435: \u043f\u0440\u0438\u0432\u044f\u0437\u043a\u0430 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u044f \u043a \u043f\u0435\u0440\u0438\u043e\u0434\u0443 \u043d\u0435\u0432\u043e\u0441\u043f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0438\u043c\u0430",
+    "type": "Issue"
+  },
+  "169": {
+    "state": "CLOSED",
+    "title": "\u0423\u0447\u0451\u0442\u043d\u044b\u0435 \u0437\u0430\u043f\u0438\u0441\u0438 \u043d\u0435 \u043f\u0435\u0440\u0435\u0436\u0438\u0432\u0430\u044e\u0442 \u0440\u0435\u0441\u0442\u0430\u0440\u0442: USERS_DB \u2014 \u043c\u043e\u0434\u0443\u043b\u044c\u043d\u044b\u0439 \u0441\u043b\u043e\u0432\u0430\u0440\u044c, \u043f\u0435\u0440\u0435\u0441\u043e\u0437\u0434\u0430\u0432\u0430\u0435\u043c\u044b\u0439 \u043f\u0440\u0438 \u0438\u043c\u043f\u043e\u0440\u0442\u0435",
+    "type": "Issue"
+  },
+  "171": {
+    "state": "MERGED",
+    "title": "feat: \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043d\u0435\u0441\u0451\u0442 \u0441\u043e\u0434\u0435\u0440\u0436\u0438\u043c\u043e\u0435, \u0430 \u043d\u0435 \u043f\u0443\u0442\u044c \u043d\u0430 \u0441\u0435\u0440\u0432\u0435\u0440\u0435 (#26)",
+    "type": "PullRequest"
+  },
+  "175": {
+    "state": "MERGED",
+    "title": "fix: \u043f\u0435\u0440\u0435\u043e\u0431\u0443\u0447\u0435\u043d\u0438\u0435 \u0441\u043e\u043e\u0431\u0449\u0430\u0435\u0442, \u0447\u0442\u043e \u043d\u0435 \u0442\u0430\u043a \u0441 \u0434\u0430\u043d\u043d\u044b\u043c\u0438 (#1, #2)",
+    "type": "PullRequest"
+  },
+  "179": {
+    "state": "OPEN",
+    "title": "M3: \u043e\u0431\u044a\u044f\u0432\u0438\u0442\u044c \u043f\u0440\u043e\u0433\u043d\u043e\u0437\u043d\u0443\u044e \u0446\u0435\u043b\u044c \u043f\u043e \u043f\u043e\u0433\u043e\u0434\u0435 \u0438 \u0432\u043e\u0437\u0434\u0443\u0445\u0443 (21 \u0440\u0435\u0433\u0438\u043e\u043d) \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u0447\u0430\u0441\u044b \u00a77",
+    "type": "Issue"
+  },
+  "183": {
+    "state": "CLOSED",
+    "title": "AUC 0.9939 \u0438\u0437\u043c\u0435\u0440\u0435\u043d \u043d\u0430 851 \u0441\u0442\u0440\u043e\u043a\u0435; \u0442\u0435\u043a\u0443\u0449\u0438\u0439 \u043d\u0430\u0431\u043e\u0440 \u2014 17 071 \u0441\u0442\u0440\u043e\u043a\u0430 \u0438 \u0440\u0430\u0437\u0434\u0435\u043b\u044f\u0435\u0442\u0441\u044f \u0445\u0443\u0436\u0435. \u0413\u0435\u0439\u0442 0.80 \u043d\u0438\u043a\u043e\u0433\u0434\u0430 \u043d\u0435 \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u043b\u0441\u044f \u043d\u0430 \u044d\u0442\u0438\u0445 \u0434\u0430\u043d\u043d\u044b\u0445",
+    "type": "Issue"
+  },
+  "188": {
+    "state": "CLOSED",
+    "title": "\u041f\u0440\u043e\u0432\u0430\u043b\u0438\u0432\u0448\u0435\u0435\u0441\u044f \u043f\u0435\u0440\u0435\u043e\u0431\u0443\u0447\u0435\u043d\u0438\u0435 \u0432\u0438\u0434\u043d\u043e \u0442\u043e\u043b\u044c\u043a\u043e \u0432 \u043b\u043e\u0433\u0435: \u043c\u0435\u0441\u044f\u0446 \u043f\u0440\u043e\u0441\u0442\u043e\u044f \u043f\u0440\u043e\u0448\u0451\u043b \u043d\u0435\u0437\u0430\u043c\u0435\u0447\u0435\u043d\u043d\u044b\u043c",
+    "type": "Issue"
+  },
+  "189": {
+    "state": "CLOSED",
+    "title": "\u0420\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u044f \u043c\u043e\u0434\u0435\u043b\u0438 \u0432 MLflow \u043f\u0440\u043e\u0432\u0430\u043b\u0438\u0432\u0430\u0435\u0442\u0441\u044f \u0442\u0438\u0445\u043e: PermissionError '/mlflow' \u043f\u0440\u0438 \u0443\u0441\u043f\u0435\u0448\u043d\u043e\u043c \u043f\u0440\u043e\u0433\u043e\u043d\u0435",
+    "type": "Issue"
+  },
+  "191": {
+    "state": "CLOSED",
+    "title": "models/ \u043e\u0442\u0441\u043b\u0435\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044f git \u0438 \u043f\u0438\u0448\u0435\u0442\u0441\u044f \u0440\u0430\u043d\u0442\u0430\u0439\u043c\u043e\u043c: \u043f\u0435\u0440\u0435\u043e\u0431\u0443\u0447\u0435\u043d\u0438\u0435 \u0438 \u0434\u0435\u043f\u043b\u043e\u0439 \u0432\u0437\u0430\u0438\u043c\u043e\u0438\u0441\u043a\u043b\u044e\u0447\u0430\u044e\u0449\u0438",
+    "type": "Issue"
+  },
+  "192": {
+    "state": "MERGED",
+    "title": "feat: \u0432\u043e\u0437\u0440\u0430\u0441\u0442 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0435\u0433\u043e \u0443\u0441\u043f\u0435\u0448\u043d\u043e\u0433\u043e \u043f\u0435\u0440\u0435\u043e\u0431\u0443\u0447\u0435\u043d\u0438\u044f \u043a\u0430\u043a \u043c\u0435\u0442\u0440\u0438\u043a\u0430 (#188)",
+    "type": "PullRequest"
+  },
+  "196": {
+    "state": "CLOSED",
+    "title": "fix: \u0444\u0430\u0439\u043b\u044b, \u043a\u043e\u0442\u043e\u0440\u044b\u0435 \u043f\u0435\u0440\u0435\u043f\u0438\u0441\u044b\u0432\u0430\u0435\u0442 \u043f\u0435\u0440\u0435\u043e\u0431\u0443\u0447\u0435\u043d\u0438\u0435, \u043f\u0435\u0440\u0435\u0441\u0442\u0430\u044e\u0442 \u0431\u044b\u0442\u044c \u0438\u0441\u0445\u043e\u0434\u043d\u0438\u043a\u0430\u043c\u0438 (#191)",
+    "type": "PullRequest"
+  },
+  "198": {
+    "state": "CLOSED",
+    "title": "Make the MLflow registration contract provable and recoverable (#189)",
+    "type": "PullRequest"
+  },
+  "199": {
+    "state": "CLOSED",
+    "title": "\u0415\u0434\u0438\u043d\u044b\u0439 retrain run \u0438 promotion state machine \u0434\u043b\u044f \u0432\u0441\u0435\u0445 \u0441\u0435\u043c\u0438 \u0432\u044b\u0437\u044b\u0432\u0430\u044e\u0449\u0438\u0445 \u043f\u0443\u0442\u0435\u0439",
+    "type": "Issue"
+  },
+  "2": {
+    "state": "CLOSED",
+    "title": "retrain: low_samples edge case xfailed",
+    "type": "Issue"
+  },
+  "20": {
+    "state": "CLOSED",
+    "title": "Backend tests mutate tracked model and data artifacts",
+    "type": "Issue"
+  },
+  "207": {
+    "state": "MERGED",
+    "title": "feat: the loader resolves one source for the whole champion (#191, phase 3)",
+    "type": "PullRequest"
+  },
+  "208": {
+    "state": "MERGED",
+    "title": "fix: make the LFS pattern recursive before anything moves under models/ (#191)",
+    "type": "PullRequest"
+  },
+  "209": {
+    "state": "MERGED",
+    "title": "feat: training stages a candidate; only the gate promotes it (#199 phase 4)",
+    "type": "PullRequest"
+  },
+  "213": {
+    "state": "MERGED",
+    "title": "fix: create /app/runtime in the image so its named volume is writable",
+    "type": "PullRequest"
+  },
+  "216": {
+    "state": "MERGED",
+    "title": "fix: the production image ships a frontend that invents its numbers",
+    "type": "PullRequest"
+  },
+  "22": {
+    "state": "CLOSED",
+    "title": "alembic upgrade head fails on a clean database: region_esg_scores is never created by a migration",
+    "type": "Issue"
+  },
+  "223": {
+    "state": "MERGED",
+    "title": "feat: World Bank source identity, shared by both fetch pipelines",
+    "type": "PullRequest"
+  },
+  "23": {
+    "state": "CLOSED",
+    "title": "fix(db): make a clean database reachable from migrations alone",
+    "type": "PullRequest"
+  },
+  "232": {
+    "state": "CLOSED",
+    "title": "duration_months \u0443\u0442\u0435\u043a\u0430\u0435\u0442 \u0432 success: AUC 0.905 \u043d\u0435\u043f\u0440\u0438\u0433\u043e\u0434\u043d\u0430 \u043a\u0430\u043a \u0434\u043e\u043a\u0430\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432\u043e \u043a\u0430\u0447\u0435\u0441\u0442\u0432\u0430 \u0434\u043e \u043a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u0435\u043d\u043d\u043e\u0439 \u0438\u0437\u043e\u043b\u044f\u0446\u0438\u0438 \u0443\u0442\u0435\u0447\u043a\u0438",
+    "type": "Issue"
+  },
+  "233": {
+    "state": "MERGED",
+    "title": "feat: offline ablation harness for #232 \u2014 the instrument, not the measurement",
+    "type": "PullRequest"
+  },
+  "234": {
+    "state": "MERGED",
+    "title": "fix: cluster bootstrap for the ablation harness, and a sharper legacy caveat",
+    "type": "PullRequest"
+  },
+  "236": {
+    "state": "CLOSED",
+    "title": "UncertaintyCard \u0440\u0438\u0441\u0443\u0435\u0442 0.0% \u043a\u0430\u043a \u0438\u0437\u043c\u0435\u0440\u0435\u043d\u043d\u043e\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435, \u043a\u043e\u0433\u0434\u0430 API \u0432\u0435\u0440\u043d\u0443\u043b \u043f\u0443\u0441\u0442\u043e\u0439 200",
+    "type": "Issue"
+  },
+  "238": {
+    "state": "MERGED",
+    "title": "fix: \u043f\u0443\u0441\u0442\u043e\u0439 200 \u2014 \u043d\u0435 \u0438\u0437\u043c\u0435\u0440\u0435\u043d\u0438\u0435; \u0441\u0435\u043c\u044c \u043c\u0435\u0441\u0442 \u043e\u0434\u043d\u043e\u0433\u043e \u0434\u0435\u0444\u0435\u043a\u0442\u0430 (#236)",
+    "type": "PullRequest"
+  },
+  "239": {
+    "state": "CLOSED",
+    "title": "GET /api/v1/model/drift: \u0432\u0435\u0440\u0434\u0438\u043a\u0442 \u043d\u0430\u0437\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0442\u043e drift, \u0442\u043e drift_detected, \u0438 \u043d\u0430 \u0442\u0440\u0451\u0445 \u0432\u0435\u0442\u043a\u0430\u0445 \u0438\u0437 \u0447\u0435\u0442\u044b\u0440\u0451\u0445 \u043e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u0435\u0442",
+    "type": "Issue"
+  },
+  "24": {
+    "state": "CLOSED",
+    "title": "fix(security): close unauthenticated training-data poisoning via bulk-upload",
+    "type": "PullRequest"
+  },
+  "241": {
+    "state": "CLOSED",
+    "title": "\u0414\u0435\u0432\u044f\u0442\u044c \u043f\u0443\u0431\u043b\u0438\u0447\u043d\u044b\u0445 \u0430\u0434\u0440\u0435\u0441\u043e\u0432 \u043e\u0431\u044a\u044f\u0432\u043b\u0435\u043d\u044b \u0434\u0432\u0430\u0436\u0434\u044b; \u043c\u0451\u0440\u0442\u0432\u044b\u0439 /auth/login \u043f\u0440\u0438\u043d\u0438\u043c\u0430\u0435\u0442 JSON, \u0436\u0438\u0432\u043e\u0439 \u2014 \u0444\u043e\u0440\u043c\u0443",
+    "type": "Issue"
+  },
+  "243": {
+    "state": "CLOSED",
+    "title": "GET /api/v1/model/drift \u043c\u043e\u0436\u0435\u0442 \u0437\u0430\u0432\u0438\u0441\u043d\u0443\u0442\u044c: \u0438\u043c\u043f\u043e\u0440\u0442 mlflow_tracking \u0432\u043d\u0443\u0442\u0440\u0438 \u0437\u0430\u043f\u0440\u043e\u0441\u0430 \u0434\u0435\u043b\u0430\u0435\u0442 \u0441\u0435\u0442\u0435\u0432\u043e\u0439 \u0432\u044b\u0437\u043e\u0432 \u0431\u0435\u0437 \u0442\u0430\u0439\u043c\u0430\u0443\u0442\u0430",
+    "type": "Issue"
+  },
+  "244": {
+    "state": "MERGED",
+    "title": "feat: GET /api/v1/model/drift \u2014 \u043e\u0431\u044a\u044f\u0432\u043b\u0435\u043d\u043d\u044b\u0439 \u043a\u043e\u043d\u0442\u0440\u0430\u043a\u0442, \u043f\u0435\u0440\u0432\u044b\u0439 \u0432\u0435\u0440\u0442\u0438\u043a\u0430\u043b\u044c\u043d\u044b\u0439 \u043e\u0431\u0440\u0430\u0437\u0435\u0446 (#239)",
+    "type": "PullRequest"
+  },
+  "247": {
+    "state": "MERGED",
+    "title": "feat: GET /api/v1/model/drift/mlflow-history \u2014 \u043e\u0431\u044a\u044f\u0432\u043b\u0435\u043d\u043d\u044b\u0439 \u043a\u043e\u043d\u0442\u0440\u0430\u043a\u0442, \u0442\u0440\u0435\u0442\u044c\u044f \u043c\u0438\u0433\u0440\u0430\u0446\u0438\u044f",
+    "type": "PullRequest"
+  },
+  "248": {
+    "state": "MERGED",
+    "title": "feat: POST /api/v1/evaluate/monte-carlo \u2014 \u043e\u0431\u044a\u044f\u0432\u043b\u0435\u043d\u043d\u044b\u0439 \u043a\u043e\u043d\u0442\u0440\u0430\u043a\u0442, \u0438 \u0442\u0435\u0441\u0442\u043e\u0432\u044b\u0439 seam",
+    "type": "PullRequest"
+  },
+  "249": {
+    "state": "MERGED",
+    "title": "feat: GET /api/v1/lstm-status \u2014 \u043e\u0431\u044a\u044f\u0432\u043b\u0435\u043d\u043d\u044b\u0439 \u043a\u043e\u043d\u0442\u0440\u0430\u043a\u0442, \u00ab\u043d\u0435 \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u0438\u043b\u0438\u00bb \u044d\u0442\u043e \u043d\u0435 \u00ab\u043d\u0435 \u0430\u043a\u0442\u0438\u0432\u0435\u043d\u00bb",
+    "type": "PullRequest"
+  },
+  "25": {
+    "state": "CLOSED",
+    "title": "Security P0 follow-ups: password hashing and key-rotation readiness",
+    "type": "Issue"
+  },
+  "250": {
+    "state": "CLOSED",
+    "title": "\u0424\u0440\u043e\u043d\u0442\u0435\u043d\u0434 \u0440\u0430\u0437\u0431\u0438\u0440\u0430\u0435\u0442 \u043e\u0448\u0438\u0431\u043a\u0443 400 \u043f\u043e\u0434\u0441\u0442\u0440\u043e\u043a\u043e\u0439 \u0430\u043d\u0433\u043b\u0438\u0439\u0441\u043a\u043e\u0433\u043e \u0442\u0435\u043a\u0441\u0442\u0430; \u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u043d\u044b\u0439 reason_code \u043a\u043b\u0438\u0435\u043d\u0442 \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0442\u044c \u043d\u0435 \u043c\u043e\u0436\u0435\u0442",
+    "type": "Issue"
+  },
+  "251": {
+    "state": "MERGED",
+    "title": "fix: \u043a\u043e\u043d\u0442\u0440\u0430\u043a\u0442 \u0434\u0440\u0435\u0439\u0444\u0430 \u0441\u043b\u043e\u043c\u0430\u043b \u043e\u0431\u043e\u0438\u0445 \u043d\u0435-HTTP \u0432\u044b\u0437\u044b\u0432\u0430\u044e\u0449\u0438\u0445 (\u0440\u0435\u0433\u0440\u0435\u0441\u0441\u0438\u044f #244)",
+    "type": "PullRequest"
+  },
+  "252": {
+    "state": "CLOSED",
+    "title": "CLAUDE.md \u043e\u0431\u0435\u0449\u0430\u0435\u0442 \u043d\u0435\u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0438\u0435 check_drift_job() \u0438 auto_retrain_on_drift_job(); \u0440\u0435\u0430\u043b\u044c\u043d\u044b\u0439 closed loop \u2014 \u0435\u0436\u0435\u0434\u043d\u0435\u0432\u043d\u043e \u0432 03:00 UTC",
+    "type": "Issue"
+  },
+  "254": {
+    "state": "MERGED",
+    "title": "docs: \u0440\u0430\u0437\u0434\u0435\u043b \u043f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0449\u0438\u043a\u0430 \u043e\u043f\u0438\u0441\u044b\u0432\u0430\u043b \u0437\u0430\u0434\u0430\u043d\u0438\u044f, \u043a\u043e\u0442\u043e\u0440\u044b\u0445 \u043d\u0435\u0442",
+    "type": "PullRequest"
+  },
+  "255": {
+    "state": "CLOSED",
+    "title": "MLflow-\u0432\u044b\u0437\u043e\u0432\u044b \u0432 \u043f\u0443\u0442\u0438 \u0437\u0430\u043f\u0440\u043e\u0441\u0430 \u043d\u0435 \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0435\u043d\u044b \u043f\u043e \u0432\u0440\u0435\u043c\u0435\u043d\u0438: \u0438\u0437\u043c\u0435\u0440\u0435\u043d\u043e 247 \u0441 \u043d\u0430 \u043e\u0434\u0438\u043d \u0432\u044b\u0437\u043e\u0432 \u043f\u0440\u0438 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e\u043c \u0441\u0435\u0440\u0432\u0435\u0440\u0435",
+    "type": "Issue"
+  },
+  "258": {
+    "state": "CLOSED",
+    "title": "calculate_esg \u043b\u043e\u0433\u0438\u0440\u0443\u0435\u0442 \u043e\u0446\u0435\u043d\u043a\u0443 \u0438\u0437\u043d\u0443\u0442\u0440\u0438: /evaluate \u043f\u0438\u0448\u0435\u0442 \u0435\u0451 \u0434\u0432\u0430\u0436\u0434\u044b, monte-carlo \u2014 \u043e\u0442 50 \u0434\u043e 5000 \u0440\u0430\u0437 \u0437\u0430 \u0437\u0430\u043f\u0440\u043e\u0441",
+    "type": "Issue"
+  },
+  "26": {
+    "state": "CLOSED",
+    "title": "Replace server-side file_path in bulk-upload with multipart upload or a trusted object ID",
+    "type": "Issue"
+  },
+  "261": {
+    "state": "OPEN",
+    "title": "\u0423\u0431\u043e\u0440\u043a\u0430: 712 sample-level \u043f\u0440\u043e\u0433\u043e\u043d\u043e\u0432 \u0432 production MLflow \u2014 \u043f\u043b\u0430\u043d \u0433\u043e\u0442\u043e\u0432, \u0436\u0434\u0451\u0442 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u044f",
+    "type": "Issue"
+  },
+  "262": {
+    "state": "CLOSED",
+    "title": "\u041c\u0435\u0442\u0440\u0438\u043a\u0438 sora_* \u0441\u0447\u0438\u0442\u0430\u044e\u0442\u0441\u044f \u0432 \u043e\u0434\u043d\u043e\u043c \u043f\u0440\u043e\u0446\u0435\u0441\u0441\u0435 \u0438\u0437 \u0447\u0435\u0442\u044b\u0440\u0451\u0445 \u0432\u043e\u0440\u043a\u0435\u0440\u043e\u0432: /metrics \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u0441\u043b\u0443\u0447\u0430\u0439\u043d\u044b\u0439 \u0432\u043e\u0440\u043a\u0435\u0440",
+    "type": "Issue"
+  },
+  "264": {
+    "state": "CLOSED",
+    "title": "\u0414\u0435\u0432\u044f\u0442\u044c \u0438\u0437 \u0434\u0432\u0430\u0434\u0446\u0430\u0442\u0438 \u0447\u0435\u0442\u044b\u0440\u0451\u0445 \u043c\u0435\u0442\u0440\u0438\u043a sora_* \u0434\u043e\u0445\u043e\u0434\u044f\u0442 \u0434\u043e Prometheus; \u0442\u0440\u0438 \u0438\u0437 \u0447\u0435\u0442\u044b\u0440\u0451\u0445 \u00ab\u043a\u043b\u044e\u0447\u0435\u0432\u044b\u0445\u00bb \u0432 CLAUDE.md \u043d\u0435 \u043c\u043e\u0433\u0443\u0442 \u043d\u0438\u0447\u0435\u0433\u043e \u0441\u043e\u043e\u0431\u0449\u0438\u0442\u044c",
+    "type": "Issue"
+  },
+  "266": {
+    "state": "CLOSED",
+    "title": "#264 \u044d\u0442\u0430\u043f 1: \u0447\u0435\u0442\u044b\u0440\u0435 \u043c\u0435\u0442\u0440\u0438\u043a\u0438 sora_* \u043d\u0435 \u0432\u044b\u0441\u0442\u0430\u0432\u043b\u044f\u044e\u0442\u0441\u044f \u043d\u0438 \u043e\u0434\u043d\u0438\u043c production-\u043f\u0443\u0442\u0451\u043c",
+    "type": "Issue"
+  },
+  "267": {
+    "state": "CLOSED",
+    "title": "#264 \u044d\u0442\u0430\u043f 2: \u043e\u0434\u0438\u043d\u043d\u0430\u0434\u0446\u0430\u0442\u044c \u043c\u0435\u0442\u0440\u0438\u043a \u0432\u044b\u0441\u0442\u0430\u0432\u043b\u044f\u044e\u0442\u0441\u044f \u0432 scheduler, \u043a\u043e\u0442\u043e\u0440\u044b\u0439 \u043d\u0438\u043a\u0442\u043e \u043d\u0435 \u0441\u043a\u0440\u0435\u0431\u0451\u0442",
+    "type": "Issue"
+  },
+  "268": {
+    "state": "CLOSED",
+    "title": "#264 \u044d\u0442\u0430\u043f 3: \u043f\u0440\u0438\u0432\u0435\u0441\u0442\u0438 \u0440\u0430\u0437\u0434\u0435\u043b Key metrics \u0432 CLAUDE.md \u043a \u0444\u0430\u043a\u0442\u0443 \u0438 \u0437\u0430\u043a\u0440\u044b\u0442\u044c \u0442\u0435\u0441\u0442\u043e\u043c",
+    "type": "Issue"
+  },
+  "269": {
+    "state": "MERGED",
+    "title": "feat: drill \u043e\u0442 \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0430, offline-\u0442\u0435\u0441\u0442\u044b S3 \u0438 IAM \u0441 \u043c\u0438\u043d\u0438\u043c\u0430\u043b\u044c\u043d\u044b\u043c\u0438 \u043f\u0440\u0430\u0432\u0430\u043c\u0438",
+    "type": "PullRequest"
+  },
+  "27": {
+    "state": "CLOSED",
+    "title": "fix(db): converge region_esg_scores on deployments already past the head",
+    "type": "PullRequest"
+  },
+  "270": {
+    "state": "CLOSED",
+    "title": "GET /api/v1/scheduler/status \u043e\u0442\u0434\u0430\u0451\u0442 \u0436\u0451\u0441\u0442\u043a\u043e \u0437\u0430\u0448\u0438\u0442\u044b\u0439 \u0441\u043f\u0438\u0441\u043e\u043a \u0438\u0437 5 \u0437\u0430\u0434\u0430\u043d\u0438\u0439 \u0438\u0437 13, \u0441 \u043e\u0434\u043d\u0438\u043c \u043d\u0435\u0432\u0435\u0440\u043d\u044b\u043c \u0442\u0440\u0438\u0433\u0433\u0435\u0440\u043e\u043c",
+    "type": "Issue"
+  },
+  "274": {
+    "state": "CLOSED",
+    "title": "closed_loop_retrain \u0441\u043e\u043e\u0431\u0449\u0430\u0435\u0442 drift_detected=False \u043f\u0440\u0438 no_log \u0438 insufficient_data \u2014 \u0442\u043e \u0436\u0435, \u0447\u0442\u043e #251, \u043e\u0434\u043d\u043e\u0439 \u0432\u0435\u0442\u043a\u043e\u0439 \u043f\u0440\u0430\u0432\u0435\u0435",
+    "type": "Issue"
+  },
+  "275": {
+    "state": "CLOSED",
+    "title": "Prometheus \u043d\u0435 \u043f\u0435\u0440\u0435\u0447\u0438\u0442\u044b\u0432\u0430\u0435\u0442 infra/prometheus.yml \u043f\u0440\u0438 \u0434\u0435\u043f\u043b\u043e\u0435: \u0446\u0435\u043b\u044c sora-scheduler \u0432 \u0444\u0430\u0439\u043b\u0435 \u0435\u0441\u0442\u044c, \u0432 \u0441\u0431\u043e\u0440\u0435 \u043d\u0435\u0442",
+    "type": "Issue"
+  },
+  "278": {
+    "state": "CLOSED",
+    "title": "CLAUDE.md \u0441\u043e\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u0442 compose-\u043a\u043e\u043c\u0430\u043d\u0434\u044b \u0438\u0437 \u0434\u0432\u0443\u0445 \u0444\u0430\u0439\u043b\u043e\u0432, \u0430 \u0434\u0435\u043f\u043b\u043e\u0439 \u2014 \u0438\u0437 \u043e\u0434\u043d\u043e\u0433\u043e: up \u0432\u043e \u0432\u0442\u043e\u0440\u043e\u0439 \u0444\u043e\u0440\u043c\u0435 \u0441\u043e\u0437\u0434\u0430\u0451\u0442 \u043b\u0438\u0448\u043d\u0438\u0439 \u043a\u043e\u043d\u0442\u0435\u0439\u043d\u0435\u0440 app",
+    "type": "Issue"
+  },
+  "281": {
+    "state": "CLOSED",
+    "title": "\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0434\u0440\u0435\u0439\u0444\u0430 \u0447\u0438\u0442\u0430\u0435\u0442 \u0444\u0430\u0439\u043b, \u043a\u043e\u0442\u043e\u0440\u044b\u0439 \u0441\u0442\u0438\u0440\u0430\u0435\u0442\u0441\u044f \u043f\u0440\u0438 \u043a\u0430\u0436\u0434\u043e\u043c \u0432\u044b\u043a\u0430\u0442\u0435, \u0430 \u043d\u0430\u0434\u0451\u0436\u043d\u0430\u044f \u0437\u0430\u043f\u0438\u0441\u044c \u043b\u0435\u0436\u0438\u0442 \u0432 \u0442\u0430\u0431\u043b\u0438\u0446\u0435, \u043a\u043e\u0442\u043e\u0440\u0443\u044e \u043e\u043d\u0430 \u043d\u0435 \u0447\u0438\u0442\u0430\u0435\u0442",
+    "type": "Issue"
+  },
+  "282": {
+    "state": "CLOSED",
+    "title": "CLAUDE.md: \u0440\u0430\u0437\u0434\u0435\u043b Database Schema \u043d\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u0434\u0432\u0435 \u043c\u043e\u0434\u0435\u043b\u0438, \u043a\u043e\u0442\u043e\u0440\u044b\u0445 \u043d\u0435\u0442, \u0438 \u0434\u0432\u0435 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0435 psql-\u043a\u043e\u043c\u0430\u043d\u0434\u044b \u043e\u0431\u0440\u0430\u0449\u0430\u044e\u0442\u0441\u044f \u043a \u043d\u0435\u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0435\u0439 \u0442\u0430\u0431\u043b\u0438\u0446\u0435",
+    "type": "Issue"
+  },
+  "284": {
+    "state": "OPEN",
+    "title": "\u041f\u044f\u0442\u044c \u0438\u0437 \u0434\u0435\u0441\u044f\u0442\u0438 \u0430\u043b\u0435\u0440\u0442\u043e\u0432 Grafana \u0441\u043b\u0435\u0434\u044f\u0442 \u0437\u0430 \u043c\u0435\u0442\u0440\u0438\u043a\u0430\u043c\u0438 \u0431\u0435\u0437 \u0435\u0434\u0438\u043d\u043e\u0439 \u0441\u0435\u0440\u0438\u0438, \u0430 \u0432\u0435\u0440\u043d\u044b\u0439 job-\u0441\u0435\u043b\u0435\u043a\u0442\u043e\u0440 \u0437\u0430\u0441\u0442\u0430\u0432\u0438\u043b \u0431\u044b \u0448\u0435\u0441\u0442\u043e\u0439 \u0437\u0430\u043c\u043e\u043b\u0447\u0430\u0442\u044c",
+    "type": "Issue"
+  },
+  "286": {
+    "state": "CLOSED",
+    "title": "docs/RUNBOOK.md \u043e\u043f\u0438\u0441\u044b\u0432\u0430\u0435\u0442 \u043c\u0451\u0440\u0442\u0432\u0443\u044e \u0438\u043d\u0444\u0440\u0430\u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0443: \u0432\u0441\u0435 \u0442\u043e\u0447\u043a\u0438 \u0432\u0445\u043e\u0434\u0430 \u043d\u0435 \u043e\u0442\u0432\u0435\u0447\u0430\u044e\u0442, \u0430 BACKUP_RESTORE \u0441\u0441\u044b\u043b\u0430\u0435\u0442\u0441\u044f \u043d\u0430 \u043d\u0435\u0433\u043e \u043a\u0430\u043a \u043d\u0430 \u0434\u0435\u0439\u0441\u0442\u0432\u0443\u044e\u0449\u0438\u0439",
+    "type": "Issue"
+  },
+  "289": {
+    "state": "CLOSED",
+    "title": "\u041a\u0430\u0436\u0434\u043e\u0435 \u043f\u043b\u0430\u043d\u043e\u0432\u043e\u0435 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 \u0432\u043d\u0435\u0448\u043d\u0438\u0445 \u0434\u0430\u043d\u043d\u044b\u0445 \u043f\u0438\u0448\u0435\u0442 \u0432\u0442\u043e\u0440\u0443\u044e, \u0432\u044b\u0434\u0443\u043c\u0430\u043d\u043d\u0443\u044e \u0441\u0442\u0440\u043e\u043a\u0443: 0 \u0441\u0442\u0440\u0430\u043d, trigger_source=manual \u0438 status=success \u043d\u0435\u0437\u0430\u0432\u0438\u0441\u0438\u043c\u043e \u043e\u0442 \u0440\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442\u0430",
+    "type": "Issue"
+  },
+  "292": {
+    "state": "CLOSED",
+    "title": "CLAUDE.md: \u0448\u0435\u0441\u0442\u044c \u0441\u0441\u044b\u043b\u043e\u043a app/main.py:NNN \u0432\u0435\u0434\u0443\u0442 \u043d\u0435 \u0442\u0443\u0434\u0430, \u00ab\u0442\u0440\u0438 \u043c\u043e\u0434\u0435\u043b\u0438\u00bb \u0438\u0445 \u0447\u0435\u0442\u044b\u0440\u0435, \u00ab375/384 \u0442\u0435\u0441\u0442\u0430\u00bb \u0438\u0445 3082",
+    "type": "Issue"
+  },
+  "294": {
+    "state": "CLOSED",
+    "title": "docs/API.md: \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0439 \u043f\u0443\u0442\u044c \u043e\u0442\u0434\u0430\u0451\u0442 404, \u0434\u0432\u0430 \u0437\u0430\u0433\u043e\u043b\u043e\u0432\u043a\u0430 \u0443\u043d\u0438\u0447\u0442\u043e\u0436\u0435\u043d\u044b \u0441 \u043f\u0435\u0440\u0432\u043e\u0433\u043e \u043a\u043e\u043c\u043c\u0438\u0442\u0430, \u043f\u043e\u043a\u0440\u044b\u0442\u0438\u0435 35 \u0438\u0437 162",
+    "type": "Issue"
+  },
+  "296": {
+    "state": "CLOSED",
+    "title": "\u041f\u043e\u0440\u0447\u0430 \u0438\u0437 \u043f\u0435\u0440\u0432\u043e\u0433\u043e \u043a\u043e\u043c\u043c\u0438\u0442\u0430: \u0441\u0435\u043c\u044c \u0443\u0442\u0440\u0430\u0447\u0435\u043d\u043d\u044b\u0445 \u0440\u0430\u0437\u0434\u0435\u043b\u043e\u0432 \u0432 \u0447\u0435\u0442\u044b\u0440\u0451\u0445 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0430\u0445, \u0432\u0438\u0434\u043d\u0430 \u0434\u0432\u0443\u043c\u044f \u043c\u0435\u0445\u0430\u043d\u0438\u0447\u0435\u0441\u043a\u0438\u043c\u0438 \u043f\u0440\u0438\u0437\u043d\u0430\u043a\u0430\u043c\u0438",
+    "type": "Issue"
+  },
+  "297": {
+    "state": "CLOSED",
+    "title": "README \u043e\u0431\u0435\u0449\u0430\u0435\u0442 9 thesis-\u0430\u0440\u0442\u0435\u0444\u0430\u043a\u0442\u043e\u0432, \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442 \u043e\u043f\u0438\u0441\u044b\u0432\u0430\u0435\u0442 7, \u0432 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0435 0",
+    "type": "Issue"
+  },
+  "299": {
+    "state": "CLOSED",
+    "title": "sora_pdf_latency_seconds \u043e\u0431\u044a\u044f\u0432\u043b\u0435\u043d\u0430, \u043d\u0438\u043a\u043e\u0433\u0434\u0430 \u043d\u0435 \u0437\u0430\u043f\u0438\u0441\u044b\u0432\u0430\u0435\u0442\u0441\u044f, \u0438 \u043d\u0430 \u043d\u0435\u0451 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u0430 \u043f\u0430\u043d\u0435\u043b\u044c Grafana",
+    "type": "Issue"
+  },
+  "3": {
+    "state": "CLOSED",
+    "title": "api: /api/v1/export/csv returns 404 (endpoint missing)",
+    "type": "Issue"
+  },
+  "31": {
+    "state": "MERGED",
+    "title": "ops: prove the database can be restored, and script it",
+    "type": "PullRequest"
+  },
+  "315": {
+    "state": "MERGED",
+    "title": "feat: auto-retrain \u043e\u0431\u044a\u044f\u0432\u043b\u044f\u0435\u0442, \u043a\u0430\u043a\u043e\u0439 \u0438\u0437 \u0434\u0432\u0443\u0445 \u0441\u0432\u043e\u0438\u0445 \u043e\u0442\u0432\u0435\u0442\u043e\u0432 \u043e\u043d \u0434\u0430\u043b (roadmap P0)",
+    "type": "PullRequest"
+  },
+  "316": {
+    "state": "MERGED",
+    "title": "feat: \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b\u0439 \u0440\u0435\u0435\u0441\u0442\u0440 \u0432 /predict/v2 \u2014 \u044d\u0442\u043e 503, \u0430 \u043d\u0435 \u043f\u0440\u0435\u0434\u0441\u043a\u0430\u0437\u0430\u043d\u0438\u0435 \u043f\u0440\u043e\u0432\u0430\u043b\u0430",
+    "type": "PullRequest"
+  },
+  "317": {
+    "state": "MERGED",
+    "title": "feat: A/B-\u043c\u0430\u0440\u0448\u0440\u0443\u0442\u044b \u043f\u0435\u0440\u0435\u0441\u0442\u0430\u044e\u0442 \u043e\u0442\u0432\u0435\u0447\u0430\u0442\u044c 200 \u043d\u0430 \u043e\u0442\u043a\u0430\u0437, \u0438 \u043e\u0434\u0438\u043d \u0438\u0437 \u043d\u0438\u0445 \u2014 \u043d\u0430 \u0437\u0430\u043f\u0438\u0441\u044c",
+    "type": "PullRequest"
+  },
+  "320": {
+    "state": "CLOSED",
+    "title": "/predict/neural can serve predictions from randomly initialized weights",
+    "type": "Issue"
+  },
+  "321": {
+    "state": "MERGED",
+    "title": "fix: make the model seed mechanically read-only",
+    "type": "PullRequest"
+  },
+  "323": {
+    "state": "CLOSED",
+    "title": "/analytics/model-compare presents hand-written formulas as four model predictions",
+    "type": "Issue"
+  },
+  "324": {
+    "state": "CLOSED",
+    "title": "/health and /system/health report literal values that cannot fail",
+    "type": "Issue"
+  },
+  "325": {
+    "state": "CLOSED",
+    "title": "Prediction cache keys use per-process hash(), so workers never share a cached result",
+    "type": "Issue"
+  },
+  "326": {
+    "state": "MERGED",
+    "title": "fix: retraining bounds runtime/staged instead of keeping every candidate",
+    "type": "PullRequest"
+  },
+  "327": {
+    "state": "CLOSED",
+    "title": "retry_registration has no caller and can only refuse: its default reads the seed, which no retrain writes",
+    "type": "Issue"
+  },
+  "329": {
+    "state": "CLOSED",
+    "title": "The promotion gate compares a candidate with the newest training run, not with the serving champion",
+    "type": "Issue"
+  },
+  "34": {
+    "state": "CLOSED",
+    "title": "fix(security): store passwords with Argon2id and migrate the legacy formats",
+    "type": "PullRequest"
+  },
+  "36": {
+    "state": "CLOSED",
+    "title": "Global rate limiting is not enforced: SlowAPIMiddleware is a pass-through stub",
+    "type": "Issue"
+  },
+  "37": {
+    "state": "CLOSED",
+    "title": "feat(ops): scheduled, encrypted, off-host backups",
+    "type": "PullRequest"
+  },
+  "4": {
+    "state": "CLOSED",
+    "title": "api: /api/v1/ab/compare returns 405 Method Not Allowed",
+    "type": "Issue"
+  },
+  "44": {
+    "state": "MERGED",
+    "title": "fix(security): make the rate limiter actually count requests (#36)",
+    "type": "PullRequest"
+  },
+  "45": {
+    "state": "MERGED",
+    "title": "fix(security): make refresh tokens survive a restart and be individually revocable (GAP-009)",
+    "type": "PullRequest"
+  },
+  "46": {
+    "state": "MERGED",
+    "title": "fix(security): give the embed widget a frame policy browsers implement (GAP-011)",
+    "type": "PullRequest"
+  },
+  "47": {
+    "state": "MERGED",
+    "title": "feat(ops): ship the schedule that makes the backups happen (GAP-007)",
+    "type": "PullRequest"
+  },
+  "48": {
+    "state": "MERGED",
+    "title": "fix(security): charge both budgets, and charge nothing on a refusal",
+    "type": "PullRequest"
+  },
+  "49": {
+    "state": "CLOSED",
+    "title": "Harden the metrics endpoints: authentication, cardinality bound, and ingress policy",
+    "type": "Issue"
+  },
+  "5": {
+    "state": "CLOSED",
+    "title": "api: history empty after evaluate flow",
+    "type": "Issue"
+  },
+  "50": {
+    "state": "CLOSED",
+    "title": "Startup time exceeds the health policy: the container reports unhealthy while it is still loading",
+    "type": "Issue"
+  },
+  "51": {
+    "state": "CLOSED",
+    "title": "alembic upgrade head produces an incomplete schema: four tables exist only via create_all() at import time",
+    "type": "Issue"
+  },
+  "52": {
+    "state": "MERGED",
+    "title": "fix: add the missing migrations, and refuse a schema the revision cannot vouch for",
+    "type": "PullRequest"
+  },
+  "53": {
+    "state": "MERGED",
+    "title": "fix: the application checks the schema instead of creating it",
+    "type": "PullRequest"
+  },
+  "54": {
+    "state": "CLOSED",
+    "title": "scripts/fix_display_bugs.py doesn't parse and has been dead since the initial commit \u2014 propose removal",
+    "type": "Issue"
+  },
+  "55": {
+    "state": "MERGED",
+    "title": "fix: the scheduler recorded no metrics at all, and paid for app.main to find out",
+    "type": "PullRequest"
+  },
+  "56": {
+    "state": "CLOSED",
+    "title": "openaq_ingestion: 333 consecutive runs recorded success with zero records, and the cause is unknown",
+    "type": "Issue"
+  },
+  "57": {
+    "state": "CLOSED",
+    "title": "Air quality data is nine years stale: OpenAQ's stations for these regions stopped in 2017",
+    "type": "Issue"
+  },
+  "58": {
+    "state": "CLOSED",
+    "title": "87,005 indicator rows have no observation period: the source states the year and the ingester drops it",
+    "type": "Issue"
+  },
+  "59": {
+    "state": "MERGED",
+    "title": "fix: keep the period a World Bank value describes",
+    "type": "PullRequest"
+  },
+  "63": {
+    "state": "MERGED",
+    "title": "test: cover the daily local backup, and run it in CI",
+    "type": "PullRequest"
+  },
+  "64": {
+    "state": "MERGED",
+    "title": "fix: serve public traffic from the production backend, not the dev container",
+    "type": "PullRequest"
+  },
+  "65": {
+    "state": "MERGED",
+    "title": "fix: the dev compose file must not publish the API to the internet",
+    "type": "PullRequest"
+  },
+  "66": {
+    "state": "MERGED",
+    "title": "feat: a deployment guard, and a production file that describes production",
+    "type": "PullRequest"
+  },
+  "67": {
+    "state": "MERGED",
+    "title": "fix: the deployment lock sat in a world-writable directory",
+    "type": "PullRequest"
+  },
+  "68": {
+    "state": "MERGED",
+    "title": "feat: a run is a success only when it produced something",
+    "type": "PullRequest"
+  },
+  "69": {
+    "state": "CLOSED",
+    "title": "data_quality_aggregation: 393 successful runs, records_processed=0 in every one",
+    "type": "Issue"
+  },
+  "70": {
+    "state": "CLOSED",
+    "title": "test_ensemble_validate fails under full-suite load, passes in isolation",
+    "type": "Issue"
+  },
+  "71": {
+    "state": "CLOSED",
+    "title": "deploy_production.sh is not atomic: the checkout moves before the deployment runs",
+    "type": "Issue"
+  },
+  "72": {
+    "state": "MERGED",
+    "title": "fix: the aggregation recorded nothing about what it aggregated",
+    "type": "PullRequest"
+  },
+  "73": {
+    "state": "MERGED",
+    "title": "feat: infer the indicator periods that can be inferred, and name what the rest are",
+    "type": "PullRequest"
+  },
+  "74": {
+    "state": "CLOSED",
+    "title": "Ingestion status says how the run ended, not what an operator must do about it",
+    "type": "Issue"
+  },
+  "75": {
+    "state": "OPEN",
+    "title": "Point-in-time provenance: #58 restores the observation year, and that alone does not make backtesting leakage-free",
+    "type": "Issue"
+  },
+  "76": {
+    "state": "CLOSED",
+    "title": "Long waits need an owned lifecycle: deadline, cleanup trap, cancellation, and a no-children postcondition",
+    "type": "Issue"
+  },
+  "77": {
+    "state": "MERGED",
+    "title": "docs: bring the roadmap up to what is true on 2026-08-04",
+    "type": "PullRequest"
+  },
+  "79": {
+    "state": "MERGED",
+    "title": "fix: refuse a forbidden port before it is opened, and require the ones that must be",
+    "type": "PullRequest"
+  },
+  "80": {
+    "state": "MERGED",
+    "title": "fix: a refusal after the containers are up now undoes what it refused",
+    "type": "PullRequest"
+  },
+  "81": {
+    "state": "CLOSED",
+    "title": "Three ingestion jobs are the same 130 lines three times; move openaq and openmeteo onto the shared runner",
+    "type": "Issue"
+  },
+  "82": {
+    "state": "MERGED",
+    "title": "feat: schedule air quality, beside OpenAQ rather than instead of it",
+    "type": "PullRequest"
+  },
+  "83": {
+    "state": "MERGED",
+    "title": "refactor(ingestion): move openaq and openmeteo onto the shared runner (#81)",
+    "type": "PullRequest"
+  },
+  "84": {
+    "state": "CLOSED",
+    "title": "environmental_observations is write-only: 28,646 rows with no API, feature or frontend consumer",
+    "type": "Issue"
+  },
+  "86": {
+    "state": "CLOSED",
+    "title": "The gdp_growth regressor is always zero: the feature builder asks for indicators the table has never held",
+    "type": "Issue"
+  },
+  "88": {
+    "state": "CLOSED",
+    "title": "alembic autogenerate produces a destructive migration: the ORM model no longer describes the database",
+    "type": "Issue"
+  },
+  "9": {
+    "state": "MERGED",
+    "title": "feat: Open-Meteo weather ingester - Phase 1 Step 3",
+    "type": "PullRequest"
+  },
+  "90": {
+    "state": "MERGED",
+    "title": "feat: read country_indicator_history as of a past moment (#75)",
+    "type": "PullRequest"
+  },
+  "91": {
+    "state": "CLOSED",
+    "title": "refresh_forecast_metrics has never run in production: it calls a hostname that only exists in the dev compose file",
+    "type": "Issue"
+  },
+  "93": {
+    "state": "MERGED",
+    "title": "fix: the scheduler called a hostname that exists only in the dev compose file (#91)",
+    "type": "PullRequest"
+  },
+  "94": {
+    "state": "CLOSED",
+    "title": "Two metrics endpoints and a stale prometheus.yml: the hand-built one exposes none of the 22 declared metrics",
+    "type": "Issue"
+  },
+  "95": {
+    "state": "CLOSED",
+    "title": "M1 Data Trust: all three external regressors are constants \u2014 every forecast ever produced ran on zeros",
+    "type": "Issue"
+  },
+  "96": {
+    "state": "MERGED",
+    "title": "feat: store the World Bank series, not the latest value repeatedly (#86)",
+    "type": "PullRequest"
+  },
+  "97": {
+    "state": "CLOSED",
+    "title": "Two of seven collected indicators do not exist at the World Bank: EN.ATM.CO2E.PC and GE.EST",
+    "type": "Issue"
+  },
+  "98": {
+    "state": "CLOSED",
+    "title": "A renewed certificate will not reach nginx: no deploy hook, and nginx only reads the store at startup",
+    "type": "Issue"
+  },
+  "99": {
+    "state": "CLOSED",
+    "title": "scripts/ is not copied into the production image: the documented one-shot entry point does not exist in the container",
+    "type": "Issue"
+  }
+}
