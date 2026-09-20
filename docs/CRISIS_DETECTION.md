@@ -78,7 +78,7 @@ Channel: `crisis_alerts`
 | Component | Status | File |
 |-----------|--------|------|
 | Detector module | ✅ Done | `app/services/crisis_detector.py` |
-| Scheduler integration | ✅ Done | `app/scheduler.py:744` |
+| Scheduler integration | ✅ Done | `app/scheduler.py` → `_scheduled_crisis_detection()` |
 | Redis publishing | ❌ TODO | — |
 | Webhook dispatch | ❌ TODO | — |
 | API endpoints | ❌ TODO | — |
