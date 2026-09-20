@@ -926,9 +926,18 @@ def observation_coverage(
     """Days a point did not supply enough observations to be usable.
 
     The M3 target is a daily mean computed only where at least 80% of the
-    expected hourly observations are present. A day below that is absent, and
-    an absent day is one fewer window the §7 gate can use -- so a quiet dip in
-    coverage moves the earliest evidential date, currently 2027-02-04.
+    expected **hours** are present. A day below that is absent, and an absent
+    day is one fewer window the §7 gate can use -- so a quiet dip in coverage
+    moves the earliest evidential date.
+
+    That date is deliberately not quoted here. It was, as "currently
+    2027-02-04", and it was wrong twice over: the clock it came from was voided
+    on 2026-09-02 and the figure stayed, and the restarted clock gives a
+    different date. It lives in docs/M3_FORECAST_DECLARATION.md, computed from
+    the gate constants, and is checked there by tests.
+
+    Hours rather than rows, because they differ on real data: see the SQL
+    below.
 
     Nothing watched for that. `/ingestion/attention` reports the verdict of
     each source's latest run: it catches "the ingester stopped", and weakly,
@@ -951,9 +960,18 @@ def observation_coverage(
     try:
         rows = db.execute(text(
             """
+            -- DISTINCT hours, not rows (#179, amendment 1.3). The source is
+            -- polled roughly hourly but stamped from Open-Meteo's `current`
+            -- block, whose time moves at 15-minute resolution, so one hour can
+            -- hold several rows -- every deployment adds one, since
+            -- auto_openmeteo_ingestion runs at startup. Counting rows let a day
+            -- covering 18 hours clear a threshold meant for 19 of 24, which is
+            -- exactly the quiet dip this endpoint exists to surface. Measured
+            -- on production 2026-09-19: three of the first sixteen days of the
+            -- restarted clock were short in hours and complete in rows.
             SELECT to_char(event_time::date, 'YYYY-MM-DD') AS day,
                    region_id,
-                   count(*) AS observations
+                   count(DISTINCT date_trunc('hour', event_time)) AS observations
               FROM environmental_observations
              WHERE source = :source
                AND indicator = :indicator

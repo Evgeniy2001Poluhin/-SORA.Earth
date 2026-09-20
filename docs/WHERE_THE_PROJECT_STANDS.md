@@ -32,7 +32,7 @@ The experiment does not gate the product and has not been promoted. See
 |---|---|---|
 | M1 Data Trust | signed off, production verified | `docs/M1_DATA_TRUST_REPORT.md` |
 | M2 Forecasting | **CLOSED — NEGATIVE RESULT** | `e82d682` |
-| M3 Forecast target | declared; **§7 clock VOID since 2026-09-02**, see amendment 1.1 | `10f985f` |
+| M3 Forecast target | declared; **§7 clock running from 2026-09-03**, restarted by measurement in amendment 1.2 | `10f985f` |
 | Phase 1 (env foundation) | all seven exit criteria met | |
 | Product punch-list | empty | |
 
@@ -43,14 +43,16 @@ MAE = 0 — a property of the data wearing the shape of a result about a method.
 
 ## 3. The fact that shapes everything until February
 
-M3 cannot produce an evidential result before a date that **is currently
-unknown**: the clock was voided on 2026-09-02 when the production server was
-deleted for non-payment and the accumulated observations were lost with it. It
-restarts when collection resumes. The figures below were 2027-02-04 (h=7) and
-2028-02-05 (h=30) under the original clock; they come from the gate's own
-constants —
+M3 cannot produce an evidential result before **2027-02-24** (h=7) or
+**2028-02-25** (h=30). The clock was voided on 2026-09-02, when the production
+server was deleted for non-payment and the accumulated observations were lost
+with it; amendment 1.2 restarted it on 2026-09-19 at the first day on the
+rebuilt deployment that meets the coverage rule — 2026-09-03, measured, with
+24 of 24 hours at every one of the 21 points (2026-09-02 had 4 and fails).
+
+The dates come from the gate's own constants —
 `REQUIRED_WINDOWS = 12`, `TRAINING_DAYS = {7: 90, 30: 180}` — and no amount of
-engineering moves them.
+engineering moves them. The outage cost 20 days against the voided clock.
 
 So the question for the next 174 days is not "what feature next". It is: **what
 is worth doing in a window where no forecasting result can be evidential?**
@@ -70,6 +72,22 @@ moves the evidential date, and it is invisible in the instrument this file's aut
 previously said covered it.
 
 What would cover it is a per-day, per-point count against the 19-of-24 rule.
+
+**This is no longer hypothetical.** That count was run by hand on 2026-09-19,
+over the first sixteen days of the restarted clock, and it found three days on
+which a point fell below the rule while nothing reported anything:
+
+| day | points meeting the rule | worst point |
+|---|---:|---:|
+| 2026-09-09 | 19 of 21 | 18 hours |
+| 2026-09-10 | 20 of 21 | 18 hours |
+| 2026-09-14 | 20 of 21 | 16 hours |
+
+Counting rows instead of hours, all three days pass — which is how they went
+unnoticed, and is the reason amendment 1.3 fixes the rule to hours. Three days
+lost out of sixteen is inside the 80% floor and costs nothing yet; the point is
+that the instrument did not see them, so a run of such days would also be
+invisible.
 
 ### B. Make the eventual measurement trustworthy — before it runs
 
