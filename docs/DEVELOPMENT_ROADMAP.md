@@ -224,10 +224,10 @@ outstanding work.
 
 | Claimed outstanding | Actual state | Evidence |
 |---|---|---|
-| raise AUC 0.70 → 0.80 | 0.80, and the 95% CI **lower bound** is what is tested | `app/model_quality.py:67` |
+| raise AUC 0.70 → 0.80 | 0.80, and the 95% CI **lower bound** is what is tested | `app/model_quality.py` → `clears_threshold()` |
 | refresh 24h → 6h | 6h; ingestion hourly | `app/scheduler.py` |
-| EnvironmentalObservation schema | exists, six ingesters | `app/database.py:389` |
-| SHA-256 password hashing | Argon2id | `app/auth.py:9,83` |
+| EnvironmentalObservation schema | exists, six ingesters | `app/database.py` → `EnvironmentalObservation` |
+| SHA-256 password hashing | Argon2id | `app/auth.py` → `_hash_password()` |
 | no automated backups | encrypted, daily, locked | `scripts/backup_crypt.sh` |
 | clean Alembic install fails | passes, guarded by its own CI job | `.github/workflows/ci.yml` |
 
