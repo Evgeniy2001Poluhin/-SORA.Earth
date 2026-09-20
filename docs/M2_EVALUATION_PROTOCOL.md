@@ -432,8 +432,9 @@ variance estimate, so at h=30 "better than baseline" is indistinguishable from
 The decisive finding, and the reason no volume of this data would suffice.
 
 `Evaluation` rows are written in exactly one place: the `POST /evaluate`
-request handler, `app/api/evaluate.py:151`. The scheduler only reads them
-(`app/scheduler.py:499`). There is no scheduled writer anywhere.
+request handler, `app/api/evaluate.py` → `evaluate_project()`. The scheduler only
+reads them (`app/scheduler.py` → `scheduled_pretrain_forecast_models()`). There
+is no scheduled writer anywhere.
 
 `total_score` is computed by `calculate_esg(project, region)` or
 `_macro_esg_from_payload(payload)` — both **deterministic functions of the
@@ -605,12 +606,13 @@ metric computed on a model fitted to generated observations measures the
 generator.
 
 Weights are also redistributed silently when a member fails to fit
-(`ensemble.py:107-123`), so two folds reporting "the ensemble" may not have run
+(`app/services/forecasting/ensemble.py` → `_normalize_weights()`), so two folds
+reporting "the ensemble" may not have run
 the same combination — which is the same defect as the fallback chain below,
 one level down.
 
 **Fallbacks are recorded, never silent.** The stack documents a chain that
-"never fails" (`app/services/forecasting/__init__.py:11`). For evaluation, any
+"never fails" (`app/services/forecasting/__init__.py`). For evaluation, any
 fold or region where the primary model did not fit is reported as a fallback
 with the reason, and is **not** counted as a result of the primary model.
 
