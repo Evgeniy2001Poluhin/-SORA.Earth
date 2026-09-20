@@ -880,6 +880,12 @@ docker-compose logs -f scheduler | grep -E "(drift|retrain)"
 # used to select from one, and answered "relation does not exist" (#282).
 docker-compose exec postgres psql -U sora -d sora_earth -c "SELECT started_at, status, trigger_source FROM retrain_log ORDER BY started_at DESC LIMIT 5;"
 
+# The phase 6 forecast report: the section 7 gate verdict, per-point coverage,
+# and the three baselines scored over identical rolling-origin windows. Prints a
+# refusal with its reasons until the clock reaches 2027-02-24, which is the
+# correct output rather than a failure -- it exits 0 either way.
+python scripts/evaluate_forecast.py
+
 # Check Redis cache stats
 curl http://localhost:8000/api/v1/cache/redis
 
