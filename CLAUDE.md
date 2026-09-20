@@ -322,6 +322,53 @@ The table is read from `__tablename__` and checked against the module by
 that names a table no model creates. **Edit the code, then regenerate this; do
 not hand-edit the table.**
 
+**What `predictions_log` holds, and it is not what the name says.** The table
+is **fed entirely by `/evaluate`**. Three functions are called `log_prediction`
+and they do different things:
+
+| symbol | writes | callers |
+|---|---|---|
+| `app.mlflow_tracking.log_prediction` | MLflow telemetry on a thread; a no-op under `SORA_OFFLINE` | `/predict`, `/predict/neural`, `/predict/stacking` |
+| `app.main.log_prediction` | the row in `predictions_log` | `/evaluate`, and nothing else |
+| `app.obs.request_log.log_prediction` | a JSONL file, and the only one of the three that takes a `model_version` | `app/ml/routes.py`, off unless `SORA_REQUEST_LOG=1` |
+
+So a `/predict` call leaves **no durable row**. What it leaves is `_log_csv`
+appending four input columns -- no probability, no prediction, no timestamp, no
+model -- to `data/predictions_log.csv`, the file #281 established is destroyed
+on every redeploy, rollback and `--force-recreate`.
+
+`model_version` on every row is the column default, the literal `"v2.0"`: the
+one construction never assigns it, and `/api/v1/analytics/predictions-log`
+serves the column as though it identified a model.
+
+**And a model did produce the number beside it.** This paragraph first said the
+rows "describe `/evaluate`, which runs a hardcoded ESG formula rather than a
+model", and that is false. `app/main.py` → `calculate_esg` runs
+`rf_model.predict_proba` unconditionally -- `rf_model` is the serving champion --
+and returns it as `success_probability`. The row writer stores
+`probability=result.get("probability") or result.get("success_probability")`,
+and `calculate_esg` returns no `probability` key, so the fallback takes the
+champion's figure. The ESG **score** in the same response is a formula; the
+probability is not.
+
+So `model_version` is a plain provenance gap rather than a defensible blank: a
+champion produced the number in the row beside it, and nothing records which
+one. Only the `_macro_esg_from_payload` branch of `app/api/evaluate.py`, taken
+when the payload carries a macro key, is formula-only.
+
+**This is what the drift check samples.** `app/api/drift.py` →
+`_recent_predictions` takes the last `window` rows by id with no `endpoint`
+filter, so the KS test compares evaluation inputs against the baseline. Adding
+such a filter would be worse than leaving it: `endpoint == "predict"` selects
+nothing, and a KS test over an empty frame is not a verdict.
+
+Pinned by `tests/test_predictions_log_records_what_it_says.py`, which fails if a
+second writer appears, if a predict route is wired in, or if this description
+stops matching the wiring. The confusion is not hypothetical --
+`app/api/evaluate.py` carries a comment from whoever deleted that call once,
+reading it as duplicate telemetry, and learned otherwise only because mutation
+testing left every assertion green when the call came back.
+
 **There is no `DriftLog` model and no `drift_log` table, and drift decisions
 are not persisted anywhere.** This section named `DriftLog` and `RefreshJob`;
 neither class exists -- the second one is `DataRefreshLog` -- and two debugging
@@ -768,7 +815,9 @@ docker-compose exec postgres psql -U sora -d sora_earth -c "SELECT started_at, s
 # Check Redis cache stats
 curl http://localhost:8000/api/v1/cache/redis
 
-# View recent predictions
+# View recent rows of `predictions_log` -- which are /evaluate calls, not
+# /predict calls. See "What `predictions_log` holds" above before reading them
+# as predictions.
 curl http://localhost:8000/api/v1/analytics/predictions-log?limit=10
 
 # Manually trigger drift check
