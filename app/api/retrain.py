@@ -3,6 +3,7 @@ from app.auth import require_admin
 """Model retraining and metrics API."""
 import contextlib
 import fcntl
+import hashlib
 import os, csv, pickle, json, stat, tempfile, time
 from datetime import datetime
 
@@ -174,9 +175,30 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
     with open(os.path.join(staged, INCOMPLETE_MARKER), "w") as _marker:
         _marker.write(run_id)
 
+    #: None until the dataset has been read. The failure path below reports it
+    #: either way, and a run that fell over before reaching the file genuinely
+    #: has no dataset to name -- which is a different fact from one that read a
+    #: dataset and failed afterwards, and the row should be able to say which.
+    data_version = None
+
     try:
         if not os.path.exists(PROJECTS_CSV):
             raise HTTPException(400, "No training data (projects.csv) found")
+
+        #: Which bytes this run trained on (#164 line of work; the
+        #: `data snapshot -> run_id` link of the roadmap's definition of done).
+        #:
+        #: Of the file, not of the parsed frame: pandas' reading is a second
+        #: thing that can change between releases, and the question this answers
+        #: is "did two runs see the same dataset", which is about the input.
+        #:
+        #: The dataset is not static -- `POST /model/data/bulk-upload/content`
+        #: replaces it atomically, and the comment below records that it is
+        #: appended to by more than that path -- so before this, two champions
+        #: trained a week apart were indistinguishable in the record except by
+        #: `total_samples` and a timestamp.
+        with open(PROJECTS_CSV, "rb") as _handle:
+            data_version = "sha256:" + hashlib.sha256(_handle.read()).hexdigest()
 
         df = pd.read_csv(PROJECTS_CSV)
         required = ["budget", "co2_reduction", "social_impact", "duration_months", "success"]
@@ -407,6 +429,11 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
             "algorithm": "RandomForestClassifier",
             "n_estimators": 200, "max_depth": 10,
             "features": feature_cols, "total_samples": len(df),
+            # `total_samples` is the count after inf/NaN rows are dropped, so it
+            # is not the size of the file. Both are recorded: the digest names
+            # the dataset, the counts say how much of it was usable.
+            "data_version": data_version,
+            "data_rows_read": int(before),
         }
         with open(os.path.join(staged, "meta.json"), "w") as f:
             json.dump(new_meta, f, indent=2)
@@ -442,6 +469,16 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
             #: The candidate is staged under this run and is not serving. A
             #: caller that decides to promote calls activate(run_id).
             "staged": True,
+            #: Returned so a caller writing a second row for the same physical
+            #: run can put the same value in it rather than re-digesting a file
+            #: that may have changed since. `retrain_models` and
+            #: `closed_loop_retrain` both write such a row and neither passes it
+            #: yet, so their rows still carry NULL -- the remaining half of this
+            #: link. This comment first said it "belongs with the one-row-per-run
+            #: work (#199)"; #199 was closed COMPLETED on 2026-09-19 and its
+            #: closing note says the unification must be filed fresh. No open
+            #: issue carries it, so this half is unowned rather than scheduled.
+            "data_version": data_version,
         }
 
         try:
@@ -471,6 +508,7 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
 
         _finish_retrain_log(
             log_id=log_id,
+            data_version=data_version,
             # No `status`: it is derived from the stages by project_status, so
             # this row cannot disagree with its own fields (#199 phase 2B).
             training_status="success",
@@ -501,6 +539,7 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
             )
         _finish_retrain_log(
             log_id=log_id,
+            data_version=data_version,
             training_status="failed",
             failure_reason=type(e).__name__,
             message="Manual retraining failed",
