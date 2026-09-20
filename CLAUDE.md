@@ -233,8 +233,15 @@ drift-check job: drift is checked inside `closed_loop_retrain`, once a day.
   bound** of its AUC must clear 0.80 -- not the point estimate, since 0.85
   measured on 171 rows has a lower bound of 0.78 -- the run must have
   registered the model in MLflow, and it must not be more than 0.02 below what
-  is already serving. Any one of the three rejects it. The closed loop applies
-  all three; `POST /mlops/auto-retrain` currently applies only the last.
+  is already serving. Any one of the three rejects it. **Both gated paths apply
+  all three** -- the closed loop and `POST /mlops/auto-retrain` each call
+  `app.promotion.gated_decision`, which adds a fourth refusal of its own: it
+  declines when the serving model's own score cannot be read, rather than
+  comparing against the newest training row (#329).
+
+  > This said: "The closed loop applies all three; `POST /mlops/auto-retrain`
+  > currently applies only the last." True once, and false since the two paths
+  > were brought onto one gate.
 - Decision logged to the `retrain_log` table.
 
 **Manual triggers:** `/api/v1/model/retrain`, `/api/v1/mlops/full-pipeline` (admin only)
@@ -534,11 +541,19 @@ Optional:
    candidates there with `app/model_source.py` → `prune_staged()`, which spares
    the one the champion was activated from (#326). The one way into
    `runtime/active/` is `app/model_source.py` → `activate()`, and its one
-   caller is `app/scheduler.py` → `closed_loop_retrain()`, after the promotion
-   gate passes -- reached by the daily and weekly jobs and by the routes that
-   run the closed loop. Every other way to start a retrain stages and stops.
-   `POST /api/v1/mlops/auto-retrain` is the one that misleads: it applies the
-   same gate and records `promoted` in `retrain_log`, and never activates.
+   caller is `app/model_loader.py` → `activate_promoted_candidate()`. **Two**
+   paths reach that helper, both after `gated_decision` passes:
+   `app/scheduler.py` → `closed_loop_retrain()` (the daily and weekly jobs, and
+   the routes that run the closed loop) and `app/api/infra.py` →
+   `auto_retrain_on_drift()`, which serves `POST /api/v1/mlops/auto-retrain`.
+   Every other way to start a retrain stages and stops.
+
+   > This said `activate()`'s one caller was `closed_loop_retrain()`, and that
+   > `POST /api/v1/mlops/auto-retrain` "is the one that misleads: it applies the
+   > same gate and records `promoted` in `retrain_log`, and never activates."
+   > Both halves were true before the route was brought onto the same helper,
+   > and neither is now. An endpoint documented as a silent no-op is one nobody
+   > uses and someone eventually re-implements.
 
    **A process keeps the champion it loaded.** Each `backend` worker loads it
    once, when the worker starts. `app/model_loader.py` → `reload_champion()`
