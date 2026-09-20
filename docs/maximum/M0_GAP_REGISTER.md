@@ -59,8 +59,8 @@ remain open while GAP-011 does, and `M0_COMPLETION_REPORT.md` does not exist.
 | Severity | P0 — BLOCKER |
 | Status | CLOSED |
 | Verified 2026-07-30 | `migration-bootstrap` is green on `main@dff724f`: a clean PostgreSQL 16 reaches head from migrations alone, plus the catch-up scenario against a database already recorded at `0b0ff6d1594e`. |
-| Evidence (as raised 2026-07-24) | `alembic/versions/a1b2c3d4e5f6_regional_esg_snapshot_view.py:29` fails with `UndefinedTable` |
-| Root Cause (as raised) | Model `RegionESGScore` defined at `app/database.py:194` but no migration creates the table |
+| Evidence (as raised 2026-07-24) | `alembic/versions/a1b2c3d4e5f6_regional_esg_snapshot_view.py` → `upgrade()` fails with `UndefinedTable` |
+| Root Cause (as raised) | `app/database.py` → `RegionESGScore` is defined but no migration creates the table |
 | Impact (as raised) | CI fails, fresh DB cannot be provisioned, Alembic upgrade fails |
 | Fix (as proposed) | **Reassigned to PR #23.** This PR no longer carries a migration for GAP-001 — see note below |
 | Implementation | `alembic/versions/b7c1e4a92f30_create_region_esg_scores.py` (PR #23) |
@@ -90,8 +90,8 @@ remain open while GAP-011 does, and `M0_COMPLETION_REPORT.md` does not exist.
 | Category | DP |
 | Severity | P0 — BLOCKER |
 | Status | CLOSED |
-| Verified 2026-07-30 | `app/services/environmental/scheduler_jobs.py:215` (openaq) and `:335` (openmeteo) call `persist_environmental_observations`. `environmental-postgres-tests` green on `main@dff724f`. |
-| Evidence (as raised 2026-07-24) | `app/services/environmental/scheduler_jobs.py:131-228` — no call to `persist_environmental_observations()` |
+| Verified 2026-07-30 | `app/services/environmental/scheduler_jobs.py` → `_run_ingestion()` calls `persist_environmental_observations`, and both `scheduled_openaq_ingestion()` and `scheduled_openmeteo_ingestion()` reach it. `environmental-postgres-tests` green on `main@dff724f`. |
+| Evidence (as raised 2026-07-24) | `app/services/environmental/scheduler_jobs.py` — no call to `persist_environmental_observations()` |
 | Root Cause (as raised) | `scheduled_openaq_ingestion()` and `scheduled_openmeteo_ingestion()` fetch signals but discard them |
 | Impact (as raised) | `environmental_observations` table remains empty, no data for crisis detection |
 | Fix (as proposed) | Add `persist_environmental_observations(signals, source)` call after fetch |
@@ -122,8 +122,8 @@ remain open while GAP-011 does, and `M0_COMPLETION_REPORT.md` does not exist.
 | Category | SEC |
 | Severity | P0 — CRITICAL |
 | Status | CLOSED |
-| Verified 2026-07-30 | PR #24 requires admin and confines the path. The remaining architectural change — replacing a server-side `file_path` with a multipart upload — is tracked separately as issue #26 and is not this gap. |
-| Evidence (as raised 2026-07-24) | `app/api/retrain.py:398-404` — `file_path` parameter used without validation |
+| Verified 2026-07-30 | PR #24 requires admin and confines the path. #26 (closed 2026-09-19) replaced `file_path` with a content-upload route (`POST .../bulk-upload/content`, shipped in #171); the old route is deprecated but still registered, its removal deliberately deferred to evidence of no use. #26's own closing comment offered to file that removal as its own issue "so it is not lost" -- nothing shows that happened, so it is currently untracked, not tracked separately as this line said. |
+| Evidence (as raised 2026-07-24) | `app/api/retrain.py` — `file_path` parameter used without validation |
 | Root Cause (as raised) | No path sanitization before `pd.read_csv(file_path)` |
 | Impact (as raised) | Arbitrary file read on server |
 | Fix (as proposed) | Add `Depends(require_admin)`, validate path is within allowed directory |
@@ -137,7 +137,7 @@ remain open while GAP-011 does, and `M0_COMPLETION_REPORT.md` does not exist.
 | Severity | P0 — CRITICAL |
 | Status | CLOSED |
 | Verified 2026-07-30 | PR #24 put `require_admin` on the sensitive endpoints. |
-| Evidence (as raised 2026-07-24) | `app/api/retrain.py:398` (`/model/data/bulk-upload`), `app/api/forecast.py:175,188` |
+| Evidence (as raised 2026-07-24) | `app/api/retrain.py` (`/model/data/bulk-upload`), `app/api/forecast.py` |
 | Root Cause (as raised) | Missing `Depends(require_admin)` |
 | Impact (as raised) | Data injection, resource exhaustion |
 | Fix (as proposed) | Add admin authentication to endpoints |
@@ -154,8 +154,8 @@ remain open while GAP-011 does, and `M0_COMPLETION_REPORT.md` does not exist.
 | Category | SEC |
 | Severity | P1 — HIGH |
 | Status | CLOSED |
-| Verified 2026-07-30 | `app/auth.py:9` uses `argon2.PasswordHasher` (PR #34), with migration of the legacy formats on verify. |
-| Evidence (as raised 2026-07-24) | `app/auth.py:72-75` — uses `hashlib.sha256` instead of bcrypt |
+| Verified 2026-07-30 | `app/auth.py` → `_hash_password()` uses `argon2.PasswordHasher` (PR #34), with migration of the legacy formats on verify. |
+| Evidence (as raised 2026-07-24) | `app/auth.py` — uses `hashlib.sha256` instead of bcrypt |
 | Root Cause (as raised) | bcrypt in requirements.txt but not used |
 | Impact (as raised) | Passwords vulnerable to GPU brute-force attacks |
 | Fix (as proposed) | Migrate to `bcrypt.hashpw()` |
@@ -196,8 +196,8 @@ remain open while GAP-011 does, and `M0_COMPLETION_REPORT.md` does not exist.
 | Category | SEC |
 | Severity | P1 — HIGH |
 | Status | OPEN |
-| Verified 2026-07-30 | `app/auth.py:397` holds `_refresh_tokens: set = set()` — a plain in-process set. Three consequences: every restart invalidates every refresh token, `backend` and `scheduler` do not share it, and the set grows without bound because entries are removed only by explicit revocation. |
-| Evidence | `app/auth.py:397` — `_refresh_tokens: set = set()`. The original citation of line 118 no longer resolves; that line is now `ARGON2_CEILING`. |
+| Verified 2026-07-30 | `app/auth.py` holds `_refresh_tokens: set = set()` — a plain in-process set. Three consequences: every restart invalidates every refresh token, `backend` and `scheduler` do not share it, and the set grows without bound because entries are removed only by explicit revocation. |
+| Evidence | `app/auth.py` — `_refresh_tokens: set = set()`. The original citation of line 118 no longer resolves; that line is now `ARGON2_CEILING`. |
 | Root Cause | Tokens stored in Python process memory |
 | Impact | Tokens lost on restart, not distributed |
 | Fix | Store refresh tokens in Redis with TTL |
@@ -246,8 +246,8 @@ remain open while GAP-011 does, and `M0_COMPLETION_REPORT.md` does not exist.
 | Category | SEC |
 | Severity | P2 — MEDIUM |
 | Status | OPEN |
-| Verified 2026-07-30 | `app/api/embed/api.py:10` still returns `headers={"X-Frame-Options": "ALLOWALL"}`. |
-| Evidence | `app/api/embed/api.py:10` |
+| Verified 2026-07-30 | `app/api/embed/api.py` still returns `headers={"X-Frame-Options": "ALLOWALL"}`. |
+| Evidence | `app/api/embed/api.py` |
 | Fix | Restrict to known origins or remove |
 
 ### GAP-012: Port 8000 Exposed to Internet

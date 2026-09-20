@@ -85,8 +85,11 @@ API_KEY = {
 
 # Known-unguarded and deliberately not touched here. Each names why.
 GAP = {
-    # IDOR: deletes any session by id. Needs ownership, not a blanket admin gate.
-    "/api/v1/copilot/sessions/{session_id}": "needs owner-scope (#199 follow-up)",
+    # IDOR: deletes any session by id. Needs ownership, not a blanket admin
+    # gate. Not #199 -- that issue is the retrain/promotion state machine,
+    # a different endpoint family, and closed; this gap is not tracked by it
+    # or by anything else currently open.
+    "/api/v1/copilot/sessions/{session_id}": "needs owner-scope, not currently tracked",
     # Bulk write, abuse-bounded by the rate limiter; decision pending.
     "/api/v1/batch/evaluate": "bulk write, decision pending",
 }

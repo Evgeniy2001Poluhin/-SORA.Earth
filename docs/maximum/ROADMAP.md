@@ -208,8 +208,9 @@ ingested_at    when this system received it
 + updated_at   when the row last changed
 ```
 
-The error came from reading `observed_at` at `app/database.py:204` and
-attributing it to `EnvironmentalObservation` — it belongs to a different model.
+The error came from reading `observed_at` in `app/database.py` and attributing
+it to `EnvironmentalObservation` — it belongs to a different model, and as of
+this writing that model is `RegionSignal`.
 The gap was invented by misreading, not found by measuring. Corrected here rather
 than quietly deleted, because a roadmap that hides its own errors is worth less
 than one that carries them.

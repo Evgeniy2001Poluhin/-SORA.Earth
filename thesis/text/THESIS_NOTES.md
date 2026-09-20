@@ -12,7 +12,7 @@
 The dedicated scheduler service was inspected via `py-spy dump --pid 1` on the running container. The dump confirms two active threads:
 
 - MainThread blocked in `time.sleep(60)` inside the supervisor loop of `run_scheduler.py`
-- Background worker thread ecuting `apscheduler.schedulers.blocking._main_loop` (blocking.py:30) — the canonical idle state of APScheduler waiting for the next cron trigger
+- Background worker thread ecuting `apscheduler.schedulers.blocking._main_loop` on `BlockingScheduler` — the canonical idle state of APScheduler waiting for the next cron trigger
 
 The scheduler registers three cron jobs at startup:
 
