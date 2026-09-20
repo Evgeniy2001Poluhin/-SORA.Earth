@@ -233,8 +233,15 @@ drift-check job: drift is checked inside `closed_loop_retrain`, once a day.
   bound** of its AUC must clear 0.80 -- not the point estimate, since 0.85
   measured on 171 rows has a lower bound of 0.78 -- the run must have
   registered the model in MLflow, and it must not be more than 0.02 below what
-  is already serving. Any one of the three rejects it. The closed loop applies
-  all three; `POST /mlops/auto-retrain` currently applies only the last.
+  is already serving. Any one of the three rejects it. **Both gated paths apply
+  all three** -- the closed loop and `POST /mlops/auto-retrain` each call
+  `app.promotion.gated_decision`, which adds a fourth refusal of its own: it
+  declines when the serving model's own score cannot be read, rather than
+  comparing against the newest training row (#329).
+
+  > This said: "The closed loop applies all three; `POST /mlops/auto-retrain`
+  > currently applies only the last." True once, and false since the two paths
+  > were brought onto one gate.
 - Decision logged to the `retrain_log` table.
 
 **Manual triggers:** `/api/v1/model/retrain`, `/api/v1/mlops/full-pipeline` (admin only)
@@ -314,6 +321,53 @@ The table is read from `__tablename__` and checked against the module by
 `tests/test_docs_name_real_tables.py`, which also refuses any SQL in this file
 that names a table no model creates. **Edit the code, then regenerate this; do
 not hand-edit the table.**
+
+**What `predictions_log` holds, and it is not what the name says.** The table
+is **fed entirely by `/evaluate`**. Three functions are called `log_prediction`
+and they do different things:
+
+| symbol | writes | callers |
+|---|---|---|
+| `app.mlflow_tracking.log_prediction` | MLflow telemetry on a thread; a no-op under `SORA_OFFLINE` | `/predict`, `/predict/neural`, `/predict/stacking` |
+| `app.main.log_prediction` | the row in `predictions_log` | `/evaluate`, and nothing else |
+| `app.obs.request_log.log_prediction` | a JSONL file, and the only one of the three that takes a `model_version` | `app/ml/routes.py`, off unless `SORA_REQUEST_LOG=1` |
+
+So a `/predict` call leaves **no durable row**. What it leaves is `_log_csv`
+appending four input columns -- no probability, no prediction, no timestamp, no
+model -- to `data/predictions_log.csv`, the file #281 established is destroyed
+on every redeploy, rollback and `--force-recreate`.
+
+`model_version` on every row is the column default, the literal `"v2.0"`: the
+one construction never assigns it, and `/api/v1/analytics/predictions-log`
+serves the column as though it identified a model.
+
+**And a model did produce the number beside it.** This paragraph first said the
+rows "describe `/evaluate`, which runs a hardcoded ESG formula rather than a
+model", and that is false. `app/main.py` → `calculate_esg` runs
+`rf_model.predict_proba` unconditionally -- `rf_model` is the serving champion --
+and returns it as `success_probability`. The row writer stores
+`probability=result.get("probability") or result.get("success_probability")`,
+and `calculate_esg` returns no `probability` key, so the fallback takes the
+champion's figure. The ESG **score** in the same response is a formula; the
+probability is not.
+
+So `model_version` is a plain provenance gap rather than a defensible blank: a
+champion produced the number in the row beside it, and nothing records which
+one. Only the `_macro_esg_from_payload` branch of `app/api/evaluate.py`, taken
+when the payload carries a macro key, is formula-only.
+
+**This is what the drift check samples.** `app/api/drift.py` →
+`_recent_predictions` takes the last `window` rows by id with no `endpoint`
+filter, so the KS test compares evaluation inputs against the baseline. Adding
+such a filter would be worse than leaving it: `endpoint == "predict"` selects
+nothing, and a KS test over an empty frame is not a verdict.
+
+Pinned by `tests/test_predictions_log_records_what_it_says.py`, which fails if a
+second writer appears, if a predict route is wired in, or if this description
+stops matching the wiring. The confusion is not hypothetical --
+`app/api/evaluate.py` carries a comment from whoever deleted that call once,
+reading it as duplicate telemetry, and learned otherwise only because mutation
+testing left every assertion green when the call came back.
 
 **There is no `DriftLog` model and no `drift_log` table, and drift decisions
 are not persisted anywhere.** This section named `DriftLog` and `RefreshJob`;
@@ -534,11 +588,19 @@ Optional:
    candidates there with `app/model_source.py` → `prune_staged()`, which spares
    the one the champion was activated from (#326). The one way into
    `runtime/active/` is `app/model_source.py` → `activate()`, and its one
-   caller is `app/scheduler.py` → `closed_loop_retrain()`, after the promotion
-   gate passes -- reached by the daily and weekly jobs and by the routes that
-   run the closed loop. Every other way to start a retrain stages and stops.
-   `POST /api/v1/mlops/auto-retrain` is the one that misleads: it applies the
-   same gate and records `promoted` in `retrain_log`, and never activates.
+   caller is `app/model_loader.py` → `activate_promoted_candidate()`. **Two**
+   paths reach that helper, both after `gated_decision` passes:
+   `app/scheduler.py` → `closed_loop_retrain()` (the daily and weekly jobs, and
+   the routes that run the closed loop) and `app/api/infra.py` →
+   `auto_retrain_on_drift()`, which serves `POST /api/v1/mlops/auto-retrain`.
+   Every other way to start a retrain stages and stops.
+
+   > This said `activate()`'s one caller was `closed_loop_retrain()`, and that
+   > `POST /api/v1/mlops/auto-retrain` "is the one that misleads: it applies the
+   > same gate and records `promoted` in `retrain_log`, and never activates."
+   > Both halves were true before the route was brought onto the same helper,
+   > and neither is now. An endpoint documented as a silent no-op is one nobody
+   > uses and someone eventually re-implements.
 
    **A process keeps the champion it loaded.** Each `backend` worker loads it
    once, when the worker starts. `app/model_loader.py` → `reload_champion()`
@@ -753,7 +815,9 @@ docker-compose exec postgres psql -U sora -d sora_earth -c "SELECT started_at, s
 # Check Redis cache stats
 curl http://localhost:8000/api/v1/cache/redis
 
-# View recent predictions
+# View recent rows of `predictions_log` -- which are /evaluate calls, not
+# /predict calls. See "What `predictions_log` holds" above before reading them
+# as predictions.
 curl http://localhost:8000/api/v1/analytics/predictions-log?limit=10
 
 # Manually trigger drift check
