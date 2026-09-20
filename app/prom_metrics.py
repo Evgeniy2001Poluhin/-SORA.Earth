@@ -177,6 +177,43 @@ sora_environmental_data_quality_score = Gauge(
     ["source"],
     multiprocess_mode="mostrecent"
 )
+# ── M3 accumulation coverage ──
+#
+# The §7 clock runs from 2026-09-03, and a day below the 80% floor is a day the
+# gate cannot use -- it moves the earliest evidential date and nothing else says
+# so. `/api/v1/infra/observations/coverage` computes the count;
+# docs/WHERE_THE_PROJECT_STANDS.md §3A records that nothing watched it, which was
+# still true on 2026-09-19: no alert, no panel, no gauge, and no caller.
+#
+# All three are published together and that is the point. A gap count of 0 means
+# "no day fell short" or "no day was examined", and in one gauge those are the
+# same reading -- `days_examined` and `points_examined` are the denominator that
+# tells them apart. `ObservationCoverage` already carries them for this reason;
+# publishing only the count would discard it at the last step.
+#
+# `mostrecent` throughout: each is the state of the window as last computed, not
+# work done by a process. Written in the scheduler container, which is one
+# process -- the mode is declared anyway, for the same reason the forecast
+# gauges declare it.
+sora_observation_coverage_gap_days = Gauge(
+    "sora_observation_coverage_gap_days",
+    "Point-days below the M3 coverage floor in the examined window",
+    ["source", "indicator"],
+    multiprocess_mode="mostrecent",
+)
+sora_observation_coverage_days_examined = Gauge(
+    "sora_observation_coverage_days_examined",
+    "Distinct UTC days the coverage query looked at",
+    ["source", "indicator"],
+    multiprocess_mode="mostrecent",
+)
+sora_observation_coverage_points_examined = Gauge(
+    "sora_observation_coverage_points_examined",
+    "Distinct points the coverage query looked at",
+    ["source", "indicator"],
+    multiprocess_mode="mostrecent",
+)
+
 sora_environmental_observations_total = Counter(
     "sora_environmental_observations_total",
     "Total environmental observations ingested",
