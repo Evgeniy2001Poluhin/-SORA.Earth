@@ -529,6 +529,16 @@
     "title": "fix(security): store passwords with Argon2id and migrate the legacy formats",
     "type": "PullRequest"
   },
+  "350": {
+    "state": "MERGED",
+    "title": "feat: publish M3 observation coverage, so a dip is visible without being asked for",
+    "type": "PullRequest"
+  },
+  "356": {
+    "state": "MERGED",
+    "title": "feat: phase 6 produces a report \u2014 \u00a73 in code, the gate's verdict, and the bar",
+    "type": "PullRequest"
+  },
   "36": {
     "state": "CLOSED",
     "title": "Global rate limiting is not enforced: SlowAPIMiddleware is a pass-through stub",
