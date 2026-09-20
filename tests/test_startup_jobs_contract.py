@@ -14,17 +14,24 @@ The behaviour is an explicit `modify_job(next_run_time=now)` over a named list.
 That establishes the mechanism as deliberate. It does not establish that each
 of the five members was chosen: archaeology found a written reason for exactly
 one (#82, air quality), while the other four arrived with commit messages that
-gave none. app/scheduler.py records which is which, and #156 carries the
-question of whether the four should stay.
+gave none. #156 closed that on 2026-09-19 -- all five stay and the four missing
+reasons were supplied by decision, since the commits do not contain them.
 
-So these tests pin the *membership*, not its justification. Adding a sixth entry
+So these tests pin the *membership* and, since #156, that every member states
+why it is a member -- which is a claim about what is written down, not about
+whether the reason is a good one. Adding a sixth entry
 has to be a decision rather than something that happens while editing nearby --
 each one costs a database write or an external API call on every deployment,
 rollbacks included.
 """
+import os
+import re
+
 import pytest
 
 from app.scheduler import RUN_IMMEDIATELY_ON_STARTUP
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 EXPECTED = (
     "auto_run_ingesters",
@@ -136,6 +143,108 @@ def test_an_interval_trigger_does_not_fire_at_startup_by_itself():
     assert first - now > timedelta(hours=23), (
         f"an interval job now fires {first - now} after start; the startup runs "
         f"are no longer explained by app/scheduler.py's modify_job loop"
+    )
+
+
+def _startup_comment_blocks() -> dict:
+    """The per-job comment block in app/scheduler.py, keyed by job id.
+
+    Parsed rather than grepped, so a reason written for one job cannot satisfy
+    the assertion for another -- the whole defect #156 recorded is that four
+    entries were carried along by the tuple they sat in. A block is the lines
+    from a `#   <job id>` heading to the next heading, inside the comment
+    region that documents RUN_IMMEDIATELY_ON_STARTUP.
+    """
+    src = open(os.path.join(REPO_ROOT, "app", "scheduler.py")).read()
+    start = src.index("# Jobs that run once at startup")
+    end = src.index("RUN_IMMEDIATELY_ON_STARTUP = (")
+    region = src[start:end]
+
+    blocks: dict = {}
+    current = None
+    for line in region.splitlines():
+        heading = re.fullmatch(r"#   (\S+)", line)
+        if heading:
+            current = heading.group(1)
+            blocks[current] = []
+        elif current is not None:
+            blocks[current].append(line)
+    return {jid: "\n".join(lines) for jid, lines in blocks.items()}
+
+
+@pytest.mark.parametrize("job_id", EXPECTED)
+def test_every_startup_job_states_why_it_runs_at_startup(job_id):
+    """#156, resolved: keep all five, and write down why each one is there.
+
+    Four of the five arrived with no stated reason -- a6d5ede added two under an
+    empty commit body, #11 added two more. "It was already in the tuple" is not
+    a reason, and the resolution of #156 was to supply the missing four rather
+    than to remove them. This test is what stops one from being deleted again by
+    the next edit that only reads the code.
+
+    Asserted against the block for *this* job id, so a reason present for the
+    one entry that always had one (#82, air quality) does not cover the others.
+    """
+    blocks = _startup_comment_blocks()
+    assert job_id in blocks, (
+        f"app/scheduler.py runs {job_id} on every deployment and its comment "
+        f"region does not document it. Blocks found: {sorted(blocks)}"
+    )
+
+    block = blocks[job_id]
+    match = re.search(r"why at startup:(.*?)(?=\n#     repeat:|\Z)", block, re.S)
+    assert match, (
+        f"the block for {job_id} has no 'why at startup:' line, so nothing says "
+        f"why this job costs a write or an external call on every release"
+    )
+
+    reason = match.group(1)
+    assert "NOT STATED" not in reason.upper(), (
+        f"{job_id} runs on every deployment -- and on every rollback -- and its "
+        f"reason is still recorded as NOT STATED. #156 resolved this by keeping "
+        f"all five and writing the reason down; supply it or remove the job "
+        f"from RUN_IMMEDIATELY_ON_STARTUP."
+    )
+    assert len(reason.split()) >= 8, (
+        f"the reason for {job_id} is {reason.strip()!r}, which is too short to "
+        f"be one: it has to say what the startup run buys, not that it exists"
+    )
+
+
+@pytest.mark.parametrize("job_id", EXPECTED)
+def test_the_claude_md_table_states_a_reason_for_each_startup_job(job_id):
+    """The table an operator reads, checked against the same resolution.
+
+    CLAUDE.md carried "**not stated**" in the 'why at startup' column for the
+    same four jobs. A reason written only in app/scheduler.py leaves the
+    document that gets read during a deployment saying the opposite.
+    """
+    claude_md = open(os.path.join(REPO_ROOT, "CLAUDE.md")).read()
+
+    # Scoped to the startup table by its header, not matched on the job id
+    # anywhere in the file: four of these five also appear in the scheduler's
+    # own jobs table, and the first version of this test read that row instead
+    # -- it would have passed on a reason written in the wrong table.
+    header = "| job | side effect | why at startup | repeating it |"
+    assert header in claude_md, (
+        "the CLAUDE.md startup table header changed; this test can no longer "
+        "tell that table apart from the scheduler jobs table above it"
+    )
+    table = claude_md.split(header, 1)[1].split("\n\n", 1)[0]
+
+    rows = [
+        line for line in table.splitlines()
+        if line.lstrip().startswith(f"| `{job_id}` |")
+    ]
+    assert len(rows) == 1, (
+        f"expected exactly one CLAUDE.md startup-table row for {job_id}, "
+        f"found {len(rows)}"
+    )
+
+    assert "not stated" not in rows[0].lower(), (
+        f"CLAUDE.md still tells an operator that {job_id}'s startup run has no "
+        f"stated reason. #156 supplied one -- regenerate the row from the "
+        f"comment block in app/scheduler.py."
     )
 
 

@@ -106,9 +106,56 @@ def test_it_does_not_claim_m2_showed_anything(text):
     assert "forbids the rename" in text
 
 
-def test_the_amendment_record_exists_and_is_empty(text):
-    """Empty is the correct state at version 1.0, and the section has to exist
-    now -- adding it later, beside a first amendment, is how the record starts
-    with the thing it was supposed to have caught."""
+def test_every_amendment_is_in_the_amendment_record(text):
+    """The record has to list the amendments the document actually contains.
+
+    It used to assert the opposite -- that the record still reads "None. This is
+    version 1.0." -- and that assertion outlived its truth. Amendment 1.1 was
+    added on 2026-09-02 and the record went on saying there were none, with this
+    test holding the false sentence in place. A record that cannot disagree with
+    the document is not a record.
+
+    So this reads the amendment headings out of the document and requires each
+    one to appear in the record section, with a date and a reason beside it.
+    Adding an amendment without recording it now fails here.
+    """
     assert "Amendment record" in text
-    assert "None. This is version 1.0." in text
+
+    # Headings look like "## Amendment 1.2 -- ...". The fixture has collapsed
+    # whitespace, so match on the numbered phrase rather than on line starts.
+    amendments = sorted(set(re.findall(r"Amendment (\d+\.\d+)", text)))
+    assert amendments, (
+        "no amendments found in the declaration; if the document genuinely has "
+        "none, this test should be checking that the record says so"
+    )
+
+    record = text.split("Amendment record", 1)[1]
+    missing = [a for a in amendments if a not in record]
+    assert not missing, (
+        f"the declaration contains amendment(s) {missing} that its own record "
+        f"section does not list. The record exists so an amendment cannot be "
+        f"made quietly; leaving one out is the defect it was written against."
+    )
+
+
+def test_the_amendment_record_carries_a_date_and_a_reason_for_each(text):
+    """§6 requires "a new version number, a date, and the reason". A record
+    naming an amendment and nothing else satisfies the letter and not the
+    point."""
+    record = text.split("Amendment record", 1)[1]
+    amendments = sorted(set(re.findall(r"Amendment (\d+\.\d+)", text)))
+
+    for amendment in amendments:
+        # Guarded rather than indexed blind: an amendment missing from the
+        # record is the other test's failure, and it should not surface here as
+        # an IndexError that says nothing about what is wrong.
+        assert amendment in record, (
+            f"amendment {amendment} is not in the record at all; see "
+            f"test_every_amendment_is_in_the_amendment_record"
+        )
+        after = record.split(amendment, 1)[1][:400]
+        assert re.search(r"20\d\d-\d\d-\d\d", after), (
+            f"the record entry for amendment {amendment} carries no date, so it "
+            f"does not meet this document's own rule: a new version number, a "
+            f"date, and the reason"
+        )

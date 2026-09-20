@@ -190,6 +190,9 @@ from app.prom_metrics import (
     sora_drift_detected as sora_drift_detected_total,
     sora_model_promoted as sora_model_promoted_total,
     sora_model_rejected as sora_model_rejected_total,
+    sora_observation_coverage_gap_days,
+    sora_observation_coverage_days_examined,
+    sora_observation_coverage_points_examined,
 )
 
 # The promotion decision, shared with the other caller that promotes. Imported at
@@ -214,58 +217,96 @@ scheduler = BackgroundScheduler(timezone="UTC")
 # first fire time a full interval away, so an interval job left alone does
 # nothing at startup. These are forced with `modify_job(next_run_time=now)`.
 #
-# One of the five has a written reason. The other four were inherited: a6d5ede
-# added the first two under the message "scheduler: run interval
-# ingesters/refresh immediately on startup" with an empty body, and #11 added
-# two more without saying why. Being in the tuple is not the same as having
-# been chosen, and this table says which is which rather than presenting all
-# five as one deliberate contract.
+# All five were kept, and the four that arrived without a reason now have one
+# (#156, decided 2026-09-19). Until then only one did: a6d5ede added the first
+# two under the message "scheduler: run interval ingesters/refresh immediately
+# on startup" with an empty body, and #11 added two more without saying why.
+# Being in the tuple was not the same as having been chosen, so each entry below
+# says what its startup run buys and what it costs. The decision was to supply
+# the missing four rather than drop them: each closes a gap that would otherwise
+# start at a deployment rather than at a schedule, and none of the four costs
+# more than a no-op upsert or a single bounded API pass.
 #
 #   auto_run_ingesters
 #     writes rosstat + sber rows.
-#     why at startup: NOT STATED (a6d5ede).
+#     why at startup: decided in #156. The trigger is IntervalTrigger(hours=24),
+#     so without the startup run the first snapshot pass after a release is up
+#     to a day away and the freshness of rosstat/sber data depends on when the
+#     last deployment happened rather than on the schedule. The cost of closing
+#     that gap is measured at zero rows (see repeat, below).
 #     repeat: safe, measured on production -- an unchanged snapshot yields the
 #     same revision, so the upsert reports inserted=0 and a zero row delta
 #     (#121, acceptance round 2).
 #
 #   auto_refresh_external_data
 #     one World Bank API pass, plus one data_refresh_log row per run.
-#     why at startup: NOT STATED (a6d5ede) -- but the behaviour was known:
-#     app/external_data.py gates the full history pass behind
+#     why at startup: decided in #156. The trigger is IntervalTrigger(hours=6),
+#     so a release would otherwise run for up to six hours on whatever World
+#     Bank values the previous process last wrote. The behaviour was already
+#     designed around: app/external_data.py gates the full history pass behind
 #     SORA_HISTORY_REFRESH *because* this job runs at startup, so that "the
-#     first mass ingestion" is not a side effect of a deployment.
+#     first mass ingestion" is not a side effect of a deployment -- which bounds
+#     the startup cost to one ordinary pass.
 #     repeat: the log row is appended by design; the heavy history pass is off
 #     by default. Quota impact per deploy is one pass, not one per country.
 #
 #   refresh_forecast_metrics
 #     reads, and sets Prometheus gauges.
-#     why at startup: NOT STATED (#11). Plausibly so a scraped dashboard is not
-#     empty for the first 30 seconds, but that is a guess and is labelled one.
+#     why at startup: decided in #156, and kept for the opposite reason to the
+#     others. Its trigger is IntervalTrigger(seconds=30), so the gap it closes
+#     is half a minute and is not worth much on its own -- but it is the only
+#     member of this tuple that neither writes to the database nor calls an
+#     external API, so the objection that each entry costs something per release
+#     does not apply to it at all. Keeping it is free; removing it would buy
+#     nothing.
+#     NB: this job does *not* close the window where the forecast gauges have no
+#     series after a deployment. That window is up to six hours long and belongs
+#     to auto_pretrain_forecast (IntervalTrigger(hours=6)), which is deliberately
+#     not in this tuple -- see the monitoring section of CLAUDE.md and #284.
 #     repeat: safe -- gauges are set, never incremented.
 #
 #   auto_openmeteo_ingestion
 #     one Open-Meteo fetch, writes `observed` rows.
-#     why at startup: NOT STATED (#11).
-#     repeat: derived, not measured -- an observed row's identity is
-#     `{region}_{metric}_{event_time}`, and Open-Meteo timestamps an hour to a
-#     fixed instant, so a second run inside the same hour upserts rather than
-#     inserts.
+#     why at startup: decided in #156, and it is the reason already written for
+#     its air-quality twin below. The two are the same job shape against the same
+#     source on the same IntervalTrigger(hours=1); without the startup run the
+#     first weather rows arrive an hour after a deployment, and a restart made
+#     specifically to check whether the source works shows nothing for an hour.
+#     Only half of that pair was ever written down (#82); this is the other half,
+#     not a new argument.
+#     repeat: measured 2026-09-19, and it does NOT upsert. This line used to
+#     read "derived, not measured" and say that a second run inside the same
+#     hour upserts, on the theory that a row's identity is
+#     `{region}_{metric}_{event_time}` and Open-Meteo timestamps an hour to a
+#     fixed instant. The ingester reads the API's `current` block, whose `time`
+#     advances at 15-minute resolution, so a run 15 minutes after another
+#     carries a different event_time and INSERTS. On production 3620 point-hours
+#     hold more than one row (3620 rows beyond one per hour). The cost of a
+#     startup run is therefore ~210 real rows (21 points x 10 indicators), not
+#     zero -- they are genuine readings of current conditions rather than
+#     duplicates of one instant, which is why this stays a bounded cost and not
+#     a correctness problem.
 #
 #   auto_openmeteo_air_quality_ingestion
 #     one Open-Meteo fetch, writes `observed` rows.
 #     why at startup: STATED (#82) -- without it the first air-quality rows
 #     arrive an hour after a deployment, and a restart made specifically to
 #     check whether the source works shows nothing for an hour.
-#     repeat: same identity rule as above.
+#     repeat: same as above -- it inserts rather than upserts, ~126 rows per
+#     startup run (21 points x 6 indicators).
 #
 # auto_openaq_ingestion is deliberately absent: the job is not registered unless
 # SORA_OPENAQ_ENABLED is set, and an immediate run of a job that does not exist
 # is not an error worth logging.
 #
-# Whether the four unstated entries should stay is #156, not a question for
-# whoever edits this next. Each costs a write or an external call on every
-# release, and "it was already in the tuple" is not a reason; deciding needs the
-# operational intent rather than more archaeology.
+# #156 is closed: all five stay, and the four reasons above were supplied by the
+# decision rather than found by more archaeology -- the commits genuinely do not
+# say why. What was decided is the operational intent, not the history: a gap in
+# ingestion or in external data should start at a schedule, never at a release,
+# and none of the five costs more than a no-op upsert or one bounded API pass.
+#
+# That reasoning is what a sixth entry has to meet. "It was already in the tuple"
+# is still not a reason, and neither is "the other five are there".
 #
 # tests/test_startup_jobs_contract.py pins the membership. Adding a sixth entry
 # has to be a decision rather than something that happens while editing nearby.
@@ -972,6 +1013,77 @@ def scheduled_pretrain_forecast_models():
         lock.release()
 
 
+#: The target the M3 declaration names, and the only one the §7 clock runs on.
+#: Not configurable here on purpose: a job that watched a different series than
+#: the one the clock counts would report healthy accumulation of the wrong
+#: thing. docs/M3_FORECAST_DECLARATION.md §1.
+COVERAGE_WATCH = ("openmeteo", "temperature")
+
+#: Thirty days, matching the endpoint's default. The §7 windows are longer, but
+#: a gauge is a current-state reading: what matters is whether a dip happened
+#: recently enough to still be actionable, and the durable record of older ones
+#: is the table itself.
+COVERAGE_WATCH_DAYS = 30
+
+
+def scheduled_observation_coverage():
+    """Publish how many point-days fell below the M3 coverage floor.
+
+    docs/WHERE_THE_PROJECT_STANDS.md §3A calls this the highest-value work while
+    no forecasting result can be evidential: a day under 80% coverage is a day
+    the §7 gate cannot use, so a quiet dip moves the earliest evidential date --
+    and the clock has been running since 2026-09-03.
+
+    The count already existed at `/api/v1/infra/observations/coverage`. What did
+    not exist was anyone reading it: measured 2026-09-19, no Grafana alert or
+    panel mentioned coverage, no gauge was declared, and nothing called the
+    endpoint. An admin endpoint nobody calls reports a dip to nobody.
+
+    Through `app.api.infra.coverage_report`, not a copy of its query. That SQL
+    decides whether a day counts and has already been corrected once, from
+    counting rows to counting hours (#179, amendment 1.3); a second copy would
+    have gone on answering the old way while the endpoint answered the new one.
+
+    All three numbers are published together. A gap count of 0 means "nothing
+    fell short" or "nothing was looked at", and one gauge cannot tell those
+    apart -- the denominator is what makes the zero readable.
+    """
+    import app.api.infra as infra
+
+    source, indicator = COVERAGE_WATCH
+    try:
+        report = infra.coverage_report(
+            source=source, indicator=indicator, days=COVERAGE_WATCH_DAYS)
+    except Exception as e:
+        # Left unset rather than published as zero. A zero written here would be
+        # indistinguishable from a healthy window, which is the failure this job
+        # exists to prevent rather than to commit.
+        logger.warning("Observation coverage check failed: %s", e)
+        return {"status": "error", "error": str(e)}
+
+    labels = {"source": source, "indicator": indicator}
+    sora_observation_coverage_gap_days.labels(**labels).set(report.gap_count)
+    sora_observation_coverage_days_examined.labels(**labels).set(
+        report.days_examined)
+    sora_observation_coverage_points_examined.labels(**labels).set(
+        report.points_examined)
+
+    if report.gap_count:
+        logger.warning(
+            "M3 coverage: %d point-day(s) below %d observations of %d, across "
+            "%d day(s) and %d point(s) of %s:%s",
+            report.gap_count, report.required_per_day, 24,
+            report.days_examined, report.points_examined, source, indicator,
+        )
+
+    return {
+        "status": "ok",
+        "gap_count": report.gap_count,
+        "days_examined": report.days_examined,
+        "points_examined": report.points_examined,
+    }
+
+
 def refresh_forecast_metrics():
     """Keep Prometheus forecast metrics fresh for Grafana dashboard.
 
@@ -1094,6 +1206,21 @@ def init_scheduler(start: bool = True):
         IntervalTrigger(seconds=30),
         id="refresh_forecast_metrics",
         name="Refresh Prometheus forecast metrics every 30s",
+        replace_existing=True,
+    )
+
+    # Fifteen minutes, not thirty seconds: the value can only change once a day,
+    # because the endpoint excludes today as incomplete by construction. The
+    # interval is short anyway because these are labelled gauges -- no series
+    # exists until the first set, and a restart empties the registry, so the
+    # interval is also how long after a deployment an alert on them cannot fire.
+    # That window is the #284 defect in miniature, and fifteen minutes is the
+    # price of keeping it small for a read-only query.
+    scheduler.add_job(
+        scheduled_observation_coverage,
+        IntervalTrigger(minutes=15),
+        id="auto_observation_coverage",
+        name="Publish M3 observation coverage every 15m",
         replace_existing=True,
     )
 
