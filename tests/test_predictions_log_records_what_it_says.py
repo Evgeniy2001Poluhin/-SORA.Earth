@@ -171,10 +171,18 @@ def test_the_documentation_says_whether_model_version_carries_anything():
     `PredictionLog.model_version` defaults to "v2.0" and the one construction
     never assigns it, so every row carries that string -- and
     `/api/v1/analytics/predictions-log` serves it as though it identified a
-    model. The rows describe `/evaluate`, which runs a hardcoded ESG formula
-    rather than a model at all, so filling it in with the champion's version
-    would be a different error; what is required is that the document says which
-    of the two is true.
+    model.
+
+    This docstring first said the rows "describe `/evaluate`, which runs a
+    hardcoded ESG formula rather than a model at all", and used that to argue
+    the blank was defensible. It is false. `calculate_esg` runs
+    `rf_model.predict_proba` unconditionally and returns `success_probability`;
+    the writer stores `result.get("probability") or result.get("success_probability")`
+    and `calculate_esg` has no `probability` key, so the column holds the
+    serving champion's output. The score is a formula, the probability is not.
+
+    What this test requires is unchanged: that the document states which of the
+    two the column is. The false premise was in the reasoning, not the check.
     """
     constructions = _prediction_log_constructions()
     assert constructions, "no PredictionLog construction found to inspect"
