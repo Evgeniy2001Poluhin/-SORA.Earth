@@ -116,7 +116,17 @@ def test_a_tampered_payload_is_refused_before_decryption(tmp_path, keypair):
     """)
 
     sealed = (tmp_path / "sealed.enc").read_bytes()
-    (tmp_path / "sealed.enc").write_bytes(sealed[:100] + b"\x00" + sealed[101:])
+    # Flip the byte rather than writing a constant. Writing b"\x00" corrupts
+    # nothing whenever byte 100 is already zero -- the session key is fresh per
+    # run, so that byte is effectively uniform and lands on zero about once in
+    # 256 runs (measured: 3 of 400 encryptions). The decrypt then legitimately
+    # succeeds and this test fails, blaming correct code for a tamper that
+    # never happened. XOR always changes the byte; the assertion below makes a
+    # silent no-op impossible to reintroduce. The same file already uses this
+    # idiom for the parameter-tampering test.
+    tampered = sealed[:100] + bytes([sealed[100] ^ 0xFF]) + sealed[101:]
+    assert tampered != sealed, "the tamper must actually change the payload"
+    (tmp_path / "sealed.enc").write_bytes(tampered)
 
     result = bash(f"""
         source scripts/backup_crypt.sh
