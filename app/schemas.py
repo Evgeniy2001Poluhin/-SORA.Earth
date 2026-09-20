@@ -71,7 +71,17 @@ class ESGResult(BaseModel):
     environment_score: float
     social_score: float
     economic_score: float
-    success_probability: float
+    #: NB: this class is wired to no route -- `POST /api/v1/evaluate` declares
+    #: no `response_model`, so nothing here reaches the OpenAPI page and the
+    #: endpoint an ESG user reaches for first publishes no schema at all. The
+    #: description is written anyway, so that whoever wires it does not have to
+    #: rediscover #232 first; `tests/test_the_api_says_what_success_probability_is.py`
+    #: records the gap and goes red the day it is closed.
+    success_probability: float = Field(
+        ..., description=(
+            "Model estimate of a **heuristic** label, not a validated outcome. `success` is derived from a project's administrative status and closing date, and `duration_months` is a second reading of the same fact -- so most of the model's apparent skill is that leak. Measured 2026-09-20: ROC AUC 0.9165 with every feature, 0.8700 from budget and duration alone, 0.6605 with the closing-date-derived column removed. Use it to rank and to explain, not as evidence a project will succeed (#232, resolved as 'retire the quality claim')."
+        )
+    )
     recommendations: list
     risk_level: str
     esg_weights: dict
@@ -410,7 +420,9 @@ class PredictV2Ok(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
     success_probability: float = Field(
-        ..., ge=0.0, le=1.0, description="Probability that the project succeeds."
+        ..., ge=0.0, le=1.0, description=(
+            "Model estimate of a **heuristic** label, not a validated outcome. `success` is derived from a project's administrative status and closing date, and `duration_months` is a second reading of the same fact -- so most of the model's apparent skill is that leak. Measured 2026-09-20: ROC AUC 0.9165 with every feature, 0.8700 from budget and duration alone, 0.6605 with the closing-date-derived column removed. Use it to rank and to explain, not as evidence a project will succeed (#232, resolved as 'retire the quality claim')."
+        )
     )
     predicted_class: int = Field(
         ..., description="1 when the probability is at least 0.5, else 0."

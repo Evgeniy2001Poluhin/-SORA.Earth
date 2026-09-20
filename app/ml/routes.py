@@ -25,7 +25,11 @@ class PredictRequest(BaseModel):
 
 
 class PredictResponse(BaseModel):
-    success_probability: float
+    success_probability: float = Field(
+        ..., description=(
+            "Model estimate of a **heuristic** label, not a validated outcome. `success` is derived from a project's administrative status and closing date, and `duration_months` is a second reading of the same fact -- so most of the model's apparent skill is that leak. Measured 2026-09-20: ROC AUC 0.9165 with every feature, 0.8700 from budget and duration alone, 0.6605 with the closing-date-derived column removed. Use it to rank and to explain, not as evidence a project will succeed (#232, resolved as 'retire the quality claim')."
+        )
+    )
     success_class: int
     model_version: str
     model_name: str = "esg-success-predictor"
