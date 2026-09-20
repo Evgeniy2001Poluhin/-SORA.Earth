@@ -134,9 +134,16 @@ def test_two_runs_over_the_same_snapshot_agree():
     """Reproducible is the word in the exit criterion.
 
     The baselines are deterministic; the bootstrap confidence interval is not
-    unless it is seeded. `evaluation.bootstrap_ci` takes a seed for exactly this
-    reason, and a report that varies between runs over one snapshot cannot be
-    the artefact phase 6 asks for.
+    unless it is seeded. `EvaluationReport.confidence_interval(..., seed=0)`
+    takes one for exactly this reason, and a report that varies between runs
+    over one snapshot cannot be the artefact phase 6 asks for.
+
+    This named `evaluation.bootstrap_ci`, which that module does not define --
+    the only `bootstrap_ci` in the repository is in `scripts/ablation_harness.py`
+    and takes `(values, alpha)` with no seed at all. A reader checking the
+    reproducibility argument by grepping the named symbol would have found
+    nothing, which is the defect `tests/test_docs_point_at_real_symbols.py`
+    exists for (#292).
     """
     rows = _series(days=200)
 
