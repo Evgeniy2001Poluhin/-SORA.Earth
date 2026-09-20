@@ -1,10 +1,26 @@
 """Reading country_indicator_history as of a past moment.
 
-Issue #75. The table already holds what is needed: `fetched_at` is populated on
-every row (95,024 in production across 542 fetch times), the refresh in
-app/external_data.py only inserts, and nothing deletes. So a point-in-time
-answer is a query, not a new table -- the vintage of every value is already
-recorded, and no consumer has ever asked for it.
+Issue #75. The table's *shape* is what makes this possible: `fetched_at` is
+populated on every row, the refresh in app/external_data.py only inserts, and
+nothing deletes. So a point-in-time answer is a query, not a new table -- the
+vintage of every value is recorded, and no consumer has ever asked for it.
+
+This used to quote "95,024 in production across 542 fetch times". That database
+was deleted for non-payment in 2026-08 and the figure described nothing
+afterwards. **On the rebuilt production the table is empty**, measured
+2026-09-19: `SORA_HISTORY_REFRESH` is unset there, so the gated history pass in
+app/external_data.py has been skipped by every scheduled refresh, and the
+one-shot in scripts/refresh_indicator_history.py has not been re-run since the
+rebuild. See #164 and #75.
+
+Count it rather than reading a number here:
+
+    SELECT count(*), count(DISTINCT fetched_at) FROM country_indicator_history;
+
+An empty table makes every `as_of` answer empty. Nothing consumes it today --
+the single reader is the gdp_growth regressor in
+app/services/forecasting/features.py, reached only through LSTMForecaster, which
+is inactive on production (`sora_forecast_lstm_active` is 0 in both processes).
 
 The distinction this module exists to make:
 

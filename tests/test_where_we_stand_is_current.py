@@ -52,14 +52,35 @@ def test_the_phase_plan_is_not_superseded(text):
 
 def test_the_dates_are_the_gate_arithmetic(text):
     """Typed dates drift from the constants they came from. These are checked
-    against the gate, so the plan cannot outlive its own premise."""
+    against the gate, so the plan cannot outlive its own premise.
+
+    The start is **read out of the declaration**, not typed here. It used to be
+    `date(2026, 8, 14)`, hardcoded -- and it outlived the clock it came from:
+    Amendment 1.1 voided that start on 2026-09-02, and this test went on
+    requiring the two dates derived from it, while the roadmap's own test was
+    simultaneously forbidding them. Two documents about one clock, with opposite
+    requirements, because the start was written down twice.
+    """
+    import re as _re
     from datetime import date, timedelta
 
     from app.services.forecasting.entry_conditions import (
         REQUIRED_WINDOWS, TRAINING_DAYS,
     )
 
-    start = date(2026, 8, 14)
+    declaration = open(
+        os.path.join(REPO_ROOT, "docs", "M3_FORECAST_DECLARATION.md"),
+        encoding="utf-8",
+    ).read()
+    header = _re.search(
+        r"clock start \(§7\)\s+(\d{4}-\d{2}-\d{2})", declaration)
+    assert header, (
+        "docs/M3_FORECAST_DECLARATION.md does not state a clock start in its "
+        "header block. If the clock is void again, this test has to say so "
+        "rather than compute dates from a start that does not exist."
+    )
+    start = date.fromisoformat(header.group(1))
+
     for horizon in (7, 30):
         due = start + timedelta(
             days=TRAINING_DAYS[horizon] + REQUIRED_WINDOWS * horizon)
@@ -91,3 +112,41 @@ def test_what_not_to_do_is_present(text):
 def test_it_says_what_would_make_it_stale(text):
     """Without this the file becomes the sixth confident plan with no expiry."""
     assert "What would make this file stale" in text
+
+
+def test_the_confidence_bound_is_described_as_it_is_in_the_code(text):
+    """Both directions, because either drift is a different wrong document.
+
+    §3B listed "a confidence bound in the promotion gate" as work still to do,
+    and §5 listed the decision as a human's to make, long after
+    `app/promotion.py` had shipped exactly that -- refusing on the 95% lower
+    bound through `clears_threshold` rather than on the point estimate. A
+    document that lists a decision already taken invites it to be taken again,
+    differently, which is the thing M2's §9 exists to prevent.
+
+    Bound to the source rather than to a copy of the answer: the check reads
+    whether the gate actually calls `clears_threshold`, and requires the prose
+    to agree in whichever direction that goes.
+    """
+    promotion = open(
+        os.path.join(REPO_ROOT, "app", "promotion.py"), encoding="utf-8").read()
+    gate_uses_lower_bound = "clears_threshold(" in promotion
+
+    claims_shipped = "this shipped" in text
+
+    if gate_uses_lower_bound:
+        assert claims_shipped, (
+            "app/promotion.py refuses on the confidence lower bound, and this "
+            "document still describes that as outstanding work"
+        )
+        assert "the gate cannot tell" not in text, (
+            "the document says the gate cannot tell 0.81 from 0.80 on a small "
+            "test set; clears_threshold is exactly what tells them apart"
+        )
+    else:
+        assert not claims_shipped, (
+            "the document says the confidence bound shipped, but "
+            "app/promotion.py no longer calls clears_threshold -- so either the "
+            "gate was weakened or the call was renamed, and the document is now "
+            "claiming a refusal that does not happen"
+        )
