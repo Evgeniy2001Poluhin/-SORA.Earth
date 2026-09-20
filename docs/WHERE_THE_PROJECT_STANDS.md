@@ -115,9 +115,25 @@ has a §9 and why M3 was declared before accumulation counted.
   ESG *classification*. It is meaningless for a temperature forecast, where the
   measure is MAE against seasonal naive. Nothing currently stops the number
   being applied across tasks.
-- **A confidence bound in the promotion gate.** Today a model is promoted on an
-  absolute floor plus non-degradation. 0.81 against 0.80 on a small test set is
-  noise, and the gate cannot tell.
+- ~~**A confidence bound in the promotion gate.**~~ **Done — this shipped, and
+  the paragraph describing it as pending outlived the code.** `app/promotion.py`
+  refuses on the 95% **lower bound** via `clears_threshold`, not on the point
+  estimate; the comment there works the same example this bullet used, AUC 0.81
+  measured on 171 rows having a lower bound of 0.746. The point estimate is used
+  only when `test_positive`/`test_negative` are absent, which is true only of
+  rows written before the field existed — an old run is judged by the rule in
+  force when it was written rather than refused for lacking a field it could not
+  have had.
+
+- **Metric per task, still unguarded — and still latent.** Nothing stops
+  `MIN_AUC_THRESHOLD` being applied to a task it does not describe, and nothing
+  does so today: counted 2026-09-19, the constant is referenced only inside
+  `app/promotion.py`, and the gate is reached from exactly two ESG-retrain call
+  sites (`app/api/infra.py`, `app/scheduler.py`). No forecast path routes
+  through it, because no forecast is promoted at all yet. The guard belongs with
+  the first forecast promotion; writing it now would be building the consumer
+  before the thing it consumes, which §4 below warns against in the same
+  breath.
 
 ### C. Close what does not depend on the clock
 
@@ -148,8 +164,9 @@ Stated because each is plausible and each would cost more than it returns.
 - Whether the experiment is ever promoted to product. Until then the ESG
   platform is what the project is.
 - Whether M3 v1.1 is adopted, and before which date.
-- Whether the promotion gate should refuse on a confidence bound, which will
-  reject models it currently accepts.
+- ~~Whether the promotion gate should refuse on a confidence bound.~~ Decided
+  and shipped; see §3B. Listing a decision that has already been made invites it
+  to be made again, differently.
 
 ## 6. What would make this file stale
 
