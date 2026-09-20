@@ -158,17 +158,24 @@ _RETROSPECTIVE_SUFFIX = re.compile(
 )
 
 #: `"..."` and the guillemets CLAUDE.md and the Russian-language issues use --
-#: but only when a quoting verb introduces the quote. Blanket-stripping every
-#: quoted span was tried first and broke on
+#: but only when a quoting verb or an em-dash aside introduces the quote.
+#: Blanket-stripping every quoted span was tried first and broke on
 #: `tests/test_state_changing_route_authz.py`: its GAP registry is a Python
 #: dict whose *values* are the citations this file exists to judge, quoted
 #: only because Python string literals are, and stripping them erased the
-#: defect this file was written to catch. `read "..."` /
-#: `says "..."` and friends are the actual shape of a historical quotation --
-#: `tests/test_ab_deep.py`'s "the xfail here read '...pending v0.2.2'" is the
-#: case this exists for -- and gating on the verb keeps the two apart.
+#: defect this file was written to catch. `read "..."` / `says "..."` and
+#: friends are one real shape -- `tests/test_ab_deep.py`'s "the xfail here
+#: read '...pending v0.2.2'" is the case this exists for. `-- "..." --` is
+#: the other: CLAUDE.md's own self-correction idiom ("This sentence first
+#: deferred it to #199 -- 'the same double-row shape #199 carries and is
+#: fixed with it, not separately' -- and #199 was closed...", added by #354
+#: fixing the very defect this file catches) quotes the wrong wording being
+#: corrected between em-dashes, no verb involved -- found only once this file
+#: was run against the corpus that now contains it.
 _QUOTED_AFTER_VERB = re.compile(
-    r'\b(?:read|reads|says|said|claimed|wrote)\s+("[^"]*"|«[^»]*»)', re.IGNORECASE
+    r'\b(?:read|reads|says|said|claimed|wrote)\s+("[^"]*"|«[^»]*»)'
+    r'|[-–—]{1,2}\s*("[^"]*"|«[^»]*»)\s*[-–—]{1,2}',
+    re.IGNORECASE,
 )
 
 #: Derived from the corpus (see the module docstring's Trap 2), not invented:
@@ -198,7 +205,14 @@ def tracked_files() -> list[Path]:
         ["git", "ls-files", "*.md", "app/*.py", "tests/*.py"],
         cwd=REPO, capture_output=True, text=True, check=True,
     )
-    return sorted((REPO / line for line in out.stdout.splitlines() if line), key=str)
+    paths = (REPO / line for line in out.stdout.splitlines() if line)
+    # This file itself quotes the four real defects verbatim and cites #354
+    # by way of explaining them -- the one file guaranteed to trip its own
+    # rule by doing its job. The sibling line-pointer guard exempts
+    # `ENVIRONMENTAL_BASELINE_AUDIT.md` for the identical reason: a document
+    # (here, a test module) whose whole content is examples of the pattern
+    # being judged is not evidence of the defect it quotes.
+    return sorted((p for p in paths if p != Path(__file__).resolve()), key=str)
 
 
 def prose_only(text: str) -> str:
