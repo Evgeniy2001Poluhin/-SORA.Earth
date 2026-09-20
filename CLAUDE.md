@@ -148,7 +148,7 @@ app/
 **Key files:**
 - `app/main.py` → `make_features()` builds the 9-column frame the RF model expects
 - `app/main.py` → `calculate_esg()` computes ESG scores + region-aware recommendations
-- `app/scheduler.py` - Thirteen scheduled jobs; see the table below. Drift is
+- `app/scheduler.py` - Fourteen scheduled jobs; see the table below. Drift is
   checked inside the daily closed loop, not by a job of its own.
 - `app/drift_detection.py` - KS-test drift detection. It returns a verdict and
   writes nothing: the file holds no session, no `INSERT` and no table name.
@@ -199,6 +199,7 @@ regenerate this; do not hand-edit the table.**
 | id | trigger | function |
 |---|---|---|
 | `refresh_forecast_metrics` | `IntervalTrigger(seconds=30)` | `refresh_forecast_metrics` |
+| `auto_observation_coverage` | `IntervalTrigger(minutes=15)` | `scheduled_observation_coverage` |
 | `health_ping` | `IntervalTrigger(minutes=5)` | *(inline lambda -- records a health row)* |
 | `auto_source_health_check` | `IntervalTrigger(minutes=15)` | `scheduled_source_health_check` |
 | `auto_openmeteo_ingestion` | `IntervalTrigger(hours=1)` | `scheduled_openmeteo_ingestion` |
@@ -214,8 +215,8 @@ regenerate this; do not hand-edit the table.**
 
 <!-- END SCHEDULED JOBS -->
 
-Thirteen jobs, twelve of them unconditional. There is **no** separate drift-check
-job: drift is checked inside `closed_loop_retrain`, once a day.
+Fourteen jobs, thirteen of them unconditional. There is **no** separate
+drift-check job: drift is checked inside `closed_loop_retrain`, once a day.
 
 **What the closed loop does** (`app/scheduler.py:closed_loop_retrain`):
 
@@ -232,8 +233,15 @@ job: drift is checked inside `closed_loop_retrain`, once a day.
   bound** of its AUC must clear 0.80 -- not the point estimate, since 0.85
   measured on 171 rows has a lower bound of 0.78 -- the run must have
   registered the model in MLflow, and it must not be more than 0.02 below what
-  is already serving. Any one of the three rejects it. The closed loop applies
-  all three; `POST /mlops/auto-retrain` currently applies only the last.
+  is already serving. Any one of the three rejects it. **Both gated paths apply
+  all three** -- the closed loop and `POST /mlops/auto-retrain` each call
+  `app.promotion.gated_decision`, which adds a fourth refusal of its own: it
+  declines when the serving model's own score cannot be read, rather than
+  comparing against the newest training row (#329).
+
+  > This said: "The closed loop applies all three; `POST /mlops/auto-retrain`
+  > currently applies only the last." True once, and false since the two paths
+  > were brought onto one gate.
 - Decision logged to the `retrain_log` table.
 
 **Manual triggers:** `/api/v1/model/retrain`, `/api/v1/mlops/full-pipeline` (admin only)
@@ -508,14 +516,17 @@ Optional:
 
    | job | side effect | why at startup | repeating it |
    |---|---|---|---|
-   | `auto_run_ingesters` | rosstat + sber rows | **not stated** (a6d5ede) | safe, measured: same revision → `inserted=0`, zero row delta (#121) |
-   | `auto_refresh_external_data` | World Bank pass + one `data_refresh_log` row | **not stated** (a6d5ede); the behaviour was known — the full history pass is gated behind `SORA_HISTORY_REFRESH` *because* this runs at startup | log row appended by design; heavy history pass off by default |
-   | `refresh_forecast_metrics` | reads, sets Prometheus gauges | **not stated** (#11) | safe — gauges are set, never incremented |
-   | `auto_openmeteo_ingestion` | one Open-Meteo fetch, `observed` rows | **not stated** (#11) | derived: identity is `{region}_{metric}_{event_time}`, so a repeat inside the same hour upserts |
-   | `auto_openmeteo_air_quality_ingestion` | one Open-Meteo fetch, `observed` rows | **stated** (#82): otherwise the first rows arrive an hour after a deploy, and a restart to check the source shows nothing for an hour | same identity rule |
+   | `auto_run_ingesters` | rosstat + sber rows | **decided** (#156): the trigger is 24h, so without it the first snapshot pass after a release is up to a day away and freshness depends on when the last deploy happened | safe, measured: same revision → `inserted=0`, zero row delta (#121) |
+   | `auto_refresh_external_data` | World Bank pass + one `data_refresh_log` row | **decided** (#156): the trigger is 6h, so a release would otherwise serve up to six hours on the previous process's values; the full history pass is gated behind `SORA_HISTORY_REFRESH` *because* this runs at startup, which bounds the cost to one ordinary pass | log row appended by design; heavy history pass off by default |
+   | `refresh_forecast_metrics` | reads, sets Prometheus gauges | **decided** (#156), for the opposite reason to the others: its trigger is 30s so the gap is negligible, but it is the only entry that neither writes nor calls out, so keeping it is free. It does **not** close the 6h empty-series window — that is `auto_pretrain_forecast`, deliberately not here | safe — gauges are set, never incremented |
+   | `auto_openmeteo_ingestion` | one Open-Meteo fetch, `observed` rows | **decided** (#156): the same argument as its air-quality twin below — same source, same 1h trigger — of which only one half had been written down | **inserts, measured** — the ingester reads the API's `current` block, whose `time` moves at 15-minute resolution, so a second run 15+ minutes later writes a new row. 3620 point-hours on production hold more than one row; a startup run costs ~210 rows (21 points x 10 indicators) |
+   | `auto_openmeteo_air_quality_ingestion` | one Open-Meteo fetch, `observed` rows | **stated** (#82): otherwise the first rows arrive an hour after a deploy, and a restart to check the source shows nothing for an hour | same as above: inserts, ~126 rows per startup run (21 points x 6 indicators) |
 
-   One of the five has a written reason; four were inherited. Being in the tuple
-   is not the same as having been chosen — whether the four should stay is #156.
+   All five are chosen, and #156 is closed. One reason was written when the job
+   was added (#82); the other four were supplied by the decision of 2026-09-19,
+   because the commits that added them genuinely say nothing. What was decided is
+   the operational intent — a gap in ingestion or external data should start at a
+   schedule, never at a release — and it is what a sixth entry has to meet.
 
    **What this means for acceptance.** The listed startup jobs may write during
    the deployment window. Attribute any change through `ingester_runs`, `source`
@@ -569,11 +580,19 @@ Optional:
    candidates there with `app/model_source.py` → `prune_staged()`, which spares
    the one the champion was activated from (#326). The one way into
    `runtime/active/` is `app/model_source.py` → `activate()`, and its one
-   caller is `app/scheduler.py` → `closed_loop_retrain()`, after the promotion
-   gate passes -- reached by the daily and weekly jobs and by the routes that
-   run the closed loop. Every other way to start a retrain stages and stops.
-   `POST /api/v1/mlops/auto-retrain` is the one that misleads: it applies the
-   same gate and records `promoted` in `retrain_log`, and never activates.
+   caller is `app/model_loader.py` → `activate_promoted_candidate()`. **Two**
+   paths reach that helper, both after `gated_decision` passes:
+   `app/scheduler.py` → `closed_loop_retrain()` (the daily and weekly jobs, and
+   the routes that run the closed loop) and `app/api/infra.py` →
+   `auto_retrain_on_drift()`, which serves `POST /api/v1/mlops/auto-retrain`.
+   Every other way to start a retrain stages and stops.
+
+   > This said `activate()`'s one caller was `closed_loop_retrain()`, and that
+   > `POST /api/v1/mlops/auto-retrain` "is the one that misleads: it applies the
+   > same gate and records `promoted` in `retrain_log`, and never activates."
+   > Both halves were true before the route was brought onto the same helper,
+   > and neither is now. An endpoint documented as a silent no-op is one nobody
+   > uses and someone eventually re-implements.
 
    **A process keeps the champion it loaded.** Each `backend` worker loads it
    once, when the worker starts. `app/model_loader.py` → `reload_champion()`
@@ -674,19 +693,36 @@ Optional:
   otherwise, which is how the two were confused for months.
 
 - **The scheduler publishes its own** on `scheduler:9000/metrics`, scraped as a
-  separate Prometheus job (#267). Eleven `sora_*` metrics are written only in
-  that container — `sora_retrain_total`, `sora_full_pipeline_total`, the four
-  forecast gauges and the five environmental ones — and until that target
-  existed the process served no HTTP, so every one of them was set into memory
-  nobody read and lost on the next restart. Its own job name rather than a
-  second target under `sora-app`: both processes publish metrics of the same
-  names.
+  separate Prometheus job (#267). **Sixteen** `sora_*` metrics are written only
+  in that container, and until that target existed the process served no HTTP,
+  so every one of them was set into memory nobody read and lost on the next
+  restart.
+
+  This said "Eleven", enumerated as `sora_retrain_total`,
+  `sora_full_pipeline_total`, the four forecast gauges and the five
+  environmental ones. Counted 2026-09-19, the set was thirteen even then: the
+  enumeration silently omitted `sora_drift_detected_total` and
+  `sora_external_refresh_total`, both of which the key-metrics table below
+  names as scheduler-written. The three observation-coverage gauges make
+  sixteen.
+
+  Do not trust this number either — derive it:
+
+  ```
+  python -c "import sys; sys.path.insert(0,'tests'); \
+    from test_scheduler_metrics_are_scraped import _writers_by_metric, SCHEDULER_MODULES; \
+    w=_writers_by_metric(); \
+    print(sorted(m for m,f in w.items() if f and all(x.startswith(SCHEDULER_MODULES) for x in f)))"
+  ```
+
+  Its own job name rather than a second target under `sora-app`: both
+  processes publish metrics of the same names.
 
   No multiprocess directory there. It is one process, and
   `app/scheduler_metrics.py` refuses to serve if `PROMETHEUS_MULTIPROC_DIR` is
   set rather than publishing whichever files it happens to find.
 
-  **Four of those eleven are absent for up to six hours after every
+  **Four of those sixteen are absent for up to six hours after every
   deployment**, and it is not a fault. `sora_forecast_mae_current`,
   `_rmse_current`, `_r2_current` and `_mape_current` are labelled gauges: a
   series exists only once something calls `.labels(...).set(...)`. The only

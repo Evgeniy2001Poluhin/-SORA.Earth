@@ -116,8 +116,13 @@ class FeatureEngineer:
         neither could anyone reading the frame. Declaring a regressor the
         platform does not have is worse than declaring one fewer.
 
-        `gdp_growth` stays: it carries real data after #96, verified across
-        all 30 countries on production with variance > 0.
+        `gdp_growth` stays -- but on the rebuilt production it carries
+        nothing. The verification behind that decision ("#96, across all 30
+        countries with variance > 0") was run against the database deleted in
+        2026-08. `country_indicator_history` is empty on the current server
+        (measured 2026-09-19, #164), so this regressor is all zeros there until
+        the history is restored. The warning below is what says so, and it is
+        the only thing that will.
 
         Args:
             df: Input DataFrame with 'ds' column
