@@ -89,6 +89,19 @@ lost out of sixteen is inside the 80% floor and costs nothing yet; the point is
 that the instrument did not see them, so a run of such days would also be
 invisible.
 
+**Half of this gap is now closed, and it is worth being precise about which
+half.** `auto_observation_coverage` runs every 15 minutes in the scheduler and
+publishes three gauges — `sora_observation_coverage_gap_days`,
+`_days_examined` and `_points_examined`, the last two being the denominator
+that tells "no day fell short" from "no day was examined". The count is
+therefore queryable, graphable and alertable instead of living only behind an
+admin endpoint nobody called.
+
+What is **not** done is the alerting rule. A gauge in Prometheus still requires
+someone to look, and choosing when a dip is worth waking someone for is the
+same kind of decision as the five forecast alerts in #284 — the owner's, not a
+side effect of adding the metric.
+
 ### B. Make the eventual measurement trustworthy — before it runs
 
 Decisions made after results are visible are choices of results. That is why M2

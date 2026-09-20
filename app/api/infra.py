@@ -949,6 +949,20 @@ def observation_coverage(
     reporting it would put one guaranteed gap in every response -- an alert
     that fires every day is one nobody reads.
     """
+    return coverage_report(source=source, indicator=indicator, days=days)
+
+
+def coverage_report(source: str = "openmeteo",
+                    indicator: str = "temperature",
+                    days: int = 30) -> ObservationCoverage:
+    """The query behind the route, callable without a request.
+
+    Separated so the scheduler can publish these numbers as metrics without
+    carrying a second copy of the SQL. The endpoint's query is what decides
+    whether a day counts, and it has already had to be corrected once -- from
+    counting rows to counting hours. A copy would have kept the old answer
+    while the endpoint served the new one, and nothing would have said so.
+    """
     from sqlalchemy import text
 
     from app.database import SessionLocal

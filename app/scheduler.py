@@ -190,6 +190,9 @@ from app.prom_metrics import (
     sora_drift_detected as sora_drift_detected_total,
     sora_model_promoted as sora_model_promoted_total,
     sora_model_rejected as sora_model_rejected_total,
+    sora_observation_coverage_gap_days,
+    sora_observation_coverage_days_examined,
+    sora_observation_coverage_points_examined,
 )
 
 # The promotion decision, shared with the other caller that promotes. Imported at
@@ -972,6 +975,77 @@ def scheduled_pretrain_forecast_models():
         lock.release()
 
 
+#: The target the M3 declaration names, and the only one the §7 clock runs on.
+#: Not configurable here on purpose: a job that watched a different series than
+#: the one the clock counts would report healthy accumulation of the wrong
+#: thing. docs/M3_FORECAST_DECLARATION.md §1.
+COVERAGE_WATCH = ("openmeteo", "temperature")
+
+#: Thirty days, matching the endpoint's default. The §7 windows are longer, but
+#: a gauge is a current-state reading: what matters is whether a dip happened
+#: recently enough to still be actionable, and the durable record of older ones
+#: is the table itself.
+COVERAGE_WATCH_DAYS = 30
+
+
+def scheduled_observation_coverage():
+    """Publish how many point-days fell below the M3 coverage floor.
+
+    docs/WHERE_THE_PROJECT_STANDS.md §3A calls this the highest-value work while
+    no forecasting result can be evidential: a day under 80% coverage is a day
+    the §7 gate cannot use, so a quiet dip moves the earliest evidential date --
+    and the clock has been running since 2026-09-03.
+
+    The count already existed at `/api/v1/infra/observations/coverage`. What did
+    not exist was anyone reading it: measured 2026-09-19, no Grafana alert or
+    panel mentioned coverage, no gauge was declared, and nothing called the
+    endpoint. An admin endpoint nobody calls reports a dip to nobody.
+
+    Through `app.api.infra.coverage_report`, not a copy of its query. That SQL
+    decides whether a day counts and has already been corrected once, from
+    counting rows to counting hours (#179, amendment 1.3); a second copy would
+    have gone on answering the old way while the endpoint answered the new one.
+
+    All three numbers are published together. A gap count of 0 means "nothing
+    fell short" or "nothing was looked at", and one gauge cannot tell those
+    apart -- the denominator is what makes the zero readable.
+    """
+    import app.api.infra as infra
+
+    source, indicator = COVERAGE_WATCH
+    try:
+        report = infra.coverage_report(
+            source=source, indicator=indicator, days=COVERAGE_WATCH_DAYS)
+    except Exception as e:
+        # Left unset rather than published as zero. A zero written here would be
+        # indistinguishable from a healthy window, which is the failure this job
+        # exists to prevent rather than to commit.
+        logger.warning("Observation coverage check failed: %s", e)
+        return {"status": "error", "error": str(e)}
+
+    labels = {"source": source, "indicator": indicator}
+    sora_observation_coverage_gap_days.labels(**labels).set(report.gap_count)
+    sora_observation_coverage_days_examined.labels(**labels).set(
+        report.days_examined)
+    sora_observation_coverage_points_examined.labels(**labels).set(
+        report.points_examined)
+
+    if report.gap_count:
+        logger.warning(
+            "M3 coverage: %d point-day(s) below %d observations of %d, across "
+            "%d day(s) and %d point(s) of %s:%s",
+            report.gap_count, report.required_per_day, 24,
+            report.days_examined, report.points_examined, source, indicator,
+        )
+
+    return {
+        "status": "ok",
+        "gap_count": report.gap_count,
+        "days_examined": report.days_examined,
+        "points_examined": report.points_examined,
+    }
+
+
 def refresh_forecast_metrics():
     """Keep Prometheus forecast metrics fresh for Grafana dashboard.
 
@@ -1094,6 +1168,21 @@ def init_scheduler(start: bool = True):
         IntervalTrigger(seconds=30),
         id="refresh_forecast_metrics",
         name="Refresh Prometheus forecast metrics every 30s",
+        replace_existing=True,
+    )
+
+    # Fifteen minutes, not thirty seconds: the value can only change once a day,
+    # because the endpoint excludes today as incomplete by construction. The
+    # interval is short anyway because these are labelled gauges -- no series
+    # exists until the first set, and a restart empties the registry, so the
+    # interval is also how long after a deployment an alert on them cannot fire.
+    # That window is the #284 defect in miniature, and fifteen minutes is the
+    # price of keeping it small for a read-only query.
+    scheduler.add_job(
+        scheduled_observation_coverage,
+        IntervalTrigger(minutes=15),
+        id="auto_observation_coverage",
+        name="Publish M3 observation coverage every 15m",
         replace_existing=True,
     )
 
