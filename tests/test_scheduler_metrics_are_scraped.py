@@ -1,6 +1,6 @@
 """The scheduler's metrics have to leave the scheduler (#267).
 
-Eleven `sora_*` metrics are written **only** in the scheduler container --
+Sixteen `sora_*` metrics are written **only** in the scheduler container --
 `sora_retrain_total`, `sora_full_pipeline_total`, the four forecast gauges and
 the five environmental ones. `run_scheduler.py` served no HTTP and
 `infra/prometheus.yml` named one target, `backend:8000`, so each of them was
