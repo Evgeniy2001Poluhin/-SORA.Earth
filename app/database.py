@@ -633,9 +633,12 @@ def count_physical_runs(db, status=None, since=None) -> int:
 #: training's own outcome, otherwise `running`.
 #:
 #: `registry_status` deliberately does not move `status` here. Making a failed
-#: registration visible in the top-level status is a contract change that
-#: belongs with #189 and #198, not with this split -- doing both at once would
-#: make it impossible to tell which change altered a figure.
+#: registration visible in the top-level status is a contract change of its
+#: own, kept out of this split -- doing both at once would make it impossible
+#: to tell which change altered a figure. #189 (closed 2026-09-04) and #198
+#: (a superseded pull request) are where the underlying registration bug was
+#: found and first attempted, not where this specific change is tracked;
+#: nothing currently is.
 def project_status(training_status=None, registry_status=None,
                    promotion_status=None) -> str:
     if promotion_status in ("promoted", "rejected"):
