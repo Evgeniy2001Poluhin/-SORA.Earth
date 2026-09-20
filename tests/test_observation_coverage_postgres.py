@@ -47,6 +47,28 @@ def _fill(engine, day_offset, region, count):
             })
 
 
+def _fill_at(engine, day_offset, region, minutes_past_midnight):
+    """Observations at arbitrary offsets within one past UTC day.
+
+    `_fill` above puts exactly one row in each hour, so it cannot tell a day
+    covered by 20 hours from a day covered by 20 rows crammed into 18 -- and
+    those are the two states this endpoint exists to distinguish. The ingester
+    produces the second: it reads Open-Meteo's `current` block, whose `time`
+    moves at 15-minute resolution, so two runs more than 15 minutes apart in one
+    hour write two rows. Every deployment causes such a run, because
+    auto_openmeteo_ingestion is in RUN_IMMEDIATELY_ON_STARTUP.
+    """
+    base = (datetime.now(timezone.utc) - timedelta(days=day_offset)
+            ).replace(hour=0, minute=0, second=0, microsecond=0)
+    with engine.begin() as conn:
+        for index, minutes in enumerate(minutes_past_midnight):
+            conn.execute(INSERT, {
+                "region": region,
+                "rid": f"{region}-{day_offset}-at-{index}",
+                "event_time": base + timedelta(minutes=minutes),
+            })
+
+
 def _coverage(engine, **params):
     import app.api.infra as infra
     import app.database as database
@@ -141,3 +163,58 @@ def test_another_source_is_not_counted(scratch_db):
 
     assert result.gap_count == 0
     assert result.days_examined == 0
+
+
+@requires_postgres
+def test_a_day_thin_in_hours_is_reported_though_it_has_enough_rows(scratch_db):
+    """The defect this endpoint was reported to have, measured on production.
+
+    Twenty rows, and every one of them real -- but they fall in eighteen
+    distinct hours, because two hours were sampled twice. Counting rows the day
+    passes at 20 >= 19; counting hours it is short at 18, six hours of the day
+    are missing, and §3 of the M3 declaration says the day is absent.
+
+    On production 2026-09-19 this was not hypothetical: over the first sixteen
+    days of the restarted clock, 2026-09-09, 2026-09-10 and 2026-09-14 each had
+    a point below the rule in hours and at or above it in rows, so the endpoint
+    reported nothing. 3620 point-hours held more than one row.
+    """
+    engine, _ = scratch_db
+    # 18 distinct hours; hours 0 and 1 sampled twice, 15 minutes apart.
+    minutes = [h * 60 for h in range(18)] + [15, 75]
+    assert len(minutes) == 20
+    assert len({m // 60 for m in minutes}) == 18
+    _fill_at(engine, 2, "RU-MOW", minutes)
+
+    result = _coverage(engine, source="openmeteo", indicator="temperature", days=30)
+
+    assert result.gap_count == 1, (
+        "a day covering 18 of 24 hours was not reported, because its 20 rows "
+        "cleared a threshold meant for hours. This is the failure mode that "
+        "makes a quiet dip in coverage invisible while it moves the M3 date."
+    )
+    assert result.gaps[0].observations == 18, (
+        f"the report says {result.gaps[0].observations}, which is the row count; "
+        f"the number that decides whether the day is usable is the hour count"
+    )
+
+
+@requires_postgres
+def test_repeated_samples_do_not_manufacture_a_complete_day(scratch_db):
+    """The same defect at its worst: enough rows, almost none of the day.
+
+    Nineteen rows inside four hours. By rows it is a complete day; by hours it
+    covers a sixth of one. Without this, a test suite could pass on an endpoint
+    that counts anything at all, as long as it counted enough of it.
+    """
+    engine, _ = scratch_db
+    minutes = [h * 60 + m for h in range(4) for m in (0, 12, 24, 36, 48)][:19]
+    assert len(minutes) == 19
+    assert len({m // 60 for m in minutes}) == 4
+    _fill_at(engine, 3, "RU-SPE", minutes)
+
+    result = _coverage(engine, source="openmeteo", indicator="temperature", days=30)
+
+    assert result.gap_count == 1
+    assert result.gaps[0].observations == 4
+    assert result.complete_days == 0
