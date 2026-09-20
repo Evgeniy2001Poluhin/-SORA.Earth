@@ -24,15 +24,20 @@ ROADMAP = os.path.join(REPO_ROOT, "docs", "DEVELOPMENT_ROADMAP.md")
 #: The M3 clock start, declared in docs/M3_FORECAST_DECLARATION.md. Not derived
 #: from anything in code, so it is stated once here and nowhere else.
 #:
-#: **None means the clock is void.** Amendment 1.1 of the declaration voided it
-#: on 2026-09-02: the production server was deleted for non-payment and the
-#: accumulated observations went with it, so there is no start to count from
-#: until collection resumes and a first qualifying day is measured.
+#: **None means the clock is void**, which it was between Amendment 1.1
+#: (2026-09-02, the production server was deleted for non-payment and the
+#: accumulated observations went with it) and Amendment 1.2.
 #:
 #: While it is None the checks below invert: the roadmap must carry **no**
 #: evidential date at all. A date quoted against a void clock is not merely
 #: stale, it is unfounded — nothing has started that it could be counted from.
-CLOCK_START = None
+#:
+#: Amendment 1.2 restarted it by measurement on 2026-09-19. The start is the
+#: first day on the rebuilt deployment meeting §3's coverage rule: 2026-09-02
+#: covered 4 hours of 24 and fails, 2026-09-03 covered 24 of 24 at every one of
+#: the 21 points and is therefore the start. It is not the first day with data
+#: and not the date of the amendment.
+CLOCK_START = date(2026, 9, 3)
 
 
 def read_roadmap():

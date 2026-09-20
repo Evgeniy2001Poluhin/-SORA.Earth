@@ -148,7 +148,7 @@ app/
 **Key files:**
 - `app/main.py` → `make_features()` builds the 9-column frame the RF model expects
 - `app/main.py` → `calculate_esg()` computes ESG scores + region-aware recommendations
-- `app/scheduler.py` - Thirteen scheduled jobs; see the table below. Drift is
+- `app/scheduler.py` - Fourteen scheduled jobs; see the table below. Drift is
   checked inside the daily closed loop, not by a job of its own.
 - `app/drift_detection.py` - KS-test drift detection. It returns a verdict and
   writes nothing: the file holds no session, no `INSERT` and no table name.
@@ -199,6 +199,7 @@ regenerate this; do not hand-edit the table.**
 | id | trigger | function |
 |---|---|---|
 | `refresh_forecast_metrics` | `IntervalTrigger(seconds=30)` | `refresh_forecast_metrics` |
+| `auto_observation_coverage` | `IntervalTrigger(minutes=15)` | `scheduled_observation_coverage` |
 | `health_ping` | `IntervalTrigger(minutes=5)` | *(inline lambda -- records a health row)* |
 | `auto_source_health_check` | `IntervalTrigger(minutes=15)` | `scheduled_source_health_check` |
 | `auto_openmeteo_ingestion` | `IntervalTrigger(hours=1)` | `scheduled_openmeteo_ingestion` |
@@ -214,8 +215,8 @@ regenerate this; do not hand-edit the table.**
 
 <!-- END SCHEDULED JOBS -->
 
-Thirteen jobs, twelve of them unconditional. There is **no** separate drift-check
-job: drift is checked inside `closed_loop_retrain`, once a day.
+Fourteen jobs, thirteen of them unconditional. There is **no** separate
+drift-check job: drift is checked inside `closed_loop_retrain`, once a day.
 
 **What the closed loop does** (`app/scheduler.py:closed_loop_retrain`):
 
@@ -232,8 +233,15 @@ job: drift is checked inside `closed_loop_retrain`, once a day.
   bound** of its AUC must clear 0.80 -- not the point estimate, since 0.85
   measured on 171 rows has a lower bound of 0.78 -- the run must have
   registered the model in MLflow, and it must not be more than 0.02 below what
-  is already serving. Any one of the three rejects it. The closed loop applies
-  all three; `POST /mlops/auto-retrain` currently applies only the last.
+  is already serving. Any one of the three rejects it. **Both gated paths apply
+  all three** -- the closed loop and `POST /mlops/auto-retrain` each call
+  `app.promotion.gated_decision`, which adds a fourth refusal of its own: it
+  declines when the serving model's own score cannot be read, rather than
+  comparing against the newest training row (#329).
+
+  > This said: "The closed loop applies all three; `POST /mlops/auto-retrain`
+  > currently applies only the last." True once, and false since the two paths
+  > were brought onto one gate.
 - Decision logged to the `retrain_log` table.
 
 **Manual triggers:** `/api/v1/model/retrain`, `/api/v1/mlops/full-pipeline` (admin only)
@@ -313,6 +321,53 @@ The table is read from `__tablename__` and checked against the module by
 `tests/test_docs_name_real_tables.py`, which also refuses any SQL in this file
 that names a table no model creates. **Edit the code, then regenerate this; do
 not hand-edit the table.**
+
+**What `predictions_log` holds, and it is not what the name says.** The table
+is **fed entirely by `/evaluate`**. Three functions are called `log_prediction`
+and they do different things:
+
+| symbol | writes | callers |
+|---|---|---|
+| `app.mlflow_tracking.log_prediction` | MLflow telemetry on a thread; a no-op under `SORA_OFFLINE` | `/predict`, `/predict/neural`, `/predict/stacking` |
+| `app.main.log_prediction` | the row in `predictions_log` | `/evaluate`, and nothing else |
+| `app.obs.request_log.log_prediction` | a JSONL file, and the only one of the three that takes a `model_version` | `app/ml/routes.py`, off unless `SORA_REQUEST_LOG=1` |
+
+So a `/predict` call leaves **no durable row**. What it leaves is `_log_csv`
+appending four input columns -- no probability, no prediction, no timestamp, no
+model -- to `data/predictions_log.csv`, the file #281 established is destroyed
+on every redeploy, rollback and `--force-recreate`.
+
+`model_version` on every row is the column default, the literal `"v2.0"`: the
+one construction never assigns it, and `/api/v1/analytics/predictions-log`
+serves the column as though it identified a model.
+
+**And a model did produce the number beside it.** This paragraph first said the
+rows "describe `/evaluate`, which runs a hardcoded ESG formula rather than a
+model", and that is false. `app/main.py` → `calculate_esg` runs
+`rf_model.predict_proba` unconditionally -- `rf_model` is the serving champion --
+and returns it as `success_probability`. The row writer stores
+`probability=result.get("probability") or result.get("success_probability")`,
+and `calculate_esg` returns no `probability` key, so the fallback takes the
+champion's figure. The ESG **score** in the same response is a formula; the
+probability is not.
+
+So `model_version` is a plain provenance gap rather than a defensible blank: a
+champion produced the number in the row beside it, and nothing records which
+one. Only the `_macro_esg_from_payload` branch of `app/api/evaluate.py`, taken
+when the payload carries a macro key, is formula-only.
+
+**This is what the drift check samples.** `app/api/drift.py` →
+`_recent_predictions` takes the last `window` rows by id with no `endpoint`
+filter, so the KS test compares evaluation inputs against the baseline. Adding
+such a filter would be worse than leaving it: `endpoint == "predict"` selects
+nothing, and a KS test over an empty frame is not a verdict.
+
+Pinned by `tests/test_predictions_log_records_what_it_says.py`, which fails if a
+second writer appears, if a predict route is wired in, or if this description
+stops matching the wiring. The confusion is not hypothetical --
+`app/api/evaluate.py` carries a comment from whoever deleted that call once,
+reading it as duplicate telemetry, and learned otherwise only because mutation
+testing left every assertion green when the call came back.
 
 **There is no `DriftLog` model and no `drift_log` table, and drift decisions
 are not persisted anywhere.** This section named `DriftLog` and `RefreshJob`;
@@ -508,14 +563,17 @@ Optional:
 
    | job | side effect | why at startup | repeating it |
    |---|---|---|---|
-   | `auto_run_ingesters` | rosstat + sber rows | **not stated** (a6d5ede) | safe, measured: same revision → `inserted=0`, zero row delta (#121) |
-   | `auto_refresh_external_data` | World Bank pass + one `data_refresh_log` row | **not stated** (a6d5ede); the behaviour was known — the full history pass is gated behind `SORA_HISTORY_REFRESH` *because* this runs at startup | log row appended by design; heavy history pass off by default |
-   | `refresh_forecast_metrics` | reads, sets Prometheus gauges | **not stated** (#11) | safe — gauges are set, never incremented |
-   | `auto_openmeteo_ingestion` | one Open-Meteo fetch, `observed` rows | **not stated** (#11) | derived: identity is `{region}_{metric}_{event_time}`, so a repeat inside the same hour upserts |
-   | `auto_openmeteo_air_quality_ingestion` | one Open-Meteo fetch, `observed` rows | **stated** (#82): otherwise the first rows arrive an hour after a deploy, and a restart to check the source shows nothing for an hour | same identity rule |
+   | `auto_run_ingesters` | rosstat + sber rows | **decided** (#156): the trigger is 24h, so without it the first snapshot pass after a release is up to a day away and freshness depends on when the last deploy happened | safe, measured: same revision → `inserted=0`, zero row delta (#121) |
+   | `auto_refresh_external_data` | World Bank pass + one `data_refresh_log` row | **decided** (#156): the trigger is 6h, so a release would otherwise serve up to six hours on the previous process's values; the full history pass is gated behind `SORA_HISTORY_REFRESH` *because* this runs at startup, which bounds the cost to one ordinary pass | log row appended by design; heavy history pass off by default |
+   | `refresh_forecast_metrics` | reads, sets Prometheus gauges | **decided** (#156), for the opposite reason to the others: its trigger is 30s so the gap is negligible, but it is the only entry that neither writes nor calls out, so keeping it is free. It does **not** close the 6h empty-series window — that is `auto_pretrain_forecast`, deliberately not here | safe — gauges are set, never incremented |
+   | `auto_openmeteo_ingestion` | one Open-Meteo fetch, `observed` rows | **decided** (#156): the same argument as its air-quality twin below — same source, same 1h trigger — of which only one half had been written down | **inserts, measured** — the ingester reads the API's `current` block, whose `time` moves at 15-minute resolution, so a second run 15+ minutes later writes a new row. 3620 point-hours on production hold more than one row; a startup run costs ~210 rows (21 points x 10 indicators) |
+   | `auto_openmeteo_air_quality_ingestion` | one Open-Meteo fetch, `observed` rows | **stated** (#82): otherwise the first rows arrive an hour after a deploy, and a restart to check the source shows nothing for an hour | same as above: inserts, ~126 rows per startup run (21 points x 6 indicators) |
 
-   One of the five has a written reason; four were inherited. Being in the tuple
-   is not the same as having been chosen — whether the four should stay is #156.
+   All five are chosen, and #156 is closed. One reason was written when the job
+   was added (#82); the other four were supplied by the decision of 2026-09-19,
+   because the commits that added them genuinely say nothing. What was decided is
+   the operational intent — a gap in ingestion or external data should start at a
+   schedule, never at a release — and it is what a sixth entry has to meet.
 
    **What this means for acceptance.** The listed startup jobs may write during
    the deployment window. Attribute any change through `ingester_runs`, `source`
@@ -563,17 +621,54 @@ Optional:
    says which under `model_provenance` (`source`, `run_id`, `model_version`,
    `fell_back`, `reason_code`).
 
+   **Which data a champion trained on** is in its `meta.json`, as
+   `data_version` -- `sha256:` over the bytes of `data/projects.csv` as the run
+   read them -- beside `data_rows_read` (before inf/NaN rows are dropped) and
+   `total_samples` (after). The same digest is written to
+   `retrain_log.data_version`, so the journal an operator reads and the artefact
+   agree.
+
+   Until 2026-09-20 neither carried it: the column was declared and not one of
+   the eight `_finish_retrain_log` call sites passed it, and `meta.json` recorded
+   how many rows rather than which. The dataset is not static -- `POST
+   /model/data/bulk-upload/content` replaces it atomically, and `_do_retrain`'s
+   own comment notes it is appended to by more than that path -- so two
+   champions trained a week apart were indistinguishable in the record except by
+   a timestamp and a count.
+
+   The digest does not reproduce the data. It decides whether two runs saw the
+   same bytes, which is what "was this reproduced?" reduces to in practice.
+   `retrain_models` and `closed_loop_retrain` each write a **second** row for the
+   same physical run and neither passes it, so those rows still carry NULL.
+
+   **Nothing tracks that remainder.** This sentence first deferred it to #199 --
+   "the same double-row shape #199 carries and is fixed with it, not separately"
+   -- and #199 was closed as COMPLETED on 2026-09-19, hours before the sentence
+   was written, with a closing note saying the unification must be filed fresh
+   rather than reopened. No open issue names it: searching the open set for
+   row, run or retrain returns none. So the second row's `data_version` is
+   unowned, and a reader who follows the pointer finds a closed issue that says
+   to file a new one.
+
    **How a trained model gets there.** Whatever starts a retrain, the training
    is `app/api/retrain.py` → `_do_retrain()`, and it writes the candidate to
    `runtime/staged/<run_id>/`, which nothing serves -- after pruning the older
    candidates there with `app/model_source.py` → `prune_staged()`, which spares
    the one the champion was activated from (#326). The one way into
    `runtime/active/` is `app/model_source.py` → `activate()`, and its one
-   caller is `app/scheduler.py` → `closed_loop_retrain()`, after the promotion
-   gate passes -- reached by the daily and weekly jobs and by the routes that
-   run the closed loop. Every other way to start a retrain stages and stops.
-   `POST /api/v1/mlops/auto-retrain` is the one that misleads: it applies the
-   same gate and records `promoted` in `retrain_log`, and never activates.
+   caller is `app/model_loader.py` → `activate_promoted_candidate()`. **Two**
+   paths reach that helper, both after `gated_decision` passes:
+   `app/scheduler.py` → `closed_loop_retrain()` (the daily and weekly jobs, and
+   the routes that run the closed loop) and `app/api/infra.py` →
+   `auto_retrain_on_drift()`, which serves `POST /api/v1/mlops/auto-retrain`.
+   Every other way to start a retrain stages and stops.
+
+   > This said `activate()`'s one caller was `closed_loop_retrain()`, and that
+   > `POST /api/v1/mlops/auto-retrain` "is the one that misleads: it applies the
+   > same gate and records `promoted` in `retrain_log`, and never activates."
+   > Both halves were true before the route was brought onto the same helper,
+   > and neither is now. An endpoint documented as a silent no-op is one nobody
+   > uses and someone eventually re-implements.
 
    **A process keeps the champion it loaded.** Each `backend` worker loads it
    once, when the worker starts. `app/model_loader.py` → `reload_champion()`
@@ -674,19 +769,36 @@ Optional:
   otherwise, which is how the two were confused for months.
 
 - **The scheduler publishes its own** on `scheduler:9000/metrics`, scraped as a
-  separate Prometheus job (#267). Eleven `sora_*` metrics are written only in
-  that container — `sora_retrain_total`, `sora_full_pipeline_total`, the four
-  forecast gauges and the five environmental ones — and until that target
-  existed the process served no HTTP, so every one of them was set into memory
-  nobody read and lost on the next restart. Its own job name rather than a
-  second target under `sora-app`: both processes publish metrics of the same
-  names.
+  separate Prometheus job (#267). **Sixteen** `sora_*` metrics are written only
+  in that container, and until that target existed the process served no HTTP,
+  so every one of them was set into memory nobody read and lost on the next
+  restart.
+
+  This said "Eleven", enumerated as `sora_retrain_total`,
+  `sora_full_pipeline_total`, the four forecast gauges and the five
+  environmental ones. Counted 2026-09-19, the set was thirteen even then: the
+  enumeration silently omitted `sora_drift_detected_total` and
+  `sora_external_refresh_total`, both of which the key-metrics table below
+  names as scheduler-written. The three observation-coverage gauges make
+  sixteen.
+
+  Do not trust this number either — derive it:
+
+  ```
+  python -c "import sys; sys.path.insert(0,'tests'); \
+    from test_scheduler_metrics_are_scraped import _writers_by_metric, SCHEDULER_MODULES; \
+    w=_writers_by_metric(); \
+    print(sorted(m for m,f in w.items() if f and all(x.startswith(SCHEDULER_MODULES) for x in f)))"
+  ```
+
+  Its own job name rather than a second target under `sora-app`: both
+  processes publish metrics of the same names.
 
   No multiprocess directory there. It is one process, and
   `app/scheduler_metrics.py` refuses to serve if `PROMETHEUS_MULTIPROC_DIR` is
   set rather than publishing whichever files it happens to find.
 
-  **Four of those eleven are absent for up to six hours after every
+  **Four of those sixteen are absent for up to six hours after every
   deployment**, and it is not a fault. `sora_forecast_mae_current`,
   `_rmse_current`, `_r2_current` and `_mape_current` are labelled gauges: a
   series exists only once something calls `.labels(...).set(...)`. The only
@@ -771,7 +883,9 @@ docker-compose exec postgres psql -U sora -d sora_earth -c "SELECT started_at, s
 # Check Redis cache stats
 curl http://localhost:8000/api/v1/cache/redis
 
-# View recent predictions
+# View recent rows of `predictions_log` -- which are /evaluate calls, not
+# /predict calls. See "What `predictions_log` holds" above before reading them
+# as predictions.
 curl http://localhost:8000/api/v1/analytics/predictions-log?limit=10
 
 # Manually trigger drift check
