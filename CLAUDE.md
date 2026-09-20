@@ -656,9 +656,10 @@ Optional:
     from test_scheduler_metrics_are_scraped import _writers_by_metric, SCHEDULER_MODULES; \
     w=_writers_by_metric(); \
     print(sorted(m for m,f in w.items() if f and all(x.startswith(SCHEDULER_MODULES) for x in f)))"
-  ``` Its own job name rather than a
-  second target under `sora-app`: both processes publish metrics of the same
-  names.
+  ```
+
+  Its own job name rather than a second target under `sora-app`: both
+  processes publish metrics of the same names.
 
   No multiprocess directory there. It is one process, and
   `app/scheduler_metrics.py` refuses to serve if `PROMETHEUS_MULTIPROC_DIR` is
