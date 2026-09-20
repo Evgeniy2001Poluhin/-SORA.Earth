@@ -32,7 +32,7 @@ The experiment does not gate the product and has not been promoted. See
 |---|---|---|
 | M1 Data Trust | signed off, production verified | `docs/M1_DATA_TRUST_REPORT.md` |
 | M2 Forecasting | **CLOSED — NEGATIVE RESULT** | `e82d682` |
-| M3 Forecast target | declared; **§7 clock VOID since 2026-09-02**, see amendment 1.1 | `10f985f` |
+| M3 Forecast target | declared; **§7 clock running from 2026-09-03**, restarted by measurement in amendment 1.2 | `10f985f` |
 | Phase 1 (env foundation) | all seven exit criteria met | |
 | Product punch-list | empty | |
 
@@ -43,14 +43,16 @@ MAE = 0 — a property of the data wearing the shape of a result about a method.
 
 ## 3. The fact that shapes everything until February
 
-M3 cannot produce an evidential result before a date that **is currently
-unknown**: the clock was voided on 2026-09-02 when the production server was
-deleted for non-payment and the accumulated observations were lost with it. It
-restarts when collection resumes. The figures below were 2027-02-04 (h=7) and
-2028-02-05 (h=30) under the original clock; they come from the gate's own
-constants —
+M3 cannot produce an evidential result before **2027-02-24** (h=7) or
+**2028-02-25** (h=30). The clock was voided on 2026-09-02, when the production
+server was deleted for non-payment and the accumulated observations were lost
+with it; amendment 1.2 restarted it on 2026-09-19 at the first day on the
+rebuilt deployment that meets the coverage rule — 2026-09-03, measured, with
+24 of 24 hours at every one of the 21 points (2026-09-02 had 4 and fails).
+
+The dates come from the gate's own constants —
 `REQUIRED_WINDOWS = 12`, `TRAINING_DAYS = {7: 90, 30: 180}` — and no amount of
-engineering moves them.
+engineering moves them. The outage cost 20 days against the voided clock.
 
 So the question for the next 174 days is not "what feature next". It is: **what
 is worth doing in a window where no forecasting result can be evidential?**
@@ -71,6 +73,35 @@ previously said covered it.
 
 What would cover it is a per-day, per-point count against the 19-of-24 rule.
 
+**This is no longer hypothetical.** That count was run by hand on 2026-09-19,
+over the first sixteen days of the restarted clock, and it found three days on
+which a point fell below the rule while nothing reported anything:
+
+| day | points meeting the rule | worst point |
+|---|---:|---:|
+| 2026-09-09 | 19 of 21 | 18 hours |
+| 2026-09-10 | 20 of 21 | 18 hours |
+| 2026-09-14 | 20 of 21 | 16 hours |
+
+Counting rows instead of hours, all three days pass — which is how they went
+unnoticed, and is the reason amendment 1.3 fixes the rule to hours. Three days
+lost out of sixteen is inside the 80% floor and costs nothing yet; the point is
+that the instrument did not see them, so a run of such days would also be
+invisible.
+
+**Half of this gap is now closed, and it is worth being precise about which
+half.** `auto_observation_coverage` runs every 15 minutes in the scheduler and
+publishes three gauges — `sora_observation_coverage_gap_days`,
+`_days_examined` and `_points_examined`, the last two being the denominator
+that tells "no day fell short" from "no day was examined". The count is
+therefore queryable, graphable and alertable instead of living only behind an
+admin endpoint nobody called.
+
+What is **not** done is the alerting rule. A gauge in Prometheus still requires
+someone to look, and choosing when a dip is worth waking someone for is the
+same kind of decision as the five forecast alerts in #284 — the owner's, not a
+side effect of adding the metric.
+
 ### B. Make the eventual measurement trustworthy — before it runs
 
 Decisions made after results are visible are choices of results. That is why M2
@@ -84,9 +115,25 @@ has a §9 and why M3 was declared before accumulation counted.
   ESG *classification*. It is meaningless for a temperature forecast, where the
   measure is MAE against seasonal naive. Nothing currently stops the number
   being applied across tasks.
-- **A confidence bound in the promotion gate.** Today a model is promoted on an
-  absolute floor plus non-degradation. 0.81 against 0.80 on a small test set is
-  noise, and the gate cannot tell.
+- ~~**A confidence bound in the promotion gate.**~~ **Done — this shipped, and
+  the paragraph describing it as pending outlived the code.** `app/promotion.py`
+  refuses on the 95% **lower bound** via `clears_threshold`, not on the point
+  estimate; the comment there works the same example this bullet used, AUC 0.81
+  measured on 171 rows having a lower bound of 0.746. The point estimate is used
+  only when `test_positive`/`test_negative` are absent, which is true only of
+  rows written before the field existed — an old run is judged by the rule in
+  force when it was written rather than refused for lacking a field it could not
+  have had.
+
+- **Metric per task, still unguarded — and still latent.** Nothing stops
+  `MIN_AUC_THRESHOLD` being applied to a task it does not describe, and nothing
+  does so today: counted 2026-09-19, the constant is referenced only inside
+  `app/promotion.py`, and the gate is reached from exactly two ESG-retrain call
+  sites (`app/api/infra.py`, `app/scheduler.py`). No forecast path routes
+  through it, because no forecast is promoted at all yet. The guard belongs with
+  the first forecast promotion; writing it now would be building the consumer
+  before the thing it consumes, which §4 below warns against in the same
+  breath.
 
 ### C. Close what does not depend on the clock
 
@@ -117,8 +164,9 @@ Stated because each is plausible and each would cost more than it returns.
 - Whether the experiment is ever promoted to product. Until then the ESG
   platform is what the project is.
 - Whether M3 v1.1 is adopted, and before which date.
-- Whether the promotion gate should refuse on a confidence bound, which will
-  reject models it currently accepts.
+- ~~Whether the promotion gate should refuse on a confidence bound.~~ Decided
+  and shipped; see §3B. Listing a decision that has already been made invites it
+  to be made again, differently.
 
 ## 6. What would make this file stale
 

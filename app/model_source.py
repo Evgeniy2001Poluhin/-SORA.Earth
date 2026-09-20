@@ -84,9 +84,12 @@ and when this was written they were:
   given `--preload`, so each backend worker imports the app itself and runs
   recovery — a lock, and possibly renames and deletions under the runtime root —
   as it starts.
-- `app.scheduler.closed_loop_retrain` calls `activate(run_id)` when
-  `app.promotion.evaluate_promotion` passes, then
-  `app.model_loader.reload_champion`. That reload replaces the model in the
+- `app.scheduler.closed_loop_retrain` promotes through
+  `app.model_loader.activate_promoted_candidate`, which is the only caller of
+  `activate(run_id)`, and which then calls `app.model_loader.reload_champion`.
+  It is not the only caller of *that helper*: `app.api.infra.auto_retrain_on_drift`
+  (`POST /api/v1/mlops/auto-retrain`) reaches it the same way, after the same
+  gate. Two gated paths, one door. That reload replaces the model in the
   process that ran the loop and in no other. The scheduled runs are in the
   scheduler container, so the backend's workers keep the champion they loaded
   until each starts again; a run triggered over HTTP reloads only the worker
@@ -116,13 +119,23 @@ write to it under `app/` and a writable mount (#321).
 
 Still missing:
 
-- **Activation on the other gated path.** `POST /api/v1/mlops/auto-retrain`
-  (`app.api.infra.auto_retrain_on_drift`) applies the same `evaluate_promotion`
-  and writes `promoted` into `retrain_log`, but never calls `activate()`. The
-  candidate it approves stays in `staged/` and serves nothing.
-- **A record of which champion a deployment left serving.** The manifest
-  `scripts/deploy_production.sh` writes records the commit and the images, not
-  the `run_id` in `active/activation.json`.
+- Nothing on this list. Both entries that stood here were done and the heading
+  went on presenting them as outstanding, which is the more expensive kind of
+  wrong: a list of remaining work is read as current, and each finished entry
+  costs a reader the time to discover it is not.
+
+  **Activation on the other gated path** was the first. `POST
+  /api/v1/mlops/auto-retrain` now calls `activate_promoted_candidate` and
+  reports an activation failure instead of turning it into a rejection; a
+  candidate it approves reaches `active/`.
+
+  **A record of which champion a deployment left serving** was the second.
+  `scripts/deploy_production.sh` writes an `active_model` line into every
+  manifest, beside the commit and the image digests.
+
+  `tests/test_promotion_path_is_described_as_it_is.py` now fails if either
+  claim comes back while the code still does the thing, and fails the other way
+  if the code stops doing it while this text says it does.
 """
 import contextlib
 import fcntl
