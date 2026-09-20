@@ -553,9 +553,16 @@ Optional:
    The digest does not reproduce the data. It decides whether two runs saw the
    same bytes, which is what "was this reproduced?" reduces to in practice.
    `retrain_models` and `closed_loop_retrain` each write a **second** row for the
-   same physical run and neither passes it, so those rows still carry NULL; that
-   is the same double-row shape #199 carries and is fixed with it, not
-   separately.
+   same physical run and neither passes it, so those rows still carry NULL.
+
+   **Nothing tracks that remainder.** This sentence first deferred it to #199 --
+   "the same double-row shape #199 carries and is fixed with it, not separately"
+   -- and #199 was closed as COMPLETED on 2026-09-19, hours before the sentence
+   was written, with a closing note saying the unification must be filed fresh
+   rather than reopened. No open issue names it: searching the open set for
+   row, run or retrain returns none. So the second row's `data_version` is
+   unowned, and a reader who follows the pointer finds a closed issue that says
+   to file a new one.
 
    **How a trained model gets there.** Whatever starts a retrain, the training
    is `app/api/retrain.py` → `_do_retrain()`, and it writes the candidate to

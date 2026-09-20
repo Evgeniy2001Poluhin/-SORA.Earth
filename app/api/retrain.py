@@ -474,7 +474,10 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
             #: that may have changed since. `retrain_models` and
             #: `closed_loop_retrain` both write such a row and neither passes it
             #: yet, so their rows still carry NULL -- the remaining half of this
-            #: link, and it belongs with the one-row-per-run work (#199).
+            #: link. This comment first said it "belongs with the one-row-per-run
+            #: work (#199)"; #199 was closed COMPLETED on 2026-09-19 and its
+            #: closing note says the unification must be filed fresh. No open
+            #: issue carries it, so this half is unowned rather than scheduled.
             "data_version": data_version,
         }
 
