@@ -34,7 +34,20 @@ columns is what the rows are worth.
 
 ## Result
 
-ROC AUC, with 95% bootstrap intervals about 0.023 wide:
+ROC AUC, with the 95% bootstrap interval measured per variant rather than
+summarised — they are not one width:
+
+| variant | interval width, as shipped |
+|---|---:|
+| `current` | 0.0225 |
+| `leakage_only` | 0.0288 |
+| `no_closing_derived` | 0.0461 |
+| `esg_only` | 0.0460 |
+| `minimal_baseline` | 0.0463 |
+
+This first read "intervals about 0.023 wide", which is the **half**-width of the
+four wide ones and the full width of only `current`. The figure was stated as a
+property of the whole table and was wrong for four of its five rows.
 
 | variant | features | as shipped | World Bank only | Δ |
 |---|---|---:|---:|---:|
@@ -101,8 +114,17 @@ than it is:
   said why: `data/projects.csv` carries no `source_project_id`, so rows cannot
   be grouped by project, and `--legacy-approximate` groups by normalised name
   instead. It reported zero overlapping ids on that basis. A file that carried
-  the id would make this stronger, and the absence is itself worth recording —
-  it is the same provenance gap #164 and #75 are about.
+  the id would make this stronger, and the absence is itself worth recording.
+
+  This first said the absence "is the same provenance gap #164 and #75 are
+  about". It is not: both of those are about `country_indicator_history` —
+  #75 about reading a past vintage, #164 about `as_of_date` being rewritten in
+  place — and neither names `data/projects.csv` or `source_project_id`.
+  Different table, different missing fact. The column is described in
+  `docs/ABLATION_HARNESS.md` as "the #223 schema", after the merged PR that gave
+  the fetch pipelines a source identity; **nothing open tracks giving
+  `data/projects.csv` that column**, and the join it would allow is Option A of
+  #232, which is closed with that option recorded as deferred.
 
 Reproduce with:
 
