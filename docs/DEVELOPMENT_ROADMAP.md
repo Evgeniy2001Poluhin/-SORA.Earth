@@ -125,15 +125,29 @@ must be recorded under a canonical run to be aggregatable at all.
 
 | Priority | Task | Result |
 |---|---|---|
-| P0 | Finish the #199 review | Run owner, statuses and the moment of activation are settled |
-| P0 | #199 Phase 0 | Targeted finalisation; the registration outcome is always written |
 | P0 | Measure the ambiguity window | The count of new rows without `registry_ok` is known |
-| P1 | #199 Phase 1 | One run, and analytics that are correct |
-| P1 | Design #191 together with staged/active | LFS bootstrap survives; retrain is separated from Git |
-| P1 | Build the baseline/evaluation harness | A future forecast has something to be compared against |
-| P1 | Watch M3 coverage | No calendar days are lost |
 | P2 | Specialist interviews and UX scenarios | The UAT protocol exists in advance |
 | P2 | Data contracts and dataset snapshots | Data is fully reproducible |
+
+Six rows stood here until 2026-09-21 describing work that was already done, and
+this section is the first thing read to decide what to start. What each one is
+now bound to, so that it cannot come back:
+
+| Was listed | Done by | The tree shows it because |
+|---|---|---|
+| Finish the #199 review, #199 Phase 0, Phase 1 | issue closed 2026-09-19 | `app/promotion.py` defines `evaluate_promotion` and `gated_decision` |
+| Design #191 together with staged/active | issue closed 2026-09-19 | `docker-compose.prod.yml` mounts `./models` read-only, `tests/test_seed_is_immutable.py` guards it |
+| Build the baseline/evaluation harness | #356 | `scripts/evaluate_forecast.py`, `app/services/forecasting/report.py` |
+| Watch M3 coverage | #350 | `app/scheduler.py` registers `auto_observation_coverage` |
+
+`tests/test_the_roadmap_now_is_still_outstanding.py` asserts both directions:
+listed-but-done fails, and done-but-reverted-and-unlisted fails too. It reads
+the tree rather than GitHub, because a check that needs the network fails for
+reasons that have nothing to do with the claim.
+
+The P0 that remains is a measurement, not a build: `registry_ok` exists in
+`app/promotion.py` and `app/registry_retry.py`, and what is not known is how
+many rows were written before it did.
 
 ## What needs elapsed time
 
@@ -201,11 +215,7 @@ seven call sites turned out to exist where one was assumed.
 ## Immediate sequence
 
 ```
-#199 Phase 0
-→ #199 Phase 1
-→ #191 + seed/staged/active
-→ one gate and orchestrator
-→ evaluation harness
+one gate and orchestrator
 → challengers
 → M3 evidence
 → crisis benchmark
@@ -213,6 +223,11 @@ seven call sites turned out to exist where one was assumed.
 → evidence pack
 → pilot
 ```
+
+The first four steps are struck rather than reworded: `#199 Phase 0`,
+`#199 Phase 1`, `#191 + seed/staged/active` and `evaluation harness` are done,
+and the table above says what in the tree shows each one. The order of what
+remains is unchanged -- nothing here is a new decision.
 
 The governing principle: make one model run self-consistent and reproducible
 first, then widen what the models and the product can do.
