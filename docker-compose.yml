@@ -118,13 +118,22 @@ services:
 
   nginx:
     image: nginx:alpine
+    # This file is the development stack. It used to mount production's
+    # nginx.conf, which terminates TLS with a Let's Encrypt certificate for
+    # sora-earth.online and proxies to `backend` -- a certificate no laptop
+    # has, and a service name this file does not define. nginx does not
+    # degrade when a certificate is missing: it exits, and `restart:
+    # unless-stopped` brought it back a minute later, 1536 times (measured
+    # 2026-09-21, about 25.6 hours).
+    #
+    # Production is unaffected by anything here: deploy_production.sh loads
+    # docker-compose.prod.yml alone, which declares its own nginx with the
+    # certificates and `backend`.
     ports:
+      # No 443: this stack terminates no TLS, so nothing would listen there.
       - "80:80"
-      - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-      - /var/www/certbot:/var/www/certbot:ro
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - app
     restart: unless-stopped
