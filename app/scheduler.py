@@ -534,6 +534,31 @@ def get_retrain_log(limit: int = 20):
         db.close()
 
 
+def _physical_runs_or_none():
+    """How many retrains this database records, or None if it cannot be read.
+
+    The Redis branch decorates the scheduler container's payload with this
+    figure; the fallback branches returned a literal `0` and a row count
+    respectively. Only Redis is unavailable in those branches -- the database
+    is the same one the other branch queries -- so `0` told an operator the
+    closed loop had never run, and the row count told them it had run twice as
+    often as it had (#199 point 10: the loop writes two rows per cycle).
+
+    None rather than 0 when the count itself fails: a number nobody could read
+    is not zero.
+    """
+    try:
+        from app.database import SessionLocal, count_physical_runs
+        db = SessionLocal()
+        try:
+            return count_physical_runs(db)
+        finally:
+            db.close()
+    except Exception:
+        logger.warning("scheduler status: the run count could not be read", exc_info=True)
+        return None
+
+
 def get_scheduler_status():
     """
     Fetch scheduler status from Redis (published by scheduler container).
@@ -582,28 +607,31 @@ def get_scheduler_status():
 
     if not jobs and not scheduler.running:
         # Local scheduler is empty and not running
+        # No `enabled`. This branch has just failed to reach the scheduler
+        # container, and the field described that container. It read
+        # SORA_SCHEDULER, which nothing in this repository sets -- so it was
+        # True on every deployment, and the panel rendered a badge that could
+        # not say NO. An unknown reported as a value is worse than an absence.
         return {
             "running": False,
-            "enabled": os.getenv("SORA_SCHEDULER", "1") == "1",
             "jobs": [],
             "jobs_count": 0,
             "error": "Scheduler container unreachable or not running",
             "source": "local_fallback",
-            "retrain_history_count": 0,
+            "retrain_history_count": _physical_runs_or_none(),
         }
 
     # Local scheduler has jobs (shouldn't happen in app container, but handle it)
+    # Same two corrections as the branch above: no asserted `enabled`, and runs
+    # rather than rows. This one counted `RetrainLog` rows through a session it
+    # never closed, which is the figure #199 point 10 exists to refuse -- the
+    # closed loop writes two rows per cycle, so it reported itself at double.
     return {
         "running": scheduler.running,
-        "enabled": os.getenv("SORA_SCHEDULER", "1") == "1",
         "jobs": jobs,
         "jobs_count": len(jobs),
         "source": "local_scheduler",
-        "retrain_history_count": (
-            __import__("app.database", fromlist=["SessionLocal", "RetrainLog"]).SessionLocal().query(
-                __import__("app.database", fromlist=["SessionLocal", "RetrainLog"]).RetrainLog
-            ).count()
-        ),
+        "retrain_history_count": _physical_runs_or_none(),
     }
 
 

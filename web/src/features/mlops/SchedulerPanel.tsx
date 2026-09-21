@@ -22,12 +22,12 @@ export function SchedulerPanel() {
 
   return (
     <div>
-      <div className="eyebrow" style={{ marginBottom: 12 }}>Scheduler runs: {s?.retrain_history_count ?? 0}</div>
+      <div className="eyebrow" style={{ marginBottom: 12 }}>Scheduler runs: {s?.retrain_history_count ?? "\u2014"}</div>
       <div className="kpi-grid" style={{ marginBottom: 16 }}>
         <div className="kpi"><div className="kpi-lbl">Status</div><div className="kpi-val" style={{ fontSize: 18, color: s?.running ? "var(--planet)" : "var(--muted)" }}>{s?.running ? "RUNNING" : "IDLE"}</div></div>
         <div className="kpi"><div className="kpi-lbl">Jobs</div><div className="kpi-val tabular">{s?.jobs?.length ?? 0}</div></div>
-        <div className="kpi"><div className="kpi-lbl">Enabled</div><div className="kpi-val" style={{ fontSize: 18 }}>{s?.enabled ? "YES" : "NO"}</div></div>
-        <div className="kpi"><div className="kpi-lbl">History</div><div className="kpi-val tabular">{s?.retrain_history_count ?? 0}</div></div>
+        <div className="kpi"><div className="kpi-lbl">Enabled</div><div className="kpi-val" style={{ fontSize: 18 }}>{s?.enabled == null ? "\u2014" : s.enabled ? "YES" : "NO"}</div></div>
+        <div className="kpi"><div className="kpi-lbl">History</div><div className="kpi-val tabular">{s?.retrain_history_count ?? "\u2014"}</div></div>
       </div>
       <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
         <button disabled={trigger.isPending} onClick={() => trigger.mutate()} style={{ padding: "10px 16px", background: "var(--planet)", color: "var(--bg)", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}>{trigger.isPending ? "..." : "Trigger retrain"}</button>
