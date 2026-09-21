@@ -544,6 +544,11 @@
     "title": "Global rate limiting is not enforced: SlowAPIMiddleware is a pass-through stub",
     "type": "Issue"
   },
+  "369": {
+    "state": "OPEN",
+    "title": "fix: the scheduler status fallback reported two things it had not looked at",
+    "type": "PullRequest"
+  },
   "37": {
     "state": "CLOSED",
     "title": "feat(ops): scheduled, encrypted, off-host backups",
