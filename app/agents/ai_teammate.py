@@ -55,6 +55,9 @@ THRESHOLDS = {
     "max_consecutive_failures": 3,
 }
 
+#: The answers from `DriftDetector.check_drift()` that compared anything.
+_MEASURED_DRIFT_STATUSES = ("stable", "drift_detected")
+
 
 # --------------- Core Logic ---------------
 
@@ -200,13 +203,23 @@ class AITeammate:
             ))
             return
 
-        status = result.get("status", "ok")
-        if status == "insufficient_data":
+        # Only `stable` and `drift_detected` compared anything. `insufficient_data`
+        # and `no_baseline` still send drift_detected=False and drift_score=0.0,
+        # which are placeholders: `no_baseline` fell through to the line below
+        # and was recorded as "No drift detected (score=0.0000)". Kept `info`
+        # rather than `warning`, because decide() retrains on any drift warning.
+        status = result.get("status")
+        if status not in _MEASURED_DRIFT_STATUSES:
+            counts = ", ".join(
+                f"{key}={result[key]}"
+                for key in ("observations", "required_min_samples",
+                            "reference_samples", "current_samples")
+                if key in result
+            )
             self.observations.append(Observation(
                 category="drift", severity="info",
-                message=f"Drift check skipped: insufficient data "
-                        f"(ref={result.get('reference_samples', 0)}, "
-                        f"cur={result.get('current_samples', 0)})"
+                message=f"Drift check skipped: {result.get('reason') or status or 'no status'}"
+                        + (f" ({counts})" if counts else "")
             ))
             return
 
