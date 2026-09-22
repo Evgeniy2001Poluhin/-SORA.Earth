@@ -21,9 +21,8 @@ PROJECT = {
 
 def test_ab_predict():
     r = client.post("/api/v1/ab/predict", json=PROJECT)
-    assert r.status_code in [200, 422, 500]
-    if r.status_code == 200:
-        assert isinstance(r.json(), dict)
+    assert r.status_code == 200, r.text
+    assert isinstance(r.json(), dict)
 
 def test_ab_stats():
     r = client.get("/api/v1/ab/stats")
@@ -31,8 +30,15 @@ def test_ab_stats():
     if r.status_code == 200:
         assert isinstance(r.json(), dict)
 
-def test_ab_split():
-    r = client.post("/api/v1/ab/split", json=PROJECT)
-    assert r.status_code in [200, 422, 500]
-    if r.status_code == 200:
-        assert isinstance(r.json(), dict)
+def test_ab_split(monkeypatch):
+    """Sets the split and sees it take.
+
+    This posted PROJECT, which is not a split body, and passed on the 422.
+    The split is module state, so it is put back when the test ends.
+    """
+    import app.api.ab_test as ab
+
+    monkeypatch.setitem(ab._traffic_split, "model_a", ab._traffic_split["model_a"])
+    r = client.post("/api/v1/ab/split", json={"model_a_pct": 0.3})
+    assert r.status_code == 200, r.text
+    assert r.json()["traffic_split"]["model_a"] == 0.3
