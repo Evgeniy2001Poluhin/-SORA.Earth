@@ -176,9 +176,15 @@ def check_drift_infra():
 
 @router.get("/mlops/health", tags=["mlops"])
 def mlops_health():
+    # The status the readiness probe uses, not a literal. This said "healthy"
+    # whatever the process had loaded, and the MLOps page draws it as a green
+    # KPI. `_check_models` is reused rather than repeated: the repository
+    # already answers "is the champion loaded" in three places.
+    from app.api.system import _check_models
+
     drift = drift_detector.check_drift()
     return {
-        "model_status": "healthy",
+        "model_status": _check_models()["status"],
         "drift_status": drift["status"],
         "observations_tracked": drift["observations"],
         "monitoring": {
