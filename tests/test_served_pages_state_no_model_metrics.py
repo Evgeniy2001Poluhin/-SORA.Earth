@@ -28,13 +28,23 @@ STATIC = pathlib.Path(__file__).resolve().parent.parent / "app" / "static"
 
 # A metric name followed by a decimal, or a decimal followed by a metric name.
 # `_` is a word character, so `\bAUC\b` never matches inside `roc_auc`: the
-# separators are spelled out, and the positive control below would catch a
-# regression to the narrower form.
+# separators are spelled out. A number may also come first with up to two words
+# between it and the metric -- "0.82 Cross-validated AUC" -- because pages put
+# the figure and its label in separate elements. Both lessons are pinned by the
+# positive-control test below.
+_NAME = r"(?:ROC[ _-]?AUC|AUC|F1(?:[ _-]?score)?|accuracy|precision|recall)"
 METRIC = re.compile(
-    r"(?:\b(?:ROC[ _-]?AUC|AUC|F1(?:[ _-]?score)?|accuracy|precision|recall)\b[^<\d]{0,12}\d\.\d{2,4})"
-    r"|(?:\b\d\.\d{2,4}\s*(?:ROC[ _-]?AUC|AUC|F1)\b)",
+    rf"(?:\b{_NAME}\b[^\d]{{0,12}}\d\.\d{{2,4}})"
+    rf"|(?:\b\d\.\d{{2,4}}\s+(?:[\w-]+\s+){{0,2}}{_NAME}\b)",
     re.IGNORECASE,
 )
+_TAG = re.compile(r"<[^>]*>")
+
+
+def page_text(html: str) -> str:
+    """What a reader sees: tags become spaces, so a figure and its label that
+    sit in neighbouring elements read as one phrase, as they do on screen."""
+    return re.sub(r"\s+", " ", _TAG.sub(" ", html))
 
 
 def _served_html():
@@ -60,6 +70,11 @@ def test_the_pattern_recognises_the_defect_it_was_written_for():
     assert METRIC.search("0.92 AUC")
     assert METRIC.search("f1_score: 0.9016")
     assert not METRIC.search("v2.0 build · 12 pages")
+    # The layout that slipped past the first version of this guard: figure and
+    # label in separate elements, a qualifier between them.
+    landing_form = '<div class="metric-big">0.82</div><div class="metric-label">Cross-validated AUC</div>'
+    assert not METRIC.search(landing_form), "the raw markup should not match; the text should"
+    assert METRIC.search(page_text(landing_form))
 
 
 def test_no_served_html_page_states_a_model_metric():
@@ -71,9 +86,9 @@ def test_no_served_html_page_states_a_model_metric():
 
     found = []
     for page in pages:
-        for lineno, line in enumerate(page.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-            for m in METRIC.finditer(line):
-                found.append(f"{page.relative_to(STATIC)}:{lineno}: {m.group(0)!r}")
+        text = page_text(page.read_text(encoding="utf-8", errors="replace"))
+        for m in METRIC.finditer(text):
+            found.append(f"{page.relative_to(STATIC)}: {m.group(0)!r}")
 
     assert not found, (
         "a served page states a model metric it does not compute -- remove it, "
