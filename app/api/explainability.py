@@ -51,10 +51,32 @@ def _resolve_state():
 
 
 def _make_background(scaler, n=50):
+    """The KernelExplainer's reference distribution, taken from the scaler.
+
+    Every attribution `/explain/local` returns is measured *relative to this*.
+    It used to be twelve hardcoded means and twelve hardcoded standard
+    deviations, and measured against `models/scaler_v2.pkl` on 2026-09-21 the
+    centre sat +99.45 sigma out on `budget_efficiency` and -7.02 on
+    `social_impact`, with the spread wrong on nine of the twelve features --
+    `budget` was 42,000 times too narrow, `budget_efficiency` fifty times too
+    wide. Attributions against that reference describe a distribution the model
+    never saw.
+
+    A `StandardScaler` carries the training distribution exactly: `mean_` and
+    `scale_` per feature, in `feature_names_in_` order, which
+    `tests/test_the_shap_background_is_the_training_distribution.py` pins
+    against `FEATURE_COLS`. There is nothing to guess.
+
+    Still an approximation, and worth saying so: a Gaussian is a poor model of
+    a distribution this skewed -- `budget` has a training mean of 9.9e7 against
+    a spread of 7.9e8 -- so some draws are physically impossible, a negative
+    budget among them. A sample of real rows would be better, and needs a
+    decision about what serving code may read. What this fixes is the reference
+    being in the wrong place entirely.
+    """
     rng = np.random.RandomState(42)
-    # 12 features: budget, co2, social, duration, bpm, c2d, eff, ir, be, cat_enc, reg_enc, gdp
-    means = [50000, 100, 5, 12, 5000, 0.002, 50, 0.5, 10, 0.0, 0.0, 12720.0]
-    stds = [20000, 50, 2, 6, 2000, 0.001, 20, 0.3, 5, 1.0, 1.0, 15000.0]
+    means = np.asarray(scaler.mean_, dtype=float)
+    stds = np.asarray(scaler.scale_, dtype=float)
     raw = rng.normal(loc=means, scale=stds, size=(n, len(FEATURE_COLS)))
     df = pd.DataFrame(raw, columns=FEATURE_COLS)
     return scaler.transform(df), df
