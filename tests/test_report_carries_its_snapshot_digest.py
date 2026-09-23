@@ -27,7 +27,10 @@ What a digest has to do to be worth adding:
 from datetime import datetime, timedelta, timezone
 
 import math
+import os
 import random
+import subprocess
+import sys
 
 import pytest
 
@@ -123,3 +126,70 @@ def test_the_digest_and_the_rule_travel_together(monkeypatch):
 
     assert "digest" in snapshot and "required_hours_per_day" in snapshot
     assert snapshot["required_hours_per_day"] == 19
+
+
+# The script the two subprocesses run. Module level so both of them, and the
+# in-process comparison below, are demonstrably over the same rows.
+_FRESH_PROCESS = """
+import sys
+from datetime import datetime, timedelta, timezone
+from app.services.forecasting.daily_target import snapshot_digest
+rows = [("DEU", datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(hours=h),
+         h * 1.5) for h in range(200)]
+sys.stdout.write(snapshot_digest(rows))
+"""
+
+_FRESH_ROWS = [
+    ("DEU", datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(hours=h), h * 1.5)
+    for h in range(200)
+]
+
+
+def _digest_from_a_fresh_interpreter(seed: str) -> str:
+    env = dict(os.environ, PYTHONHASHSEED=seed,
+               PYTHONPATH=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    done = subprocess.run([sys.executable, "-c", _FRESH_PROCESS],
+                          env=env, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, (
+        f"the subprocess under PYTHONHASHSEED={seed} exited "
+        f"{done.returncode}:\n{done.stderr}"
+    )
+    return done.stdout.strip()
+
+
+def test_the_digest_is_the_same_in_a_new_interpreter():
+    """The one property the six tests above cannot observe.
+
+    They run in one interpreter under one `PYTHONHASHSEED`. Replace `sorted`
+    with `set` and two interpreters digest one snapshot differently, because
+    string hashing is randomised per process -- so two runs over one snapshot
+    disagree, which is the entire claim the digest makes.
+
+    Measured, because the first version of this docstring asserted that a
+    set-based implementation "passes every one of them" and that is false: the
+    mutation fails **two** tests, this one and the shuffle above. That second
+    catch is incidental rather than a property being tested -- a set of tuples
+    built from two insertion orders may or may not iterate alike, depending on
+    collision layout -- so it is not something to rely on. This test names the
+    property directly, and is the one that stays true when the fixture changes.
+
+    The shape is asserted before the equality. Two subprocesses that both fail
+    produce two identical empty strings, and the comparison would pass on them
+    -- which is how a check comes to be unable to fail.
+    """
+    first = _digest_from_a_fresh_interpreter("0")
+    second = _digest_from_a_fresh_interpreter("12345")
+
+    assert first.startswith("sha256:") and len(first) == len("sha256:") + 64, (
+        f"the subprocess printed {first!r} rather than a digest, so comparing "
+        f"it with anything proves nothing"
+    )
+    assert first == second, (
+        f"two interpreters digested one snapshot as {first} and {second}. The "
+        f"fingerprint depends on this process rather than on the data, so no "
+        f"two reports can be compared by it"
+    )
+    assert first == snapshot_digest(_FRESH_ROWS), (
+        "the subprocesses agree with each other and not with the function this "
+        "file tests, so they are exercising something else"
+    )
