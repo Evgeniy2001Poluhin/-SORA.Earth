@@ -2,9 +2,13 @@ import { api } from "../client";
 
 export interface SchedulerStatus {
   running: boolean;
-  enabled: boolean;
+  /** Absent when the scheduler container could not be reached: the field
+   *  describes that container, and this process cannot speak for it. */
+  enabled?: boolean | null;
   jobs: unknown[];
-  retrain_history_count: number;
+  /** Null when the count could not be read. Not 0 -- a number nobody could
+   *  read is not zero, and the panel must not print one. */
+  retrain_history_count: number | null;
 }
 
 export interface RetrainHistoryItem {
