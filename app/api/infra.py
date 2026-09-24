@@ -989,17 +989,28 @@ def coverage_report(source: str = "openmeteo",
             -- exactly the quiet dip this endpoint exists to surface. Measured
             -- on production 2026-09-19: three of the first sixteen days of the
             -- restarted clock were short in hours and complete in rows.
-            SELECT to_char(event_time::date, 'YYYY-MM-DD') AS day,
+            --
+            -- UTC days and UTC hours, whatever the session's TimeZone.
+            -- `event_time` is timestamptz, so `event_time::date`,
+            -- `date_trunc('hour', event_time)` and a zone-less cutoff are all
+            -- read in the session's zone. Under a non-UTC session one complete
+            -- UTC day became two short ones, and under a +05:30 zone each UTC
+            -- hour spanned two local hours -- enough to hide an 18-hour day
+            -- entirely. `event_time at time zone 'utc'` is the UTC wall clock;
+            -- the edges are UTC midnights turned back into instants.
+            SELECT to_char((event_time at time zone 'utc')::date, 'YYYY-MM-DD') AS day,
                    region_id,
-                   count(DISTINCT date_trunc('hour', event_time)) AS observations
+                   count(DISTINCT date_trunc('hour', event_time at time zone 'utc'))
+                       AS observations
               FROM environmental_observations
              WHERE source = :source
                AND indicator = :indicator
                AND temporal_kind = 'observed'
                AND event_time IS NOT NULL
-               AND event_time >= (now() at time zone 'utc')::date
-                                 - make_interval(days => :days)
-               AND event_time <  (now() at time zone 'utc')::date
+               AND event_time >= ((now() at time zone 'utc')::date
+                                  - make_interval(days => :days)) at time zone 'utc'
+               AND event_time <  ((now() at time zone 'utc')::date)::timestamp
+                                  at time zone 'utc'
              GROUP BY 1, 2
              ORDER BY 1 DESC, 2
             """
