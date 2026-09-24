@@ -290,7 +290,9 @@ class AITeammate:
             from app.external_data import refresh_live_data
             result = refresh_live_data(trigger_source="ai_agent")
             logger.info("AI Teammate executed data refresh: %s", result)
-            return {"status": "success", "fetched": result.get("fetched", 0)}
+            # The run's own verdict, `success` or `degraded`. A constant here
+            # recorded a degraded refresh as a successful one.
+            return {"status": result["status"], "fetched": result.get("fetched", 0)}
         except Exception as e:
             logger.error("AI Teammate refresh failed: %s", e)
             return {"status": "error", "error": str(e)[:300]}
