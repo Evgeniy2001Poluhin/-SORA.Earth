@@ -240,6 +240,29 @@ describe("DriftTimeline when an event arrives malformed", () => {
     expect(container.textContent ?? "").not.toContain("Invalid Date");
   });
 
+  it("does not draw a drift event whose metrics never arrived as a drift of zero", async () => {
+    // Every row here is, by construction, a *detected* drift: the writer
+    // returns early otherwise (app/mlflow_tracking.py, _log_drift_event_now).
+    // It tags the run before it logs the metrics, and has a failure branch in
+    // between, so a tagged run with no metrics is reachable -- and the schema
+    // says as much: the metric keys vary "with what the tracking server
+    // actually stored". `Number(undefined) || 0` drew that run as 0%, in the
+    // green, which on this list reads as "no drift".
+    stubJson({ status: "ok", reason_code: null, count: 1, events: [{
+      run_id: "fedcba9876543210", start_time: "2026-09-05T10:00:00Z", "tags.baseline_id": "baseline-x",
+    }] });
+
+    const { container } = renderWithQuery(<DriftTimeline />);
+    await waitFor(() => expect(container.textContent ?? "").toContain("fedcba98"), { timeout: 3000 });
+
+    const row = Array.from(container.querySelectorAll(".drift-row"))
+      .find((r) => r.textContent?.includes("fedcba98"));
+    expect(row, "the event has no row").toBeTruthy();
+    expect(row!.textContent).not.toContain("0%");
+    const cells = Array.from(row!.querySelectorAll(".tabular")).map((c) => c.textContent);
+    expect(cells, "drift score and drifted count").toEqual(["—", "—"]);
+  });
+
   it("still renders a well-formed event exactly as before", async () => {
     stubJson({
       status: "ok",
@@ -589,5 +612,152 @@ describe("the MLflow timeline against its migrated contract", () => {
     await new Promise((resolve) => setTimeout(resolve, 400));
 
     expect(container.textContent ?? "").not.toContain("should-n");
+  });
+});
+
+/**
+ * The two answers `check_drift()` gives when nothing was measured.
+ *
+ * `insufficient_data` and `no_baseline` both come back 200 with
+ * `drift_score: 0.0` and with no `features` and no `drifted_features` at all
+ * (app/drift_detection.py, `_baseline_drift_check`). The status line already
+ * said "NO BASELINE", and beside it the page printed "Drift score 0%",
+ * "Drifted features 0" and "across 0 model features" -- three measurements
+ * nobody took, the last two made up by `?? 0` and `|| {}` on fields the server
+ * never sent. The page computes `noData` itself; the KPIs did not ask it.
+ *
+ * Shapes copied from the handler, not invented: `/mlops/drift` returns
+ * `check_drift()` unchanged (app/api/infra.py, `check_drift_infra`).
+ */
+describe("DriftPage when the server says nothing was measured", () => {
+  const INSUFFICIENT = {
+    status: "insufficient_data", drift_detected: false, drift_score: 0.0,
+    reason: "insufficient data", observations: 3, required_min_samples: 30,
+  };
+  const NO_BASELINE = {
+    status: "no_baseline", drift_detected: false, drift_score: 0.0,
+    reason: "baseline not set", observations: 64,
+  };
+  /** A measured answer with values no fallback could produce. */
+  const MEASURED = {
+    status: "drift_detected", observations: 417, drift_detected: true,
+    drift_score: 0.61, drifted_features: ["budget", "co2_reduction"],
+    features: {
+      budget:        { baseline_mean: 150000, baseline_std: 40000, current_mean: 274000, z_score: 3.1, drift: true,  drift_level: "HIGH",   severity: "high" },
+      co2_reduction: { baseline_mean: 340,    baseline_std: 90,    current_mean: 556,    z_score: 2.4, drift: true,  drift_level: "MEDIUM", severity: "medium" },
+      social_impact: { baseline_mean: 7.8,    baseline_std: 1.1,   current_mean: 8.02,   z_score: 0.2, drift: false, drift_level: "LOW",    severity: "low" },
+    },
+  };
+  /** A measured answer in which one feature had no numeric observations. The
+   *  server sends that feature as `{drift: false, reason}` and nothing else --
+   *  the second shape `_baseline_drift_check` writes into `feature_results`. */
+  const MEASURED_WITH_AN_EMPTY_FEATURE = {
+    ...MEASURED,
+    features: {
+      ...MEASURED.features,
+      duration_months: { drift: false, reason: "no numeric observations" },
+    },
+  };
+
+  const urlOf = (input: RequestInfo | URL) =>
+    typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+
+  /** `baseline` null means the baseline request fails. */
+  const serve = (drift: unknown, baseline: unknown | null) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = urlOf(input);
+      if (url.includes("/mlops/drift/baseline")) {
+        return baseline === null
+          ? new Response("upstream said no", { status: 503 })
+          : new Response(JSON.stringify(baseline), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.includes("/mlops/drift")) {
+        return new Response(JSON.stringify(drift), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("not part of this test", { status: 503 });
+    }) as typeof fetch);
+  };
+
+  /** The value under a KPI label. Narrowed by class: "Status" is also a
+   *  column heading elsewhere on screen. */
+  const kpi = (container: HTMLElement, label: string): string | null => {
+    const lbl = Array.from(container.querySelectorAll(".kpi-lbl")).find((el) => el.textContent === label);
+    return lbl?.parentElement?.querySelector(".kpi-val")?.textContent ?? null;
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  for (const [name, answer] of [["insufficient_data", INSUFFICIENT], ["no_baseline", NO_BASELINE]] as const) {
+    it(`does not print a drift score on ${name}`, async () => {
+      serve(answer, { exists: true, n_samples: 500, feature_count: 4 });
+      const { container } = renderWithQuery(<DriftPage />);
+      // Asserted inside waitFor: the label renders before the query resolves,
+      // and reading the value early reads the fallback, not the answer.
+      await waitFor(() => expect(kpi(container, "Observations")).toBe(String(answer.observations)));
+      expect(kpi(container, "Drift score")).toBe("—");
+    });
+
+    it(`does not count drifted features on ${name}`, async () => {
+      serve(answer, { exists: true, n_samples: 500, feature_count: 4 });
+      const { container } = renderWithQuery(<DriftPage />);
+      await waitFor(() => expect(kpi(container, "Observations")).toBe(String(answer.observations)));
+      expect(kpi(container, "Drifted features")).toBe("—");
+    });
+
+    it(`does not claim a number of model features on ${name}`, async () => {
+      serve(answer, { exists: true, n_samples: 500, feature_count: 4 });
+      const { container } = renderWithQuery(<DriftPage />);
+      await waitFor(() => expect(kpi(container, "Observations")).toBe(String(answer.observations)));
+      expect(container.textContent).not.toMatch(/across \d+ model features/);
+    });
+  }
+
+  it("does not say 'not fitted' when the baseline status could not be read", async () => {
+    serve(MEASURED, null);
+    const { container } = renderWithQuery(<DriftPage />);
+    await waitFor(() => expect(kpi(container, "Baseline")).not.toBeNull());
+    await waitFor(() => expect(kpi(container, "Drift score")).toBe("61%"));
+    expect(kpi(container, "Baseline")).not.toBe("not fitted");
+    expect(kpi(container, "Baseline")).toBe("—");
+  });
+
+  // Controls. Without these an unconditional "—" passes every test above and
+  // tells an operator nothing.
+  it("shows the measured drift score, count and feature total when there is one", async () => {
+    serve(MEASURED, { exists: true, n_samples: 500, feature_count: 4 });
+    const { container } = renderWithQuery(<DriftPage />);
+    await waitFor(() => expect(kpi(container, "Drift score")).toBe("61%"));
+    expect(kpi(container, "Drifted features")).toBe("2");
+    expect(container.textContent).toMatch(/across 3 model features/);
+  });
+
+  it("renders a measured answer in which one feature had nothing to measure", async () => {
+    // Not a fallback at all: the table called `.toFixed` on `baseline_mean`,
+    // and a feature with no numeric observations has none, so the page threw
+    // on a measured answer. No `??` pattern finds this -- it is a plain property
+    // read -- and only reading the handler's second shape showed it.
+    serve(MEASURED_WITH_AN_EMPTY_FEATURE, { exists: true, n_samples: 500, feature_count: 4 });
+    const { container } = renderWithQuery(<DriftPage />);
+    await waitFor(() => expect(kpi(container, "Drift score")).toBe("61%"));
+    const row = Array.from(container.querySelectorAll(".drift-row"))
+      .find((r) => r.textContent?.startsWith("duration_months"));
+    expect(row, "the unmeasured feature has no row at all").toBeTruthy();
+    expect(row!.textContent).not.toMatch(/\d\.\d{2,3}/);
+    expect(row!.textContent).toContain("—");
+    expect(row!.textContent).not.toContain("LOW");
+  });
+
+  it("still says 'not fitted' when the server says so", async () => {
+    serve(MEASURED, { exists: false });
+    const { container } = renderWithQuery(<DriftPage />);
+    await waitFor(() => expect(kpi(container, "Baseline")).toBe("not fitted"));
+  });
+
+  it("shows the fitted baseline when there is one", async () => {
+    serve(MEASURED, { exists: true, n_samples: 500, feature_count: 4 });
+    const { container } = renderWithQuery(<DriftPage />);
+    await waitFor(() => expect(kpi(container, "Baseline")).toBe("500 samples / 4 feats"));
   });
 });

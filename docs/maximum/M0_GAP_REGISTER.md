@@ -197,7 +197,7 @@ remain open while GAP-011 does, and `M0_COMPLETION_REPORT.md` does not exist.
 | Severity | P1 — HIGH |
 | Status | OPEN |
 | Verified 2026-07-30 | `app/auth.py` holds `_refresh_tokens: set = set()` — a plain in-process set. Three consequences: every restart invalidates every refresh token, `backend` and `scheduler` do not share it, and the set grows without bound because entries are removed only by explicit revocation. |
-| Evidence | `app/auth.py` — `_refresh_tokens: set = set()`. The original citation of line 118 no longer resolves; that line is now `ARGON2_CEILING`. |
+| Evidence | `app/auth.py` — `_refresh_tokens: set = set()`. The line number this row originally cited no longer resolved; it had come to hold `ARGON2_CEILING`, which is why the row now names the file and not a line. |
 | Root Cause | Tokens stored in Python process memory |
 | Impact | Tokens lost on restart, not distributed |
 | Fix | Store refresh tokens in Redis with TTL |
