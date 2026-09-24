@@ -55,6 +55,9 @@ THRESHOLDS = {
     "max_consecutive_failures": 3,
 }
 
+#: The answers from `DriftDetector.check_drift()` that compared anything.
+_MEASURED_DRIFT_STATUSES = ("stable", "drift_detected")
+
 
 # --------------- Core Logic ---------------
 
@@ -200,13 +203,23 @@ class AITeammate:
             ))
             return
 
-        status = result.get("status", "ok")
-        if status == "insufficient_data":
+        # Only `stable` and `drift_detected` compared anything. `insufficient_data`
+        # and `no_baseline` still send drift_detected=False and drift_score=0.0,
+        # which are placeholders: `no_baseline` fell through to the line below
+        # and was recorded as "No drift detected (score=0.0000)". Kept `info`
+        # rather than `warning`, because decide() retrains on any drift warning.
+        status = result.get("status")
+        if status not in _MEASURED_DRIFT_STATUSES:
+            counts = ", ".join(
+                f"{key}={result[key]}"
+                for key in ("observations", "required_min_samples",
+                            "reference_samples", "current_samples")
+                if key in result
+            )
             self.observations.append(Observation(
                 category="drift", severity="info",
-                message=f"Drift check skipped: insufficient data "
-                        f"(ref={result.get('reference_samples', 0)}, "
-                        f"cur={result.get('current_samples', 0)})"
+                message=f"Drift check skipped: {result.get('reason') or status or 'no status'}"
+                        + (f" ({counts})" if counts else "")
             ))
             return
 
@@ -290,7 +303,9 @@ class AITeammate:
             from app.external_data import refresh_live_data
             result = refresh_live_data(trigger_source="ai_agent")
             logger.info("AI Teammate executed data refresh: %s", result)
-            return {"status": "success", "fetched": result.get("fetched", 0)}
+            # The run's own verdict, `success` or `degraded`. A constant here
+            # recorded a degraded refresh as a successful one.
+            return {"status": result["status"], "fetched": result.get("fetched", 0)}
         except Exception as e:
             logger.error("AI Teammate refresh failed: %s", e)
             return {"status": "error", "error": str(e)[:300]}
