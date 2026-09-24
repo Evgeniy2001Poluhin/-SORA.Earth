@@ -53,6 +53,13 @@ def load_rows(source: str, indicator: str, days: int):
 
     `temporal_kind == 'observed'` because a forecast row is not an observation
     of anything, and mixing the two would score a model against its own output.
+
+    The cutoff is `now() - interval`: an instant minus an interval, compared
+    with `event_time` (timestamptz) as an instant. It was
+    `(now() at time zone 'utc') - interval`, a zone-less UTC wall clock that
+    PostgreSQL turned back into an instant with the *session's* TimeZone -- so
+    the window moved by the session's offset, and the rows in the report
+    depended on a connection setting.
     """
     from sqlalchemy import text
 
@@ -69,8 +76,7 @@ def load_rows(source: str, indicator: str, days: int):
                AND temporal_kind = 'observed'
                AND event_time IS NOT NULL
                AND value IS NOT NULL
-               AND event_time >= (now() at time zone 'utc')
-                                 - make_interval(days => :days)
+               AND event_time >= now() - make_interval(days => :days)
              ORDER BY event_time
             """
         ), {"source": source, "indicator": indicator, "days": days}).all()

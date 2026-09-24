@@ -5,7 +5,23 @@ from app.database import SessionLocal, HealthPing
 from app.api.system import _check_models, _check_db, _check_external_data
 
 def _component_ok():
-    out = {"api": True}
+    """What this process can observe, and nothing it cannot.
+
+    `api` was a literal `True`. The `health_ping` job in app/scheduler.py calls
+    `record_health()` every five minutes from the **scheduler** container, which
+    serves no HTTP and never contacts the API -- so every five minutes it wrote a
+    row saying the API was healthy without looking. Measured on the local
+    `health_pings` table: api 2653 of 2653 healthy, while `models` recorded
+    false 2636 times through the same pipeline. The status page derives uptime
+    from these rows, so API uptime could not fall below 100%.
+
+    The API process may still claim it: answering this call is the evidence.
+    """
+    from app.scheduler import should_run_scheduler
+
+    out = {}
+    if not should_run_scheduler():
+        out["api"] = True
     try: out["models"] = _check_models().get("status") == "healthy"
     except Exception: out["models"] = False
     try: out["database"] = _check_db().get("status") == "healthy"
