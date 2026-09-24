@@ -9,10 +9,14 @@ This dashboard monitors the progress and performance of LSTM/Prophet forecast mo
 1. **LSTM Activation Status** (green = active, orange = waiting for data)
 2. **Sample Count Progress** (gauge showing 0→60 samples)
 3. **Days Until LSTM Activation** (countdown)
-4. **Model Weights Over Time** (LSTM vs Prophet weights in ensemble)
-5. **Sample Count Growth** (time series of training data accumulation)
-6. **Forecast Request Rate** (requests/sec)
-7. **Model Comparison (MAE)** (Prophet vs LSTM vs Ensemble accuracy)
+4. **Sample Count Over Time** (time series of training data accumulation)
+5. **Forecast Request Rate** (requests/sec, from the HTTP instrumentation)
+6. **Ensemble MAE by metric** (the ensemble's MAE, one series per forecast metric)
+
+Two panels this list used to name are gone. "Model Weights Over Time" queried
+ensemble weights that no metric exports under any name, and "Model Comparison
+(MAE)" compared Prophet, LSTM and the ensemble when only the ensemble's MAE is
+exported. Both could only ever read "No data".
 
 ## Installation
 
@@ -62,15 +66,16 @@ Dashboard will auto-load on startup.
 The LSTM status endpoint automatically exports metrics to Prometheus when called:
 
 ```bash
-curl http://localhost:8000/api/v1/forecasting/lstm-status
+curl http://localhost:8000/api/v1/lstm-status
 ```
 
-This updates the following gauges:
-- `forecast_lstm_active` (0 or 1)
-- `forecast_sample_count` (0-60+)
-- `forecast_lstm_weight` (0.0-1.0)
-- `forecast_prophet_weight` (0.0-1.0)
-- `forecast_days_until_lstm` (days remaining)
+This updates the following gauges, in the API process -- so a query names
+`job="sora-app"`; the scheduler exports the same names and never sets them:
+- `sora_forecast_lstm_active` (0 or 1)
+- `sora_forecast_samples_total` (0-60+)
+- `sora_forecast_days_remaining` (days remaining)
+
+The ensemble weights are not exported as metrics.
 
 ## Scheduled Updates
 
@@ -98,8 +103,8 @@ def refresh_forecast_metrics():
 - **Time range**: Default 1 hour (adjustable with time picker)
 - **Annotations**: LSTM activation events are highlighted on charts
 - **Alerts**: Configure alerts in Grafana for:
-  - `forecast_days_until_lstm < 7` → "LSTM activation approaching"
-  - `forecast_lstm_active == 0 AND forecast_sample_count >= 60` → "LSTM should activate but hasn't"
+  - `sora_forecast_days_remaining{job="sora-app"} < 7` → "LSTM activation approaching"
+  - `sora_forecast_lstm_active{job="sora-app"} == 0 and sora_forecast_samples_total{job="sora-app"} >= 60` → "LSTM should activate but hasn't"
 
 ## Troubleshooting
 

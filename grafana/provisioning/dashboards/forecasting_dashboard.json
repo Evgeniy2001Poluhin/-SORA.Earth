@@ -20,7 +20,7 @@
       },
       "targets": [
         {
-          "expr": "forecast_lstm_active",
+          "expr": "sora_forecast_lstm_active{job=\"sora-app\"}",
           "legendFormat": "LSTM Active",
           "refId": "A"
         }
@@ -71,7 +71,7 @@
       },
       "targets": [
         {
-          "expr": "forecast_sample_count",
+          "expr": "sora_forecast_samples_total{job=\"sora-app\"}",
           "legendFormat": "Samples",
           "refId": "A"
         }
@@ -112,7 +112,7 @@
       },
       "targets": [
         {
-          "expr": "forecast_days_until_lstm",
+          "expr": "sora_forecast_days_remaining{job=\"sora-app\"}",
           "legendFormat": "Days Remaining",
           "refId": "A"
         }
@@ -145,48 +145,18 @@
       }
     },
     {
-      "id": 4,
-      "title": "Model Weights Over Time",
-      "type": "timeseries",
-      "gridPos": {
-        "x": 0,
-        "y": 4,
-        "w": 12,
-        "h": 6
-      },
-      "targets": [
-        {
-          "expr": "forecast_lstm_weight",
-          "legendFormat": "LSTM Weight",
-          "refId": "A"
-        },
-        {
-          "expr": "forecast_prophet_weight",
-          "legendFormat": "Prophet Weight",
-          "refId": "B"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "min": 0,
-          "max": 1
-        }
-      }
-    },
-    {
       "id": 5,
       "title": "Sample Count Over Time",
       "type": "timeseries",
       "gridPos": {
-        "x": 12,
+        "x": 0,
         "y": 4,
-        "w": 12,
+        "w": 24,
         "h": 6
       },
       "targets": [
         {
-          "expr": "forecast_sample_count",
+          "expr": "sora_forecast_samples_total{job=\"sora-app\"}",
           "legendFormat": "Training Samples",
           "refId": "A"
         }
@@ -221,7 +191,7 @@
       },
       "targets": [
         {
-          "expr": "rate(forecast_requests_total[5m])",
+          "expr": "sum(rate(http_requests_total{job=\"sora-app\", handler=\"/api/v1/forecast\"}[5m]))",
           "legendFormat": "Requests/sec",
           "refId": "A"
         }
@@ -234,7 +204,7 @@
     },
     {
       "id": 7,
-      "title": "Model Comparison (MAE)",
+      "title": "Ensemble MAE by metric",
       "type": "bargauge",
       "gridPos": {
         "x": 12,
@@ -244,19 +214,9 @@
       },
       "targets": [
         {
-          "expr": "forecast_model_mae{model=\"prophet\"}",
-          "legendFormat": "Prophet MAE",
+          "expr": "sora_forecast_mae_current{job=\"sora-scheduler\", model=\"ensemble\"}",
+          "legendFormat": "{{metric}}",
           "refId": "A"
-        },
-        {
-          "expr": "forecast_model_mae{model=\"lstm\"}",
-          "legendFormat": "LSTM MAE",
-          "refId": "B"
-        },
-        {
-          "expr": "forecast_model_mae{model=\"ensemble\"}",
-          "legendFormat": "Ensemble MAE",
-          "refId": "C"
         }
       ],
       "fieldConfig": {
@@ -284,7 +244,8 @@
       "options": {
         "orientation": "horizontal",
         "displayMode": "gradient"
-      }
+      },
+      "description": "Only the ensemble's MAE is exported (sora_forecast_mae_current, written by the scheduler's auto_pretrain_forecast every six hours, absent for up to six hours after a restart). Prophet and LSTM MAE are not exported under any name, so a model comparison cannot be drawn from Prometheus."
     }
   ],
   "refresh": "10s",
@@ -306,7 +267,7 @@
       {
         "name": "LSTM Activation",
         "datasource": "Prometheus",
-        "expr": "changes(forecast_lstm_active[1m]) > 0",
+        "expr": "changes(sora_forecast_lstm_active{job=\"sora-app\"}[1m]) > 0",
         "tagKeys": "activation",
         "titleFormat": "LSTM Activation Event",
         "textFormat": "LSTM model activated in ensemble"
