@@ -52,7 +52,7 @@ week_of() {  # <backup-id> -> ISO year-week
 
 KEEP=""
 add_keep() {  # <id> <reason>
-    printf '%s\n' "$KEEP" | grep -qxF "$1" 2>/dev/null && return 0
+    grep -qxF -- "$1" <<<"$KEEP" 2>/dev/null && return 0
     KEEP="$(printf '%s\n%s' "$KEEP" "$1")"
     printf '  keep   %s  (%s)\n' "$1" "$2"
 }
@@ -62,7 +62,7 @@ if [ "$KEEP_ROLLING" -gt 0 ]; then
     while IFS= read -r id; do
         [ -n "$id" ] || continue
         add_keep "$id" rolling
-    done <<< "$(printf '%s\n' "$NEWEST_FIRST" | head -n "$KEEP_ROLLING")"
+    done <<< "$(head -n "$KEEP_ROLLING" <<<"$NEWEST_FIRST")"
 fi
 
 # weekly: first sighting of each week, newest first, up to the limit
@@ -72,7 +72,7 @@ while IFS= read -r id; do
     [ -n "$id" ] || continue
     [ "$WEEKS" -ge "$KEEP_WEEKLY" ] && break
     week="$(week_of "$id")"
-    printf '%s\n' "$SEEN_WEEKS" | grep -qxF "$week" 2>/dev/null && continue
+    grep -qxF -- "$week" <<<"$SEEN_WEEKS" 2>/dev/null && continue
     SEEN_WEEKS="$(printf '%s\n%s' "$SEEN_WEEKS" "$week")"
     WEEKS=$((WEEKS + 1))
     add_keep "$id" "weekly $week"
@@ -80,7 +80,7 @@ done <<< "$NEWEST_FIRST"
 
 # Whatever the settings say, the newest completed backup stays. A configuration
 # that would empty the store is a configuration mistake, not an instruction.
-NEWEST="$(printf '%s\n' "$NEWEST_FIRST" | head -n 1)"
+NEWEST="$(head -n 1 <<<"$NEWEST_FIRST")"
 add_keep "$NEWEST" newest
 
 KEPT="$(printf '%s\n' "$KEEP" | grep -c . || true)"
@@ -89,7 +89,7 @@ echo "completed backups: $TOTAL   keeping: $KEPT"
 FAILURES=0
 while IFS= read -r id; do
     [ -n "$id" ] || continue
-    if printf '%s\n' "$KEEP" | grep -qxF "$id"; then
+    if grep -qxF -- "$id" <<<"$KEEP"; then
         continue
     fi
     if [ "$APPLY" = "1" ]; then

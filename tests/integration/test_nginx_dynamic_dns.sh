@@ -205,8 +205,8 @@ if [ "$MODE" = "legacy" ]; then
 fi
 
 [ "$code2" = "200" ] || die "did not recover: $code2 (upstream after: $after)"
-echo "$after" | grep -q "$ip2" || die "recovered, but upstream is not $ip2: $after"
-echo "$before" | grep -q "$ip1" || die "baseline upstream was not $ip1: $before"
+grep -q -- "$ip2" <<<"$after" || die "recovered, but upstream is not $ip2: $after"
+grep -q -- "$ip1" <<<"$before" || die "baseline upstream was not $ip1: $before"
 [ "$gcode2" = "200" ] && [ "$gbody2" = "/grafana/x" ] || die "grafana broke: $gcode2 $gbody2"
 
 note "PASS(fixed): upstream moved $ip1 -> $ip2 with no reload, URI preserved"
