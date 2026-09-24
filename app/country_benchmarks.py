@@ -33,6 +33,23 @@ BENCHMARKS = {
     "Afghanistan":  {"co2_per_capita": 0.2,  "renewable_share": 78.2, "esg_rank": 70, "hdi": 0.478, "gdp_per_capita": 355,    "gini_index": 29.4, "gov_effectiveness": -1.65},
 }
 
+# `COUNTRIES` in app/main.py -- the list the interface offers and `/evaluate`
+# accepts -- spells two of these in full, and `calculate_esg` looks a country up
+# by exact name. So "United States" and "United Kingdom" matched nothing and were
+# scored on GLOBAL_AVG, while the response went on naming the country the caller
+# asked for. Measured on one project (budget 150 000, CO2 340 t/yr, social 9,
+# 18 months): the United States scored 68.41 against the world average where its
+# own figures give 59.36, and the United Kingdom 71.71 where its own give 78.59.
+#
+# Aliases rather than renames: "USA" and "UK" are the spellings this table has
+# always used and an API caller may send either. They are the same object, so the
+# two spellings cannot drift apart. Finland is a different case -- there is no
+# Finland row under any spelling -- and is recorded as a gap in
+# tests/test_every_selectable_country_has_a_benchmark.py rather than invented.
+BENCHMARKS["United States"] = BENCHMARKS["USA"]
+BENCHMARKS["United Kingdom"] = BENCHMARKS["UK"]
+
+
 GLOBAL_AVG = {
     "co2_per_capita": 4.7,
     "renewable_share": 28.3,
