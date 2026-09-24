@@ -133,7 +133,7 @@ class TestCalibration:
     def test_reliability_diagram(self):
         c = TestClient(app, raise_server_exceptions=False)
         r = c.get("/api/v1/model/reliability-diagram", headers=_auth(c))
-        assert r.status_code in (200, 404, 500)
+        assert r.status_code == 200, r.text
 
     def test_predict_uncertainty(self):
         c = TestClient(app, raise_server_exceptions=False)
@@ -155,16 +155,15 @@ class TestABComparison:
     def test_ab_comparison_json(self):
         c = TestClient(app, raise_server_exceptions=False)
         r = c.get("/api/v1/model/ab-comparison", headers=_auth(c))
-        assert r.status_code in (200, 404, 500)
-        if r.status_code == 200:
-            d = r.json()
-            assert "models" in d
-            assert "winner" in d
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert "models" in d
+        assert "winner" in d
 
     def test_ab_comparison_plot(self):
         c = TestClient(app, raise_server_exceptions=False)
         r = c.get("/api/v1/model/ab-comparison/plot", headers=_auth(c))
-        assert r.status_code in (200, 404, 500)
+        assert r.status_code == 200, r.text
 
 
 # === MAIN.PY ===
