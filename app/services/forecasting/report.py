@@ -29,7 +29,8 @@ import pandas as pd
 
 from . import entry_conditions
 from .baselines import default_baselines
-from .daily_target import coverage_by_day, daily_observations, required_hours
+from .daily_target import (coverage_by_day, daily_observations, required_hours,
+                           snapshot_digest)
 from .evaluation import evaluate_rolling_origin
 
 #: The horizons the declaration names. Both are reported because the gate
@@ -71,6 +72,13 @@ def build_report(
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "target": target,
         "snapshot": {
+            # Phase 7's exit criterion: every result ties to a source and a
+            # snapshot. The counts below do not identify anything -- two runs
+            # over different data can produce the same three numbers -- so the
+            # digest is what makes this report reproducible rather than merely
+            # repeatable. Paired with `required_hours_per_day`, which is the
+            # other half: the series is a function of the rows and §3's floor.
+            "digest": snapshot_digest(rows),
             "points": len(points_in_data),
             "days": len(days),
             "first_day": days[0].isoformat() if days else None,
