@@ -41,4 +41,6 @@ def test_ping():
 
 def test_readiness_ok():
     r = _client.get("/api/v1/ready")
-    assert r.status_code in (200, 503)  # 503 если модели не загружены в тестах
+    # The models are loaded here: backend-tests checks out LFS and verifies
+    # models/ before running, so a 503 would be a real failure, not the norm.
+    assert r.status_code == 200, r.text
