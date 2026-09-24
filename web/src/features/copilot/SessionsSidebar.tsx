@@ -85,6 +85,10 @@ export function SessionsSidebar({ currentId, onSelect, onNew, tick = 0, refreshT
       <div className="sessions-list">
         {loading && sessions.length === 0 ? (
           <div className="sessions-empty">Loading…</div>
+        ) : query.isError && sessions.length === 0 ? (
+          // A failed read is not an empty history (#236): "No chats yet" here
+          // told the user their chats were gone when they could not be listed.
+          <div className="sessions-empty">Could not load chats</div>
         ) : sessions.length === 0 ? (
           <div className="sessions-empty">No chats yet</div>
         ) : (

@@ -83,8 +83,11 @@ class TestAITeammateAPI:
         import app.external_data as ext
         monkeypatch.setattr(ext, "refresh_all_countries",
                             lambda: {"fetched": 32, "total": 32, "countries": []})
+        # `status` is part of what refresh_live_data returns, and the teammate
+        # reports it; a stub without it records this refresh as an error.
         monkeypatch.setattr(ext, "refresh_live_data",
-                            lambda trigger_source="test": {"fetched": 32, "total": 32, "countries": []})
+                            lambda trigger_source="test": {"fetched": 32, "total": 32, "countries": [],
+                                                           "status": "success"})
 
         token = self._admin_token()
         r = self.client.post('/api/v1/admin/ai-teammate/run?mode=auto',

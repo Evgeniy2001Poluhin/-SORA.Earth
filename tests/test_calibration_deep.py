@@ -7,10 +7,8 @@ client = TestClient(app, raise_server_exceptions=False)
 PROJECT = {"budget": 100000, "co2_reduction": 50, "social_impact": 7, "duration_months": 12}
 
 def test_calibration_predict():
-    for path in ["/api/v1/predict/uncertainty", "/api/v1/calibration/predict"]:
-        r = client.post(path, json=PROJECT)
-        if r.status_code != 404: break
-    assert r.status_code in (200, 404, 422, 500)
+    r = client.post("/api/v1/predict/uncertainty", json=PROJECT)
+    assert r.status_code == 200, r.text
 
 def test_calibration_keeps_no_history_endpoint():
     """Neither path has ever existed, and the test accepted their 404 as a pass.
@@ -27,16 +25,19 @@ def test_calibration_keeps_no_history_endpoint():
         )
 
 def test_calibration_compare():
-    for path in ["/api/v1/calibration/discrepancy", "/api/v1/calibration/compare"]:
-        r = client.post(path, json={"projects": [PROJECT, PROJECT]})
-        if r.status_code != 404: break
-    assert r.status_code in (200, 404, 422, 500)
+    r = client.post("/api/v1/calibration/discrepancy", json={"projects": [PROJECT, PROJECT]})
+    assert r.status_code == 200, r.text
 
 def test_calibration_recalibrate():
-    for path in ["/api/v1/calibration/brier", "/api/v1/calibration/recalibrate"]:
-        r = client.post(path, json=PROJECT)
-        if r.status_code != 404: break
-    assert r.status_code in (200, 404, 422, 500)
+    """Brier score over predictions and outcomes.
+
+    This posted a project, which is not that, and passed on the 422;
+    `/calibration/recalibrate`, its fallback, does not exist.
+    """
+    r = client.post("/api/v1/calibration/brier",
+                    json={"probs": [0.2, 0.7, 0.9, 0.1], "labels": [0, 1, 1, 0]})
+    assert r.status_code == 200, r.text
+    assert "brier" in r.json()
 
 def test_calibration_module_importable():
     try:
