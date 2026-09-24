@@ -25,7 +25,7 @@ type ForecastResponse = {
   forecast: FcPoint[];
   model: string;
   metric: string;
-  confidence?: "high" | "medium" | "low";
+  confidence?: "high" | "medium" | "low" | null;
   metadata?: ForecastMetadata;
 };
 
@@ -67,7 +67,11 @@ export default function ForecastPage() {
   const lastActual = data?.history.at(-1)?.y;
   const lastForecast = data?.forecast.at(-1)?.yhat;
   const delta = lastActual && lastForecast ? lastForecast - lastActual : null;
-  const confidence = data?.confidence ?? "low";
+  // `confidence` is `Optional[...] = None` in `ForecastResponse`, and both of
+  // `/forecast`'s early returns -- no history, or under three points -- leave it
+  // unset alongside an empty forecast. No forecast has no confidence; `?? "low"`
+  // printed a grade for one that was never made.
+  const confidence = data?.confidence ?? null;
   const yDomain = metric === "prob" ? [0, 1] : metric === "score" ? [0, 100] : undefined;
 
   return (
@@ -85,8 +89,8 @@ export default function ForecastPage() {
         {data && (
           <div className="map-stats">
             <div className="stat">
-              <b style={{ color: CONFIDENCE_COLOR[confidence] }}>
-                {confidence.toUpperCase()}
+              <b style={{ color: confidence ? CONFIDENCE_COLOR[confidence] : "var(--muted)" }}>
+                {confidence ? confidence.toUpperCase() : "—"}
               </b>
               <em>confidence</em>
             </div>

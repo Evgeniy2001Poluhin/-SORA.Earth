@@ -26,6 +26,7 @@ rather than through a second shape that could disagree with it.
 """
 from __future__ import annotations
 
+import hashlib
 from collections import defaultdict
 from datetime import date, datetime, timezone
 from typing import Dict, Iterable, List, Tuple
@@ -90,6 +91,40 @@ def daily_observations(
         ))
 
     return sorted(out, key=lambda o: (o.region, o.period_end))
+
+
+def snapshot_digest(
+    rows: Iterable[Tuple[str, datetime, float]],
+) -> str:
+    """`sha256:` over the observations a report was computed from.
+
+    Phase 7's exit criterion is that every result ties to a source and a
+    snapshot. The report's counts -- points, days, observations -- do not
+    identify anything: two runs over different data can produce the same three
+    numbers. This is the same closure `_do_retrain` makes for the training file
+    (#354), on the side that reads observations instead of a CSV.
+
+    **Sorted before hashing, deliberately.** The loader orders by `event_time`
+    today and nothing forces that to stay true; an index change or a UNION would
+    reorder it, and a digest that moved then would be reporting a data change
+    that did not happen. Sorting makes the fingerprint a property of the set of
+    observations rather than of the query that fetched them.
+
+    Values are formatted with `repr` rather than rounded: rounding would make
+    two genuinely different readings hash alike, which is the failure a
+    fingerprint exists to prevent.
+
+    Timestamps go through the same UTC normalisation the series uses, so a row
+    fetched as naive and the same row fetched as aware do not look like two
+    different observations.
+    """
+    canonical = sorted(
+        (point, _as_utc(event_time).isoformat(), repr(float(value)))
+        for point, event_time, value in rows
+        if value is not None and event_time is not None
+    )
+    joined = "\n".join("\t".join(row) for row in canonical)
+    return "sha256:" + hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
 def coverage_by_day(
