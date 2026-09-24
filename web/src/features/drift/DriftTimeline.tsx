@@ -34,13 +34,24 @@ export function DriftTimeline() {
   // inside DriftPage. An absent `start_time` was quieter and worse: it sorts
   // as NaN, which reorders the timeline rather than failing (#236).
   const at = (e: MlflowDriftEvent) => new Date(e.start_time).getTime();
+  // A metric MLflow did not store is absent, not zero. `Number(undefined) || 0`
+  // drew such a run at 0% -- and every run on this timeline is a *detected*
+  // drift, so that was a drift event drawn as "no drift". The schema says the
+  // metric columns vary with what the tracking server stored, and the writer
+  // tags a run before it logs the metrics, with a failure branch in between.
+  // `Number(null)` is 0, so null is checked before converting.
+  const metric = (v: unknown): number | null => {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
   const data = events
     .slice()
     .sort((a, b) => (Number.isFinite(at(a)) ? at(a) : 0) - (Number.isFinite(at(b)) ? at(b) : 0))
     .map((e) => ({
       timeShort: Number.isFinite(at(e)) ? new Date(at(e)).toLocaleTimeString() : "-",
-      drift_score: Number(e["metrics.drift_score"]) || 0,
-      drifted_count: Number(e["metrics.drifted_features_count"]) || 0,
+      drift_score: metric(e["metrics.drift_score"]),
+      drifted_count: metric(e["metrics.drifted_features_count"]),
       run: typeof e.run_id === "string" ? e.run_id.slice(0, 8) : "-",
       baseline: e["tags.baseline_id"] || "-",
       features: e["params.drifted_features"] || "-",
@@ -136,13 +147,14 @@ export function DriftTimeline() {
           <div>Features</div>
         </div>
         {data.slice().reverse().map((e) => {
-          const high = e.drift_score >= 0.31;
+          const high = e.drift_score != null && e.drift_score >= 0.31;
+          const scoreColor = e.drift_score == null ? "var(--muted)" : high ? "#EF4444" : "#2FE0A6";
           return (
             <div key={e.run} className="drift-row" style={{ gridTemplateColumns: "80px 1fr 80px 80px 1fr 1.2fr" }}>
               <div className="mono" style={{ fontSize: 11 }}>{e.run}</div>
               <div style={{ color: "var(--muted)", fontSize: 12 }}>{e.timeShort}</div>
-              <div className="tabular" style={{ color: high ? "#EF4444" : "#2FE0A6" }}>{(e.drift_score * 100).toFixed(0)}%</div>
-              <div className="tabular">{e.drifted_count}</div>
+              <div className="tabular" style={{ color: scoreColor }}>{e.drift_score != null ? `${(e.drift_score * 100).toFixed(0)}%` : "—"}</div>
+              <div className="tabular">{e.drifted_count ?? "—"}</div>
               <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>{e.baseline}</div>
               <div style={{ fontSize: 11, color: "var(--muted)" }}>{e.features}</div>
             </div>
