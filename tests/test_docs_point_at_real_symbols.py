@@ -101,6 +101,62 @@ _SYMBOL_REF = re.compile(r"`([\w/]+\.py)`\s*→\s*`(\w+)(?:\(\))?`")
 #: Any surviving `file.py:123` pointer, which is the thing being removed.
 _LINE_REF = re.compile(r"`?([\w/]+\.py):(\d+)(?:-\d+)?`?")
 
+#: The same pointer written in words, which the shape above cannot see. A guard
+#: you can walk around by writing the thing out is not a guard, and the walk is
+#: not adversarial -- `line 118` is how anyone writes it naturally.
+#:
+#: Enumerated from the corpus rather than guessed. Counted on 2026-09-20 over
+#: the 98 markdown files then tracked, outside code blocks: 30 English, 1
+#: Russian, 1 bare continuation, 0 GitHub-style. A dated figure, not a current
+#: one: the corpus was 99 files two days later. Four shapes were looked for and found absent --
+#: `at/near line N`, `см. строку N`, `N-я строка`, `row N` -- and two more were
+#: looked for and rejected below.
+_WORDED_LINE_REF = re.compile(r"\blines?\s+\d+(?:\s*[-–—]\s*\d+)?", re.I)
+
+#: The Russian form. One instance, in a report that names itself dated.
+_WORDED_LINE_REF_RU = re.compile(r"\bстрок[аеиуо]\w*\s+\d+", re.I)
+
+#: `` `:335` `` -- a line number whose filename is carried over from an earlier
+#: reference in the same sentence. `_LINE_REF` requires the `file.py:` prefix, so
+#: the second of two pointers escapes it entirely. One instance, and it was
+#: removed -- by the change that widened this rule to every document -- by
+#: rewriting the row around it, not by seeing it.
+#:
+#: The lookbehind keeps `localhost:8000` and every other `host:port` out.
+#: Measured over the corpus: one match, and it is the pointer.
+_BARE_LINE_REF = re.compile(r"(?<![\w.:/])`?:\d{1,5}`?(?![\w.])")
+
+#: `L118`, `#L118` -- GitHub's own notation. **Zero instances in this corpus**,
+#: so unlike the three above it is pinned only by the sample in
+#: `test_each_form_is_caught`, never by real content. Included because it costs
+#: nothing and is the obvious way to write one next.
+_GITHUB_LINE_REF = re.compile(r"#?\bL\d{2,5}\b")
+
+#: Named, so a failure says which shape it matched rather than only where.
+LINE_POINTER_FORMS = {
+    "file.py:N": _LINE_REF,
+    "line N": _WORDED_LINE_REF,
+    "строка N": _WORDED_LINE_REF_RU,
+    ":N continuation": _BARE_LINE_REF,
+    "LN": _GITHUB_LINE_REF,
+}
+
+#: **A count is not a pointer, and word order is what separates them.**
+#: `38 lines modified` is a measurement of a change; `lines 462-523` is a
+#: position in a file. Measured over the corpus: 40 counts, 30 pointers, and
+#: **not one line contains both**, so requiring the word before the number
+#: separates them without a judgement call. This pattern is the one thing that
+#: must never match, and `test_a_count_of_lines_is_not_a_pointer` is why.
+_LINE_COUNT = re.compile(r"\b\d+\+?\s+lines?\b", re.I)
+
+#: **`§7`, `§10.3` -- a section, and deliberately out of scope.** 102 instances,
+#: and CLAUDE.md cites `docs/M2_EVALUATION_PROTOCOL.md` §10.3 and "M3 §7" as the
+#: correct way to point at a place in a document. A section is a named division
+#: that survives an edit above it; a line number is not. Forbidding it would
+#: forbid the notation this repository chose, so it is recorded here as
+#: considered and excluded rather than left to look like an oversight.
+_SECTION_REF = re.compile(r"§\s?\d+(?:\.\d+)*")
+
 
 #: An opening fence: up to three spaces of indentation, three or more backticks
 #: or tildes, then an info string a backtick fence may not put a backtick in.
@@ -175,6 +231,14 @@ DATED: dict[str, str] = {
     ".claude/GRAFANA_FORECAST_MONITORING.md": "# Grafana Forecast Monitoring Setup",
     ".claude/PROPHET_INTEGRATION_SUMMARY.md": "**Completed:** 2026-07-13",
     ".claude/SESSION_2_SUMMARY.md": "# Session 2 Summary - 2026-07-12/13",
+    # Added when the rule grew its worded form. These three carry no
+    # `file.py:NNN` at all, so the list -- built from where the old shape
+    # happened to land -- had never seen them. An exemption list assembled from
+    # one rule's footprint is not a description of which documents record a
+    # moment, and widening the rule is what showed the difference.
+    ".claude/SESSION_SUMMARY.md": "# Session Summary - 2026-07-12",
+    ".claude/TASK2_COMPLETION_REPORT.md": "**Date:** 2026-07-12",
+    "docs/ENGINEERING_REPORT_2026-09-06_07.md": "**SCOPED — not the project plan.**",
     "API_KEYS_USAGE_AUDIT.md": "**Date:** 2026-07-10",
     "IMPROVEMENTS_2026-07-17.md": "**Date:** 2026-07-17",
     "SECURITY_AUDIT_RESULTS.md": "**Audit Date:** 2026-07-10",
@@ -234,8 +298,8 @@ def sweep_for_line_pointers() -> tuple[int, list[str]]:
     visited, offenders = 0, []
     for path in files_in_scope():
         visited += 1
-        for n, pointer in line_pointers(path):
-            offenders.append(f"{path.relative_to(REPO)}:{n}: {pointer}")
+        for n, pointer, form in line_pointers(path):
+            offenders.append(f"{path.relative_to(REPO)}:{n}: {pointer}  [{form}]")
     return visited, offenders
 
 
@@ -254,12 +318,27 @@ def files_in_scope() -> list[Path]:
     ]
 
 
-def line_pointers(path: Path) -> list[tuple[int, str]]:
-    """`(line number, pointer)` for every `file.py:NNN` in this file's prose."""
+def line_pointers(path: Path) -> list[tuple[int, str, str]]:
+    """`(line number, pointer, form)` for every line pointer in this file's prose.
+
+    Every shape in `LINE_POINTER_FORMS`, not only `file.py:NNN`. The rule was
+    decided against a pointer that cannot be kept true, and the reason has
+    nothing to do with punctuation: `line 118` drifts exactly as `auth.py:118`
+    does, and `docs/maximum/M0_GAP_REGISTER.md` carried one of each -- the second
+    inside a correction recording that the first had rotted.
+
+    Each pointer is reported once because the forms are disjoint -- no two can
+    match the same characters -- and `test_the_forms_do_not_overlap` holds them
+    to that. An earlier version deduplicated overlapping matches here instead;
+    measured, removing that code changed nothing, because nothing ever
+    overlapped. A defence that no input can reach is a claim no test can check,
+    so it went, and the property it stood for is now asserted where it can fail.
+    """
     found = []
     for n, line in prose_lines(path.read_text(errors="replace")):
-        for m in _LINE_REF.finditer(line):
-            found.append((n, m.group(0).strip("`")))
+        for form, rx in LINE_POINTER_FORMS.items():
+            for m in rx.finditer(line):
+                found.append((n, m.group(0).strip("`"), form))
     return found
 
 
@@ -478,13 +557,31 @@ def test_the_sweep_can_print_a_non_zero():
         "traceback line, which is sample output"
     )
 
-    corpus = {}
+    from collections import Counter
+
+    corpus, by_form = {}, Counter()
     for name in DATED:
         path = REPO / name
         if path.exists():
             hits = line_pointers(path)
             if hits:
                 corpus[name] = len(hits)
+                by_form.update(form for _, _, form in hits)
+
+    #: Which shapes the detector is proven on by real repository content, and
+    #: which only by the samples in `test_each_form_is_caught`. Asserted as an
+    #: exact set, so it cannot quietly become untrue in either direction: a form
+    #: losing its last real instance says so, and a form gaining its first says
+    #: so too -- at which point this list and the docstring above it move
+    #: together. Measured: file.py:N 54, line N 29, строка N 1.
+    backed = {form for form, n in by_form.items() if n}
+    assert backed == {"file.py:N", "line N", "строка N"}, (
+        f"the forms backed by real content are {sorted(backed)}, not the three "
+        "recorded here. `:N continuation` and `LN` have no instance in this "
+        "corpus and are pinned only by samples; if that changed, say so in the "
+        "FORMS comments as well as here"
+    )
+
     assert corpus, (
         "no pointer was found in any exempt document, so the sweep below has "
         "never been observed to print non-zero over real content and its green "
@@ -516,6 +613,178 @@ def test_the_sweep_can_print_a_non_zero():
         "reporting clean is the defect being repaired, so the reach is asserted "
         "here as well as inside the sweep -- narrowing it has to break two "
         "tests, not one"
+    )
+
+
+def test_each_form_is_caught():
+    """One sample per shape, and the shape it is reported as.
+
+    The forms were enumerated from the corpus, but two of the five have no
+    instance in it -- `:N continuation` had exactly one, removed when this rule
+    first reached every document by rewriting the row around it rather than by
+    seeing it; `LN` has never appeared. Those two are pinned
+    only here, which `test_the_sweep_can_print_a_non_zero` states as a fact about
+    the corpus rather than leaving to be discovered.
+    """
+    cases = {
+        "file.py:N": "see `app/auth.py:397` for the set",
+        "line N": "the original citation of line 118 no longer resolves",
+        "строка N": "Строка 105 под комментарием предлагала `up -d`",
+        ":N continuation": "`scheduler_jobs.py:215` (openaq) and `:335` (openmeteo)",
+        "LN": "see L118 of the module",
+    }
+    for expected, text in cases.items():
+        got = [
+            (m.group(0).strip("`"), form)
+            for form, rx in LINE_POINTER_FORMS.items()
+            for m in rx.finditer(text)
+        ]
+        forms = {form for _, form in got}
+        assert expected in forms, (
+            f"the {expected!r} form is not caught in {text!r}; matched {got}. A "
+            "shape the detector cannot see is a way around the rule, and this "
+            "one was written down as covered"
+        )
+
+
+def overlapping_matches(forms: dict, lines: list[str]) -> list[str]:
+    """Places where two different forms match overlapping characters.
+
+    Separated from its test for the same reason as `unjustified_exemptions`: the
+    real corpus gives an empty answer, and an empty answer from a function that
+    has never been seen to give any other is not a measurement.
+    """
+    overlaps = []
+    for text in lines:
+        spans = [
+            (form, m.start(), m.end(), m.group(0))
+            for form, rx in forms.items()
+            for m in rx.finditer(text)
+        ]
+        for i, (fa, sa, ea, ta) in enumerate(spans):
+            for fb, sb, eb, tb in spans[i + 1:]:
+                if fa != fb and sa < eb and sb < ea:
+                    overlaps.append(f"{fa} {ta!r} and {fb} {tb!r} in {text[:70]!r}")
+    return overlaps
+
+
+def test_the_forms_do_not_overlap():
+    """No two forms may match the same characters, or one pointer counts twice.
+
+    Not hypothetical: the count that commissioned this widening scored one
+    pointer twice. Its `at line N` and `line N` patterns both matched
+    `at\nline 313` in `docs/DATASET_AUDIT_2026-09-03.md` -- the text was joined
+    into one string, so `\\s+` crossed the line break -- and that file read 5
+    where it holds 4. The total still came out right, because the same count
+    lacked the bare `:N` form and missed one elsewhere: two errors in opposite
+    directions, cancelling. Agreement between counts that are each wrong in
+    composition is the agreement not to trust.
+
+    Checked over every prose line of every tracked markdown file, and over the
+    per-form samples, so a form added later that overlaps an existing one fails
+    here and has to be made disjoint on purpose.
+    """
+    samples = [
+        "see `app/auth.py:397` and `:335`, lines 462-523, Строка 105, L118",
+        "`scheduler_jobs.py:215` (openaq) and `:335` (openmeteo)",
+    ]
+    lines = list(samples)
+    for path in markdown_files():
+        lines.extend(line for _, line in prose_lines(path.read_text(errors="replace")))
+
+    overlaps = overlapping_matches(LINE_POINTER_FORMS, lines)
+
+    # The assertion below is over an empty list on current content -- nothing
+    # overlaps -- so on its own it would be green whether or not the check
+    # works. What makes it evidence is that the same function, handed two forms
+    # that do overlap, reports them. Asserted here rather than left to a
+    # mutation run, which CI does not do.
+    rigged = {
+        "line N": _WORDED_LINE_REF,
+        "a second line N": re.compile(r"\blines?\s+\d+", re.I),
+    }
+    assert overlapping_matches(rigged, ["the citation of line 118"]), (
+        "overlapping_matches() reports nothing for two forms that match the same "
+        "text, so the empty result below is not evidence of disjoint forms"
+    )
+
+    assert not overlaps, (
+        "two forms match the same characters, so one pointer is reported twice "
+        "and every count built on this detector is inflated:\n  "
+        + "\n  ".join(overlaps[:10])
+    )
+    assert len(lines) > 1000, (
+        f"only {len(lines)} lines were checked for overlap; the corpus did not "
+        "load and this passed over nothing"
+    )
+
+
+def test_a_count_of_lines_is_not_a_pointer():
+    """The discriminating case, and the criterion is word order.
+
+    `38 lines modified` measures a change; `lines 462-523` is a position in a
+    file. Both are "lines" beside a number, and the rule must catch exactly one
+    of them or it is useless in one direction or unusable in the other.
+
+    Word order separates them, and that is measured rather than asserted: on
+    2026-09-20, over the 98 markdown files then tracked, outside code blocks,
+    there were 40 counts and 30 pointers, and **not one line contained both**. So requiring the word before
+    the number needs no judgement about intent.
+
+    The three counts below are the shapes that actually occur -- "+452 lines",
+    "354 lines", "1 file, 38 lines modified".
+    """
+    counts = [
+        "**Total:** 5 files, +452 lines",
+        "`web/src/features/forecast/ForecastComparePage.tsx`** (NEW, 354 lines)",
+        "**Total:** 1 file, 38 lines modified",
+        "app/scheduler.py is 1342 lines",
+    ]
+    for text in counts:
+        hits = [m.group(0) for m in _WORDED_LINE_REF.finditer(text)]
+        assert not hits, (
+            f"a count of lines was read as a pointer in {text!r}: {hits}. The "
+            "rule would then fire on every changelog that measures a diff"
+        )
+        assert _LINE_COUNT.search(text), (
+            f"the count pattern does not recognise {text!r}, so this case is not "
+            "testing the distinction it names"
+        )
+
+    pointers = ["(lines 462-523)", "Line 574-580 (APScheduler job)", "(line 42)"]
+    for text in pointers:
+        assert _WORDED_LINE_REF.search(text), (
+            f"a pointer was not caught in {text!r}, so the word-order rule is "
+            "excluding what it is meant to include"
+        )
+        assert not _LINE_COUNT.search(text), (
+            f"{text!r} reads as a count as well, so word order does not separate "
+            "them and the criterion in this docstring is wrong"
+        )
+
+
+def test_a_section_reference_is_not_a_line_pointer():
+    """`§7` stays legal, and that is a decision rather than an omission.
+
+    102 instances across the corpus, and CLAUDE.md cites
+    `docs/M2_EVALUATION_PROTOCOL.md` §10.3 and "M3 §7" as the way to point at a
+    place in a document. A section is a named division that survives an edit
+    above it; a line number is the thing that does not. Forbidding `§` would
+    forbid the notation this repository chose.
+    """
+    text = "`docs/M2_EVALUATION_PROTOCOL.md` §10.3 states the one continuation, see §7"
+    hits = [
+        (m.group(0), form)
+        for form, rx in LINE_POINTER_FORMS.items()
+        for m in rx.finditer(text)
+    ]
+    assert not hits, (
+        f"a section reference was read as a line pointer: {hits}. The repository "
+        "points at sections on purpose and 102 references would fail"
+    )
+    assert _SECTION_REF.findall(text) == ["§10.3", "§7"], (
+        "the section pattern no longer recognises the notation it exempts, so "
+        "this test is not checking the distinction it names"
     )
 
 
@@ -583,6 +852,20 @@ def test_no_line_number_pointers_come_back():
     the equivalent check in
     `tests/test_readme_renders_and_its_claims_hold.py` back to a single file
     survived until its sweep counted what it had visited.
+
+    Every shape in `LINE_POINTER_FORMS`, not only `file.py:NNN`. A guard you can
+    walk around by writing "line 118" instead of "auth.py:118" is not a guard,
+    and `docs/maximum/M0_GAP_REGISTER.md` carried one of each -- the worded one
+    inside a correction recording that the numbered one had rotted.
+
+    **This assertion is vacuous on current content: there is nothing left to
+    find.** All 32 worded pointers are either in documents that record a moment
+    or, for the single one that was not, repaired here. So what makes its green
+    evidence is not this line, it is
+    `test_the_sweep_can_print_a_non_zero` -- which found 84 pointers in the
+    exempt documents when this was written, and asserts exactly which three of
+    the five shapes real content proves; the set is checked, the count is not. Saying so is the point: an assertion over an empty set that
+    presents itself as a measurement is the defect this file was written about.
     """
     visited, offenders = sweep_for_line_pointers()
 

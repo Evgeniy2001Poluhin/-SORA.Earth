@@ -32,12 +32,15 @@ type MetricsResponse = {
   [metric: string]: {
     [model: string]: {
       trained_at: string;
-      mae: number;
-      rmse: number;
-      mape: number;
-      r2_score: number;
+      // Nullable in `forecast_model_metrics`: the scheduler writes a success
+      // row with no validation -- and so no errors and no test count -- when
+      // the test split holds fewer than three points.
+      mae: number | null;
+      rmse: number | null;
+      mape: number | null;
+      r2_score: number | null;
       train_samples: number;
-      test_samples: number;
+      test_samples: number | null;
       training_duration_sec: number;
     };
   };
@@ -331,27 +334,27 @@ export default function ForecastComparePage() {
                         {model}
                       </td>
                       <td style={{ padding: "8px 12px", textAlign: "right", color: "#ccc" }}>
-                        {m.mae.toFixed(2)}
+                        {m.mae != null ? m.mae.toFixed(2) : "—"}
                       </td>
                       <td style={{ padding: "8px 12px", textAlign: "right", color: "#ccc" }}>
-                        {m.rmse.toFixed(2)}
+                        {m.rmse != null ? m.rmse.toFixed(2) : "—"}
                       </td>
                       <td style={{ padding: "8px 12px", textAlign: "right", color: "#ccc" }}>
-                        {m.mape.toFixed(2)}%
+                        {m.mape != null ? `${m.mape.toFixed(2)}%` : "—"}
                       </td>
                       <td style={{
                         padding: "8px 12px",
                         textAlign: "right",
-                        color: m.r2_score < 0 ? "#ef4444" : "#10b981",
-                        fontWeight: m.r2_score < 0 ? 600 : 400,
+                        color: m.r2_score == null ? "#888" : m.r2_score < 0 ? "#ef4444" : "#10b981",
+                        fontWeight: m.r2_score != null && m.r2_score < 0 ? 600 : 400,
                       }}>
-                        {m.r2_score.toFixed(2)}
-                        {m.r2_score < 0 && (
+                        {m.r2_score != null ? m.r2_score.toFixed(2) : "—"}
+                        {m.r2_score != null && m.r2_score < 0 && (
                           <span style={{ marginLeft: 4, fontSize: 10, opacity: 0.7 }}>⚠️</span>
                         )}
                       </td>
                       <td style={{ padding: "8px 12px", textAlign: "right", color: "#888", fontSize: 11 }}>
-                        {m.train_samples} / {m.test_samples ?? 0}
+                        {m.train_samples} / {m.test_samples ?? "—"}
                       </td>
                       <td style={{ padding: "8px 12px", textAlign: "right", color: "#888", fontSize: 11 }}>
                         {new Date(m.trained_at).toLocaleDateString()}
@@ -362,9 +365,9 @@ export default function ForecastComparePage() {
               </tbody>
             </table>
           </div>
-          {Object.values(currentMetrics).some(m => m.r2_score < 0) && (
+          {Object.values(currentMetrics).some(m => m.r2_score != null && m.r2_score < 0) && (
             <p style={{ marginTop: 12, fontSize: 11, color: "#888", fontStyle: "italic" }}>
-              ⚠️ Negative R² indicates insufficient test data ({currentMetrics.ensemble?.test_samples ?? 0} samples).
+              ⚠️ Negative R² indicates insufficient test data{currentMetrics.ensemble?.test_samples != null ? ` (${currentMetrics.ensemble.test_samples} samples)` : ""}.
               Performance metrics will stabilize with 30+ test samples (~60 days of data).
             </p>
           )}
