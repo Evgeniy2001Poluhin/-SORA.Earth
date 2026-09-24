@@ -117,15 +117,21 @@ export function DriftPage() {
   const statusLabel = noData ? "NO BASELINE" : (d.drift_detected ? "DRIFT DETECTED" : "STABLE");
   const statusColor = noData ? "var(--muted)" : (d.drift_detected ? "#EF4444" : "#2FE0A6");
   const features = Object.entries(d.features || {}).sort(
-    (a, b) => Math.abs(b[1].z_score) - Math.abs(a[1].z_score)
+    (a, b) => Math.abs(b[1].z_score ?? 0) - Math.abs(a[1].z_score ?? 0)
   );
+  // Absent and zero are different answers (#236). On `insufficient_data` and
+  // `no_baseline` the server sends `drift_score: 0.0` as a placeholder and no
+  // `features` or `drifted_features` at all -- nothing was measured, and the
+  // status line already says so. Every number below is shown only when it was.
+  const measuredFeatures = !noData && d.features ? Object.keys(d.features).length : null;
+  const driftedCount = !noData && Array.isArray(d.drifted_features) ? d.drifted_features.length : null;
 
   return (
     <div className="card-body" style={{ padding: 32 }}>
       <div className="eyebrow" style={{ marginBottom: 8 }}>MLOps · Model Monitoring</div>
       <h1 className="display" style={{ fontSize: 36, margin: "0 0 8px" }}>Feature Drift</h1>
       <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 28 }}>
-        Real-time KS-style drift detection across {Object.keys(d.features || {}).length} model features. Auto-refresh every 5s.
+        Real-time KS-style drift detection{measuredFeatures != null ? ` across ${measuredFeatures} model features` : ""}. Auto-refresh every 5s.
       </p>
 
       {/* LSTM Progress Widget */}
@@ -138,7 +144,7 @@ export function DriftPage() {
         </div>
         <div className="kpi">
           <div className="kpi-lbl">Drift score</div>
-          <div className="kpi-val tabular">{(d.drift_score * 100).toFixed(0)}%</div>
+          <div className="kpi-val tabular">{noData ? "—" : `${(d.drift_score * 100).toFixed(0)}%`}</div>
         </div>
         <div className="kpi">
           <div className="kpi-lbl">Observations</div>
@@ -146,8 +152,8 @@ export function DriftPage() {
         </div>
         <div className="kpi">
           <div className="kpi-lbl">Drifted features</div>
-          <div className="kpi-val tabular" style={{ color: (d.drifted_features?.length ?? 0) > 0 ? "#EF4444" : "var(--text)" }}>
-            {(d.drifted_features?.length ?? 0)}
+          <div className="kpi-val tabular" style={{ color: (driftedCount ?? 0) > 0 ? "#EF4444" : "var(--text)" }}>
+            {driftedCount ?? "—"}
           </div>
         </div>
       </div>
@@ -157,7 +163,11 @@ export function DriftPage() {
         <div className="kpi" style={{ minWidth: 220 }}>
           <div className="kpi-lbl">Baseline</div>
           <div className="kpi-val tabular" style={{ fontSize: 14 }}>
-            {baseline.data?.exists ? (baseline.data.n_samples + " samples / " + (baseline.data.feature_count ?? "?") + " feats") : "not fitted"}
+            {baseline.data === undefined
+              ? "—"
+              : baseline.data.exists
+                ? (baseline.data.n_samples + " samples / " + (baseline.data.feature_count ?? "?") + " feats")
+                : "not fitted"}
           </div>
         </div>
         <button className="preset-btn" disabled={fitMut.isPending} onClick={() => fitMut.mutate()}>{fitMut.isPending ? "Fitting..." : "Fit baseline"}</button>
@@ -178,11 +188,13 @@ export function DriftPage() {
         {features.map(([name, f]) => (
           <div key={name} className="drift-row">
             <div className="mono" style={{ fontSize: 12 }}>{name}</div>
-            <div className="tabular" style={{ color: "var(--muted)" }}>{f.baseline_mean.toFixed(3)}</div>
-            <div className="tabular">{f.current_mean.toFixed(3)}</div>
-            <div className="tabular" style={{ color: f.z_score >= 2 ? "#EF4444" : "var(--text)" }}>{f.z_score.toFixed(2)}</div>
+            <div className="tabular" style={{ color: "var(--muted)" }}>{f.baseline_mean != null ? f.baseline_mean.toFixed(3) : "—"}</div>
+            <div className="tabular">{f.current_mean != null ? f.current_mean.toFixed(3) : "—"}</div>
+            <div className="tabular" style={{ color: (f.z_score ?? 0) >= 2 ? "#EF4444" : "var(--text)" }}>{f.z_score != null ? f.z_score.toFixed(2) : "—"}</div>
             <div>
-              <span className="drift-pill" data-level={f.drift_level} style={{ background: LVL_COLOR[f.drift_level] + "22", color: LVL_COLOR[f.drift_level], border: "1px solid " + LVL_COLOR[f.drift_level] + "55" }}>{f.drift_level}</span>
+              {f.drift_level
+                ? <span className="drift-pill" data-level={f.drift_level} style={{ background: LVL_COLOR[f.drift_level] + "22", color: LVL_COLOR[f.drift_level], border: "1px solid " + LVL_COLOR[f.drift_level] + "55" }}>{f.drift_level}</span>
+                : <span style={{ color: "var(--muted)" }}>—</span>}
             </div>
           </div>
         ))}
