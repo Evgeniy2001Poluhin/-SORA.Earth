@@ -10,12 +10,17 @@ PROJECT = {
     "social_impact": 6, "duration_months": 18, "region": "Germany",
 }
 
+DATASET = {"probs": [0.1, 0.4, 0.35, 0.8, 0.9, 0.2], "labels": [0, 0, 1, 1, 1, 0]}
+
+
 def test_calibration_endpoints():
-    paths = ["/calibration/predict", "/calibration/report", "/calibration/curve",
-             "/calibration/compare", "/calibration/metrics", "/calibration/recalibrate"]
-    for path in paths:
-        if "predict" in path or "compare" in path or "recalibrate" in path:
-            r = client.post(path, json=PROJECT)
-        else:
-            r = client.get(path)
-        assert r.status_code in [200, 404, 405, 422, 500], f"{path} returned {r.status_code}"
+    """The calibration routes that take a set of predictions and outcomes.
+
+    This requested `/calibration/predict`, `/report`, `/curve`, `/compare`,
+    `/metrics` and `/recalibrate` -- without the `/api/v1` prefix, and none of
+    them exists -- so all six answered 404, and the test accepted every one.
+    """
+    for path in ("/api/v1/calibration/brier", "/api/v1/calibration/reliability"):
+        r = client.post(path, json=DATASET)
+        assert r.status_code == 200, f"{path} returned {r.status_code}: {r.text[:200]}"
+        assert 0.0 <= r.json()["brier"] <= 1.0

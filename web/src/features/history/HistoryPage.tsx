@@ -18,12 +18,18 @@ export default function HistoryPage() {
     queryKey: ["history", params],
     queryFn: () => historyApi.list(params),
   });
-  const data = { items: query.data?.items ?? [], total: query.data?.total ?? 0 };
+  // Absent and empty are different answers (#236). `/history` answers 200 with
+  // `items` and `total` every time; a failed request has no answer at all, and
+  // used to reach the screen as "0 evaluations · avg score 0.0" beside
+  // "No evaluations match the current filters." -- a count nobody took. So
+  // `total` stays undefined until the server says it, and every figure below
+  // is drawn only from an answer.
+  const data = { items: query.data?.items ?? [], total: query.data?.total };
   const loading = query.isPending;
   const err = query.error ? errorMessage(query.error) : null;
 
   const page = Math.floor((params.offset || 0) / PAGE) + 1;
-  const pages = Math.max(1, Math.ceil(data.total / PAGE));
+  const pages = data.total != null ? Math.max(1, Math.ceil(data.total / PAGE)) : null;
   const set = (patch: Partial<HistoryParams>) => setParams((p) => ({ ...p, ...patch, offset: 0 }));
 
   const fmt = (s: string) =>
@@ -31,21 +37,24 @@ export default function HistoryPage() {
       year: "2-digit", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit",
     });
 
-  const avgScore = useMemo(
-    () => (data.items.length ? data.items.reduce((a, x) => a + x.total_score, 0) / data.items.length : 0),
-    [data.items]
-  );
+  // The mean of no rows is not 0.0; it is nothing. And a row without a score
+  // is not a row that scored zero: `evaluations.total_score` is a nullable
+  // column, and `a + null` counted it as one.
+  const avgScore = useMemo(() => {
+    const scored = data.items.filter((x) => typeof x.total_score === "number" && Number.isFinite(x.total_score));
+    return scored.length ? scored.reduce((a, x) => a + x.total_score, 0) / scored.length : null;
+  }, [data.items]);
 
   return (
     <div className="hist-page">
       <div className="eyebrow">EVALUATION LOG</div>
       <h1 className="hist-title">History</h1>
       <div className="ev-meta">
-        <span>{data.total} evaluations</span>
+        <span>{data.total ?? "—"} evaluations</span>
         <span>·</span>
-        <span>avg score {avgScore.toFixed(1)}</span>
+        <span>avg score {avgScore != null ? avgScore.toFixed(1) : "—"}</span>
         <span>·</span>
-        <span>page {page} of {pages}</span>
+        <span>page {page} of {pages ?? "—"}</span>
       </div>
 
       <div className="hist-filters">
@@ -100,7 +109,7 @@ export default function HistoryPage() {
               <div /><div /><div /><div /><div /><div /><div />
             </div>
           ))}
-        {!loading && data.items.length === 0 && (
+        {!loading && !err && data.items.length === 0 && (
           <div className="cr-empty">No evaluations match the current filters.</div>
         )}
         {!loading &&
@@ -112,8 +121,8 @@ export default function HistoryPage() {
             >
               <div className="tn">{fmt(it.created_at)}</div>
               <div>{it.region}</div>
-              <div className="tn">{it.total_score.toFixed(1)}</div>
-              <div className="tn">{(it.success_probability * 100).toFixed(0)}%</div>
+              <div className="tn">{it.total_score != null ? it.total_score.toFixed(1) : "—"}</div>
+              <div className="tn">{it.success_probability != null ? `${(it.success_probability * 100).toFixed(0)}%` : "—"}</div>
               <div className={"hist-risk r-" + (it.risk_level || "").toLowerCase()}>{it.risk_level}</div>
               <div className="tn">${it.budget.toLocaleString()}</div>
               <div className="tn">{it.duration_months}</div>
@@ -128,9 +137,9 @@ export default function HistoryPage() {
         >
           ← Prev
         </button>
-        <span>Page {page} / {pages}</span>
+        <span>Page {page} / {pages ?? "—"}</span>
         <button
-          disabled={page >= pages}
+          disabled={pages == null || page >= pages}
           onClick={() => setParams((p) => ({ ...p, offset: (p.offset || 0) + PAGE }))}
         >
           Next →

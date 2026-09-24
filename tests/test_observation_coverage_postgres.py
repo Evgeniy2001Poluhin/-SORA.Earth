@@ -218,3 +218,103 @@ def test_repeated_samples_do_not_manufacture_a_complete_day(scratch_db):
     assert result.gap_count == 1
     assert result.gaps[0].observations == 4
     assert result.complete_days == 0
+
+
+# ---- the session's TimeZone ------------------------------------------------
+#
+# Every test above runs in the server's default zone, which is UTC on the CI
+# service and in the postgres:16-alpine image production runs. So each of them
+# would pass under a query that counted the *session's* calendar day instead of
+# the UTC day the declaration defines -- and the query did exactly that.
+# `event_time` is timestamptz, and `event_time::date`,
+# `date_trunc('hour', event_time)` and the zone-less `(now() at time zone
+# 'utc')::date` edges are all read in the session's zone. Measured against
+# PostgreSQL 16 before the fix, one complete UTC day, two rows an hour:
+#
+#   Asia/Tokyo           2 days, 0 complete, gaps (9 h, 15 h)
+#   America/Los_Angeles  2 days, 0 complete, gaps (17 h, 7 h)
+#   Asia/Kolkata         2 days, 1 complete, 1 gap (6 h)
+#
+# and an 18-hour UTC day -- a real gap -- reported with *no* gap under
+# Asia/Kolkata: at +05:30 each UTC hour's two rows fall in two local hours, so
+# the hours count doubled. The failure this endpoint exists to surface, hidden.
+# Latent where sessions are UTC; nothing in the application sets one.
+
+ZONES = ["UTC", "Asia/Tokyo", "America/Los_Angeles", "Asia/Kolkata"]
+
+#: Two rows in every hour of a UTC day, at :10 and :40 -- 48 rows, 24 hours.
+TWICE_AN_HOUR = [h * 60 + m for h in range(24) for m in (10, 40)]
+
+
+def _coverage_in(url, session_timezone, **params):
+    import app.api.infra as infra
+    import app.database as database
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine(
+        url, connect_args={"options": "-c TimeZone=%s" % session_timezone})
+    original = database.SessionLocal
+    database.SessionLocal = sessionmaker(bind=engine)
+    try:
+        return infra.observation_coverage(_admin=None, **params)
+    finally:
+        database.SessionLocal = original
+        engine.dispose()
+
+
+def _gaps(result):
+    return [(g.day, g.observations) for g in result.gaps]
+
+
+@requires_postgres
+@pytest.mark.parametrize("session_timezone", ZONES)
+def test_one_complete_utc_day_is_one_complete_day_in_every_session(
+        scratch_db, session_timezone):
+    engine, url = scratch_db
+    _fill_at(engine, 2, "RU-MOW", TWICE_AN_HOUR)
+
+    result = _coverage_in(url, session_timezone, source="openmeteo",
+                          indicator="temperature", days=30)
+
+    assert (result.days_examined, result.complete_days, result.gap_count) == (1, 1, 0), (
+        f"with the session in {session_timezone}, one complete UTC day was "
+        f"reported as days_examined={result.days_examined}, complete_days="
+        f"{result.complete_days}, gaps={_gaps(result)}"
+    )
+
+
+@requires_postgres
+@pytest.mark.parametrize("session_timezone", ZONES)
+def test_a_short_utc_day_is_one_gap_on_its_utc_date_in_every_session(
+        scratch_db, session_timezone):
+    engine, url = scratch_db
+    _fill_at(engine, 2, "RU-MOW", [h * 60 + m for h in range(18) for m in (10, 40)])
+    day = (datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat()
+
+    result = _coverage_in(url, session_timezone, source="openmeteo",
+                          indicator="temperature", days=30)
+
+    assert _gaps(result) == [(day, 18)], (
+        f"with the session in {session_timezone}, a UTC day with 18 of 24 "
+        f"hours was reported as gaps {_gaps(result)}"
+    )
+
+
+@requires_postgres
+@pytest.mark.parametrize("session_timezone", ZONES)
+def test_the_window_edges_are_utc_midnights_in_every_session(
+        scratch_db, session_timezone):
+    engine, url = scratch_db
+    _fill_at(engine, 0, "RU-MOW", TWICE_AN_HOUR)   # today: excluded by construction
+    _fill_at(engine, 5, "RU-MOW", TWICE_AN_HOUR)   # outside a three-day window
+    _fill_at(engine, 1, "RU-MOW", TWICE_AN_HOUR)   # inside
+
+    result = _coverage_in(url, session_timezone, source="openmeteo",
+                          indicator="temperature", days=3)
+
+    assert (result.days_examined, result.complete_days) == (1, 1), (
+        f"with the session in {session_timezone}: days_examined="
+        f"{result.days_examined}, complete_days={result.complete_days}, "
+        f"gaps={_gaps(result)}"
+    )
