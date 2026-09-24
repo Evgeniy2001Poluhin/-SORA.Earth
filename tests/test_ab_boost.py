@@ -26,9 +26,8 @@ def test_ab_predict():
 
 def test_ab_stats():
     r = client.get("/api/v1/ab/stats")
-    assert r.status_code in [200, 404]
-    if r.status_code == 200:
-        assert isinstance(r.json(), dict)
+    assert r.status_code == 200, r.text
+    assert "traffic_split" in r.json(), sorted(r.json())
 
 def test_ab_split(monkeypatch):
     """Sets the split and sees it take.
