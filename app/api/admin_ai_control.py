@@ -22,7 +22,9 @@ def ai_trigger_refresh(_admin=Depends(require_admin)):
     try:
         result = refresh_live_data(trigger_source="ai_agent")
         d = {"fetched": result.get("fetched", 0), "total": result.get("total", 0)}
-        return AIActionResponse(action="data_refresh", status="success", timestamp=datetime.utcnow().isoformat(), details=d)
+        # The verdict the run recorded for itself -- `success` or `degraded` --
+        # not a constant. This said "success" for every run that did not raise.
+        return AIActionResponse(action="data_refresh", status=result["status"], timestamp=datetime.utcnow().isoformat(), details=d)
     except Exception as e:
         return AIActionResponse(action="data_refresh", status="error", timestamp=datetime.utcnow().isoformat(), details={"error": str(e)[:500]})
 
