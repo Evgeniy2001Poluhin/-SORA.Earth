@@ -1,7 +1,39 @@
 import { useEffect, useState } from "react";
 
-type Comp = { component:string; ok:boolean; uptime_24h:number|null; uptime_7d:number|null };
-type Data = { overall:string; components:Comp[] };
+type Comp = {
+  component:string; ok:boolean;
+  uptime_24h:number|null; uptime_7d:number|null;
+  coverage_24h?:number|null; coverage_7d?:number|null;
+};
+type Data = { overall:string; components:Comp[]; sample_interval_minutes?:number };
+
+// What the samples support, and no more.
+//
+// `uptime_*` is a lower bound: an interval nobody sampled counts against it.
+// The recorder runs inside the process being measured, so an outage leaves no
+// ping rather than a failing one, and a percentage over the pings that exist
+// cannot see it -- measured, six unrecorded hours of a day read as 100%.
+//
+// A lower bound shown alone has the opposite failure. The scheduler container
+// stopped claiming `api`, which it cannot observe, so those rows now arrive
+// only when somebody opens this page: a healthy API would read 0.7%. So the
+// range is shown. An unsampled interval could have gone either way, which puts
+// the truth between `pct` and `pct + (100 - coverage)`, and on a fully sampled
+// window the two ends meet and one number is printed.
+function Uptime({ pct, coverage }: { pct:number|null; coverage?:number|null }) {
+  if (pct == null) return <>&mdash;</>;
+  const unknown = coverage == null ? 0 : Math.round((100 - coverage) * 100) / 100;
+  if (unknown <= 0) return <>{pct}%</>;
+  const high = Math.round(Math.min(100, pct + unknown) * 100) / 100;
+  return (
+    <>
+      {pct}&ndash;{high}%
+      <span style={{color:"var(--muted,#9aa0a6)",fontSize:12,marginLeft:6}}>
+        ({coverage}% observed)
+      </span>
+    </>
+  );
+}
 const LABEL:Record<string,string> = { api:"API", models:"ML Models", database:"Database", external_data:"External Data" };
 
 export default function StatusPage() {
@@ -50,12 +82,21 @@ export default function StatusPage() {
             <tr key={c.component} style={{borderTop:"1px solid var(--line-2,#222)"}}>
               <td style={{padding:"10px 0"}}>{LABEL[c.component] ?? c.component}</td>
               <td style={{color: c.ok ? "var(--planet,#10b981)" : "#d50000"}}>{c.ok ? "● Operational" : "● Down"}</td>
-        <td>{c.uptime_24h==null ? "—" : c.uptime_24h + "%"}</td>
-              <td>{c.uptime_7d==null ? "—" : c.uptime_7d + "%"}</td>
+              <td><Uptime pct={c.uptime_24h} coverage={c.coverage_24h}/></td>
+              <td><Uptime pct={c.uptime_7d} coverage={c.coverage_7d}/></td>
             </tr>))}
           </tbody>
         </table>}
-      <p style={{color:"var(--muted)",fontSize:12,marginTop:16}}>Auto-refreshes every 30s · uptime sampled every 5 min</p>
+      {/* The cadence comes from the backend, which owns it: written here as a
+          literal it would go on claiming five minutes after the job changed. */}
+      <p style={{color:"var(--muted)",fontSize:12,marginTop:16}}>
+        Auto-refreshes every 30s
+        {d?.sample_interval_minutes ? ` · uptime sampled every ${d.sample_interval_minutes} min` : ""}
+      </p>
+      <p style={{color:"var(--muted)",fontSize:12,marginTop:4}}>
+        A range means part of the window holds no sample and could have gone
+        either way; "observed" is how much of it was sampled at all.
+      </p>
     </div>
   );
 }
