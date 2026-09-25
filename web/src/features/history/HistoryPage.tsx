@@ -122,7 +122,7 @@ export default function HistoryPage() {
               <div className="tn">{fmt(it.created_at)}</div>
               <div>{it.region}</div>
               <div className="tn">{it.total_score != null ? it.total_score.toFixed(1) : "—"}</div>
-              <div className="tn">{it.success_probability != null ? `${(it.success_probability * 100).toFixed(0)}%` : "—"}</div>
+              <div className="tn">{it.success_probability != null ? `${it.success_probability.toFixed(0)}%` : "—"}</div>
               <div className={"hist-risk r-" + (it.risk_level || "").toLowerCase()}>{it.risk_level}</div>
               <div className="tn">${it.budget.toLocaleString()}</div>
               <div className="tn">{it.duration_months}</div>
