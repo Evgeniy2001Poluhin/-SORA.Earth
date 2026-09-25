@@ -13,6 +13,37 @@ from app.schemas import UncertaintyOk
 
 router = APIRouter(tags=["calibration"])
 
+# Maximum rows to evaluate (performance bound: each endpoint <15s)
+MAX_RELIABILITY_ROWS = 200
+
+
+def _validate_social_impact_api_scale(project: dict):
+    """Extract and validate social_impact from raw dict on API scale (0-10).
+
+    Reads 'social_impact' or 'social_impact_score' (whichever is present),
+    coerces to float, and validates 0-10 range. Returns the float value or None.
+    When neither key is present, returns None (not an error: handlers' defaults apply).
+    Raises HTTPException 422 on type error or out-of-range.
+    """
+    # Try both field names; if neither present, return None (handlers use their defaults)
+    if "social_impact" in project:
+        key = "social_impact"
+    elif "social_impact_score" in project:
+        key = "social_impact_score"
+    else:
+        return None  # Not an error: handlers' existing defaults apply
+
+    raw_value = project[key]
+    try:
+        si = float(raw_value)
+    except (TypeError, ValueError):
+        raise HTTPException(422, f"{key} must be numeric, got {type(raw_value).__name__}: {raw_value}")
+
+    if si < 0 or si > 10:
+        raise HTTPException(422, f"{key} must be 0-10, got {si}")
+
+    return si
+
 
 @router.get("/model/reliability-diagram")
 def reliability_diagram():
@@ -26,44 +57,55 @@ def reliability_diagram():
         raise HTTPException(404, "Training data not found")
 
     df = pd.read_csv(csv_path)
+    # Sample at most MAX_RELIABILITY_ROWS for performance
+    if len(df) > MAX_RELIABILITY_ROWS:
+        df = df.sample(MAX_RELIABILITY_ROWS, random_state=42)
+
     from app.validators import ProjectInput as PI
 
-    probas_v1, probas_v2, probas_cal, labels = [], [], [], []
+    # Build features per row (keep try/except semantics), collect for batching
+    feats_v1_list, feats_v2_list, labels = [], [], []
     # Pre-load calibrated model once
     cal_path = os.path.join(models_dir(), "ensemble_model_v2_cal.pkl")
     cal_model = None
     if os.path.exists(cal_path) and m.ensemble_model_v2:
         with open(cal_path, "rb") as f:
             cal_model = pickle.load(f)
+    from app.scales import social_impact_from_training
     for _, row in df.iterrows():
         try:
+            # Training rows are on model scale (0-100); convert to API scale (0-10) for validator
             p = PI(budget=row.get("budget", 10000), co2_reduction=row.get("co2_reduction", 50),
-                   social_impact=row.get("social_impact", 5), duration_months=row.get("duration_months", 12))
+                   social_impact=social_impact_from_training(row.get("social_impact", 50)), duration_months=row.get("duration_months", 12))
             feats = m.make_features(p)
-            pr1 = float(m.rf_model.predict_proba(feats)[0][1])
-            probas_v1.append(pr1)
 
             cat = row.get("category", "Solar Energy") if "category" in row else "Solar Energy"
             reg = row.get("region", "Europe") if "region" in row else "Europe"
-            if m.ensemble_model_v2:
-                feats2 = m.make_features_v2(p, cat, reg)
-                pr2 = float(m.ensemble_model_v2.predict_proba(feats2)[0][1])
-                probas_v2.append(pr2)
-            else:
-                probas_v2.append(pr1)
+            feats2 = m.make_features_v2(p, cat, reg) if m.ensemble_model_v2 else None
 
-            if cal_model is not None:
-                pr_cal = float(cal_model.predict_proba(feats2)[0][1])
-                probas_cal.append(pr_cal)
-            else:
-                probas_cal.append(pr2)
-
+            feats_v1_list.append(feats)
+            feats_v2_list.append(feats2)
             labels.append(int(row.get("success", row.get("is_successful", 0))))
         except Exception:
             continue
 
     if len(labels) < 20:
         raise HTTPException(500, "Not enough valid samples")
+
+    # Batch predictions: concat frames, call each model once
+    X_v1 = pd.concat(feats_v1_list, ignore_index=True)
+    probas_v1 = m.rf_model.predict_proba(X_v1)[:, 1].tolist()
+
+    if m.ensemble_model_v2:
+        X_v2 = pd.concat(feats_v2_list, ignore_index=True)
+        probas_v2 = m.ensemble_model_v2.predict_proba(X_v2)[:, 1].tolist()
+    else:
+        probas_v2 = probas_v1
+
+    if cal_model is not None and m.ensemble_model_v2:
+        probas_cal = cal_model.predict_proba(X_v2)[:, 1].tolist()
+    else:
+        probas_cal = probas_v2
 
     y = np.array(labels)
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
@@ -123,6 +165,11 @@ def predict_with_uncertainty(project: dict):
     behaviour here changed; this docstring and the `response_model` above are
     the entire diff to this function.
     """
+    # Validate social_impact is on API scale (0-10) and convert string to float
+    si = _validate_social_impact_api_scale(project)
+    if si is not None:
+        project["social_impact"] = si  # Ensure it's float for downstream code
+
     import app.main as m
     from app.schemas import ProjectInput as Project
     from app.validators import ProjectInput as PI
@@ -178,6 +225,11 @@ def calibration_discrepancy(project: dict):
     Returns per-model proba + consensus + spread/std + RF tree uncertainty.
     Useful for surfacing model disagreement to end-users (and thesis ch. 5).
     """
+    # Validate social_impact is on API scale (0-10) and convert string to float
+    si = _validate_social_impact_api_scale(project)
+    if si is not None:
+        project["social_impact"] = si  # Ensure it's float for downstream code
+
     import app.main as m
     from app.validators import ProjectInput as PI
 

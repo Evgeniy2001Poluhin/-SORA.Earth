@@ -14,10 +14,13 @@ from app.paths import data_dir, models_dir
 
 router = APIRouter(prefix="/model", tags=["ab-comparison"])
 
+# Maximum rows to evaluate (performance bound: each endpoint <15s)
+MAX_AB_COMPARISON_ROWS = 200
+
 
 @router.get("/ab-comparison")
 def ab_comparison():
-    """Compare RF v1, Stacking v2, Calibrated v2 on held-out test set."""
+    """Compare RF v1, Stacking v2, Calibrated v2 on a deterministic sample of the training data (not held out)."""
     import app.main as m
 
     csv_path = os.path.join(data_dir(), "projects.csv")
@@ -25,43 +28,62 @@ def ab_comparison():
         raise HTTPException(404, "Training data not found")
 
     df = pd.read_csv(csv_path)
-    from app.validators import ProjectInput as PI
+    # Sample at most MAX_AB_COMPARISON_ROWS for performance
+    if len(df) > MAX_AB_COMPARISON_ROWS:
+        df = df.sample(MAX_AB_COMPARISON_ROWS, random_state=42)
 
-    results = []
+    from app.validators import ProjectInput as PI
+    from app.scales import social_impact_from_training
+
+    # Build features per row (keep try/except semantics), collect for batching
+    feats_v1_list, feats_v2_list, labels = [], [], []
     for _, row in df.iterrows():
         try:
+            # Training rows are on model scale (0-100); convert to API scale (0-10) for validator
             p = PI(budget=row["budget"], co2_reduction=row["co2_reduction"],
-                   social_impact=row["social_impact"], duration_months=row["duration_months"])
+                   social_impact=social_impact_from_training(row["social_impact"]), duration_months=row["duration_months"])
             feats_v1 = m.make_features(p)
 
             cat = row.get("category", "Solar Energy")
             reg = row.get("region", "Europe")
             feats_v2 = m.make_features_v2(p, cat, reg)
 
-            pr_v1 = float(m.rf_model.predict_proba(feats_v1)[0][1])
-
-            pr_v2 = float(m.ensemble_model_v2.predict_proba(feats_v2)[0][1]) if m.ensemble_model_v2 else pr_v1
-
-            cal_path = os.path.join(models_dir(), "rf_model_cal.pkl")
-            if os.path.exists(cal_path):
-                with open(cal_path, "rb") as f:
-                    cal = pickle.load(f)
-                pr_cal = float(cal.predict_proba(feats_v1)[0][1])
-            else:
-                pr_cal = pr_v1
-
-            results.append({
-                "y": int(row["success"]),
-                "pr_v1": pr_v1, "pr_v2": pr_v2, "pr_cal": pr_cal,
-            })
+            feats_v1_list.append(feats_v1)
+            feats_v2_list.append(feats_v2)
+            labels.append(int(row["success"]))
         except Exception:
             continue
 
-    if len(results) < 20:
+    if len(labels) < 20:
         raise HTTPException(500, "Not enough samples")
 
-    rdf = pd.DataFrame(results)
-    y = rdf["y"].values
+    # Batch predictions: concat frames, call each model once
+    X_v1 = pd.concat(feats_v1_list, ignore_index=True)
+    X_v2 = pd.concat(feats_v2_list, ignore_index=True)
+    y = np.array(labels)
+
+    # RF v1: batch predict
+    probs_v1 = m.rf_model.predict_proba(X_v1)[:, 1]
+
+    # Ensemble v2: batch predict
+    probs_v2 = m.ensemble_model_v2.predict_proba(X_v2)[:, 1] if m.ensemble_model_v2 else probs_v1
+
+    # Calibrated RF: batch predict
+    cal_path = os.path.join(models_dir(), "rf_model_cal.pkl")
+    if os.path.exists(cal_path):
+        with open(cal_path, "rb") as f:
+            cal = pickle.load(f)
+        probs_cal = cal.predict_proba(X_v1)[:, 1]
+    else:
+        probs_cal = probs_v1
+
+    # Build results DataFrame
+    rdf = pd.DataFrame({
+        "y": y,
+        "pr_v1": probs_v1,
+        "pr_v2": probs_v2,
+        "pr_cal": probs_cal,
+    })
 
     comparison = {}
     for name, col, threshold in [

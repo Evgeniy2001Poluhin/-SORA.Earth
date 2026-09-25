@@ -16,16 +16,14 @@ response those tests received:
     test_calibration_recalibrate  422: a project posted where a set of
                                   probabilities and labels is expected
 
-The first is a real defect the suite was hiding: `GET /api/v1/explain/beeswarm`
-cannot answer anything but 500, because the rows it samples from
-`data/projects.csv` carry `social_impact` on a 0-100 scale and the validator it
-runs them through accepts 0-10. The other three tested nothing, green.
+The first was a real defect the suite was hiding: `GET /api/v1/explain/beeswarm`
+could not answer anything but 500, because the rows it sampled from
+`data/projects.csv` carried `social_impact` on a 0-100 scale and the validator it
+ran them through accepted 0-10. Fixed: the conversion now happens at the model
+boundary, so training rows are converted to API scale before validation. The other
+three tested nothing, green.
 
-Each of the seventeen now asserts the answer it should get. The beeswarm test
-is marked `xfail(strict=True)` rather than loosened: it states the correct
-answer, records why it is not given, and -- because `xfail_strict` is on --
-fails the suite the moment the endpoint is repaired, so the marker cannot
-outlive the defect.
+Each of the seventeen now asserts the answer it should get.
 
 This file keeps the rule: any `status_code in (...)` whose set admits a 5xx is
 reported, with no allowance list. A test that genuinely expects a server error

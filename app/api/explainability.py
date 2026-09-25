@@ -27,11 +27,14 @@ def _gdp_median():
 
 
 def _engineer(features):
+    from app.scales import social_impact_to_model
     out = dict(features)
     b = float(out.get("budget", 0.0))
     d = float(out.get("duration_months", 1.0)) or 1.0
     co2 = float(out.get("co2_reduction", 0.0))
-    soc = float(out.get("social_impact", 0.0))
+    # Convert API scale (0-10) to model scale (0-100) once; use it for raw and derived
+    soc = social_impact_to_model(float(out.get("social_impact", 0.0)))
+    out["social_impact"] = soc  # Set raw social_impact to model scale
     out.setdefault("budget_per_month", b / max(d, 1))
     out.setdefault("co2_per_dollar", co2 / max(b, 1))
     out.setdefault("efficiency_score", (co2 + soc * 10) / max(b, 1) * 1000)
@@ -123,6 +126,11 @@ def explain_global(top_n: int = Query(10, ge=1, le=11), nsamples: int = 30):
 
 @router.post("/explain/local", tags=["explainability"])
 def explain_local(features: Dict[str, float], top_n: int = 10, nsamples: int = 100):
+    # Validate social_impact is on API scale (0-10)
+    if "social_impact" in features:
+        si = features["social_impact"]
+        if si < 0 or si > 10:
+            raise HTTPException(422, f"social_impact must be 0-10, got {si}")
     expl, kind, _ = _get_explainer()
     model, scaler = _resolve_state()
     eng = _engineer(features)

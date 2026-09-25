@@ -71,9 +71,12 @@ def _ensure_loaded() -> bool:
 
 def _make_features(p: Dict[str, Any]) -> Dict[str, float]:
     """Feature engineering — соответствует train_model_v2.py:59-63."""
+    from app.scales import social_impact_to_model
+
     budget = float(p.get("budget", 0))
     co2 = float(p.get("co2_reduction", 0))
-    soc = float(p.get("social_impact", 0))
+    # Convert API scale (0-10) to model scale (0-100) once
+    soc = social_impact_to_model(float(p.get("social_impact", 0)))
     dur = float(p.get("duration_months", 1))
 
     bpm = budget / max(dur, 1)

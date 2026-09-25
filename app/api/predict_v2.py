@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/v1", tags=["predict-v2"])
 class ProjectV2(BaseModel):
     budget: float = Field(..., gt=0)
     co2_reduction: float = Field(..., ge=0)
-    social_impact: float = Field(..., ge=0)
+    social_impact: float = Field(..., ge=0, le=10)
     duration_months: float = Field(..., gt=0)
     category: str = "water"
     region: str = "EU"
