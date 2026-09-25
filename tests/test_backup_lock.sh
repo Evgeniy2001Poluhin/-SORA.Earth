@@ -61,7 +61,7 @@ validate_runtime_dir "$WORK/missing" >/dev/null 2>&1 \
     err="$(validate_runtime_dir "$good" 2>&1)"; rc=$?
     if [ $rc -eq 0 ]; then
         echo "__RESULT__ accepted"
-    elif printf '%s' "$err" | grep -q 'owned by uid'; then
+    elif grep -q 'owned by uid' <<<"$err"; then
         echo "__RESULT__ refused-for-ownership"
     else
         echo "__RESULT__ refused-for-another-reason: $err"
@@ -160,7 +160,7 @@ fi
 msg=$( ( _have_flock() { return 1; }
          acquire_backup_lock announce 2>&1 >/dev/null
          release_backup_lock ) )
-printf '%s' "$msg" | grep -qi 'flock is unavailable' \
+grep -qi 'flock is unavailable' <<<"$msg" \
   && ok "the directory fallback says so on stderr" \
   || bad "the directory fallback says so on stderr" "said: $msg"
 
@@ -168,16 +168,16 @@ printf '%s' "$msg" | grep -qi 'flock is unavailable' \
 # Code only. Anchors that matched comments have passed while the code was wrong
 # twice already in this branch.
 code="$(grep -v '^[[:space:]]*#' scripts/backup_run.sh)"
-printf '%s\n' "$code" | grep -q 'acquire_backup_lock .* || lock_rc=\$?' \
+grep -q 'acquire_backup_lock .* || lock_rc=\$?' <<<"$code" \
   && ok "backup_run.sh captures the lock status errexit-safely" \
   || bad "backup_run.sh captures the lock status errexit-safely" "a bare call exits 75 first"
-printf '%s\n' "$code" | grep -q 'case \$lock_rc in' \
+grep -q 'case \$lock_rc in' <<<"$code" \
   && ok "backup_run.sh branches on the captured status, not \$?" \
   || bad "backup_run.sh branches on the captured status, not \$?"
-printf '%s\n' "$code" | grep -q '/tmp/[^ ]*\.lock' \
+grep -q '/tmp/[^ ]*\.lock' <<<"$code" \
   && bad "no lock path under /tmp survives in the runner" "found one" \
   || ok "no lock path under /tmp survives in the runner"
-printf '%s\n' "$(grep -v '^[[:space:]]*#' "$LIB")" | grep -q '^[[:space:]]*set -e' \
+grep -q '^[[:space:]]*set -e' <<<"$(grep -v '^[[:space:]]*#' "$LIB")" \
   && bad "the library sets no shell options" "it does" \
   || ok "the library sets no shell options"
 
