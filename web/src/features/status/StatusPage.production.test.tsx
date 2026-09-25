@@ -54,8 +54,8 @@ describe("StatusPage survives an unhealthy backend", () => {
     stubJson({
       overall: "operational",
       components: [
-        { component: "api", ok: true, uptime_24h: 100, uptime_7d: 99.9 },
-        { component: "database", ok: false, uptime_24h: null, uptime_7d: null },
+        { component: "api", ok: true },
+        { component: "database", ok: false },
       ],
     });
 
@@ -63,5 +63,25 @@ describe("StatusPage survives an unhealthy backend", () => {
 
     expect(await findByText("API")).toBeTruthy();
     expect(await findByText("Database")).toBeTruthy();
+  });
+
+  it("shows no uptime columns when response has only component and ok", async () => {
+    stubJson({
+      overall: "operational",
+      components: [
+        { component: "api", ok: true },
+        { component: "database", ok: true },
+      ],
+    });
+
+    const { container, findByText } = renderWithQuery(<StatusPage />);
+
+    // Wait for the page to render
+    expect(await findByText("API")).toBeTruthy();
+    expect(await findByText("Database")).toBeTruthy();
+
+    // The word "uptime" should not appear anywhere in the rendered page
+    const text = container.textContent || "";
+    expect(text.toLowerCase()).not.toMatch(/uptime/);
   });
 });

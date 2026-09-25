@@ -1225,11 +1225,6 @@ def init_scheduler(start: bool = True):
     )
 
     scheduler.add_job(
-        lambda: __import__("app.services.status_service", fromlist=["record_health"]).record_health(),
-        IntervalTrigger(minutes=5), id="health_ping", replace_existing=True,
-    )
-
-    scheduler.add_job(
         refresh_forecast_metrics,
         IntervalTrigger(seconds=30),
         id="refresh_forecast_metrics",

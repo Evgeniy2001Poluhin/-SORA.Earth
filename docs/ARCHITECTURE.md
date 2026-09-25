@@ -72,7 +72,6 @@ explainable ML, country & regional analytics, closed-loop MLOps и operational m
 | auto_refresh_external_data | interval 12h | обновление ESG (World Bank + OECD) |
 | auto_full_pipeline_weekly | cron вс 03:30 UTC | refresh -> drift -> retrain -> validate |
 | auto_run_ingesters | interval 24h | прогон всех ингестеров |
-| health_ping | interval 5min | запись health-метрики |
 
 tion (DriftDetector.check_drift())
 3. retrain candidate (RF + изотоническая калибровка)
