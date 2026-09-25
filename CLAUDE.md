@@ -451,12 +451,41 @@ if metadata.get("feature_enabled"):
 
 ### Uncertainty Quantification
 
-Recent changes (commits `ad86863`, `309c64d`) added p5/p95 percentile ranges for predictions:
-- Endpoint: `/api/v1/predict/uncertainty`
-- Returns: `{prediction, p5, p95, range_pct, near_deterministic}`
-- `near_deterministic` flag: True when (p95 - p5) < 10% (narrow confidence interval)
+Two routes, answering two different questions. They are easy to conflate, and
+this section did conflate them -- see the correction at the end.
 
-UI shows "≈det" badge for near-deterministic predictions (see `web/src/features/drift/DriftPage.tsx`).
+**`POST /api/v1/predict/uncertainty`** -- how much the RandomForest's trees
+disagree about one project. Response model `UncertaintyOk` in `app/schemas.py`:
+
+```
+prediction          {mean, median, lower_90, upper_90}   -- fractions, 0..1
+tree_distribution   {std, n_trees, min, max, p5, p95}     -- p5/p95 equal lower_90/upper_90
+uncertainty         {method, mean, std, ci_90, n_trees}
+```
+
+p5/p95 came in with `ad86863`. The evaluate page shows them in
+`web/src/features/evaluate/UncertaintyCard.tsx` as the "5-95%" band.
+
+**`POST /api/v1/calibration/discrepancy`** -- three models side by side
+(`rf_v1`, `stacking_v2`, `calibrated_v2`) and a weighted consensus. This is where
+`near_deterministic` lives: on `calibrated_v2` only, computed as
+`pr_cal in (0.0, 1.0)` -- **exact** equality with 0 or 1. It says nothing about
+an interval. Added in `ac668bf`, together with the "≈det" badge in
+`web/src/features/calibration/CalibrationPage.tsx`, whose tooltip reads
+"Почти бинарный прогноз (0/1)".
+
+Measured 2026-09-24 on an 81-project grid (budget, CO2, social impact and
+duration at three levels each): the badge never fired, and the calibrated
+probability stayed between 0.074 and 0.958. Whether a badge that does not light
+is worth keeping is a product question, not a documentation one.
+
+> This section said the uncertainty route returns `{prediction, p5, p95,
+> range_pct, near_deterministic}`, that `near_deterministic` means
+> `(p95 - p5) < 10%`, that the badge is in `web/src/features/drift/DriftPage.tsx`,
+> and that `309c64d` added the percentiles. All four were wrong: `range_pct`
+> exists nowhere in `app/` or `web/src`; the flag is exact 0/1 and belongs to
+> the other route; the badge has been on the calibration page since the commit
+> that introduced it; and `309c64d` is the What-If response-race fix.
 
 ## Testing
 
@@ -904,8 +933,8 @@ curl -X POST http://localhost:8000/api/v1/model/retrain \
 
 ## Recent Changes
 
-- **Uncertainty quantification** (commits `ad86863`, `309c64d`): Added p5/p95 percentile prediction ranges with `near_deterministic` flag for narrow intervals (<10% range).
-- **Drift UI improvements** (commit `ac668bf`): Added "≈det" badge to UI for near-deterministic binary predictions.
+- **Uncertainty quantification** (commit `ad86863`): p5/p95 in `tree_distribution` of `/predict/uncertainty`. This line also listed `309c64d`, which is the What-If response-race fix, and credited it with a `near_deterministic` flag for narrow intervals -- see "Uncertainty Quantification" above for what that flag actually is.
+- **Calibration UI** (commit `ac668bf`): `near_deterministic` on `/calibration/discrepancy` and the "≈det" badge in `CalibrationPage.tsx`. This line called it a drift UI change; the commit touches the calibration page and nothing under `features/drift/`.
 - **Sequential runSweep** (commit `474cc41`): Fixed race condition in What-If analysis by switching from `Promise.all()` to sequential `for...of await`.
 - **Discrepancy detection** (commit `efbf49a`): Enhanced calibration metrics with discrepancy analysis for probability-outcome alignment.
 

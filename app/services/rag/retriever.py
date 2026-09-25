@@ -8,6 +8,7 @@ from functools import lru_cache
 from typing import List, Dict, Any
 
 import chromadb
+from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
 log = logging.getLogger(__name__)
@@ -21,7 +22,11 @@ _MODEL_NAME = str(_MODEL_DIR) if _MODEL_DIR.exists() else "sentence-transformers
 
 class RagRetriever:
     def __init__(self) -> None:
-        self.client = chromadb.PersistentClient(path=str(_CHROMA_DIR))
+        # Telemetry off: chromadb reports product events to PostHog by default.
+        # The HF_*_OFFLINE lines above already keep this module from reaching
+        # out; the vector store was the half they did not cover.
+        self.client = chromadb.PersistentClient(
+            path=str(_CHROMA_DIR), settings=Settings(anonymized_telemetry=False))
         self.encoder = SentenceTransformer(_MODEL_NAME)
         self.collection = self._ensure_collection()
 
