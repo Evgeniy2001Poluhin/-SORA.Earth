@@ -1,4 +1,7 @@
 """Calibration & uncertainty endpoints for thesis."""
+import io
+
+from fastapi import Response
 import os, pickle, json
 import numpy as np
 import pandas as pd
@@ -92,8 +95,9 @@ def reliability_diagram():
     ax2.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    out = os.path.join(data_dir(), "reliability_diagram.png")
-    plt.savefig(out, dpi=150, bbox_inches="tight")
+    # Rendered into memory: a GET does not rewrite a tracked file in data/.
+    png = io.BytesIO()
+    plt.savefig(png, format="png", dpi=150, bbox_inches="tight")
     plt.close()
 
     from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
@@ -105,8 +109,9 @@ def reliability_diagram():
             "auc_roc": round(roc_auc_score(y, probs), 4),
         }
 
-    return FileResponse(out, media_type="image/png", filename="reliability_diagram.png",
-                        headers={"X-Metrics": json.dumps(metrics), "X-Samples": str(len(labels))})
+    return Response(png.getvalue(), media_type="image/png",
+                    headers={"Content-Disposition": 'attachment; filename="reliability_diagram.png"',
+                             "X-Metrics": json.dumps(metrics), "X-Samples": str(len(labels))})
 
 
 @router.post("/predict/uncertainty", response_model=UncertaintyOk)

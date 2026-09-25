@@ -1,4 +1,7 @@
 """A/B model comparison — v1 vs v2 vs v2_calibrated."""
+import io
+
+from fastapi import Response
 import os, pickle, json
 import numpy as np
 import pandas as pd
@@ -113,8 +116,10 @@ def ab_comparison_plot():
     ax.grid(True, alpha=0.3, axis="y")
 
     plt.tight_layout()
-    out = os.path.join(data_dir(), "ab_comparison.png")
-    plt.savefig(out, dpi=150, bbox_inches="tight")
+    # Rendered into memory: a GET does not rewrite a tracked file in data/.
+    png = io.BytesIO()
+    plt.savefig(png, format="png", dpi=150, bbox_inches="tight")
     plt.close()
 
-    return FileResponse(out, media_type="image/png", filename="ab_comparison.png")
+    return Response(png.getvalue(), media_type="image/png",
+                    headers={"Content-Disposition": 'attachment; filename="ab_comparison.png"'})
