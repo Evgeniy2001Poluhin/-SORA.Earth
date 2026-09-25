@@ -7,12 +7,31 @@ from typing import Any
 
 import numpy as np
 
+from app.obs import request_log
+
 from app.drift.metrics import (
     psi, ks, histogram, category_counts, status_from_psi,
 )
 
 REF_PATH = Path("output/ref_stats.json")
-LOG_DIR = Path("output/request_log")
+
+#: The directory the writer writes to, not a second spelling of its default.
+#:
+#: `app/obs/request_log.py` honours `SORA_REQUEST_LOG_DIR`; this module used to
+#: hardcode the default. Measured: with the variable set and rows written to the
+#: configured directory, the report read the old path, found nothing, and called
+#: every feature "stable". Both spellings were equal until someone set the
+#: variable, which is why `==` between them was a check that could not fail.
+LOG_DIR = request_log.LOG_DIR
+
+#: What a feature reports when the window held no observations at all.
+#:
+#: An empty live sample gives PSI exactly 0.0, and 0.0 is below the "stable"
+#: threshold -- so "we measured nothing" arrived as "nothing is wrong", which is
+#: what a dashboard and an alert read. The same distinction the closed loop
+#: makes for the other drift check: a check that could not run is not "no
+#: drift".
+NOT_MEASURED = "not_measured"
 
 
 def _load_live(window_hours: int = 24) -> list[dict]:
@@ -64,7 +83,8 @@ def report_features(window_hours: int = 24) -> dict[str, Any]:
         out.append({
             "feature": feat, "kind": "numeric",
             "psi": round(psi_v, 4), "ks_stat": round(ks_stat, 4),
-            "ks_pvalue": round(ks_p, 6), "status": status_from_psi(psi_v),
+            "ks_pvalue": round(ks_p, 6),
+            "status": status_from_psi(psi_v) if len(vals) else NOT_MEASURED,
             "n_live": int(len(vals)),
         })
     # categorical
@@ -77,7 +97,8 @@ def report_features(window_hours: int = 24) -> dict[str, Any]:
         out.append({
             "feature": feat, "kind": "categorical",
             "psi": round(psi_v, 4), "ks_stat": None, "ks_pvalue": None,
-            "status": status_from_psi(psi_v), "n_live": int(len(vals)),
+            "status": status_from_psi(psi_v) if len(vals) else NOT_MEASURED,
+            "n_live": int(len(vals)),
         })
     return {
         "window_hours": window_hours,
@@ -104,7 +125,8 @@ def report_predictions(window_hours: int = 24) -> dict[str, Any]:
     return {
         "window_hours": window_hours, "n_live": int(len(probs)),
         "psi": round(psi_v, 4), "ks_stat": round(ks_stat, 4),
-        "ks_pvalue": round(ks_p, 6), "status": status_from_psi(psi_v),
+        "ks_pvalue": round(ks_p, 6),
+        "status": status_from_psi(psi_v) if len(probs) else NOT_MEASURED,
         "bin_edges": edges.tolist(),
         "counts_ref": ref_counts.tolist(),
         "counts_live": live_counts.tolist(),
