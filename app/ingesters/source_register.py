@@ -33,6 +33,11 @@ MODELLED = "modelled"
 #: measured here nor modelled here: someone else measured, and this holds a
 #: dated copy.
 ADMINISTRATIVE_SNAPSHOT = "administrative_snapshot"
+#: Official statistics fetched from the publisher at run time. Someone else
+#: measured, as with `administrative_snapshot`; the difference is that this is
+#: the publisher's current release fetched over the network, not a dated copy
+#: shipped in the source tree.
+ADMINISTRATIVE_FETCHED = "administrative_fetched"
 #: A constant chosen by an author and committed as a literal. No measurement
 #: and no model stands behind the number.
 STATIC_BASELINE = "static_baseline"
@@ -146,6 +151,47 @@ SOURCE_REGISTER: Dict[str, SourceFacts] = {
             "identifier and no measurement or model behind the numbers -- an "
             "author chose them. Distinct from rosstat, which is a dated copy "
             "of statistics someone did measure. Same provenance defect (#121)."
+        ),
+    ),
+    "world_bank": SourceFacts(
+        name="world_bank",
+        measurement_kind=ADMINISTRATIVE_FETCHED,
+        model=None,
+        status=STATUS_ACTIVE,
+        coverage="30 countries, 5 indicators, annual series",
+        last_verified_data=None,
+        requires_api_key=False,
+        notes=(
+            "World Bank API (api.worldbank.org): 30 countries from COUNTRY_ISO3, "
+            "5 indicators from INDICATORS. The scheduled job auto_refresh_external_data "
+            "refreshes country profiles through the fallback chain "
+            "(get_country_esg_realtime / _fetch_with_fallback_impl); profiles are "
+            "also fetched on demand and cached with a TTL. The history pass "
+            "refresh_indicator_history(), the only writer of country_indicator_history "
+            "rows labelled source='world_bank', runs only when SORA_HISTORY_REFRESH "
+            "is on (off by default). Each World Bank value "
+            "carries the period the source states for it (indicator_periods / "
+            "as_of_date). Fallback chain: World Bank → OECD (for indicators in "
+            "OECD_FLOWS) → static benchmark → global average (only when "
+            "SORA_OFFLINE=1). Each value's indicator_sources says which source answered."
+        ),
+    ),
+    "oecd": SourceFacts(
+        name="oecd",
+        measurement_kind=ADMINISTRATIVE_FETCHED,
+        model=None,
+        status=STATUS_ACTIVE,
+        coverage="2 indicators with OECD mappings",
+        last_verified_data=None,
+        requires_api_key=False,
+        notes=(
+            "OECD SDMX API (sdmx.oecd.org): 2 indicators from OECD_FLOWS "
+            "(gdp_per_capita and gini_index). Fetched only when World Bank "
+            "returns nothing for a mapped indicator (via _fetch_with_fallback_impl, "
+            "called by the same auto_refresh_external_data job). OECD values are "
+            "not written to country_indicator_history; they appear only in the live "
+            "profile's indicator_sources and carry no period (the fallback returns "
+            "None for it)."
         ),
     ),
 }

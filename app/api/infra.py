@@ -771,7 +771,8 @@ def observations(
     measurement_kind: Optional[str] = Query(
         None,
         description="measured | modelled | administrative_snapshot | "
-                    "static_baseline. Selects the sources declared as that kind.",
+                    "administrative_fetched | static_baseline. Selects the sources "
+                    "declared as that kind.",
     ),
     since: Optional[datetime] = Query(
         None, description="lower bound on event_time, inclusive"),
