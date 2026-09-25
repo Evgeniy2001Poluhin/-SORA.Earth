@@ -55,7 +55,12 @@ def batch_evaluate(req: BatchRequest, db: Session = Depends(get_db)):
     fail = 0
     for p in req.projects:
         try:
-            project = Project(**{k: v for k, v in p.items() if k in Project.model_fields})
+            # The whole row, not a filter over `model_fields`: that kept field
+            # names only and discarded every alias `ProjectInput` accepts
+            # (`budget_usd`, `country`, ...), so a row spelled the other way
+            # scored as an empty project. Unknown keys are still ignored --
+            # the model does not forbid extras.
+            project = Project(**p)
             cdata = COUNTRIES.get(project.region or "Germany", {"region": "Europe", "lat": 50.0, "lon": 10.0})
             region_name = cdata.get("region", "Europe")
             result = calculate_esg(project, region_name)
