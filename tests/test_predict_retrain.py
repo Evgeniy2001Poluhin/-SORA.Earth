@@ -56,7 +56,7 @@ SAMPLE2 = {
     "social_impact": 6.0,
     "duration_months": 12,
     "category": "Wind Energy",
-    "region": "Asia",
+    "region": "Japan",
     "lat": 35.0,
     "lon": 105.0,
 }
