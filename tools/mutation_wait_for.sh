@@ -71,7 +71,7 @@ PY
     local out wrapper
     wrapper="$(mutant_wrapper "$mutant")"
     out="$(run_suite "$wrapper" "$section")"
-    if printf '%s' "$out" | grep -q "FAIL.*$expect"; then
+    if grep -q "FAIL.*$expect" <<<"$out"; then
         printf '  killed   %-42s → "%s" failed\n' "$name" "$expect"
         KILLED=$((KILLED+1))
     else
@@ -82,7 +82,7 @@ PY
 
 echo "== the unmodified tool passes its own suite =="
 BASELINE="$(run_suite "$WRAPPER")"
-if printf '%s' "$BASELINE" | grep -q "failed: 0"; then
+if grep -q "failed: 0" <<<"$BASELINE"; then
     printf '  ok       baseline is green\n'
 else
     printf '  FAIL     baseline is not green; nothing below means anything\n'

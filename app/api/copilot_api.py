@@ -55,10 +55,53 @@ def _retrieve_sources(query, k=4):
         log.warning("RAG failed: %s", e)
         return []
 
+#: Fields of the answer that are not the answer's own words.
+#:
+#: `sources` is the retrieved corpus, quoted rather than written here -- a
+#: finding in a seed document would make the badge read FAIL about text the
+#: answer did not compose. The rest carry no prose: an id, a mode name, a
+#: version, the query built from the numbers, and the verdict this very scan
+#: produces.
+#: What a verdict on no text at all looks like. One definition, because three
+#: copies of it drifted apart once already.
+_NO_TEXT_VERDICT = {
+    "passed": True, "pii_findings": [], "bias_findings": [],
+    "policy_violations": [], "redacted_text": "", "risk_score": 0.0,
+    "engine": "regex-v1",
+}
+
+_NOT_THE_ANSWERS_WORDS = frozenset({
+    "compliance", "sources", "session_id", "explanation_mode",
+    "model_version", "rag_query",
+})
+
+
 def _scan_text(base):
-    parts = [base.get("recommendation") or ""]
-    risks = base.get("risks") or []
-    parts.extend(risks)
+    """Every piece of prose the answer carries, as one string.
+
+    Named by exclusion, not by inclusion. The version that listed the fields to
+    scan -- `recommendation` and `risks` -- left `executive_summary`, the field
+    the page shows first, outside the verdict: measured over 64 inputs, three
+    distinct scanned texts and PASS every time, while the detector itself
+    caught a planted violation with risk 1.0. A list of what to scan falls
+    behind the answer; a list of what to skip does not.
+    """
+    parts = []
+
+    def collect(value):
+        if isinstance(value, str):
+            parts.append(value)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                collect(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                collect(item)
+
+    for key, value in (base or {}).items():
+        if key in _NOT_THE_ANSWERS_WORDS:
+            continue
+        collect(value)
     return " ".join(p for p in parts if p).strip()
 
 @router.post("/copilot/explain")
@@ -70,7 +113,7 @@ def explain(payload: CopilotRequest, k: int = Query(4, ge=1, le=8)):
         base["sources"] = sources
         base["rag_query"] = q
         scan_text = _scan_text(base)
-        base["compliance"] = compliance_check(scan_text) if scan_text else {"passed": True, "pii_findings": [], "bias_findings": [], "policy_violations": [], "redacted_text": "", "risk_score": 0.0, "engine": "regex-v1"}
+        base["compliance"] = compliance_check(scan_text) if scan_text else dict(_NO_TEXT_VERDICT)
         sid = _persist_explain(payload, base, sources)
         if sid:
             base["session_id"] = sid
@@ -112,11 +155,7 @@ async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8),
     q = _build_rag_query(payload.probability, payload.features)
     sources = _retrieve_sources(q, k=k)
     scan_text = _scan_text(base) if isinstance(base, dict) else ""
-    compliance = compliance_check(scan_text) if scan_text else {
-        "passed": True, "pii_findings": [], "bias_findings": [],
-        "policy_violations": [], "redacted_text": "", "risk_score": 0.0,
-        "engine": "regex-v1",
-    }
+    compliance = compliance_check(scan_text) if scan_text else dict(_NO_TEXT_VERDICT)
     rec = (base.get("recommendation") or "") if isinstance(base, dict) else ""
     if rec and sources:
         cites_text = " ".join(["[" + s.get("id", "?") + "]" for s in sources[:2]])
@@ -225,6 +264,11 @@ class QAResponse(BaseModel):
     audience: str
     mode: str
     tokens_used: int
+    #: The sentinel's verdict on `answer`. This route returns text a model
+    #: generated rather than text assembled from a template, and it was the one
+    #: route that ran no check at all -- the guard covered the answers that
+    #: cannot go wrong and not the one that can.
+    compliance: Dict[str, Any]
 
 
 @router.post("/copilot/qa", response_model=QAResponse)
@@ -248,11 +292,13 @@ def qa(payload: QARequest):
                  citations=[s.get("id") for s in sources if s.get("id")])
     except Exception as e:
         log.warning("qa persist failed: %s", e)
+    answer = result["answer"]
     return QAResponse(
         session_id=payload.session_id,
-        answer=result["answer"],
+        answer=answer,
         sources=sources,
         audience=payload.audience or "executive",
         mode=result["mode"],
         tokens_used=result["tokens_used"],
+        compliance=compliance_check(answer) if answer else _NO_TEXT_VERDICT,
     )

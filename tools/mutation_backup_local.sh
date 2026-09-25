@@ -49,7 +49,7 @@ PY
 
     local out
     out="$(SCRIPT_UNDER_TEST="$mutant" bash "$TESTS" 2>&1)"
-    if echo "$out" | grep -q "FAIL.*$expect"; then
+    if grep -q "FAIL.*$expect" <<<"$out"; then
         printf '  caught %-42s → "%s" failed\n' "$name" "$expect"
         PASS=$((PASS+1))
     else

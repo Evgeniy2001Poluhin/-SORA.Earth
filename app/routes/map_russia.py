@@ -38,11 +38,21 @@ _REGIONS_META = _load_regions()
 log.info(f"[map_russia] loaded {len(_REGIONS_META)} region metadata entries")
 
 # ---------- fallback mock ----------
+#
+# Served when both database readers come back empty, with `source:
+# "mock-esg-v1-fallback"` in the response -- honest at the API, and the
+# interface dropped it: `useRussiaMap` takes `j.regions` and discards `source`,
+# so Moscow appeared at 89.0 with nothing to say the number was invented. This
+# platform has already served invented ESG scores to production for weeks with
+# every health check passing, which is why these rows now declare what they are
+# and the card repeats it.
 _MOCK = [
     {"code":"RU-MOW","name":"Moscow","capital":"Moscow","district":"CFO","lat":55.7558,"lon":37.6173,"population":13010112,
-     "esg":{"score":89.0,"e_score":87.0,"s_score":88.0,"g_score":90.0}},
+     "esg":{"score":89.0,"e_score":87.0,"s_score":88.0,"g_score":90.0},
+     "score_kind":"mock","score_vintage":None},
     {"code":"RU-SPE","name":"SPb","capital":"SPb","district":"SZFO","lat":59.9343,"lon":30.3351,"population":5601911,
-     "esg":{"score":77.0,"e_score":75.0,"s_score":78.0,"g_score":78.0}},
+     "esg":{"score":77.0,"e_score":75.0,"s_score":78.0,"g_score":78.0},
+     "score_kind":"mock","score_vintage":None},
 ]
 
 _pool = None
@@ -55,6 +65,34 @@ async def _get_pool():
             log.warning(f"[map_russia] pool init failed: {e}")
             _pool = None
     return _pool
+
+def score_provenance() -> dict:
+    """What kind of number the region score is, and which data it stands on.
+
+    Read from the two modules that decide it, never written down here: the
+    aggregator declares `SCORE_KIND` beside the formula, and the rosstat
+    ingester declares the snapshot's reference period. A year typed into this
+    file, or into the interface, is a figure that cannot stay true.
+
+    The label existed and did not travel: `SCORE_KIND = "structural"` appeared
+    only in the aggregator's own run result, so the card showed a 2024
+    structural index as an ESG score with no indication of either.
+    """
+    kind = "structural"
+    vintage = None
+    try:
+        from app.services.esg_aggregator import SCORE_KIND
+        kind = SCORE_KIND
+    except Exception:  # pragma: no cover - import guard, same style as below
+        pass
+    try:
+        from app.ingesters.rosstat import PERIOD_END, PERIOD_START
+        vintage = (str(PERIOD_START.year) if PERIOD_START.year == PERIOD_END.year
+                   else f"{PERIOD_START.year}-{PERIOD_END.year}")
+    except Exception:  # pragma: no cover
+        pass
+    return {"score_kind": kind, "score_vintage": vintage}
+
 
 async def _load_from_db():
     pool = await _get_pool()
@@ -84,6 +122,7 @@ async def _load_from_db():
             "confidence": float(r["confidence"] or 0),
             "sources_used": list(r["sources_used"] or []),
             "updated_at": r["computed_at"].isoformat() if r["computed_at"] else None,
+            **score_provenance(),
         })
     return regions
 
@@ -116,6 +155,7 @@ def _load_from_sqlalchemy():
             "sources_count": int(r.sources_count or 0),
             "signals_used": int(r.signals_used or 0),
             "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            **score_provenance(),
         })
     return regions
 
@@ -217,5 +257,6 @@ async def region_detail(region_code: str):
         "indicators_count": len(indicators),
         "signals_total": len(signals),
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        **score_provenance(),
     }
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import RussiaMap, { type MapMode } from "./RussiaMap";
 import { useRussiaMap } from "@/hooks/useRussiaMap";
 import { RUSSIA_REGIONS, FD_COLORS, type RussianRegion, type EnrichedRussianRegion } from "@/data/russia_regions";
+import RegionEsgCard from "./RegionEsgCard";
 
 type FD = RussianRegion["district"];
 const ALL_FD: FD[] = ["ЦФО", "СЗФО", "ЮФО", "СКФО", "ПФО", "УФО", "СФО", "ДФО"];
@@ -228,40 +229,15 @@ export default function RussiaMapModal({
               <Row k="Широта" v={selected.lat.toFixed(4)} />
               <Row k="Долгота" v={selected.lon.toFixed(4)} />
               {selected.esgScore != null && (
-                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #1a1d20" }}>
-                  <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                    ESG Score
-                  </div>
-                  <Row k="Total" v={Number(selected.esgScore).toFixed(1)} />
-                  {selected.esgBreakdown && (
-                    <>
-                      <Row k="E (environmental)" v={Number(selected.esgBreakdown.e_score).toFixed(1)} color="#5A9A6F" />
-                      <Row k="S (social)"        v={Number(selected.esgBreakdown.s_score).toFixed(1)} color="#8FB069" />
-                      <Row k="G (governance)"    v={Number(selected.esgBreakdown.g_score).toFixed(1)} color="#C9A96E" />
-                    </>
-                  )}
-                  {selected.confidence != null && (
-                    <Row
-                      k="Confidence"
-                      v={`${(selected.confidence * 100).toFixed(0)}%`}
-                      color={
-                        selected.confidence >= 0.67 ? "#5A9A6F"
-                        : selected.confidence >= 0.34 ? "#C9A96E"
-                        : "#B85C5C"
-                      }
-                    />
-                  )}
-                  {selected.sourcesUsed && selected.sourcesUsed.length > 0 && (
-                    <div style={{ marginTop: 8, fontSize: 11, opacity: 0.55 }}>
-                      Sources: {selected.sourcesUsed.join(", ")}
-                    </div>
-                  )}
-                  {selected.updatedAt && (
-                    <div style={{ marginTop: 4, fontSize: 10, opacity: 0.4 }}>
-                      Updated: {new Date(selected.updatedAt).toLocaleString("ru-RU")}
-                    </div>
-                  )}
-                </div>
+                <RegionEsgCard
+                  score={Number(selected.esgScore)}
+                  breakdown={selected.esgBreakdown}
+                  confidence={selected.confidence}
+                  sourcesUsed={selected.sourcesUsed}
+                  scoreKind={selected.scoreKind}
+                  scoreVintage={selected.scoreVintage}
+                  updatedAt={selected.updatedAt}
+                />
               )}
             </aside>
           )}
