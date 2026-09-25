@@ -36,7 +36,11 @@ const header = (c: HTMLElement) => c.querySelector(".ev-meta")?.textContent ?? "
 
 const row = (id: number, total_score: number | null) => ({
   id, created_at: "2026-09-20T10:00:00Z", region: "Europe", total_score,
-  success_probability: total_score == null ? null : total_score / 100 + 0.05,
+  // A percentage, as `/history` returns it -- the same scale as `/evaluate`
+  // (tests/test_history_probability_scale.py pins that on the backend). This
+  // fixture was a fraction, `total_score / 100 + 0.05`, which the API never
+  // sends -- and on a fraction the page's `* 100` looked right.
+  success_probability: total_score == null ? null : Math.min(100, total_score + 5),
   risk_level: "LOW", budget: 150000, duration_months: 18,
 });
 
@@ -126,5 +130,20 @@ describe("HistoryPage with real rows", () => {
     expect(cells).toHaveLength(3);
     expect(cells[1]).toContain("—");
     expect(cells[1]).not.toContain("0%");
+  });
+});
+
+describe("the success probability column", () => {
+  it("shows the percentage the API returns, not a hundred times it", async () => {
+    // 27.5 is what /evaluate and /history return for a project the model rates
+    // at 27.5 %. The page multiplied it by 100 and printed "2750%".
+    stubJson({ items: [{ ...row(1, 49.06), success_probability: 27.5 }], total: 1, limit: 20, offset: 0 });
+    const { container } = renderPage();
+    await waitFor(() => expect(container.querySelector(".hist-item")).not.toBeNull());
+    // Whole cells, not the row's text: cells concatenate ("49.1" + "28%" reads
+    // "49.128%"), so a substring check would also pass on "128%".
+    const cells = Array.from(container.querySelector(".hist-item")!.children).map((c) => c.textContent);
+    expect(cells).toContain("28%");
+    expect(cells).not.toContain("2750%");
   });
 });

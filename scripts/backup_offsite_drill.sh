@@ -81,7 +81,7 @@ COMPLETED="$(store_list_backups || true)"
 [ -n "$COMPLETED" ] || { echo "  no completed backup in the store" >&2; exit 1; }
 if [ -n "$WANTED" ]; then
     BACKUP_ID="$WANTED"
-    echo "$COMPLETED" | grep -qx "$BACKUP_ID" || {
+    grep -qx -- "$BACKUP_ID" <<<"$COMPLETED" || {
         echo "  $BACKUP_ID has no manifest: it is not a completed backup" >&2; exit 1; }
 else
     BACKUP_ID="$(echo "$COMPLETED" | tail -1)"

@@ -74,8 +74,17 @@ class PromotionDecision:
 
 
 def _auc_of(metrics: Mapping[str, Any]) -> Optional[float]:
-    """Both spellings appear in stored rows, so both are read."""
-    return metrics.get("auc_roc") or metrics.get("roc_auc")
+    """Both spellings appear in stored rows, so both are read.
+
+    `is not None`, not `or`: 0.0 is falsy, so `a or b` read an AUC of exactly
+    zero as an absent one -- and an absent one used to clear this gate. Zero is
+    a measurement, and the worst one there is.
+    """
+    for key in ("auc_roc", "roc_auc"):
+        value = metrics.get(key)
+        if value is not None:
+            return value
+    return None
 
 
 def evaluate_promotion(
@@ -110,14 +119,28 @@ def evaluate_promotion(
     # recorded before that change carry no `test_positive` -- so an old row is
     # judged by the rule in force when it was written rather than refused for
     # lacking a field it could not have had.
+    #
+    # 1a. An AUC that could not be measured is not an AUC that passed.
+    #
+    # Every refusal below requires `new_auc`, so `None` silenced all three and
+    # the candidate was promoted with nothing measured about it. That state is
+    # reachable: `_do_retrain` sets `auc = None` in the `except` around
+    # `roc_auc_score`, and the closed loop hands those metrics straight here --
+    # its own log line already spelled the case as "unrecorded".
+    #
+    # This is the rule the closed loop already applies to the other check in
+    # the same run: a drift check that could not run is not "no drift".
     n_pos = metrics.get("test_positive")
     n_neg = metrics.get("test_negative")
-    if new_auc is not None and n_pos is not None and n_neg is not None:
+    if new_auc is None:
+        _reject("AUC not measured: the candidate carries no AUC, so no quality "
+                "claim can be made about it")
+    elif n_pos is not None and n_neg is not None:
         cleared, why = clears_threshold(
             new_auc, int(n_pos), int(n_neg), MIN_AUC_THRESHOLD)
         if not cleared:
             _reject(why)
-    elif new_auc is not None and float(new_auc) < MIN_AUC_THRESHOLD:
+    elif float(new_auc) < MIN_AUC_THRESHOLD:
         _reject(f"AUC below minimum threshold: {new_auc:.4f} < {MIN_AUC_THRESHOLD}")
 
     # 2. Registered, or not promoted (#189).

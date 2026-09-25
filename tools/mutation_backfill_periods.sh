@@ -95,7 +95,7 @@ PY
     if [ "$status" -eq 0 ]; then
         printf '  survived %-34s → %s still passed\n' "$name" "$node"
         SURVIVED=$((SURVIVED+1))
-    elif printf '%s' "$out" | grep -q "FAILED.*$node"; then
+    elif grep -q "FAILED.*$node" <<<"$out"; then
         printf '  killed   %-34s → %s failed\n' "$name" "$node"
         KILLED=$((KILLED+1))
     else
