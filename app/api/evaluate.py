@@ -20,6 +20,7 @@ from app.drift_detection import drift_detector
 from app.mlflow_tracking import log_evaluation, log_simulation
 from app.middleware import METRICS
 from app.database import Evaluation
+from app.map_position import marker_offset
 
 import csv, io, time, math
 from datetime import datetime
@@ -159,8 +160,9 @@ async def evaluate_project(request: Request, project: Project):
     except Exception:
         pass
 
-    lat = cdata["lat"] + (hash(project.name) % 10 - 5) * 0.3
-    lon = cdata["lon"] + (hash(project.name) % 10 - 5) * 0.3
+    offset = marker_offset(project.name)
+    lat = cdata["lat"] + offset
+    lon = cdata["lon"] + offset
 
     db = get_db_sync()
     try:
