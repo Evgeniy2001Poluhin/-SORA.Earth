@@ -130,13 +130,15 @@ def test_the_parser_and_its_tests_are_kept():
 
 
 def test_every_source_kind_is_distinct_where_the_sources_are():
-    """Four kinds, because collapsing them hides what a number is worth.
+    """Five kinds, because collapsing them hides what a number is worth.
 
     `derived` covered both rosstat and sber_veb_baseline in the first version
     of this register. It should not: rosstat is a dated copy of statistics
     somebody measured, sber_veb_baseline is a constant an author chose. Under
     one word a reader cannot tell which is which, and the whole point of the
-    register is that they can.
+    register is that they can. administrative_fetched (world_bank, oecd) is
+    kept apart from administrative_snapshot (rosstat) because one is the
+    publisher's live release and the other a dated copy in the tree.
     """
     from app.ingesters.source_register import (
         ADMINISTRATIVE_SNAPSHOT, STATIC_BASELINE,
@@ -145,9 +147,10 @@ def test_every_source_kind_is_distinct_where_the_sources_are():
     assert SOURCE_REGISTER["rosstat"].measurement_kind == ADMINISTRATIVE_SNAPSHOT
     assert SOURCE_REGISTER["sber_veb_baseline"].measurement_kind == STATIC_BASELINE
     assert ADMINISTRATIVE_SNAPSHOT != STATIC_BASELINE
+    assert SOURCE_REGISTER["world_bank"].measurement_kind != SOURCE_REGISTER["rosstat"].measurement_kind
 
     kinds = {f.name: f.measurement_kind for f in SOURCE_REGISTER.values()}
-    assert len(set(kinds.values())) == 4, (
+    assert len(set(kinds.values())) == 5, (
         f"the register collapsed distinct sources into one kind: {kinds}"
     )
 
