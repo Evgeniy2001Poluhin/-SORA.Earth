@@ -25,6 +25,8 @@ export interface EnrichedRussianRegion extends RussianRegion {
   esgBreakdown?: RegionEsgBreakdown;
   confidence?: number;
   sourcesUsed?: string[];
+  scoreKind?: string | null;
+  scoreVintage?: string | null;
   updatedAt?: string | null;
 }
 

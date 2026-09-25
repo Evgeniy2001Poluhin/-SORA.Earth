@@ -11,6 +11,10 @@ export interface Region {
   confidence?: number;
   sources_used?: string[];
   updated_at?: string | null;
+  /** What kind of number the score is, from the aggregator's own SCORE_KIND. */
+  score_kind?: string | null;
+  /** The reference period of the data behind it, from the rosstat snapshot. */
+  score_vintage?: string | null;
   code: string;
   name: string;
   capital: string;
