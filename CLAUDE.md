@@ -200,7 +200,6 @@ regenerate this; do not hand-edit the table.**
 |---|---|---|
 | `refresh_forecast_metrics` | `IntervalTrigger(seconds=30)` | `refresh_forecast_metrics` |
 | `auto_observation_coverage` | `IntervalTrigger(minutes=15)` | `scheduled_observation_coverage` |
-| `health_ping` | `IntervalTrigger(minutes=5)` | *(inline lambda -- records a health row)* |
 | `auto_source_health_check` | `IntervalTrigger(minutes=15)` | `scheduled_source_health_check` |
 | `auto_openmeteo_ingestion` | `IntervalTrigger(hours=1)` | `scheduled_openmeteo_ingestion` |
 | `auto_openmeteo_air_quality_ingestion` | `IntervalTrigger(hours=1)` | `scheduled_openmeteo_air_quality_ingestion` |
@@ -215,7 +214,7 @@ regenerate this; do not hand-edit the table.**
 
 <!-- END SCHEDULED JOBS -->
 
-Fourteen jobs, thirteen of them unconditional. There is **no** separate
+Thirteen jobs, twelve of them unconditional. There is **no** separate
 drift-check job: drift is checked inside `closed_loop_retrain`, once a day.
 
 **What the closed loop does** (`app/scheduler.py:closed_loop_retrain`):

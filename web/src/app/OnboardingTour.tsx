@@ -30,7 +30,7 @@ const STEPS: Step[] = [
   {
     target: '[data-tour="status"]',
     title: "System status",
-    content: "Live service health with uptime over 24h and 7d. You are all set.",
+    content: "Live service health for all components. You are all set.",
   },
 ];
 
