@@ -194,6 +194,41 @@ SOURCE_REGISTER: Dict[str, SourceFacts] = {
             "None for it)."
         ),
     ),
+    "benchmark": SourceFacts(
+        name="benchmark",
+        measurement_kind=ADMINISTRATIVE_SNAPSHOT,
+        model=None,
+        status=STATUS_ACTIVE,
+        coverage="32 countries, 7 indicators",
+        last_verified_data=None,
+        requires_api_key=False,
+        notes=(
+            "Static benchmark values in app/country_benchmarks.py BENCHMARKS dict, "
+            "described as 'based on World Bank & UN data (expanded v2)' with no year "
+            "recorded for the values. Third fallback in the country-data chain "
+            "(_fetch_with_fallback_impl), after World Bank and OECD. Serves "
+            "BENCHMARK_ONLY_INDICATORS (co2_per_capita, gov_effectiveness) which are "
+            "not fetched from the network, plus fills gaps for the five INDICATORS when "
+            "World Bank and OECD both return nothing. The esg_rank field, present in "
+            "every benchmark record, has no stated source."
+        ),
+    ),
+    "global_avg": SourceFacts(
+        name="global_avg",
+        measurement_kind=STATIC_BASELINE,
+        model=None,
+        status=STATUS_ACTIVE,
+        coverage="7 indicators",
+        last_verified_data=None,
+        requires_api_key=False,
+        notes=(
+            "Global average constants in app/country_benchmarks.py GLOBAL_AVG dict. "
+            "Used only when SORA_OFFLINE=1 as the fourth and final fallback in the "
+            "country-data chain (_fetch_with_fallback_impl), after World Bank, OECD, "
+            "and benchmark. No measurement or model stands behind these numbers; they "
+            "are constants chosen by an author and committed as literals."
+        ),
+    ),
 }
 
 
