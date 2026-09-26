@@ -252,7 +252,7 @@ class ObservationRow(BaseModel):
     unit: Optional[str] = None
 
     source: str
-    #: measured | modelled | administrative_snapshot | static_baseline
+    #: measured | modelled | administrative_snapshot | administrative_fetched | static_baseline
     measurement_kind: str
     #: The named model behind a `modelled` value; None for every other kind.
     model: Optional[str] = None
