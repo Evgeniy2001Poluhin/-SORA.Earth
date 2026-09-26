@@ -85,6 +85,13 @@ def observe(
     features: dict,
     _key: dict = Security(require_api_key),
 ):
+    # Convert social_impact to model scale if present. Clients send 0-10, but
+    # the baseline is fitted from data/projects.csv (0-100 scale).
+    if "social_impact" in features:
+        from app.scales import social_impact_to_model
+        features = dict(features)  # copy to avoid mutating caller's dict
+        features["social_impact"] = social_impact_to_model(features["social_impact"])
+
     drift_detector.add_observation(features)
     return {"status": "ok", "observations": drift_detector.count()}
 

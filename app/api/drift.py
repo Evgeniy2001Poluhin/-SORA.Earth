@@ -199,6 +199,14 @@ def compute_drift(window: int = 50, db=None):
             status="insufficient_data", window=window, observations=len(recent), features={},
             reason_code="below_minimum_window",
         )
+    # Convert social_impact from API scale (0-10) to model scale (0-100) so
+    # the KS test compares on the same scale as the training baseline. Clients
+    # send 0-10, training data is 0-100.
+    if "social_impact" in recent.columns:
+        from app.scales import SOCIAL_IMPACT_MODEL_FACTOR
+        recent = recent.copy()
+        recent["social_impact"] = recent["social_impact"] * SOCIAL_IMPACT_MODEL_FACTOR
+
     results = {}
     drift_any = False
     for col in COLS:
