@@ -273,23 +273,35 @@ def test_ab_predict_dead_zone_gone(monkeypatch):
 # (a2, a3) Unit tests for build_features and ml_registry._make_features
 # ============================================================================
 
-def test_build_features_scales_social_impact(monkeypatch):
+def test_build_features_scales_social_impact():
     """app.ml.features.build_features: social_impact 1 → 10.0, 10 → 100.0."""
     from app.ml.features import build_features
-    import app.ml.features
 
-    # Monkeypatch the scaler to return input unchanged (pre-existing bug: scaler_v2 expects country_gdp_per_capita)
-    class FakeScaler:
+    # Create a bundle with identity scaler (returns input unchanged)
+    class IdentityScaler:
         def transform(self, X):
             return X
 
-    monkeypatch.setattr(app.ml.features, "_load_scaler", lambda: FakeScaler())
+    # Minimal bundle with category/region encodings
+    bundle = {
+        "features": [
+            "budget", "co2_reduction", "social_impact", "duration_months",
+            "budget_per_month", "co2_per_dollar", "efficiency_score",
+            "impact_ratio", "budget_efficiency",
+            "category_enc", "region_enc",
+        ],
+        "cat_encodings": {
+            "category": {"Solar Energy": 0.5},
+            "region": {"Europe": 0.6}
+        },
+        "scaler": IdentityScaler()
+    }
 
-    p1 = {**BASE_PROJECT, "social_impact": 1}
-    p10 = {**BASE_PROJECT, "social_impact": 10}
+    p1 = {**BASE_PROJECT, "social_impact": 1, "category": "Solar Energy", "region": "Europe"}
+    p10 = {**BASE_PROJECT, "social_impact": 10, "category": "Solar Energy", "region": "Europe"}
 
-    df1 = build_features(p1)
-    df10 = build_features(p10)
+    df1 = build_features(p1, bundle)
+    df10 = build_features(p10, bundle)
 
     assert "social_impact" in df1.columns
     assert "social_impact" in df10.columns

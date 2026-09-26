@@ -1,5 +1,6 @@
 """FastAPI routes powered by MLflow Registry model."""
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from app.auth import require_admin
 from mlflow.exceptions import MlflowException
@@ -8,8 +9,8 @@ import time
 
 from app.obs.request_log import log_prediction
 
-from app.ml.registry_loader import get_model, get_version, get_alias, reload as reload_model
-from app.ml.features import build_features
+from app.ml.registry_loader import get_model, get_version, get_alias, reload as reload_model, get_bundle, RegistryException
+from app.ml.features import build_features, UnknownCategoryError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v2", tags=["ml-v2"])
@@ -40,12 +41,31 @@ class PredictResponse(BaseModel):
 def predict(req: PredictRequest):
     try:
         t0 = time.perf_counter()
-        X = build_features(req.dict())
-        model = get_model()
+
+        # Get the bundle (model + preprocessing artifacts)
+        bundle = get_bundle()
+
+        if bundle is None:
+            # SORA_OFFLINE=1
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "reason_code": "registry_unavailable",
+                    "detail": "The model registry is not available; no prediction was made."
+                }
+            )
+
+        # Build features using the bundle's preprocessor
+        X = build_features(req.dict(), bundle)
+
+        # Predict
+        model = bundle["model"]
         proba = float(model.predict_proba(X)[0][1])
         cls = int(round(proba))
+
         latency_ms = (time.perf_counter() - t0) * 1000.0
-        mv = str(get_version())
+        mv = str(bundle["version"])
+
         log_prediction(
             features=req.dict(),
             probability=proba,
@@ -54,14 +74,38 @@ def predict(req: PredictRequest):
             model_version=mv,
             model_alias="champion",
         )
+
         return PredictResponse(
             success_probability=round(proba, 4),
             success_class=cls,
             model_version=mv,
         )
+
+    except RegistryException as e:
+        # Model registry or preprocessing artifacts unavailable
+        logger.warning("Registry exception: %s - %s", e.reason_code, e.detail)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "reason_code": e.reason_code,
+                "detail": e.detail
+            }
+        )
+
+    except UnknownCategoryError as e:
+        # Unknown category or region
+        logger.warning("Unknown %s: %s (known: %s)", e.field, e.value, e.known_values)
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": f"Unknown {e.field}: {e.value}. Known {e.field}s: {', '.join(e.known_values)}"
+            }
+        )
+
     except Exception as e:
         logger.exception("v2 predict failed")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/model/version")
 def model_version():
@@ -89,6 +133,11 @@ def model_version():
         raise HTTPException(
             status_code=503,
             detail="no model registered under the configured name/alias yet")
+    except RegistryException as e:
+        logger.warning("model/version: registry exception: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=e.detail)
 
 
 @router.post("/model/reload", dependencies=[Depends(require_admin)])
@@ -102,6 +151,12 @@ def model_reload():
         raise HTTPException(
             status_code=503,
             detail="no model registered under the configured name/alias yet")
+    except RegistryException as e:
+        logger.warning("model/reload: registry exception: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=e.detail)
+
 
 @router.get("/model/calibration")
 def model_calibration():
