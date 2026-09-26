@@ -92,6 +92,8 @@ def main(argv=None):
     parser.add_argument("--days", type=int, default=800,
                         help="how far back to read, in whole days")
     parser.add_argument("-o", "--output", help="also write the report here")
+    parser.add_argument("--include-shadow", action="store_true",
+                        help="include shadow models (e.g., LSTM) in candidate evaluation")
     args = parser.parse_args(argv)
 
     from app.services.forecasting.report import build_report
@@ -101,6 +103,7 @@ def main(argv=None):
         rows,
         target=f"{args.source}:{args.indicator}",
         declared_points=declared_points(),
+        include_shadow=args.include_shadow,
     )
 
     text_out = json.dumps(report, indent=2, sort_keys=True, default=str)
