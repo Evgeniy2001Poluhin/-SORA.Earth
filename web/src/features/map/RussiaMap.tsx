@@ -6,6 +6,7 @@ import "leaflet/dist/leaflet.css";
 import "./map.css";
 import { TILE_URL, TILE_ATTRIBUTION, TILE_MAX_NATIVE_ZOOM } from "./tiles";
 import { RUSSIA_REGIONS, FD_COLORS, type RussianRegion, type EnrichedRussianRegion } from "@/data/russia_regions";
+import RegionTooltipBody from "./RegionTooltipBody";
 
 /** /geo/russia.geo.json keys each polygon by the same region code as RUSSIA_REGIONS. */
 type RegionFeature = Feature<Geometry, { code: string }>;
@@ -127,24 +128,7 @@ export default function RussiaMap({ height = 560, activeFD, search, mode, onSele
               eventHandlers={{ click: () => onSelect(r) }}
             >
               <Tooltip direction="top" offset={[0, -6]} className="esg-tooltip">
-                <strong>{r.capital}</strong>
-                <div style={{ fontSize: 11, opacity: 0.8 }}>{r.name}</div>
-                <div style={{ fontSize: 10, opacity: 0.6 }}>
-                  {r.district} · {(r.population / 1e6).toFixed(2)}M
-                  {r.esgScore != null && ` · ESG ${r.esgScore}`}
-                </div>
-                {r.esgBreakdown && (
-                  <div style={{ fontSize: 10, opacity: 0.75, marginTop: 2, display: "flex", gap: 6 }}>
-                    <span style={{ color: "#5A9A6F" }}>E{Math.round(r.esgBreakdown.e_score)}</span>
-                    <span style={{ color: "#8FB069" }}>S{Math.round(r.esgBreakdown.s_score)}</span>
-                    <span style={{ color: "#C9A96E" }}>G{Math.round(r.esgBreakdown.g_score)}</span>
-                    {r.confidence != null && (
-                      <span style={{ opacity: 0.55, marginLeft: 4 }}>
-                        · conf {Math.round(r.confidence * 100)}%
-                      </span>
-                    )}
-                  </div>
-                )}
+                <RegionTooltipBody region={r} />
               </Tooltip>
             </CircleMarker>
           );
