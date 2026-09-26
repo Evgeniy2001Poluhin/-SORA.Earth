@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import RussiaMap, { type MapMode } from "./RussiaMap";
 import { useRussiaMap } from "@/hooks/useRussiaMap";
-import { RUSSIA_REGIONS, FD_COLORS, type RussianRegion, type EnrichedRussianRegion } from "@/data/russia_regions";
+import { FD_COLORS, type RussianRegion, type EnrichedRussianRegion } from "@/data/russia_regions";
 import RegionEsgCard from "./RegionEsgCard";
+import { enrichRegions, cardPropsOf } from "./enrichRegions";
 
 type FD = RussianRegion["district"];
 const ALL_FD: FD[] = ["ЦФО", "СЗФО", "ЮФО", "СКФО", "ПФО", "УФО", "СФО", "ДФО"];
@@ -30,22 +31,7 @@ export default function RussiaMapModal({
   const [selected, setSelected] = useState<EnrichedRussianRegion | null>(null);
 
   const { data: apiRegions } = useRussiaMap();
-  const enrichedRegions = useMemo(() => {
-    if (!apiRegions?.length) return RUSSIA_REGIONS;
-    const apiMap = new Map(apiRegions.map(r => [r.code, r]));
-    return RUSSIA_REGIONS.map(r => {
-      const a = apiMap.get(r.code);
-      if (!a) return r;
-      return {
-        ...r,
-        esgScore: a.esg?.score ?? r.esgScore,
-        esgBreakdown: a.esg,
-        confidence: a.confidence,
-        sourcesUsed: a.sources_used,
-        updatedAt: a.updated_at,
-      };
-    });
-  }, [apiRegions]);
+  const enrichedRegions = useMemo(() => enrichRegions(apiRegions), [apiRegions]);
 
   useEffect(() => {
     if (!open) return;
@@ -229,15 +215,7 @@ export default function RussiaMapModal({
               <Row k="Широта" v={selected.lat.toFixed(4)} />
               <Row k="Долгота" v={selected.lon.toFixed(4)} />
               {selected.esgScore != null && (
-                <RegionEsgCard
-                  score={Number(selected.esgScore)}
-                  breakdown={selected.esgBreakdown}
-                  confidence={selected.confidence}
-                  sourcesUsed={selected.sourcesUsed}
-                  scoreKind={selected.scoreKind}
-                  scoreVintage={selected.scoreVintage}
-                  updatedAt={selected.updatedAt}
-                />
+                <RegionEsgCard {...cardPropsOf(selected)} />
               )}
             </aside>
           )}
