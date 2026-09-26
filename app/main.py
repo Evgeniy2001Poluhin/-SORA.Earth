@@ -610,9 +610,12 @@ def make_features_base(data):
     """Alias for make_features (9 features)."""
     return make_features(data)
 
-def make_features_v2(data, category: str = "Solar Energy", region: str = "Europe"):
-    if scaler_v2 is None:
-        return make_features(data)
+def make_features_v2_raw(data, category: str = "Solar Energy", region: str = "Europe"):
+    """Build unscaled v2 features in FEATURE_COLS_V2 order.
+
+    Returns the unscaled 1-row DataFrame, in FEATURE_COLS_V2 order, that the
+    served v2 ensemble sees after scaler_v2.
+    """
     from app.scales import social_impact_to_model
 
     # Convert API scale (0-10) to model scale (0-100) once
@@ -628,7 +631,13 @@ def make_features_v2(data, category: str = "Solar Energy", region: str = "Europe
     gdp = gdp_for_country(region)  # `region` carries the request's country (aliased)
     row = [[data.budget, data.co2_reduction, social_model, data.duration_months,
             bpm, c2d, eff, ir, be, c_enc, r_enc, gdp]]
-    df = pd.DataFrame(row, columns=FEATURE_COLS_V2)
+    return pd.DataFrame(row, columns=FEATURE_COLS_V2)
+
+
+def make_features_v2(data, category: str = "Solar Energy", region: str = "Europe"):
+    if scaler_v2 is None:
+        return make_features(data)
+    df = make_features_v2_raw(data, category, region)
     return pd.DataFrame(scaler_v2.transform(df), columns=FEATURE_COLS_V2)
 
 
