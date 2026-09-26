@@ -22,9 +22,9 @@ class ProjectInput(BaseModel):
     social_impact: float = Field(
         default=5,
         ge=0,
-        le=100,
+        le=10,
         alias="social_impact_score",
-        description="Social impact score 0-100 (normalized to match training data range)"
+        description="Social impact score 0-10 (interface range 1-10)"
     )
     duration_months: int = Field(
         default=12,
