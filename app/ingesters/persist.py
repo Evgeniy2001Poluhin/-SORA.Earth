@@ -311,7 +311,13 @@ def _upsert_observations(
         # PostgreSQL: use native UPSERT with ON CONFLICT + RETURNING
         stmt = insert(EnvironmentalObservation).values(observations)
 
-        # On conflict: update fields that may have changed
+        # On conflict: update fields that may have changed. updated_at must stay
+        # in this update path: the aggregator reads it as "this pair was delivered
+        # again". ingested_at must stay out: it is the first-write time, which the
+        # aggregator uses to choose which row represents a pair (esg_aggregator._ordering_key
+        # for not_applicable rows, and the ingested_at tiebreaker), and which the
+        # data-quality job counts by (app/services/environmental/scheduler_jobs.py,
+        # rows ingested in the last 24h).
         update_dict = {
             "updated_at": stmt.excluded.updated_at,
             "quality_score": stmt.excluded.quality_score,
@@ -365,7 +371,14 @@ def _upsert_observations(
                 ).first()
 
                 if existing:
-                    # Update existing record
+                    # Update existing record. updated_at must be updated: the
+                    # aggregator reads it as "this pair was delivered again".
+                    # ingested_at must not: it is the first-write time, which the
+                    # aggregator uses to choose which row represents a pair
+                    # (esg_aggregator._ordering_key for not_applicable rows, and the
+                    # ingested_at tiebreaker), and which the data-quality job counts
+                    # by (app/services/environmental/scheduler_jobs.py, rows ingested
+                    # in the last 24h).
                     existing.value = obs["value"]
                     existing.quality_score = obs["quality_score"]
                     existing.is_valid = obs["is_valid"]

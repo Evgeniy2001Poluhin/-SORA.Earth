@@ -232,3 +232,130 @@ def test_the_migrated_column_is_at_least_as_wide_as_the_model_says(scratch_db):
             f"{name}: model declares {declared}, migrated database has "
             f"{actual.get(name)}"
         )
+
+
+@requires_postgres
+def test_a_redelivery_moves_updated_at_and_keeps_ingested_at(scratch_db):
+    """The PostgreSQL upsert: a repeat moves updated_at and keeps ingested_at.
+
+    The aggregator's liveness reads updated_at, so this pins the cause on the
+    production dialect; test_the_aggregator_counts_a_redelivered_snapshot_as_delivered
+    checks the consequence. Write one sber_veb_baseline signal, backdate both
+    timestamps 72h, write the same signal again (assert 0 inserted / 1 updated),
+    assert ingested_at unchanged and updated_at advanced by at least 71h.
+    """
+    engine, _ = scratch_db
+    revision = temporal.content_revision("sber_veb_baseline", {"RU-MOW": 89.0})
+    signal = Signal(
+        region_code="RU-MOW", source="sber_veb_baseline",
+        metric="esg_index_baseline", value=89.0,
+        temporal_kind=temporal.NOT_APPLICABLE,
+        source_revision=revision
+    )
+
+    # First write
+    obs, (inserted, _u, _d) = _write(engine, signal, "sber_veb_baseline")
+    assert inserted == 1
+
+    # Backdate both timestamps 72h
+    with engine.begin() as conn:
+        conn.execute(text(
+            "UPDATE environmental_observations "
+            "SET ingested_at = ingested_at - interval '72 hours', "
+            "    updated_at = updated_at - interval '72 hours' "
+            "WHERE source_record_id = :i"
+        ), {"i": obs["source_record_id"]})
+
+        # Capture backdated values
+        backdated = conn.execute(text(
+            "SELECT ingested_at, updated_at FROM environmental_observations "
+            "WHERE source_record_id = :i"
+        ), {"i": obs["source_record_id"]}).one()
+
+    # Second write
+    _obs2, (inserted2, updated2, _d2) = _write(engine, signal, "sber_veb_baseline")
+    assert inserted2 == 0, "second write reported an insert"
+    assert updated2 == 1, "second write did not report an update"
+
+    # Check timestamps
+    with engine.begin() as conn:
+        final = conn.execute(text(
+            "SELECT ingested_at, updated_at FROM environmental_observations "
+            "WHERE source_record_id = :i"
+        ), {"i": obs["source_record_id"]}).one()
+
+    # ingested_at must be unchanged
+    assert final.ingested_at == backdated.ingested_at, (
+        f"ingested_at changed from {backdated.ingested_at} to {final.ingested_at}; "
+        f"a repeat must not move it"
+    )
+
+    # updated_at must have advanced by at least 71h
+    delta = (final.updated_at - backdated.updated_at).total_seconds() / 3600.0
+    assert delta >= 71, (
+        f"updated_at advanced by {delta:.1f}h, expected >= 71h; a repeat must move it"
+    )
+
+
+@requires_postgres
+def test_the_aggregator_counts_a_redelivered_snapshot_as_delivered(scratch_db, monkeypatch):
+    """End-to-end on PG: real ingesters' signals, backdate, re-deliver, aggregate.
+
+    Writes both ingesters' signals via _upsert_observations, backdates, writes
+    again, aggregates → 85 computed, 0 stale pairs.
+    """
+    import asyncio
+    from app.ingesters.sber_veb_baseline import SberVebBaselineIngester
+    from app.ingesters.rosstat import RosstatIngester
+    import app.services.esg_aggregator as agg
+
+    engine, _ = scratch_db
+
+    # Fetch signals
+    sber_signals = asyncio.run(SberVebBaselineIngester().fetch_with_retry())
+    rosstat_signals = asyncio.run(RosstatIngester().fetch_with_retry())
+
+    # Write via _upsert_observations
+    db = _session(engine)
+    try:
+        sber_obs = [_signal_to_observation_dict(s, "sber_veb_baseline") for s in sber_signals]
+        rosstat_obs = [_signal_to_observation_dict(s, "rosstat") for s in rosstat_signals]
+        _upsert_observations(db, sber_obs)
+        _upsert_observations(db, rosstat_obs)
+        db.commit()
+    finally:
+        db.close()
+
+    # Backdate all rows 72h
+    with engine.begin() as conn:
+        conn.execute(text(
+            "UPDATE environmental_observations "
+            "SET ingested_at = ingested_at - interval '72 hours', "
+            "    updated_at = updated_at - interval '72 hours'"
+        ))
+
+    # Re-fetch and rebuild observation dicts for the second write
+    sber_signals = asyncio.run(SberVebBaselineIngester().fetch_with_retry())
+    rosstat_signals = asyncio.run(RosstatIngester().fetch_with_retry())
+
+    # Re-write the same signals
+    db = _session(engine)
+    try:
+        sber_obs = [_signal_to_observation_dict(s, "sber_veb_baseline") for s in sber_signals]
+        rosstat_obs = [_signal_to_observation_dict(s, "rosstat") for s in rosstat_signals]
+        inserted, updated, _ = _upsert_observations(db, sber_obs)
+        assert inserted == 0 and updated == len(sber_obs), "sber re-delivery"
+        inserted, updated, _ = _upsert_observations(db, rosstat_obs)
+        assert inserted == 0 and updated == len(rosstat_obs), "rosstat re-delivery"
+        db.commit()
+    finally:
+        db.close()
+
+    # Aggregate
+    factory = sessionmaker(bind=engine)
+    monkeypatch.setattr(agg, "SessionLocal", factory)
+    result = agg.recalc_all_regions()
+
+    assert result["status"] == "success", result
+    assert result["regions_computed"] == 85
+    assert result["required_pairs_stale"] == 0
