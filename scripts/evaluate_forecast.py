@@ -60,13 +60,7 @@ def load_rows(source: str, indicator: str, days: int):
     PostgreSQL turned back into an instant with the *session's* TimeZone -- so
     the window moved by the session's offset, and the rows in the report
     depended on a connection setting.
-
-    Returns empty list in offline mode (SORA_OFFLINE=1).
     """
-    import os
-    if os.getenv("SORA_OFFLINE") == "1":
-        return []
-
     from sqlalchemy import text
 
     from app.database import SessionLocal
