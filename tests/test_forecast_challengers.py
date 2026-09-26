@@ -62,6 +62,53 @@ def _synthetic_daily_series(
     return rows
 
 
+def _learnable_series(seed: int = 0, regions: int = 3, days: int = 200):
+    """Generate a learnable series -- weekly seasonality plus AR(1).
+
+    Measured on macOS ARM over seeds 0-7: the worst case across seeds was mean
+    ratio 0.850 and worst-region ratio 0.863 against every baseline, a margin of
+    at least 13% in every seed. The 10% threshold on seed 0 leaves room for
+    floating-point differences between platforms. A purely weekly series was too
+    close to a tie: seasonal naive is near optimal on it.
+
+    Args:
+        seed: Random seed for reproducibility
+        regions: Number of regions
+        days: Number of days per region
+
+    Returns:
+        List of (region, event_time, value) tuples (hourly observations)
+    """
+    rng = np.random.default_rng(seed)
+    rows = []
+
+    for r in range(regions):
+        region = f"region_{r:02d}"
+        base = 20.0 + rng.normal() * 2.0
+
+        # AR(1) process: phi=0.6, sigma=1.0
+        phi = 0.6
+        sigma = 1.0
+        ar = np.zeros(days)
+        ar[0] = rng.normal() * sigma / math.sqrt(1 - phi**2)
+
+        for d in range(1, days):
+            ar[d] = phi * ar[d - 1] + rng.normal() * sigma
+
+        # Generate hourly observations for each day
+        for d in range(days):
+            # Daily value: base + weekly seasonality + AR(1)
+            daily = base + 2.0 * math.sin(2 * math.pi * d / 7) + ar[d]
+
+            # 24 hourly observations with small noise
+            for h in range(24):
+                event_time = datetime(2025, 1, 1) + timedelta(days=d, hours=h)
+                value = daily + rng.normal() * 0.2
+                rows.append((region, event_time, value))
+
+    return rows
+
+
 def test_candidates_evaluated_on_same_windows_as_baselines():
     """(a) Candidates evaluated on exactly the same window boundaries as baselines."""
     # Enough history: 3 regions × 260 days
@@ -123,10 +170,8 @@ def test_candidates_evaluated_on_same_windows_as_baselines():
 
 def test_xgboost_beats_seasonal_naive_on_seasonal_data():
     """(b) XGBoost beats every baseline on seasonal data, not on white noise."""
-    # Strongly seasonal series with trend
-    seasonal_rows = _synthetic_daily_series(
-        regions=3, days=200, seed=42, seasonality=3.0, trend=0.02
-    )
+    # Learnable series: weekly seasonality + AR(1)
+    seasonal_rows = _learnable_series(seed=0, regions=3, days=200)
 
     declared_seasonal = sorted({r[0] for r in seasonal_rows})
 
@@ -171,9 +216,22 @@ def test_xgboost_beats_seasonal_naive_on_seasonal_data():
     assert xgb_noise.get("evaluated"), "XGBoost should be evaluated on noise data"
 
     # Seasonal case: XGBoost must beat EVERY baseline in both mean and worst-region MAE
-    assert xgb_seasonal["beats_every_baseline"], \
-        f"XGBoost should beat every baseline on seasonal data, " \
-        f"got ratios: {xgb_seasonal.get('per_baseline_mae_ratios')}"
+    # Mean MAE ratio: check per_baseline_mae_ratios for every baseline
+    for baseline_name, ratio in xgb_seasonal["per_baseline_mae_ratios"].items():
+        assert ratio <= 0.90, \
+            f"XGBoost mean MAE ratio should be <= 0.90 for {baseline_name}, got {ratio:.4f}"
+
+    # Worst-region MAE ratio: worst region vs worst region for each baseline
+    worst_region_mae = xgb_seasonal["worst_region_mae"]
+    baselines_section = report_seasonal["baselines"]
+    for point_key, baseline_point in baselines_section.items():
+        if baseline_point.get("scored"):
+            for baseline_name, baseline_scores in baseline_point["scored"].items():
+                baseline_worst = baseline_scores["mae"]
+                worst_ratio = worst_region_mae / baseline_worst
+                assert worst_ratio <= 0.90, \
+                    f"XGBoost worst-region MAE ratio should be <= 0.90 for {baseline_name}, got {worst_ratio:.4f}"
+
     assert xgb_seasonal["eligible_for_promotion"], \
         "XGBoost should be eligible for promotion on seasonal data"
 
