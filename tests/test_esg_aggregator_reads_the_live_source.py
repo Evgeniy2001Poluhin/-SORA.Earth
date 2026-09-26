@@ -99,8 +99,10 @@ def _observe(session, region, source, indicator, value, event_time=None,
         # that cannot occur.
         **_temporal_fields(source, when),
         # Separate on purpose: for these sources `event_time` is `now` on every
-        # run regardless of how old the numbers are, so only `ingested_at`
-        # says whether the pipeline moved.
+        # run regardless of how old the numbers are, so it cannot say whether
+        # the pipeline moved. The aggregator reads each pair's last delivery --
+        # `updated_at`, falling back to this `ingested_at`, which is all a row
+        # written here has.
         ingested_at=ingested_at or when,
         is_valid=valid,
     ))
@@ -240,7 +242,7 @@ def test_an_old_event_time_does_not_stall_a_running_pipeline(session_factory):
 
     A source may legitimately carry observations older than the bound while
     ingestion runs perfectly. Measuring staleness on `event_time` would call
-    that a failure; measuring it on `ingested_at` does not.
+    that a failure; measuring it on the last delivery does not.
     """
     s = session_factory()
     _all_declared(
@@ -656,7 +658,11 @@ def test_one_stale_pair_out_of_510_degrades_the_run(session_factory):
     stale = s.query(EnvironmentalObservation).filter_by(
         region_id="RU-TVE", indicator="unemployment_rate"
     ).one()
-    stale.ingested_at = _now() - timedelta(days=7)
+    old_time = _now() - timedelta(days=7)
+    stale.ingested_at = old_time
+    # A pair not delivered for a week has a week-old last delivery, not only a
+    # week-old first write.
+    stale.updated_at = old_time
     s.commit()
     s.close()
 
@@ -686,10 +692,13 @@ def test_one_source_stopping_degrades_while_the_global_clock_looks_fresh(session
     s = session_factory()
     _all_declared(s, ingested_at=_now() - timedelta(days=7))
     s.commit()
+    fresh_time = _now() - timedelta(minutes=5)
     for row in s.query(EnvironmentalObservation).filter_by(
         source="sber_veb_baseline"
     ):
-        row.ingested_at = _now() - timedelta(minutes=5)
+        # sber keeps delivering, so its last delivery is fresh
+        row.ingested_at = fresh_time
+        row.updated_at = fresh_time
     s.commit()
     s.close()
 
@@ -893,7 +902,11 @@ def test_a_stale_pair_marks_the_row_too(session_factory):
     row = s.query(EnvironmentalObservation).filter_by(
         region_id="RU-TVE", indicator="unemployment_rate"
     ).one()
-    row.ingested_at = _now() - timedelta(days=7)
+    old_time = _now() - timedelta(days=7)
+    row.ingested_at = old_time
+    # A pair not delivered for a week has a week-old last delivery, not only a
+    # week-old first write.
+    row.updated_at = old_time
     s.commit()
     s.close()
 
