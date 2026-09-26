@@ -1,6 +1,8 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { useParams, Link } from "react-router-dom";
 import "./region-detail.css";
+import { ScoreKindNote } from "@/features/map/ProvenanceNotes";
+import { sourcesCountText } from "@/features/map/regionProvenance";
 
 type Indicator = {
   source: string;
@@ -31,6 +33,8 @@ type RegionDetailData = {
   sources_missing: string[];
   model_version: string | null;
   computed_at: string | null;
+  score_kind?: string | null;
+  score_vintage?: string | null;
   indicators: Indicator[];
   indicators_count: number;
   signals_total: number;
@@ -73,11 +77,6 @@ export default function RegionDetail() {
     { label: "Social", v: esg.s_score },
     { label: "Governance", v: esg.g_score },
   ] : [];
-  const confColor = data.confidence == null
-    ? "var(--muted)"
-    : data.confidence >= 0.67 ? GREEN
-    : data.confidence >= 0.34 ? YELLOW
-    : RED;
 
   return (
     <div className="rd-page">
@@ -92,6 +91,8 @@ export default function RegionDetail() {
         {data.region.population && <span>Population: <b>{data.region.population.toLocaleString("ru-RU")}</b></span>}
       </div>
 
+      <ScoreKindNote scoreKind={data.score_kind} scoreVintage={data.score_vintage} />
+
       {esg && (
         <div className="rd-kpis">
           {kpis.map(k => (
@@ -104,22 +105,21 @@ export default function RegionDetail() {
       )}
 
       <div className="rd-row">
-        <div className="rd-card" style={{ "--score-color": confColor } as CSSProperties}>
-          <div className="label">Confidence</div>
-          <div className="value">{data.confidence != null ? (data.confidence * 100).toFixed(0) + "%" : "-"}</div>
-          {data.confidence != null && (
-            <div className="rd-conf-bar"><i style={{ width: (data.confidence * 100) + "%" }} /></div>
-          )}
-        </div>
         <div className="rd-card">
-          <div className="label">Sources</div>
-          <div className="rd-chips">
-            {data.sources_used.length > 0
-              ? data.sources_used.map(s => <span key={s} className="rd-chip used">{s}</span>)
-              : <span className="rd-chip">-</span>}
-            {data.sources_missing.map(s => <span key={s} className="rd-chip missing">{s}</span>)}
+          <div className="label">Источников</div>
+          <div className="value" style={{ fontSize: 24 }}>
+            {data.confidence != null ? sourcesCountText(data.confidence) : "-"}
           </div>
         </div>
+        {(data.sources_used.length > 0 || data.sources_missing.length > 0) && (
+          <div className="rd-card">
+            <div className="label">Sources</div>
+            <div className="rd-chips">
+              {data.sources_used.map(s => <span key={s} className="rd-chip used">{s}</span>)}
+              {data.sources_missing.map(s => <span key={s} className="rd-chip missing">{s}</span>)}
+            </div>
+          </div>
+        )}
       </div>
 
       <h2 className="rd-section-title">Indicators<span className="count">({data.indicators_count})</span></h2>

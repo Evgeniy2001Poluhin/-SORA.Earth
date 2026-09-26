@@ -6,6 +6,9 @@
  * than an element, which left this block — the part that makes claims about a
  * number — untestable. `RussiaMapModal.tsx` had no tests at all.
  */
+import { ScoreKindNote } from "./ProvenanceNotes";
+import { sourcesCountText } from "./regionProvenance";
+
 export type RegionEsgBreakdown = {
   e_score?: number | null;
   s_score?: number | null;
@@ -47,29 +50,7 @@ export default function RegionEsgCard({
         ESG Score
       </div>
 
-      {/* What the number is. The aggregator declares it beside the formula
-          (`SCORE_KIND = "structural"`, with a measurement next to it: one
-          distinct value per region against 99.9 for openmeteo temperature over
-          the same window) and the rosstat ingester declares the vintage. Both
-          travel with the score now; before this they lived only in the
-          aggregator's own run result and reached no screen. */}
-      {/* The map serves two hardcoded regions when both database readers come
-          back empty. The API says so in `source: "mock-esg-v1-fallback"`; the
-          hook took `j.regions` and dropped it, so Moscow showed 89.0 with
-          nothing to mark it invented. This platform has already served invented
-          ESG scores to production for weeks with every health check passing. */}
-      {scoreKind === "mock" && (
-        <div style={{ fontSize: 10, marginBottom: 6, lineHeight: 1.35, color: "#B85C5C" }}>
-          Заглушка — данных по региону нет, число не измерено
-        </div>
-      )}
-
-      {scoreKind === "structural" && (
-        <div style={{ fontSize: 10, opacity: 0.45, marginBottom: 6, lineHeight: 1.35 }}>
-          Структурный индекс{scoreVintage ? `, данные ${scoreVintage}` : ""}
-          {" "}— сравнивает регионы между собой, не отражает изменения во времени
-        </div>
-      )}
+      <ScoreKindNote scoreKind={scoreKind} scoreVintage={scoreVintage} />
 
       <Row k="Total" v={Number(score).toFixed(1)} />
       {breakdown && (
@@ -80,14 +61,8 @@ export default function RegionEsgCard({
         </>
       )}
 
-      {/* `confidence` is `len(distinct source names) / 3`, and the required
-          metric set spans exactly two sources — so it was 0.67 for all 85
-          regions on every input. Measured over 27 value combinations: 26
-          distinct total scores, one distinct confidence. Rendered as "67%" in
-          green it read as "the model is two-thirds sure of this figure".
-          Shown as the count it is, without a traffic light it cannot earn. */}
       {confidence != null && (
-        <Row k="Источников" v={`${Math.round(confidence * 3)} из 3 ожидаемых`} />
+        <Row k="Источников" v={sourcesCountText(confidence)} />
       )}
 
       {sourcesUsed && sourcesUsed.length > 0 && (
