@@ -151,11 +151,13 @@ def beeswarm_plot():
         df = df.sample(200, random_state=42)
 
     from app.validators import ProjectInput as PI
+    from app.scales import social_impact_from_training
     feats_list = []
     for _, row in df.iterrows():
         try:
+            # Training rows are on model scale (0-100); convert to API scale (0-10) for validator
             p = PI(budget=row.get("budget", 10000), co2_reduction=row.get("co2_reduction", 50),
-                   social_impact=row.get("social_impact", 50), duration_months=row.get("duration_months", 12))
+                   social_impact=social_impact_from_training(row.get("social_impact", 50)), duration_months=row.get("duration_months", 12))
             feats_list.append(m.make_features(p))
         except Exception:
             continue

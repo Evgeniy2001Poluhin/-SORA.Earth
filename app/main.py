@@ -550,10 +550,14 @@ FEATURE_COLS_BASE = ["budget", "co2_reduction", "social_impact", "duration_month
 def make_features(data):
     """Returns 9-feature DataFrame consistent with retrain feature_cols."""
     from datetime import datetime as _dt
+    from app.scales import social_impact_to_model
+
+    # Convert API scale (0-10) to model scale (0-100) once
+    social_model = social_impact_to_model(data.social_impact)
 
     budget_per_month = data.budget / max(data.duration_months, 1)
     co2_per_dollar = data.co2_reduction / max(data.budget, 1) * 1000
-    efficiency_score = (data.co2_reduction * data.social_impact) / max(data.duration_months, 1)
+    efficiency_score = (data.co2_reduction * social_model) / max(data.duration_months, 1)
     year = _dt.utcnow().year
     quarter = (_dt.utcnow().month - 1) // 3 + 1
 
@@ -561,7 +565,7 @@ def make_features(data):
         [[
             data.budget,
             data.co2_reduction,
-            data.social_impact,
+            social_model,
             data.duration_months,
             budget_per_month,
             co2_per_dollar,
@@ -587,11 +591,16 @@ def make_features(data):
 
 def make_features_xgb(data):
     """7-feature unscaled DataFrame for legacy XGBoost."""
+    from app.scales import social_impact_to_model
+
+    # Convert API scale (0-10) to model scale (0-100) once
+    social_model = social_impact_to_model(data.social_impact)
+
     budget_per_month = data.budget / max(data.duration_months, 1)
     co2_per_dollar = data.co2_reduction / max(data.budget, 1) * 1000
-    impact_per_month = data.social_impact / max(data.duration_months, 1)
+    impact_per_month = social_model / max(data.duration_months, 1)
     return pd.DataFrame(
-        [[data.budget, data.co2_reduction, data.social_impact,
+        [[data.budget, data.co2_reduction, social_model,
           data.duration_months, budget_per_month, co2_per_dollar,
           impact_per_month]],
         columns=FEATURE_COLS_BASE,
@@ -604,49 +613,29 @@ def make_features_base(data):
 def make_features_v2(data, category: str = "Solar Energy", region: str = "Europe"):
     if scaler_v2 is None:
         return make_features(data)
+    from app.scales import social_impact_to_model
+
+    # Convert API scale (0-10) to model scale (0-100) once
+    social_model = social_impact_to_model(data.social_impact)
+
     bpm = data.budget / max(data.duration_months, 1)
     c2d = data.co2_reduction / max(data.budget, 1) * 1000
-    eff = (data.co2_reduction * data.social_impact) / max(data.duration_months, 1)
-    ir  = data.social_impact / max(data.co2_reduction, 1)
+    eff = (data.co2_reduction * social_model) / max(data.duration_months, 1)
+    ir  = social_model / max(data.co2_reduction, 1)
     be  = data.co2_reduction / max(bpm, 1)
     c_enc = cat_encodings.get("category", {}).get(category, 0.5)
     r_enc = cat_encodings.get("region", {}).get(region, 0.5)
     gdp = gdp_for_country(region)  # `region` carries the request's country (aliased)
-    row = [[data.budget, data.co2_reduction, data.social_impact, data.duration_months,
+    row = [[data.budget, data.co2_reduction, social_model, data.duration_months,
             bpm, c2d, eff, ir, be, c_enc, r_enc, gdp]]
     df = pd.DataFrame(row, columns=FEATURE_COLS_V2)
     return pd.DataFrame(scaler_v2.transform(df), columns=FEATURE_COLS_V2)
 
 
-COUNTRIES = {
-    "Afghanistan": {"lat": 33.9, "lon": 67.7, "region": "Asia"},
-    "Albania": {"lat": 41.2, "lon": 20.2, "region": "Europe"},
-    "Algeria": {"lat": 28.0, "lon": 1.7, "region": "Africa"},
-    "Argentina": {"lat": -38.4, "lon": -63.6, "region": "South America"},
-    "Australia": {"lat": -25.3, "lon": 133.8, "region": "Oceania"},
-    "Austria": {"lat": 47.5, "lon": 14.6, "region": "Europe"},
-    "Sweden": {"lat": 60.1, "lon": 18.6, "region": "Europe"},
-    "Norway": {"lat": 60.5, "lon": 8.5, "region": "Europe"},
-    "Denmark": {"lat": 56.3, "lon": 9.5, "region": "Europe"},
-    "Finland": {"lat": 61.9, "lon": 25.7, "region": "Europe"},
-    "Netherlands": {"lat": 52.1, "lon": 5.3, "region": "Europe"},
-    "Switzerland": {"lat": 46.8, "lon": 8.2, "region": "Europe"},
-    "Brazil": {"lat": -14.2, "lon": -51.9, "region": "South America"},
-    "Canada": {"lat": 56.1, "lon": -106.3, "region": "North America"},
-    "China": {"lat": 35.9, "lon": 104.2, "region": "Asia"},
-    "France": {"lat": 46.2, "lon": 2.2, "region": "Europe"},
-    "Germany": {"lat": 51.2, "lon": 10.5, "region": "Europe"},
-    "India": {"lat": 20.6, "lon": 79.0, "region": "Asia"},
-    "Italy": {"lat": 41.9, "lon": 12.6, "region": "Europe"},
-    "Japan": {"lat": 36.2, "lon": 138.3, "region": "Asia"},
-    "Mexico": {"lat": 23.6, "lon": -102.6, "region": "North America"},
-    "Nigeria": {"lat": 9.1, "lon": 8.7, "region": "Africa"},
-    "Russia": {"lat": 55.75, "lon": 37.62, "region": "Europe"},
-    "South Africa": {"lat": -30.6, "lon": 22.9, "region": "Africa"},
-    "Spain": {"lat": 40.5, "lon": -3.7, "region": "Europe"},
-    "United Kingdom": {"lat": 55.4, "lon": -3.4, "region": "Europe"},
-    "United States": {"lat": 37.1, "lon": -95.7, "region": "North America"},
-}
+# COUNTRIES moved to app/countries.py - the single source of truth for
+# supported countries. Imported here so existing `from app.main import COUNTRIES`
+# continues to work.
+from app.countries import COUNTRIES
 
 REGIONAL_FACTORS = {
     "Europe": {"env_mult": 1.1, "soc_mult": 1.05, "eco_mult": 1.0, "renewable_bonus": 0.05},

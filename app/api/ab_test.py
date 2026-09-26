@@ -3,7 +3,7 @@ import os, random, time
 from fastapi import APIRouter, Body, Depends
 from fastapi.responses import JSONResponse
 from app.auth import require_admin
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from collections import defaultdict
 
 from app.schemas import ABPredictOk, ABPredictUnavailable, ABSplitOk
@@ -23,7 +23,7 @@ def _clip_prob(p: float) -> float:
 class ABRequest(BaseModel):
     budget: float
     co2_reduction: float
-    social_impact: float
+    social_impact: float = Field(..., ge=0, le=10)
     duration_months: float
     team_size: float = 5.0
     region_risk: float = 3.0

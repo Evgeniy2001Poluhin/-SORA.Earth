@@ -88,7 +88,7 @@ def paths(tmp_path, monkeypatch):
     return baseline, log
 
 
-def write_rows(path: Path, n: int, budget: int = 100, cycle: int = 0) -> None:
+def write_rows(path: Path, n: int, budget: int = 100, cycle: int = 0, api_scale: bool = False) -> None:
     """Write `n` rows.
 
     With `cycle`, values repeat over that many distinct levels, so two files
@@ -97,10 +97,15 @@ def write_rows(path: Path, n: int, budget: int = 100, cycle: int = 0) -> None:
     two files of different lengths differ in range -- which is what made the
     first version of the "no drift" test assert against a KS result that had
     genuinely found something.
+
+    `api_scale=True`: write social_impact on API scale (0-10) instead of model
+    scale (0-100). Use this for the predictions log, which holds values from
+    clients, while the baseline (projects.csv) uses model scale.
     """
     header = "budget,co2_reduction,social_impact,duration_months\n"
     step = (lambda i: i % cycle) if cycle else (lambda i: i)
-    rows = "".join(f"{budget + step(i)},{50 + step(i)},{5},{12}\n" for i in range(n))
+    social_impact = 0.5 if api_scale else 5
+    rows = "".join(f"{budget + step(i)},{50 + step(i)},{social_impact},{12}\n" for i in range(n))
     path.write_text(header + rows, encoding="utf-8")
 
 
@@ -124,7 +129,7 @@ def test_no_prediction_log_is_a_domain_state_not_a_verdict(client, paths):
 def test_too_few_rows_is_a_domain_state_not_a_verdict(client, paths):
     baseline, log = paths
     write_rows(baseline, 40)
-    write_rows(log, drift_module.MIN_WINDOW_ROWS - 1)
+    write_rows(log, drift_module.MIN_WINDOW_ROWS - 1, api_scale=True)
 
     r = client.get("/api/v1/model/drift")
 
@@ -142,7 +147,7 @@ def test_a_computed_verdict_carries_a_boolean_and_its_features(client, paths):
     baseline, log = paths
     write_rows(baseline, 60, budget=100)
     # Far from the baseline, so the KS test has something to find.
-    write_rows(log, 40, budget=900_000)
+    write_rows(log, 40, budget=900_000, api_scale=True)
 
     r = client.get("/api/v1/model/drift")
 
@@ -163,8 +168,10 @@ def test_identical_distributions_report_no_drift_rather_than_no_answer(client, p
     # Same ten levels in both, so the two empirical distributions match and the
     # KS test genuinely finds nothing -- rather than the two files merely
     # starting at the same number and covering different ranges.
+    # Baseline uses model scale (0-100), log uses API scale (0-10) which is
+    # converted to model scale before comparison.
     write_rows(baseline, 60, budget=100, cycle=10)
-    write_rows(log, 40, budget=100, cycle=10)
+    write_rows(log, 40, budget=100, cycle=10, api_scale=True)
 
     body = client.get("/api/v1/model/drift").json()
 
@@ -175,7 +182,7 @@ def test_identical_distributions_report_no_drift_rather_than_no_answer(client, p
 def test_missing_scipy_is_a_deployment_fault_not_a_drift_answer(client, paths, monkeypatch):
     baseline, log = paths
     write_rows(baseline, 40)
-    write_rows(log, 40)
+    write_rows(log, 40, api_scale=True)
     monkeypatch.setattr(drift_module, "HAS_SCIPY", False)
 
     r = client.get("/api/v1/model/drift")
@@ -190,7 +197,7 @@ def test_missing_scipy_is_a_deployment_fault_not_a_drift_answer(client, paths, m
 
 def test_a_missing_baseline_is_a_fault_rather_than_a_traceback(client, paths):
     baseline, log = paths
-    write_rows(log, 40)
+    write_rows(log, 40, api_scale=True)
     assert not baseline.exists()
 
     r = client.get("/api/v1/model/drift")
@@ -220,10 +227,10 @@ def test_no_branch_reports_a_falsy_verdict(client, paths, monkeypatch, status_na
         write_rows(baseline, 40)
     elif status_name == "insufficient_data":
         write_rows(baseline, 40)
-        write_rows(log, 2)
+        write_rows(log, 2, api_scale=True)
     else:
         write_rows(baseline, 40)
-        write_rows(log, 40)
+        write_rows(log, 40, api_scale=True)
         monkeypatch.setattr(drift_module, "HAS_SCIPY", False)
 
     body = client.get("/api/v1/model/drift").json()

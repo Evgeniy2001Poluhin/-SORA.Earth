@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/v2", tags=["ml-v2"])
 class PredictRequest(BaseModel):
     budget: float = Field(..., gt=0)
     co2_reduction: float = Field(..., ge=0)
-    social_impact: float = Field(..., ge=0, le=100)
+    social_impact: float = Field(..., ge=0, le=10)
     duration_months: int = Field(..., ge=1, le=120)
     category: str = "energy"
     region: str = "EU"

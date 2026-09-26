@@ -16,8 +16,8 @@
         "environment_score": 63.3,
         "social_score": 79.5,
         "economic_score": 85.0,
-        "success_probability": 98.0,
-        "success_probability_v2": 73.05,
+        "success_probability": 94.5,
+        "success_probability_v2": 93.98,
         "risk_level": "Medium"
       }
     },
@@ -37,8 +37,8 @@
         "environment_score": 81.4,
         "social_score": 69.6,
         "economic_score": 85.0,
-        "success_probability": 87.0,
-        "success_probability_v2": 84.44,
+        "success_probability": 87.5,
+        "success_probability_v2": 95.45,
         "risk_level": "Low"
       }
     },
@@ -58,8 +58,8 @@
         "environment_score": 93.5,
         "social_score": 59.7,
         "economic_score": 85.0,
-        "success_probability": 81.0,
-        "success_probability_v2": 92.94,
+        "success_probability": 81.5,
+        "success_probability_v2": 95.04,
         "risk_level": "Low"
       }
     },
@@ -79,8 +79,8 @@
         "environment_score": 93.5,
         "social_score": 89.5,
         "economic_score": 26.1,
-        "success_probability": 1.0,
-        "success_probability_v2": 5.93,
+        "success_probability": 12.0,
+        "success_probability_v2": 9.07,
         "risk_level": "Medium"
       }
     },
@@ -100,8 +100,8 @@
         "environment_score": 54.8,
         "social_score": 69.6,
         "economic_score": 85.0,
-        "success_probability": 100.0,
-        "success_probability_v2": 95.1,
+        "success_probability": 98.0,
+        "success_probability_v2": 95.74,
         "risk_level": "Medium"
       }
     },
@@ -121,8 +121,8 @@
         "environment_score": 39.1,
         "social_score": 89.5,
         "economic_score": 16.5,
-        "success_probability": 30.0,
-        "success_probability_v2": 8.44,
+        "success_probability": 25.0,
+        "success_probability_v2": 20.39,
         "risk_level": "Medium"
       }
     },
@@ -142,8 +142,8 @@
         "environment_score": 53.4,
         "social_score": 79.1,
         "economic_score": 85.0,
-        "success_probability": 98.0,
-        "success_probability_v2": 92.76,
+        "success_probability": 94.5,
+        "success_probability_v2": 95.29,
         "risk_level": "Medium"
       }
     },
@@ -163,8 +163,8 @@
         "environment_score": 71.5,
         "social_score": 69.2,
         "economic_score": 85.0,
-        "success_probability": 87.0,
-        "success_probability_v2": 94.09,
+        "success_probability": 87.5,
+        "success_probability_v2": 95.71,
         "risk_level": "Medium"
       }
     },
@@ -184,8 +184,8 @@
         "environment_score": 83.6,
         "social_score": 59.3,
         "economic_score": 85.0,
-        "success_probability": 81.0,
-        "success_probability_v2": 95.59,
+        "success_probability": 81.5,
+        "success_probability_v2": 95.72,
         "risk_level": "Medium"
       }
     },
@@ -205,8 +205,8 @@
         "environment_score": 83.6,
         "social_score": 89.0,
         "economic_score": 33.5,
-        "success_probability": 1.0,
-        "success_probability_v2": 23.96,
+        "success_probability": 12.0,
+        "success_probability_v2": 72.68,
         "risk_level": "Medium"
       }
     },
@@ -226,8 +226,8 @@
         "environment_score": 44.9,
         "social_score": 69.2,
         "economic_score": 85.0,
-        "success_probability": 100.0,
-        "success_probability_v2": 95.59,
+        "success_probability": 98.0,
+        "success_probability_v2": 95.77,
         "risk_level": "Medium"
       }
     },
@@ -247,17 +247,17 @@
         "environment_score": 29.2,
         "social_score": 89.0,
         "economic_score": 18.9,
-        "success_probability": 30.0,
-        "success_probability_v2": 32.78,
+        "success_probability": 25.0,
+        "success_probability_v2": 66.33,
         "risk_level": "Medium"
       }
     },
     {
-      "country": "UK",
+      "country": "United Kingdom",
       "preset": "Solar",
       "payload": {
         "project_name": "Solar",
-        "country": "UK",
+        "country": "United Kingdom",
         "co2_reduction_tons_per_year": 250,
         "budget_usd": 150000,
         "social_impact_score": 8,
@@ -268,17 +268,17 @@
         "environment_score": 56.0,
         "social_score": 78.0,
         "economic_score": 85.0,
-        "success_probability": 98.0,
-        "success_probability_v2": 73.05,
+        "success_probability": 94.5,
+        "success_probability_v2": 95.29,
         "risk_level": "Medium"
       }
     },
     {
-      "country": "UK",
+      "country": "United Kingdom",
       "preset": "Wind",
       "payload": {
         "project_name": "Wind",
-        "country": "UK",
+        "country": "United Kingdom",
         "co2_reduction_tons_per_year": 400,
         "budget_usd": 250000,
         "social_impact_score": 7,
@@ -289,17 +289,17 @@
         "environment_score": 74.1,
         "social_score": 68.3,
         "economic_score": 85.0,
-        "success_probability": 87.0,
-        "success_probability_v2": 84.44,
+        "success_probability": 87.5,
+        "success_probability_v2": 95.71,
         "risk_level": "Low"
       }
     },
     {
-      "country": "UK",
+      "country": "United Kingdom",
       "preset": "Hydro",
       "payload": {
         "project_name": "Hydro",
-        "country": "UK",
+        "country": "United Kingdom",
         "co2_reduction_tons_per_year": 600,
         "budget_usd": 400000,
         "social_impact_score": 6,
@@ -310,17 +310,17 @@
         "environment_score": 86.2,
         "social_score": 58.5,
         "economic_score": 85.0,
-        "success_probability": 81.0,
-        "success_probability_v2": 92.94,
+        "success_probability": 81.5,
+        "success_probability_v2": 95.72,
         "risk_level": "Medium"
       }
     },
     {
-      "country": "UK",
+      "country": "United Kingdom",
       "preset": "Reforestation",
       "payload": {
         "project_name": "Reforestation",
-        "country": "UK",
+        "country": "United Kingdom",
         "co2_reduction_tons_per_year": 500,
         "budget_usd": 80000,
         "social_impact_score": 9,
@@ -331,17 +331,17 @@
         "environment_score": 86.2,
         "social_score": 87.8,
         "economic_score": 37.6,
-        "success_probability": 1.0,
-        "success_probability_v2": 5.93,
+        "success_probability": 12.0,
+        "success_probability_v2": 72.68,
         "risk_level": "Medium"
       }
     },
     {
-      "country": "UK",
+      "country": "United Kingdom",
       "preset": "EV_charging",
       "payload": {
         "project_name": "EV_charging",
-        "country": "UK",
+        "country": "United Kingdom",
         "co2_reduction_tons_per_year": 180,
         "budget_usd": 200000,
         "social_impact_score": 7,
@@ -352,17 +352,17 @@
         "environment_score": 47.5,
         "social_score": 68.3,
         "economic_score": 85.0,
-        "success_probability": 100.0,
-        "success_probability_v2": 95.1,
+        "success_probability": 98.0,
+        "success_probability_v2": 95.77,
         "risk_level": "Medium"
       }
     },
     {
-      "country": "UK",
+      "country": "United Kingdom",
       "preset": "Water",
       "payload": {
         "project_name": "Water",
-        "country": "UK",
+        "country": "United Kingdom",
         "co2_reduction_tons_per_year": 50,
         "budget_usd": 60000,
         "social_impact_score": 9,
@@ -373,134 +373,134 @@
         "environment_score": 31.8,
         "social_score": 87.8,
         "economic_score": 20.4,
-        "success_probability": 30.0,
-        "success_probability_v2": 8.44,
+        "success_probability": 25.0,
+        "success_probability_v2": 66.33,
         "risk_level": "Medium"
       }
     },
     {
-      "country": "USA",
+      "country": "United States",
       "preset": "Solar",
       "payload": {
         "project_name": "Solar",
-        "country": "USA",
+        "country": "United States",
         "co2_reduction_tons_per_year": 250,
         "budget_usd": 150000,
         "social_impact_score": 8,
         "project_duration_months": 24
       },
       "expected": {
-        "total_score": 53.8,
-        "environment_score": 37.0,
-        "social_score": 77.4,
-        "economic_score": 52.6,
-        "success_probability": 98.0,
-        "success_probability_v2": 92.76,
+        "total_score": 52.64,
+        "environment_score": 33.7,
+        "social_score": 73.7,
+        "economic_score": 56.9,
+        "success_probability": 94.5,
+        "success_probability_v2": 95.29,
         "risk_level": "Medium"
       }
     },
     {
-      "country": "USA",
+      "country": "United States",
       "preset": "Wind",
       "payload": {
         "project_name": "Wind",
-        "country": "USA",
+        "country": "United States",
         "co2_reduction_tons_per_year": 400,
         "budget_usd": 250000,
         "social_impact_score": 7,
         "project_duration_months": 30
       },
       "expected": {
-        "total_score": 67.88,
-        "environment_score": 55.2,
-        "social_score": 67.7,
+        "total_score": 64.91,
+        "environment_score": 50.2,
+        "social_score": 64.5,
         "economic_score": 85.0,
-        "success_probability": 87.0,
-        "success_probability_v2": 94.09,
+        "success_probability": 87.5,
+        "success_probability_v2": 95.71,
         "risk_level": "Medium"
       }
     },
     {
-      "country": "USA",
+      "country": "United States",
       "preset": "Hydro",
       "payload": {
         "project_name": "Hydro",
-        "country": "USA",
+        "country": "United States",
         "co2_reduction_tons_per_year": 600,
         "budget_usd": 400000,
         "social_impact_score": 6,
         "project_duration_months": 48
       },
       "expected": {
-        "total_score": 66.33,
-        "environment_score": 67.3,
-        "social_score": 58.0,
+        "total_score": 63.22,
+        "environment_score": 61.2,
+        "social_score": 55.3,
         "economic_score": 85.0,
-        "success_probability": 81.0,
-        "success_probability_v2": 95.59,
+        "success_probability": 81.5,
+        "success_probability_v2": 95.72,
         "risk_level": "Medium"
       }
     },
     {
-      "country": "USA",
+      "country": "United States",
       "preset": "Reforestation",
       "payload": {
         "project_name": "Reforestation",
-        "country": "USA",
+        "country": "United States",
         "co2_reduction_tons_per_year": 500,
         "budget_usd": 80000,
         "social_impact_score": 9,
         "project_duration_months": 36
       },
       "expected": {
-        "total_score": 58.17,
-        "environment_score": 67.3,
-        "social_score": 87.0,
-        "economic_score": 17.2,
-        "success_probability": 1.0,
-        "success_probability_v2": 23.96,
+        "total_score": 54.71,
+        "environment_score": 61.2,
+        "social_score": 82.9,
+        "economic_score": 17.9,
+        "success_probability": 12.0,
+        "success_probability_v2": 72.68,
         "risk_level": "Medium"
       }
     },
     {
-      "country": "USA",
+      "country": "United States",
       "preset": "EV_charging",
       "payload": {
         "project_name": "EV_charging",
-        "country": "USA",
+        "country": "United States",
         "co2_reduction_tons_per_year": 180,
         "budget_usd": 200000,
         "social_impact_score": 7,
         "project_duration_months": 18
       },
       "expected": {
-        "total_score": 56.87,
-        "environment_score": 28.6,
-        "social_score": 67.7,
-        "economic_score": 83.8,
-        "success_probability": 100.0,
-        "success_probability_v2": 95.59,
+        "total_score": 55.23,
+        "environment_score": 26.0,
+        "social_score": 64.5,
+        "economic_score": 85.0,
+        "success_probability": 98.0,
+        "success_probability_v2": 95.77,
         "risk_level": "Medium"
       }
     },
     {
-      "country": "USA",
+      "country": "United States",
       "preset": "Water",
       "payload": {
         "project_name": "Water",
-        "country": "USA",
+        "country": "United States",
         "co2_reduction_tons_per_year": 50,
         "budget_usd": 60000,
         "social_impact_score": 9,
         "project_duration_months": 12
       },
       "expected": {
-        "total_score": 35.34,
-        "environment_score": 12.8,
-        "social_score": 87.0,
-        "economic_score": 13.7,
-        "success_probability": 30.0,
-        "success_probability_v2": 32.78,
+        "total_score": 33.76,
+        "environment_score": 11.7,
+        "social_score": 82.9,
+        "economic_score": 14.1,
+        "success_probability": 25.0,
+        "success_probability_v2": 66.33,
         "risk_level": "High"
       }
     },
@@ -520,8 +520,8 @@
         "environment_score": 75.1,
         "social_score": 54.3,
         "economic_score": 73.0,
-        "success_probability": 98.0,
-        "success_probability_v2": 81.91,
+        "success_probability": 94.5,
+        "success_probability_v2": 94.09,
         "risk_level": "Medium"
       }
     },
@@ -541,8 +541,8 @@
         "environment_score": 94.1,
         "social_score": 47.5,
         "economic_score": 73.0,
-        "success_probability": 87.0,
-        "success_probability_v2": 88.23,
+        "success_probability": 87.5,
+        "success_probability_v2": 95.42,
         "risk_level": "Medium"
       }
     },
@@ -562,8 +562,8 @@
         "environment_score": 100.0,
         "social_score": 40.7,
         "economic_score": 73.0,
-        "success_probability": 81.0,
-        "success_probability_v2": 93.93,
+        "success_probability": 81.5,
+        "success_probability_v2": 95.19,
         "risk_level": "Medium"
       }
     },
@@ -583,8 +583,8 @@
         "environment_score": 100.0,
         "social_score": 61.1,
         "economic_score": 72.5,
-        "success_probability": 1.0,
-        "success_probability_v2": 6.03,
+        "success_probability": 12.0,
+        "success_probability_v2": 8.65,
         "risk_level": "Medium"
       }
     },
@@ -604,8 +604,8 @@
         "environment_score": 66.3,
         "social_score": 47.5,
         "economic_score": 73.0,
-        "success_probability": 100.0,
-        "success_probability_v2": 95.32,
+        "success_probability": 98.0,
+        "success_probability_v2": 95.73,
         "risk_level": "Medium"
       }
     },
@@ -625,8 +625,8 @@
         "environment_score": 49.8,
         "social_score": 61.1,
         "economic_score": 67.2,
-        "success_probability": 30.0,
-        "success_probability_v2": 9.68,
+        "success_probability": 25.0,
+        "success_probability_v2": 21.15,
         "risk_level": "Medium"
       }
     },
@@ -646,8 +646,8 @@
         "environment_score": 48.3,
         "social_score": 48.1,
         "economic_score": 85.0,
-        "success_probability": 98.0,
-        "success_probability_v2": 67.43,
+        "success_probability": 94.5,
+        "success_probability_v2": 93.62,
         "risk_level": "Medium"
       }
     },
@@ -667,8 +667,8 @@
         "environment_score": 63.2,
         "social_score": 42.1,
         "economic_score": 85.0,
-        "success_probability": 87.0,
-        "success_probability_v2": 79.26,
+        "success_probability": 87.5,
+        "success_probability_v2": 95.38,
         "risk_level": "Medium"
       }
     },
@@ -688,8 +688,8 @@
         "environment_score": 73.1,
         "social_score": 36.1,
         "economic_score": 85.0,
-        "success_probability": 81.0,
-        "success_probability_v2": 94.17,
+        "success_probability": 81.5,
+        "success_probability_v2": 95.39,
         "risk_level": "Medium"
       }
     },
@@ -709,8 +709,8 @@
         "environment_score": 73.1,
         "social_score": 54.1,
         "economic_score": 85.0,
-        "success_probability": 1.0,
-        "success_probability_v2": 5.81,
+        "success_probability": 12.0,
+        "success_probability_v2": 7.26,
         "risk_level": "Medium"
       }
     },
@@ -730,8 +730,8 @@
         "environment_score": 41.4,
         "social_score": 42.1,
         "economic_score": 85.0,
-        "success_probability": 100.0,
-        "success_probability_v2": 95.16,
+        "success_probability": 98.0,
+        "success_probability_v2": 95.74,
         "risk_level": "Medium"
       }
     },
@@ -751,8 +751,8 @@
         "environment_score": 28.5,
         "social_score": 54.1,
         "economic_score": 82.1,
-        "success_probability": 30.0,
-        "success_probability_v2": 9.27,
+        "success_probability": 25.0,
+        "success_probability_v2": 22.31,
         "risk_level": "Medium"
       }
     },
@@ -772,8 +772,8 @@
         "environment_score": 36.7,
         "social_score": 70.3,
         "economic_score": 85.0,
-        "success_probability": 98.0,
-        "success_probability_v2": 84.48,
+        "success_probability": 94.5,
+        "success_probability_v2": 94.24,
         "risk_level": "Medium"
       }
     },
@@ -793,8 +793,8 @@
         "environment_score": 51.6,
         "social_score": 61.5,
         "economic_score": 85.0,
-        "success_probability": 87.0,
-        "success_probability_v2": 89.82,
+        "success_probability": 87.5,
+        "success_probability_v2": 95.54,
         "risk_level": "Medium"
       }
     },
@@ -814,8 +814,8 @@
         "environment_score": 61.5,
         "social_score": 52.7,
         "economic_score": 85.0,
-        "success_probability": 81.0,
-        "success_probability_v2": 93.75,
+        "success_probability": 81.5,
+        "success_probability_v2": 94.95,
         "risk_level": "Medium"
       }
     },
@@ -835,8 +835,8 @@
         "environment_score": 61.5,
         "social_score": 79.1,
         "economic_score": 71.8,
-        "success_probability": 1.0,
-        "success_probability_v2": 7.52,
+        "success_probability": 12.0,
+        "success_probability_v2": 15.64,
         "risk_level": "Medium"
       }
     },
@@ -856,8 +856,8 @@
         "environment_score": 29.8,
         "social_score": 61.5,
         "economic_score": 85.0,
-        "success_probability": 100.0,
-        "success_probability_v2": 95.17,
+        "success_probability": 98.0,
+        "success_probability_v2": 95.72,
         "risk_level": "Medium"
       }
     },
@@ -877,8 +877,8 @@
         "environment_score": 16.9,
         "social_score": 79.1,
         "economic_score": 38.6,
-        "success_probability": 30.0,
-        "success_probability_v2": 11.98,
+        "success_probability": 25.0,
+        "success_probability_v2": 27.09,
         "risk_level": "Medium"
       }
     }

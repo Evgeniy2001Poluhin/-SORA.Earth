@@ -24,12 +24,6 @@ def test_explain_waterfall():
     r = client.post("/api/v1/predict/explain/waterfall", json=PROJECT)
     assert r.status_code == 200, r.text
 
-@pytest.mark.xfail(strict=True, reason=(
-    "GET /explain/beeswarm answers 500 'No valid samples' on every call: the 200 "
-    "rows it samples from data/projects.csv carry social_impact on a 0-100 scale "
-    "and app/validators.py accepts 0-10, so none survives. Which scale is right "
-    "is an open decision. strict: this fails the suite once the endpoint works, "
-    "so the marker has to be removed with the defect."))
 def test_explain_beeswarm():
     r = client.get("/api/v1/explain/beeswarm")
     assert r.status_code == 200, r.text

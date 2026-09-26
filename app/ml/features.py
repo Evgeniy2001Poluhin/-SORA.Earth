@@ -33,11 +33,13 @@ FEATURES = [
 
 
 def build_features(raw: dict) -> pd.DataFrame:
+    from app.scales import social_impact_to_model
     cat = _load_cat()
 
     budget = float(raw["budget"])
     co2 = float(raw["co2_reduction"])
-    social = float(raw["social_impact"])
+    # Convert API scale (0-10) to model scale (0-100) once
+    social = social_impact_to_model(float(raw["social_impact"]))
     dur = max(1.0, float(raw["duration_months"]))
 
     budget_per_month = budget / dur

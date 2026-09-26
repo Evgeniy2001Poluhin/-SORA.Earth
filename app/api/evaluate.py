@@ -196,11 +196,16 @@ async def evaluate_project(request: Request, project: Project):
     # The one MLflow event for this operation (#258). It used to be two: this
     # one and an identical `log_evaluation` from inside `calculate_esg`.
     log_evaluation(project.name, result, result["risk_level"])
+
+    # Convert social_impact to model scale (0-100) for drift detection. The
+    # baseline is fitted from data/projects.csv which uses 0-100, so observations
+    # must be on the same scale.
+    from app.scales import social_impact_to_model
     drift_detector.add_observation(
         {
             "budget": project.budget,
             "co2_reduction": project.co2_reduction,
-            "social_impact": project.social_impact,
+            "social_impact": social_impact_to_model(project.social_impact),
             "duration_months": project.duration_months,
         }
     )

@@ -22,9 +22,9 @@ class ProjectInput(BaseModel):
     social_impact: float = Field(
         default=5,
         ge=0,
-        le=100,
+        le=10,
         alias="social_impact_score",
-        description="Social impact score 0-100 (normalized to match training data range)"
+        description="Social impact score 0-10 (interface range 1-10)"
     )
     duration_months: int = Field(
         default=12,
@@ -57,6 +57,29 @@ class ProjectInput(BaseModel):
         if v > 10000:
             raise ValueError(f"co2_reduction {v:,.1f} tons exceeds training range (max 10K tons/year)")
         return v
+
+    @field_validator("region")
+    @classmethod
+    def validate_country(cls, v: Optional[str]) -> Optional[str]:
+        """
+        Validate that country is supported.
+
+        The default "Europe" stands for "no country given": accepting it preserves
+        the existing behavior for requests that omit the country, and avoids breaking
+        every internal path that rebuilds ProjectInput from model_dump() (what_if,
+        Monte Carlo, compare). What an omitted country should mean is an open owner
+        question (finding 30.7). Unknown countries (Kenya, USA, Atlantis, "") are refused.
+        """
+        if v is None:
+            return v
+
+        # Accept the field's own default to preserve "no country given" semantics
+        default_value = cls.model_fields["region"].default
+        if v == default_value:
+            return v
+
+        from app.countries import check_country
+        return check_country(v)
 
 class GHGInput(BaseModel):
     electricity_kwh: float = Field(default=10000, ge=0)
