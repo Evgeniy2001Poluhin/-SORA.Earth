@@ -57,8 +57,15 @@ def _live_df(rows: list[dict]) -> dict[str, list]:
     if not rows:
         return {}
     out: dict[str, list] = {}
+    # Convert social_impact from API scale (0-10) to model scale (0-100) so
+    # drift comparisons match the reference stats built from data/projects.csv.
+    # Request logs store what clients sent (0-10), ref_stats holds training
+    # distribution (0-100).
+    from app.scales import SOCIAL_IMPACT_MODEL_FACTOR
     for r in rows:
         for k, v in r.get("features", {}).items():
+            if k == "social_impact" and v is not None:
+                v = v * SOCIAL_IMPACT_MODEL_FACTOR
             out.setdefault(k, []).append(v)
         out.setdefault("__prob__", []).append(r["pred"]["prob"])
     return out
