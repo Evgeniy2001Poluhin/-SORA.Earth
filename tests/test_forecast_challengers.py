@@ -122,8 +122,8 @@ def test_candidates_evaluated_on_same_windows_as_baselines():
 
 
 def test_xgboost_beats_seasonal_naive_on_seasonal_data():
-    """(b) XGBoost beats seasonal naive on seasonal data, not on white noise."""
-    # Seasonal series with trend
+    """(b) XGBoost beats every baseline on seasonal data, not on white noise."""
+    # Strongly seasonal series with trend
     seasonal_rows = _synthetic_daily_series(
         regions=3, days=200, seed=42, seasonality=3.0, trend=0.02
     )
@@ -141,6 +141,13 @@ def test_xgboost_beats_seasonal_naive_on_seasonal_data():
     )
 
     # Pure white noise (no seasonality, no trend) - CONTROL
+    # On white noise, seasonal naive y[t] = y[t-7] errs by the difference of two
+    # independent noises: Var(y[t] - y[t-7]) = 2*sigma^2. Any forecaster near
+    # the mean errs with Var(y[t] - yhat) = sigma^2. So ANY smoother achieves
+    # MASE ~ sqrt(sigma^2 / 2*sigma^2) = sqrt(1/2) ~ 0.71 against seasonal naive
+    # on pure noise. "Beats seasonal naive" therefore cannot distinguish learning
+    # from smoothing. The correct test: xgboost must beat EVERY baseline, including
+    # the moving average (which is also a smoother).
     noise_rows = _synthetic_daily_series(
         regions=3, days=200, seed=43, seasonality=0.0, trend=0.0
     )
@@ -163,42 +170,36 @@ def test_xgboost_beats_seasonal_naive_on_seasonal_data():
     xgb_noise = report_noise["candidates"].get("xgboost_lag", {})
     assert xgb_noise.get("evaluated"), "XGBoost should be evaluated on noise data"
 
-    # XGBoost should produce valid MASE metrics (not NaN, not infinite, reasonable range)
-    seasonal_mase = xgb_seasonal["mean_mase"]
-    assert not math.isnan(seasonal_mase), "MASE should not be NaN"
-    assert seasonal_mase < 10.0, "MASE should be reasonable (< 10)"
-    assert seasonal_mase > 0.0, "MASE should be positive"
+    # Seasonal case: XGBoost must beat EVERY baseline in both mean and worst-region MAE
+    assert xgb_seasonal["beats_every_baseline"], \
+        f"XGBoost should beat every baseline on seasonal data, " \
+        f"got ratios: {xgb_seasonal.get('per_baseline_mae_ratios')}"
+    assert xgb_seasonal["eligible_for_promotion"], \
+        "XGBoost should be eligible for promotion on seasonal data"
 
-    # White-noise control: on pure noise, XGBoost should NOT beat seasonal naive
-    # by more than a measured tolerance. Tolerance = 0.69 (31% margin): gradient
-    # boosting with lag features will overfit to noise on small datasets (200
-    # days × 3 regions) due to the model's flexibility. With 14 lag features +
-    # day-of-week + 2 rolling means = 17 features total, the model can find
-    # spurious patterns. The tolerance reflects what XGBoost achieves in practice
-    # with conservative regularization (max_depth=3, min_child_weight=5,
-    # subsample=0.7). A MASE significantly below 0.69 would indicate excessive
-    # overfitting beyond normal tree-based behavior.
-    noise_mase = xgb_noise["mean_mase"]
-    assert noise_mase >= 0.69, \
-        f"XGBoost MASE on white noise should be >= 0.69 (got {noise_mase:.3f}), " \
-        f"otherwise it's overfitting beyond expected tree-based behavior"
+    # White-noise control: XGBoost must NOT be eligible (it should not beat every baseline)
+    assert not xgb_noise["beats_every_baseline"], \
+        f"XGBoost should not beat every baseline on noise, " \
+        f"got ratios: {xgb_noise.get('per_baseline_mae_ratios')}"
+    assert not xgb_noise["eligible_for_promotion"], \
+        "XGBoost should not be eligible for promotion on noise"
 
-    # Should have worst region MASE
-    worst_mase = xgb_seasonal.get("worst_region_mase")
-    assert worst_mase is not None, "Should have worst region MASE"
-    assert not math.isnan(worst_mase), "Worst MASE should not be NaN"
+    # Specific check: XGBoost MAE should not beat moving average by more than 5% on noise
+    # (ratio >= 0.95). This tests that xgboost doesn't overfit beyond normal smoothing.
+    ratios = xgb_noise.get("per_baseline_mae_ratios", {})
+    ma_ratio = None
+    for name, ratio in ratios.items():
+        if "MovingAverage" in name:
+            ma_ratio = ratio
+            break
+    assert ma_ratio is not None, "Should have moving average baseline"
+    assert ma_ratio >= 0.95, \
+        f"XGBoost should not beat moving average by >5% on noise (ratio {ma_ratio:.3f} < 0.95)"
 
-    # Should have eligibility status
-    assert "eligible_for_promotion" in xgb_seasonal, "Should have eligibility status"
-    assert isinstance(xgb_seasonal["eligible_for_promotion"], bool), \
-        "Eligibility should be boolean"
-
-    # Should have comparison summary
-    assert "comparison_summary" in xgb_seasonal, "Should have comparison summary"
-    summary = xgb_seasonal["comparison_summary"]
-    assert "verdict" in summary, "Summary should have verdict"
-    assert summary["verdict"] in ["beats_all", "loses_to_some", "not_comparable"], \
-        "Verdict should be valid"
+    # Should have metrics
+    assert "mean_mae" in xgb_seasonal, "Should have mean MAE"
+    assert "worst_region_mae" in xgb_seasonal, "Should have worst region MAE"
+    assert "per_baseline_mae_ratios" in xgb_seasonal, "Should have per-baseline ratios"
 
 
 def test_candidates_not_evaluated_when_history_insufficient():

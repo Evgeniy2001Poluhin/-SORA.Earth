@@ -104,16 +104,16 @@ class XGBoostLagForecaster(BaseForecastModel):
         # Build features -- strictly from past values
         X, y = self._build_features(values)
 
-        # Train XGBoost with regularization to prevent overfitting to noise
+        # Train XGBoost with balanced regularization
+        # Must learn seasonal patterns while not overfitting to noise
         self._model = xgb.XGBRegressor(
-            n_estimators=50,  # Fewer trees to reduce overfitting
-            max_depth=3,  # Shallower trees
-            learning_rate=0.05,  # Lower learning rate
-            min_child_weight=5,  # Require more samples per leaf
-            subsample=0.7,  # Use 70% of samples per tree
-            colsample_bytree=0.7,  # Use 70% of features per tree
-            reg_alpha=0.5,  # L1 regularization
-            reg_lambda=2.0,  # L2 regularization
+            n_estimators=100,
+            max_depth=4,  # Enough depth to capture interactions
+            learning_rate=0.1,
+            min_child_weight=3,  # Moderate regularization
+            subsample=0.8,  # Stochastic sampling
+            colsample_bytree=0.8,
+            reg_lambda=1.0,  # L2 regularization only
             random_state=self.random_state,
             n_jobs=1,
             verbosity=0,

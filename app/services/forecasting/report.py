@@ -270,23 +270,69 @@ def build_report(
                 candidate_name=spec.name,
             )
 
-            # Compute metrics
+            # Compute metrics (both MASE and MAE)
             worst_region, worst_mase = regional.worst_region()
             mean_mase = float(np.mean([r.mean("mase") for r in regional.reports.values()]))
 
-            # Beats seasonal naive if both mean and worst are < 1.0
-            beats_sn = mean_mase < 1.0 and worst_mase < 1.0
+            # MAE metrics for eligibility
+            mean_mae = float(np.mean([r.mean("mae") for r in regional.reports.values()]))
+            worst_region_mae_name, worst_mae = None, float("nan")
+            mae_by_region = {name: r.mean("mae") for name, r in regional.reports.items()}
+            if mae_by_region:
+                worst_region_mae_name = max(mae_by_region, key=mae_by_region.get)
+                worst_mae = mae_by_region[worst_region_mae_name]
 
-            # Eligible for promotion: candidate role AND beats seasonal naive
-            eligible = spec.role == "candidate" and beats_sn
+            # Compute baselines' aggregate MAE across all regions (mean and worst)
+            baseline_mean_maes = {}
+            baseline_worst_maes = {}
+            for point in points_in_data:
+                if point in baselines and baselines[point]["scored"]:
+                    point_baselines = baselines[point]["scored"]
+                    for bl_name, bl_scores in point_baselines.items():
+                        bl_mae = bl_scores.get("mae", float("inf"))
+                        if bl_name not in baseline_mean_maes:
+                            baseline_mean_maes[bl_name] = []
+                            baseline_worst_maes[bl_name] = []
+                        baseline_mean_maes[bl_name].append(bl_mae)
+                        baseline_worst_maes[bl_name].append(bl_mae)
+
+            # Average across regions for each baseline
+            baseline_agg = {}
+            for bl_name in baseline_mean_maes:
+                baseline_agg[bl_name] = {
+                    "mean": float(np.mean(baseline_mean_maes[bl_name])),
+                    "worst": float(np.max(baseline_worst_maes[bl_name])),
+                }
+
+            # Beats every baseline: candidate's mean MAE below every baseline's mean MAE
+            # AND candidate's worst-region MAE below every baseline's worst-region MAE
+            beats_all = True
+            per_baseline_margins = {}
+            if baseline_agg:
+                for bl_name, bl_metrics in baseline_agg.items():
+                    bl_mean = bl_metrics["mean"]
+                    bl_worst = bl_metrics["worst"]
+                    margin = mean_mae / bl_mean if bl_mean > 0 else float("inf")
+                    per_baseline_margins[bl_name] = round(margin, 4)
+                    # Must beat on BOTH mean and worst
+                    if mean_mae >= bl_mean or worst_mae >= bl_worst:
+                        beats_all = False
+            else:
+                beats_all = False
+
+            # Eligible for promotion: candidate role AND beats every baseline
+            eligible = spec.role == "candidate" and beats_all
 
             candidates_section[spec.name] = {
                 "evaluated": True,
                 "role": spec.role,
                 "mean_mase": round(mean_mase, 4),
+                "mean_mae": round(mean_mae, 4),
                 "worst_region": worst_region,
                 "worst_region_mase": round(worst_mase, 4) if not math.isnan(worst_mase) else None,
-                "beats_seasonal_naive": beats_sn,
+                "worst_region_mae": round(worst_mae, 4) if not math.isnan(worst_mae) else None,
+                "beats_every_baseline": beats_all,
+                "per_baseline_mae_ratios": per_baseline_margins,
                 "eligible_for_promotion": eligible,
                 "regions_scored": len(regional.reports),
                 "regions_skipped": len(regional.skipped),
