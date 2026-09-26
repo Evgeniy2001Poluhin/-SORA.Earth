@@ -221,16 +221,18 @@ def test_xgboost_beats_seasonal_naive_on_seasonal_data():
         assert ratio <= 0.90, \
             f"XGBoost mean MAE ratio should be <= 0.90 for {baseline_name}, got {ratio:.4f}"
 
-    # Worst-region MAE ratio: worst region vs worst region for each baseline
+    # Worst-region MAE ratio: the candidate's worst region against each
+    # baseline's worst region -- the comparison the eligibility rule makes.
     worst_region_mae = xgb_seasonal["worst_region_mae"]
-    baselines_section = report_seasonal["baselines"]
-    for point_key, baseline_point in baselines_section.items():
-        if baseline_point.get("scored"):
-            for baseline_name, baseline_scores in baseline_point["scored"].items():
-                baseline_worst = baseline_scores["mae"]
-                worst_ratio = worst_region_mae / baseline_worst
-                assert worst_ratio <= 0.90, \
-                    f"XGBoost worst-region MAE ratio should be <= 0.90 for {baseline_name}, got {worst_ratio:.4f}"
+    scored = [p["scored"] for p in report_seasonal["baselines"].values() if p.get("scored")]
+    baseline_names = sorted({name for s in scored for name in s})
+    for baseline_name in baseline_names:
+        baseline_worst = max(s[baseline_name]["mae"] for s in scored if baseline_name in s)
+        worst_ratio = worst_region_mae / baseline_worst
+        assert worst_ratio <= 0.90, (
+            f"XGBoost worst-region MAE should be at most 0.90 of {baseline_name}'s "
+            f"worst region, got {worst_ratio:.4f}"
+        )
 
     assert xgb_seasonal["eligible_for_promotion"], \
         "XGBoost should be eligible for promotion on seasonal data"
