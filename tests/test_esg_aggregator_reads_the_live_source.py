@@ -952,3 +952,128 @@ def test_a_region_never_written_needs_no_mark(session_factory):
     s = session_factory()
     assert s.query(RegionESGScore).count() == 0
     s.close()
+
+
+def test_recovery_preserves_updated_at_when_score_is_unchanged(session_factory):
+    """When stale marks are cleared but the score hasn't changed, updated_at must not move.
+    
+    The "recovered" path in _write_score clears the marks and returns "recovered"
+    when the scores are unchanged. Without preserving updated_at, the UPDATE that
+    clears the marks fires onupdate=func.now() and moves updated_at to now,
+    claiming a change that didn't happen.
+    """
+    s = session_factory()
+    _all_declared(s)
+    s.commit()
+    s.close()
+    esg_aggregator.recalc_all_regions()
+
+    # Mark the region as stale by removing an observation
+    s = session_factory()
+    removed = s.query(EnvironmentalObservation).filter_by(
+        region_id="RU-MOS", indicator="life_expectancy"
+    ).one()
+    value, source, event_time = removed.value, removed.source, removed.event_time
+    s.delete(removed)
+    s.commit()
+    s.close()
+    esg_aggregator.recalc_all_regions()
+    
+    # Set updated_at to an old value so the test can detect if it moves
+    updated_before = _now() - timedelta(days=5)
+    s = session_factory()
+    row = s.query(RegionESGScore).filter_by(region_code="RU-MOS").one()
+    row.updated_at = updated_before
+    s.commit()
+    s.close()
+    
+    # Verify precondition: the row is stale and updated_at is old
+    before = _row(session_factory)
+    assert before.stale_since is not None, "precondition: row is marked stale"
+    stored_before = before.updated_at
+    if stored_before.tzinfo is None:
+        stored_before = stored_before.replace(tzinfo=timezone.utc)
+    assert abs((stored_before - updated_before).total_seconds()) < 2, (
+        f"precondition: updated_at was set to {updated_before}, got {stored_before}"
+    )
+    score_before = before.total_score
+
+    # Restore the observation (with the same value) and recalc
+    s = session_factory()
+    _observe(s, "RU-MOS", source, "life_expectancy", value, event_time)
+    s.commit()
+    s.close()
+    
+    result = esg_aggregator.recalc_all_regions()
+    assert result["regions_unmarked_stale"] == 1
+
+    # Check: marks cleared, score unchanged, updated_at preserved
+    after = _row(session_factory)
+    assert after.stale_since is None, "marks should be cleared"
+    assert after.stale_reason is None
+    assert after.total_score == score_before, "score should be unchanged"
+    
+    stored_after = after.updated_at
+    if stored_after.tzinfo is None:
+        stored_after = stored_after.replace(tzinfo=timezone.utc)
+    assert abs((stored_after - updated_before).total_seconds()) < 2, (
+        f"updated_at should be preserved at {updated_before} when the score is "
+        f"unchanged, but it moved to {stored_after}"
+    )
+
+
+def test_updated_at_moves_when_score_actually_changes(session_factory):
+    """Control: when the score changes, updated_at SHOULD move."""
+    s = session_factory()
+    _all_declared(s)
+    s.commit()
+    s.close()
+    esg_aggregator.recalc_all_regions()
+
+    # Mark the region as stale by removing an observation
+    s = session_factory()
+    removed = s.query(EnvironmentalObservation).filter_by(
+        region_id="RU-MOS", indicator="life_expectancy"
+    ).one()
+    source, event_time = removed.source, removed.event_time
+    s.delete(removed)
+    s.commit()
+    s.close()
+    esg_aggregator.recalc_all_regions()
+    
+    # Set updated_at to an old value
+    updated_before = _now() - timedelta(days=5)
+    s = session_factory()
+    row = s.query(RegionESGScore).filter_by(region_code="RU-MOS").one()
+    row.updated_at = updated_before
+    s.commit()
+    s.close()
+    
+    # Verify precondition
+    before = _row(session_factory)
+    assert before.stale_since is not None
+    stored_before = before.updated_at
+    if stored_before.tzinfo is None:
+        stored_before = stored_before.replace(tzinfo=timezone.utc)
+    assert abs((stored_before - updated_before).total_seconds()) < 2
+    score_before = before.total_score
+
+    # Restore the observation with a DIFFERENT value
+    s = session_factory()
+    _observe(s, "RU-MOS", source, "life_expectancy", 80.0, event_time)  # Changed from 73.0
+    s.commit()
+    s.close()
+    
+    esg_aggregator.recalc_all_regions()
+
+    # Check: score changed, updated_at should be later
+    after = _row(session_factory)
+    assert after.total_score != score_before, "score should have changed"
+    
+    stored_after = after.updated_at
+    if stored_after.tzinfo is None:
+        stored_after = stored_after.replace(tzinfo=timezone.utc)
+    assert stored_after > updated_before, (
+        f"updated_at should move when the score changes, but it stayed at "
+        f"{stored_after} (expected > {updated_before})"
+    )

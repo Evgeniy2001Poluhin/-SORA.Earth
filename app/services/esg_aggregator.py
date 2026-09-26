@@ -542,7 +542,13 @@ def _write_score(db, region_code, scores):
         return "written"
     if cleared:
         # The score is unchanged but the row is: it stopped being marked stale,
-        # and that is a change a reader acts on.
+        # and that is a change a reader acts on. Preserve updated_at the same
+        # way _mark_stale does: it means "when the score last changed", and
+        # clearing the marks when the score is unchanged does not change the
+        # score.
+        previous = row.updated_at
+        row.updated_at = previous
+        flag_modified(row, "updated_at")
         return "recovered"
     return "unchanged"
 
