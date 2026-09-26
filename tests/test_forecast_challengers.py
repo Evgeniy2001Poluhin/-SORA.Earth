@@ -317,53 +317,62 @@ def test_baselines_section_unchanged_with_and_without_candidates():
 
 
 def test_xgboost_never_uses_future_values():
-    """(f) XGBoostLagForecaster never uses future values in feature building."""
+    """(f) XGBoostLagForecaster never uses future values in feature building.
+
+    For each row i, the features must be built only from values[0:i], never from
+    values[i] itself (same-day leak) or from any values[j] with j > i (look-ahead).
+    """
     # Create a simple series
     days = 100
-    df = pd.DataFrame({
-        "ds": [date(2025, 1, 1) + timedelta(days=i) for i in range(days)],
-        "y": np.arange(days, dtype=float) + np.random.randn(days) * 0.1,
-    })
+    np.random.seed(42)
+    values = np.arange(days, dtype=float) + np.random.randn(days) * 0.1
 
     model = XGBoostLagForecaster(season_length=7, random_state=42)
-    model.fit(df, "y")
 
-    # Get the feature builder
-    values = df["y"].to_numpy()
+    # Build features from the original values
     X_orig, y_orig = model._build_features(values)
 
-    # Now change the last training day's value
-    values_modified = values.copy()
-    values_modified[-1] = values[-1] + 100.0  # Large change
+    # Test several positions in the middle of the VALUES array
+    # _build_features creates X row i from values[max_lag + i], so to test
+    # features built for values position v, we check X row (v - max_lag)
+    max_lag = 2 * model.season_length  # 14
+    test_value_positions = [max_lag + 5, max_lag + 10, max_lag + 20, len(values) - 20]
 
-    # Rebuild features
-    X_modified, y_modified = model._build_features(values_modified)
+    for v in test_value_positions:
+        if v < max_lag or v >= len(values):
+            continue
 
-    # For all positions BEFORE the last one, features should be identical
-    # (only the last row's features should change, since they depend on values[-1])
-    n_rows = len(X_orig)
-    for i in range(n_rows - 1):
-        # The features at position i should not change when we modify values[-1]
-        # because position i only sees values[0:i], not values[-1]
-        # Actually, this is not quite right -- the lag features at position i
-        # depend on values BEFORE position i, not including position -1
-        # unless i is close to -1.
+        # Row index in X corresponding to values position v
+        row_idx = v - max_lag
+        if row_idx >= len(X_orig):
+            continue
 
-        # Let me think more carefully: if we're at position i in the training data,
-        # and we have max_lag = 14, then the features are built from values[i-14:i].
-        # So changing values[-1] should only affect rows where i-14 <= len(values)-1 < i,
-        # which means the last ~14 rows.
+        # Test 1: Changing values[v] itself should not change the features built for it
+        # (this catches same-day leaks where lag reads values[v] instead of values[v-lag])
+        values_self = values.copy()
+        values_self[v] = values[v] + 100.0  # Large change to values[v]
+        X_self, _ = model._build_features(values_self)
 
-        # A simpler test: changing the value at the LAST training position should
-        # NOT change the lag features for positions more than max_lag away from it.
-        max_lag = 2 * model.season_length  # 14
-        if i < n_rows - max_lag - 1:
+        np.testing.assert_array_almost_equal(
+            X_orig[row_idx], X_self[row_idx],
+            err_msg=f"Features for values[{v}] (X[{row_idx}]) changed when values[{v}] changed (same-day leak)"
+        )
+
+        # Test 2: Changing any values[j] with j > v should not change features for v
+        # (this catches look-ahead leaks)
+        for offset in [1, 5, 10]:
+            j = v + offset
+            if j >= len(values):
+                continue
+
+            values_future = values.copy()
+            values_future[j] = values[j] + 100.0  # Large change to values[j] where j > v
+            X_future, _ = model._build_features(values_future)
+
             np.testing.assert_array_almost_equal(
-                X_orig[i], X_modified[i],
-                err_msg=f"Features at position {i} should not change when last value changes"
+                X_orig[row_idx], X_future[row_idx],
+                err_msg=f"Features for values[{v}] (X[{row_idx}]) changed when values[{j}] (future) changed"
             )
-
-    # The test passes if no future values were used
 
 
 def test_all_candidates_listed_in_constants():
