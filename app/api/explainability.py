@@ -17,33 +17,7 @@ FEATURE_COLS = [
     "country_gdp_per_capita",
 ]
 
-
-def _gdp_median():
-    try:
-        from app.main import COUNTRY_GDP
-        return COUNTRY_GDP.get("median", 0.0)
-    except Exception:
-        return 0.0
-
-
-def _engineer(features):
-    from app.scales import social_impact_to_model
-    out = dict(features)
-    b = float(out.get("budget", 0.0))
-    d = float(out.get("duration_months", 1.0)) or 1.0
-    co2 = float(out.get("co2_reduction", 0.0))
-    # Convert API scale (0-10) to model scale (0-100) once; use it for raw and derived
-    soc = social_impact_to_model(float(out.get("social_impact", 0.0)))
-    out["social_impact"] = soc  # Set raw social_impact to model scale
-    out.setdefault("budget_per_month", b / max(d, 1))
-    out.setdefault("co2_per_dollar", co2 / max(b, 1))
-    out.setdefault("efficiency_score", (co2 + soc * 10) / max(b, 1) * 1000)
-    out.setdefault("impact_ratio", (co2 * soc) / max(b, 1) * 1000)
-    out.setdefault("budget_efficiency", co2 / max(d, 1))
-    out.setdefault("category_enc", 0.0)
-    out.setdefault("region_enc", 0.0)
-    out.setdefault("country_gdp_per_capita", _gdp_median())
-    return out
+BASE_FEATURES = ["budget", "co2_reduction", "social_impact", "duration_months"]
 
 
 def _resolve_state():
@@ -126,17 +100,39 @@ def explain_global(top_n: int = Query(10, ge=1, le=11), nsamples: int = 30):
 
 @router.post("/explain/local", tags=["explainability"])
 def explain_local(features: Dict[str, float], top_n: int = 10, nsamples: int = 100):
+    # Check for missing base features
+    missing = [f for f in BASE_FEATURES if f not in features]
+    if missing:
+        raise HTTPException(422, f"Missing required features: {missing}")
+
     # Validate social_impact is on API scale (0-10)
-    if "social_impact" in features:
-        si = features["social_impact"]
-        if si < 0 or si > 10:
-            raise HTTPException(422, f"social_impact must be 0-10, got {si}")
+    si = features.get("social_impact", 0.0)
+    if si < 0 or si > 10:
+        raise HTTPException(422, f"social_impact must be 0-10, got {si}")
+
+    # Identify extra keys (not base features)
+    ignored = sorted([k for k in features.keys() if k not in BASE_FEATURES])
+
+    # Build ProjectInput from the four base features
+    from app.validators import ProjectInput
+    pi = ProjectInput(
+        budget=features["budget"],
+        co2_reduction=features["co2_reduction"],
+        social_impact=features["social_impact"],
+        duration_months=features["duration_months"],
+    )
+
     expl, kind, _ = _get_explainer()
     model, scaler = _resolve_state()
-    eng = _engineer(features)
-    row = [[eng.get(f, 0.0) for f in FEATURE_COLS]]
-    df = pd.DataFrame(row, columns=FEATURE_COLS)
-    Xs = scaler.transform(df)
+
+    # Get raw features using the serving builder with serving defaults
+    from app.main import make_features_v2_raw
+    df_raw = make_features_v2_raw(pi, category="Solar Energy", region="Europe")
+
+    # Scale the raw features
+    Xs = scaler.transform(df_raw)
+
+    # Compute SHAP on scaled input
     sv = expl.shap_values(Xs, nsamples=nsamples, silent=True)
     sv_arr = np.asarray(sv)
     if isinstance(sv, list):
@@ -149,18 +145,23 @@ def explain_local(features: Dict[str, float], top_n: int = 10, nsamples: int = 1
     base = expl.expected_value
     if hasattr(base, "__len__"):
         base = float(base[1])
-    pred_proba = float(model.predict_proba(df)[0][1])
+
+    # Compute prediction on SCALED input (same as serving)
+    df_scaled = pd.DataFrame(Xs, columns=FEATURE_COLS)
+    pred_proba = float(model.predict_proba(df_scaled)[0][1])
+
     order = np.argsort(np.abs(contrib))[::-1][:top_n]
     return {
         "explainer": kind,
         "base_value": float(base),
         "prediction_proba": pred_proba,
         "prediction": pred_proba,
+        "ignored_features": ignored,
         "top_contributions": [
             {
                 "feature": FEATURE_COLS[i],
                 "scaled_value": float(Xs[0, i]),
-                "raw_value": float(df.iloc[0, i]),
+                "raw_value": float(df_raw.iloc[0, i]),
                 "shap": float(contrib[i]),
                 "shap_value": float(contrib[i]),
                 "direction": "up" if contrib[i] > 0 else "down",
