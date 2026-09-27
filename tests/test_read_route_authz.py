@@ -284,29 +284,11 @@ def test_route_registry_complete_with_spa_present():
         # Run a subprocess that imports app.main with SORA_SPA_DIR set and prints
         # all GET/HEAD routes with their auth dependencies.
         script = """
-import sys
-import os
 import json
 from fastapi.routing import APIRoute
 
-# Set the SPA directory before importing app.main
-os.environ["SORA_SPA_DIR"] = sys.argv[1]
-
 from app.main import app
-
-AUTH_DEPENDENCIES = {
-    "require_auth", "require_admin", "require_analyst_or_admin",
-    "require_api_key", "require_admin_apikey", "admin_auth",
-}
-
-def _auth_names(dependant, found=None):
-    found = found if found is not None else []
-    for sub in dependant.dependencies:
-        name = getattr(sub.call, "__name__", type(sub.call).__name__)
-        if name in AUTH_DEPENDENCIES:
-            found.append(name)
-        _auth_names(sub, found)
-    return found
+from tests.test_read_route_authz import _auth_names
 
 routes = []
 for route in app.routes:
@@ -322,18 +304,15 @@ print(json.dumps(routes))
 """
 
         env = os.environ.copy()
-        env.update({
-            "DATABASE_URL": "sqlite:///./test.db",
-            "SECRET_KEY": "test-secret",
-            "SORA_ADMIN_TOKEN": "test-admin",
-            "SORA_OFFLINE": "1",
-            "RUN_SCHEDULER": "false",
-        })
-        # Remove REDIS_URL if present (empty string causes ValueError)
+        env["SORA_SPA_DIR"] = str(spa_dir)
+        # Pop REDIS_URL: empty string (from the parent's test env) causes
+        # ValueError in redis.from_url() when the subprocess imports
+        # app.drift_detection. The parent doesn't fail because conftest.py
+        # imports app.main at module level before the test runs.
         env.pop("REDIS_URL", None)
 
         result = subprocess.run(
-            [sys.executable, "-c", script, str(spa_dir)],
+            [sys.executable, "-c", script],
             capture_output=True,
             text=True,
             timeout=120,
