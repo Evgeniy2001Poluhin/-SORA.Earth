@@ -161,6 +161,10 @@ COPY --chown=app:app app/         ./app/
 # have lying around.
 COPY --from=spa --chown=app:app /src/app/static/spa ./app/static/spa
 COPY --chown=app:app data/        ./data/
+# Region metadata for the map route. app/routes/map_russia.py parses
+# web/src/data/russia_regions.ts at import for region names; when the file is
+# missing production served codes as names (e.g. "RU-MOW" instead of "Moscow").
+COPY --chown=app:app web/src/data/russia_regions.ts ./web/src/data/russia_regions.ts
 COPY --chown=app:app run_scheduler.py ./
 COPY --chown=app:app alembic.ini  ./
 COPY --chown=app:app alembic/     ./alembic/
