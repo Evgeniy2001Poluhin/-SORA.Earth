@@ -105,9 +105,8 @@ def test_sqlalchemy_fallback_emits_stale_since_for_stale_region():
 
 
 class FakeAsyncpgRecord(dict):
-    """A fake asyncpg.Record that supports both r["col"] and attribute access."""
-    def __getitem__(self, key):
-        return super().__getitem__(key)
+    """A fake asyncpg.Record that supports r["col"] dict access."""
+    pass
 
 
 class FakeAsyncpgConnection:
@@ -172,6 +171,13 @@ class FakeAsyncpgConnection:
 
         return columns
 
+    def _get_from_table(self, sql):
+        """Extract the table name from the FROM clause."""
+        from_match = re.search(r'FROM\s+(\w+)', sql, re.IGNORECASE)
+        if from_match:
+            return from_match.group(1)
+        return None
+    
     def _filter_rows(self, sql, args):
         """Filter backing rows based on WHERE clause."""
         # Check for WHERE region_code = $1
@@ -200,12 +206,18 @@ class FakeAsyncpgConnection:
 
     async def fetch(self, sql, *args):
         """Execute a query and return multiple rows."""
+        # Return empty list for region_signals queries
+        if self._get_from_table(sql) == "region_signals":
+            return []
         columns = self._parse_select_columns(sql)
         filtered = self._filter_rows(sql, args)
         return [self._build_record(row, columns) for row in filtered]
 
     async def fetchrow(self, sql, *args):
         """Execute a query and return a single row."""
+        # Return None for region_signals queries
+        if self._get_from_table(sql) == "region_signals":
+            return None
         rows = await self.fetch(sql, *args)
         return rows[0] if rows else None
 
@@ -237,7 +249,7 @@ class FakeAsyncpgAcquireContext:
 # ========== Tests using the fake asyncpg pool ==========
 
 
-def test_asyncpg_load_from_db_emits_stale_since():
+def test_asyncpg_load_from_db_emits_stale_since(monkeypatch):
     """
     The asyncpg _load_from_db() function emits stale_since correctly for both
     stale and fresh regions.
@@ -269,12 +281,13 @@ def test_asyncpg_load_from_db_emits_stale_since():
         },
     ]
 
-    async def scenario(monkeypatch):
-        pool = FakeAsyncpgPool(backing_rows)
-        async def get_pool():
-            return pool
-        monkeypatch.setattr(map_russia, "_get_pool", get_pool)
-
+    
+    pool = FakeAsyncpgPool(backing_rows)
+    async def get_pool():
+        return pool
+    monkeypatch.setattr(map_russia, "_get_pool", get_pool)
+    
+    async def scenario():
         # Test _load_from_db
         regions = await map_russia._load_from_db()
 
@@ -297,10 +310,10 @@ def test_asyncpg_load_from_db_emits_stale_since():
             f"Expected stale_since to be None for fresh region, got {fresh['stale_since']}"
         )
 
-    asyncio.run(scenario(pytest.MonkeyPatch()))
+    asyncio.run(scenario())
 
 
-def test_asyncpg_russia_regions_emits_source_and_stale_since():
+def test_asyncpg_russia_regions_emits_source_and_stale_since(monkeypatch):
     """
     The asyncpg path through russia_regions() emits source="db-esg-v1-asyncpg"
     and stale_since correctly.
@@ -332,12 +345,13 @@ def test_asyncpg_russia_regions_emits_source_and_stale_since():
         },
     ]
 
-    async def scenario(monkeypatch):
-        pool = FakeAsyncpgPool(backing_rows)
-        async def get_pool():
-            return pool
-        monkeypatch.setattr(map_russia, "_get_pool", get_pool)
-
+    
+    pool = FakeAsyncpgPool(backing_rows)
+    async def get_pool():
+        return pool
+    monkeypatch.setattr(map_russia, "_get_pool", get_pool)
+    
+    async def scenario():
         result = await map_russia.russia_regions()
 
         # Verify the asyncpg source
@@ -360,10 +374,10 @@ def test_asyncpg_russia_regions_emits_source_and_stale_since():
 
         assert fresh["stale_since"] is None
 
-    asyncio.run(scenario(pytest.MonkeyPatch()))
+    asyncio.run(scenario())
 
 
-def test_asyncpg_region_detail_emits_stale_since():
+def test_asyncpg_region_detail_emits_stale_since(monkeypatch):
     """
     The asyncpg region_detail() emits stale_since correctly for both stale
     and fresh regions, with no "error" key.
@@ -401,12 +415,13 @@ def test_asyncpg_region_detail_emits_stale_since():
         },
     ]
 
-    async def scenario(monkeypatch):
-        pool = FakeAsyncpgPool(backing_rows)
-        async def get_pool():
-            return pool
-        monkeypatch.setattr(map_russia, "_get_pool", get_pool)
-
+    
+    pool = FakeAsyncpgPool(backing_rows)
+    async def get_pool():
+        return pool
+    monkeypatch.setattr(map_russia, "_get_pool", get_pool)
+    
+    async def scenario():
         # Test stale region
         stale_result = await map_russia.region_detail("RU-STALE")
         assert "error" not in stale_result, f"Expected no error key, got {stale_result.get('error')}"
@@ -423,4 +438,4 @@ def test_asyncpg_region_detail_emits_stale_since():
             f"Expected stale_since to be None for fresh region, got {fresh_result['stale_since']}"
         )
 
-    asyncio.run(scenario(pytest.MonkeyPatch()))
+    asyncio.run(scenario())
