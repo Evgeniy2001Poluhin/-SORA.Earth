@@ -47,4 +47,28 @@ describe("the region tooltip", () => {
     expect(text).toContain("S57");
     expect(text).toContain("G55");
   });
+
+  it("shows the short-form stale warning when staleSince is set", () => {
+    const staleRegion: EnrichedRussianRegion = {
+      ...region,
+      staleSince: "2026-09-20T00:00:00Z",
+    };
+    const { container } = render(<RegionTooltipBody region={staleRegion} />);
+    const text = container.textContent ?? "";
+
+    expect(text).toContain("не подтверждено с");
+    // Should show day.month format
+    expect(text).toMatch(/\d{2}\.\d{2}/);
+  });
+
+  it("does not show stale warning when staleSince is null", () => {
+    const freshRegion: EnrichedRussianRegion = {
+      ...region,
+      staleSince: null,
+    };
+    const { container } = render(<RegionTooltipBody region={freshRegion} />);
+    const text = container.textContent ?? "";
+
+    expect(text).not.toContain("не подтверждено");
+  });
 });

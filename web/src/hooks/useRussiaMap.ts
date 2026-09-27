@@ -15,6 +15,8 @@ export interface Region {
   score_kind?: string | null;
   /** The reference period of the data behind it, from the rosstat snapshot. */
   score_vintage?: string | null;
+  /** When the region's score stopped being confirmed by fresh data. */
+  stale_since?: string | null;
   code: string;
   name: string;
   capital: string;

@@ -42,3 +42,18 @@ export function ScoreKindNote({ scoreKind, scoreVintage }: ScoreKindNoteProps) {
 
   return null;
 }
+
+type StaleNoteProps = {
+  staleSince?: string | null;
+};
+
+export function StaleNote({ staleSince }: StaleNoteProps) {
+  if (!staleSince) return null;
+  const date = new Date(staleSince);
+  const formatted = date.toLocaleDateString("ru-RU");
+  return (
+    <div style={{ fontSize: 10, marginBottom: 6, lineHeight: 1.35, color: "#B85C5C" }}>
+      Не подтверждено с {formatted} — источники не присылали данные; показана последняя подтверждённая оценка
+    </div>
+  );
+}

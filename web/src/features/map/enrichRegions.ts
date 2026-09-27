@@ -32,6 +32,7 @@ export function enrichRegions(
       scoreKind: a.score_kind ?? null,
       scoreVintage: a.score_vintage ?? null,
       updatedAt: a.updated_at,
+      staleSince: a.stale_since ?? null,
     };
   });
 }
@@ -51,5 +52,6 @@ export function cardPropsOf(region: EnrichedRussianRegion): RegionEsgCardProps {
     scoreKind: region.scoreKind,
     scoreVintage: region.scoreVintage,
     updatedAt: region.updatedAt,
+    staleSince: region.staleSince,
   };
 }

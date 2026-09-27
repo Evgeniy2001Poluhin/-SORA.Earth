@@ -36,6 +36,7 @@ const RU_AST_API: Region = {
   updated_at: "2026-09-02T20:26:28.091744+00:00",
   score_kind: "structural",
   score_vintage: "2024",
+  stale_since: null,
 };
 
 describe("enrichRegions", () => {
@@ -93,5 +94,44 @@ describe("the full path from API to card", () => {
 
     expect(text).toContain("Заглушка");
     expect(text).toContain("данных по региону нет");
+  });
+
+  it("shows the stale warning when stale_since is set", () => {
+    const staleItem: Region = { ...RU_AST_API, stale_since: "2026-09-20T00:00:00Z" };
+    const enriched = enrichRegions([staleItem]);
+    const ast = enriched.find((r) => r.code === "RU-AST")!;
+    const { container } = render(<RegionEsgCard {...cardPropsOf(ast)} />);
+    const text = container.textContent ?? "";
+
+    expect(text).toContain("Не подтверждено с");
+    expect(text).toContain("источники не присылали данные");
+  });
+
+  it("does not show stale warning when stale_since is null", () => {
+    const freshItem: Region = { ...RU_AST_API, stale_since: null };
+    const enriched = enrichRegions([freshItem]);
+    const ast = enriched.find((r) => r.code === "RU-AST")!;
+    const { container } = render(<RegionEsgCard {...cardPropsOf(ast)} />);
+    const text = container.textContent ?? "";
+
+    expect(text).not.toContain("Не подтверждено с");
+  });
+});
+
+describe("enrichRegions carries stale_since", () => {
+  it("copies stale_since from the API item", () => {
+    const staleItem: Region = { ...RU_AST_API, stale_since: "2026-09-20T00:00:00Z" };
+    const enriched = enrichRegions([staleItem]);
+    const ast = enriched.find((r) => r.code === "RU-AST")!;
+
+    expect(ast.staleSince).toBe("2026-09-20T00:00:00Z");
+  });
+
+  it("sets staleSince to null when stale_since is null", () => {
+    const freshItem: Region = { ...RU_AST_API, stale_since: null };
+    const enriched = enrichRegions([freshItem]);
+    const ast = enriched.find((r) => r.code === "RU-AST")!;
+
+    expect(ast.staleSince).toBeNull();
   });
 });
