@@ -207,7 +207,7 @@ regenerate this; do not hand-edit the table.**
 | `auto_openaq_ingestion` | `IntervalTrigger(hours=1)` | `scheduled_openaq_ingestion` — **registered only when `_openaq_refusal is None`** |
 | `auto_refresh_external_data` | `IntervalTrigger(hours=6)` | `scheduled_refresh_external_data` |
 | `auto_pretrain_forecast` | `IntervalTrigger(hours=6)` | `scheduled_pretrain_forecast_models` |
-| `auto_crisis_detection` | `IntervalTrigger(hours=6)` | `_scheduled_crisis_detection` |
+| `auto_crisis_detection` | `IntervalTrigger(hours=6)` | `_scheduled_crisis_detection` — **registered only when `_crisis_refusal is None`** |
 | `auto_run_ingesters` | `IntervalTrigger(hours=24)` | `scheduled_run_ingesters` |
 | `auto_closed_loop_daily` | `CronTrigger(hour=3, minute=0)` | `closed_loop_retrain` |
 | `auto_full_pipeline_weekly` | `CronTrigger(day_of_week="sun", hour=3, minute=30)` | `full_pipeline_run` |
