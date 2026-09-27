@@ -10,6 +10,7 @@ Measured with scipy's ks_2samp against data/projects.csv: interface-like values
 any real traffic. A control drawn from the training data itself gives p = 0.82
 (no drift). So the drift verdict on social_impact was a scale artefact.
 """
+from datetime import datetime, timedelta, timezone
 import os
 import json
 import tempfile
@@ -248,11 +249,17 @@ def test_evidently_detector_report_features():
         log_path = log_dir / "2026-09-26.jsonl"
 
         sample = df.sample(n=50, random_state=0)
+        # Relative to now, not a date: report_features reads the last 24 hours,
+        # and a fixed timestamp here fell out of that window on 2026-09-27 at
+        # 12:00 UTC -- from then on this test failed on every branch.
+        ts = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime(
+            "%Y-%m-%dT%H:%M:%S.000Z"
+        )
         with log_path.open("w") as f:
             for _, row in sample.iterrows():
                 record = {
                     "v": 1,
-                    "ts": "2026-09-26T12:00:00.000Z",
+                    "ts": ts,
                     "model": {"alias": "champion", "version": "1"},
                     "features": {
                         "budget": float(row["budget"]),
