@@ -1,10 +1,11 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { Toaster } from "sonner";
 import { PropsWithChildren } from "react";
 import { ThemeProvider } from "./ThemeProvider";
+import { createAppQueryClient } from "./queryClient";
 
-const qc = new QueryClient({ defaultOptions:{ queries:{ staleTime:30000, refetchOnWindowFocus:false } } });
+const qc = createAppQueryClient();
 
 export function Providers({ children }: PropsWithChildren) {
   return (
