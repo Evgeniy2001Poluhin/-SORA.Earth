@@ -168,13 +168,29 @@ def require_declared(region_id):
     return region_id
 
 
-# How long ingestion may be silent before the run is degraded.
+# How long a required pair may go without delivery before the run is degraded.
 #
-# This measures `ingested_at`: **whether the pipeline is running**, which is a
-# real and previously invisible failure -- the aggregator read a table dead for
-# eight days and reported ok (#116). It is deliberately *not* called freshness
-# of the data, and it is not computed from `event_time`, because for these
-# sources a current `event_time` means only that a constant was re-stamped.
+# This asks **whether the pipeline is running**, which is a real and previously
+# invisible failure -- the aggregator read a table dead for eight days and
+# reported ok (#116). It is deliberately *not* called freshness of the data, and
+# it is not computed from `event_time`, because for these sources a current
+# `event_time` means only that a constant was re-stamped.
+#
+# It is measured on each pair's last delivery: `updated_at`, which
+# app/ingesters/persist.py sets on the first write and on every repeat, falling
+# back to `ingested_at` for a row never updated. Not on `ingested_at` alone: that
+# is the first write, a repeat does not move it, and after #121 a repeat of an
+# unchanged snapshot is the normal case. On production (one run measured,
+# 2026-09-26 16:05 UTC) pairs re-delivered a second earlier read as 571.7h
+# silent -- the age of their first write on 2026-09-02; the daily ingester job
+# kept re-delivering them in between (inferred from its 24h schedule, not
+# measured).
+#
+# Caveat: `updated_at` also has ORM `onupdate=func.now()`, so any ORM edit of an
+# observation row would count as a delivery. Today persist is the only code that
+# moves these rows' `updated_at` (the migrations that update observation rows use
+# raw SQL on other columns, and no trigger exists) -- if a second writer appears,
+# liveness needs its own column.
 _MAX_INGEST_AGE_ENV = "SORA_AGGREGATOR_MAX_INGEST_AGE_HOURS"
 _DEFAULT_MAX_INGEST_AGE_HOURS = 48.0
 
@@ -238,11 +254,15 @@ def _norm(v, lo, hi):
 def _latest_by_region(db):
     """Newest valid observation per (region, source, indicator).
 
-    Returns (metrics_by_region, newest_ingested_at, rows_examined).
+    Returns (metrics_by_region, newest_delivered_at, rows_examined, vintage).
 
-    `ingested_at` rather than `event_time`, deliberately: the caller uses it to
-    ask whether ingestion is still running, and `event_time` cannot answer that
-    for a source that re-stamps a literal with `now`.
+    Each pair's delivery timestamp is `updated_at` (which app/ingesters/persist.py
+    sets on the first write and refreshes on every repeat), falling back to
+    `ingested_at` for a row never updated. This measures whether the pipeline
+    is still delivering. Why not `ingested_at` alone: the caller asks whether
+    ingestion is still running, and `ingested_at` is the first write; a repeat
+    does not move it. Why not `event_time`: see the comment above
+    `_MAX_INGEST_AGE_ENV`.
 
     `row_number()` rather than DISTINCT ON, matching app/services/point_in_time.py:
     production is PostgreSQL but the test suite runs on SQLite, and a read path
@@ -254,7 +274,10 @@ def _latest_by_region(db):
             EnvironmentalObservation.source,
             EnvironmentalObservation.indicator,
             EnvironmentalObservation.value,
-            EnvironmentalObservation.ingested_at,
+            func.coalesce(
+                EnvironmentalObservation.updated_at,
+                EnvironmentalObservation.ingested_at
+            ).label("delivered_at"),
             EnvironmentalObservation.temporal_kind,
             EnvironmentalObservation.period_start,
             EnvironmentalObservation.period_end,
@@ -310,12 +333,12 @@ def _latest_by_region(db):
     )
 
     result = defaultdict(dict)
-    newest_ingest = None
+    newest_delivery = None
     examined = 0
 
     vintage: dict[str, str] = {}
 
-    for (region_id, source, indicator, value, ingested_at, kind,
+    for (region_id, source, indicator, value, delivered_at, kind,
          period_start, period_end, source_revision, _rn) in db.execute(
         select(ranked).where(ranked.c.rn == 1)
     ):
@@ -326,16 +349,16 @@ def _latest_by_region(db):
         # here, not because any row claimed it. Now the row does.
         vintage.setdefault(source, _vintage_of(kind, period_start, period_end,
                                                source_revision))
-        # `ingested_at` is carried per entry, not only as a global maximum:
-        # the contract is checked per (region, source, indicator) pair, and a
-        # maximum over all rows cannot see one pair that stopped.
-        result[region_id][f"{source}:{indicator}"] = (value, source, ingested_at)
-        if ingested_at is not None and (
-            newest_ingest is None or ingested_at > newest_ingest
+        # entry is (value, source, delivered_at): the last time this pair was
+        # delivered -- updated_at, which persist sets on the first write and on
+        # every repeat, falling back to ingested_at for a row never updated.
+        result[region_id][f"{source}:{indicator}"] = (value, source, delivered_at)
+        if delivered_at is not None and (
+            newest_delivery is None or delivered_at > newest_delivery
         ):
-            newest_ingest = ingested_at
+            newest_delivery = delivered_at
 
-    return result, newest_ingest, examined, vintage
+    return result, newest_delivery, examined, vintage
 
 
 def _get(metrics, key):
@@ -395,23 +418,26 @@ def _vintage_of(kind, period_start, period_end, source_revision):
 def _classify_pairs(metrics, limit_hours):
     """Sort one region's required pairs into missing, stale and fresh.
 
-    Checked per pair rather than against a single newest-row timestamp, because
-    a maximum over all rows only proves that *something* is being written. With
-    509 pairs updating daily and one silent for a week, the region still looks
+    Checked per pair rather than against a single newest-row timestamp: carried
+    per entry, not only as a global maximum, because the contract is checked per
+    pair and a maximum over all rows cannot see one pair that stopped. With 509
+    pairs updating daily and one silent for a week, the region still looks
     complete, the global timestamp still looks fresh, the week-old value still
     enters the score, and the run still reports success. The same holds if
     rosstat stops entirely while sber_veb_baseline keeps writing its baseline
     every day.
 
-    A pair with no `ingested_at` is counted missing rather than fresh: it
+    A pair with no delivery timestamp is counted missing rather than fresh: it
     cannot be shown to have arrived within the bound, and treating unknown as
     acceptable is how the original defect worked.
 
-    This is still pipeline freshness -- age is measured on `ingested_at`.
-    Vintage of the information is a separate field entirely, read off the
-    selected rows: a period for rosstat, a snapshot revision for the constants.
-    A pipeline that ran an hour ago can be delivering numbers from 2024, and
-    both facts have to be reportable at once.
+    This measures each pair's last delivery -- `updated_at` (which
+    app/ingesters/persist.py sets on the first write and on every repeat),
+    falling back to `ingested_at` for a row never updated. The carried value is
+    the last delivery. Vintage of the information is a separate field entirely,
+    read off the selected rows: a period for rosstat, a snapshot revision for
+    the constants. A pipeline that ran an hour ago can be delivering numbers from
+    2024, and both facts have to be reportable at once.
     """
     missing, stale, fresh = [], [], []
     for key in REQUIRED_METRIC_KEYS:
@@ -419,11 +445,11 @@ def _classify_pairs(metrics, limit_hours):
         if entry is None:
             missing.append(key)
             continue
-        ingested_at = entry[2] if len(entry) > 2 else None
-        if ingested_at is None:
+        delivered_at = entry[2] if len(entry) > 2 else None
+        if delivered_at is None:
             missing.append(key)
             continue
-        age = _age_hours(ingested_at)
+        age = _age_hours(delivered_at)
         if age is not None and age > limit_hours:
             stale.append(key)
         else:
@@ -476,7 +502,7 @@ def _compute_one(metrics):
 
     total = env_v * 0.4 + soc_v * 0.35 + gov_v * 0.25
 
-    # entry is (value, source, ingested_at); index rather than unpack so a
+    # entry is (value, source, delivered_at); index rather than unpack so a
     # further field does not break this the way widening to three did.
     sources = {entry[1] for entry in metrics.values()}
     confidence = min(1.0, len(sources) / 3.0)
@@ -588,8 +614,9 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
     together, and conflating them is what let an eight-day staleness pass
     unnoticed (#116):
 
-    `pipeline_freshness` -- is ingestion still running? Measured on
-    `ingested_at`. A stalled pipeline is a real failure and degrades the run.
+    `pipeline_freshness` -- is ingestion still running? Measured on each pair's
+    last delivery (`updated_at`, falling back to `ingested_at`). A stalled
+    pipeline is a real failure and degrades the run.
 
     `source_data_vintage` -- how old is the *information*? Declared per source,
     because neither source reports it and both re-stamp their literals with
@@ -619,7 +646,7 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
             _parse_max_ingest_age_hours() if max_ingest_age_hours is None
             else max_ingest_age_hours
         )
-        latest, newest_ingest, examined, vintage = _latest_by_region(db)
+        latest, newest_delivery, examined, vintage = _latest_by_region(db)
 
         computed = 0
         written = 0
@@ -668,8 +695,8 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
         db.commit()
 
         undeclared = sorted(set(latest) - DECLARED_REGIONS)
-        ingest_age = _age_hours(newest_ingest)
-        stalled = ingest_age is not None and ingest_age > limit
+        delivery_age = _age_hours(newest_delivery)
+        stalled = delivery_age is not None and delivery_age > limit
 
         reasons = []
         if examined == 0:
@@ -682,7 +709,7 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
             )
         if stalled:
             reasons.append(
-                f"ingestion silent for {ingest_age:.1f}h, limit {limit:.0f}h"
+                f"ingestion silent for {delivery_age:.1f}h, limit {limit:.0f}h"
             )
         if pairs_stale:
             reasons.append(
@@ -724,10 +751,10 @@ def recalc_all_regions(max_ingest_age_hours: float | None = None):
             # being written, never that every required pair is -- which is what
             # `required_pairs_stale` is for.
             "pipeline_freshness": {
-                "newest_ingested_at": (
-                    newest_ingest.isoformat() if newest_ingest else None
+                "newest_delivered_at": (
+                    newest_delivery.isoformat() if newest_delivery else None
                 ),
-                "age_hours": round(ingest_age, 1) if ingest_age is not None else None,
+                "age_hours": round(delivery_age, 1) if delivery_age is not None else None,
                 "stalled": stalled,
             },
             # Read off the selected rows. Until #121 this was a mapping
