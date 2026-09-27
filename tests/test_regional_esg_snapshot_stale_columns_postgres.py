@@ -64,7 +64,7 @@ def test_view_exposes_stale_columns_and_preserves_original_eight(scratch_db):
         # Original 8: region_code, e_score, s_score, g_score, score, confidence,
         #             sources_used, computed_at
         # New 2: stale_since, stale_reason
-        assert len(row) == 10, f"Expected 10 columns, got {len(row)}: {row.keys()}"
+        assert len(row) == 10, f"Expected 10 columns, got {len(row)}: {row._fields}"
 
         # Verify the original 8 columns are present and unchanged
         assert row[0] == "RU-TEST", f"Column 0 (region_code) expected 'RU-TEST', got {row[0]}"
@@ -91,7 +91,8 @@ def test_view_exposes_stale_columns_and_preserves_original_eight(scratch_db):
         )
 
         # Verify column names explicitly
-        keys = list(row.keys())
+        # A SQLAlchemy 2.0 Row has no keys(); _fields holds the column names.
+        keys = list(row._fields)
         expected_keys = [
             "region_code", "e_score", "s_score", "g_score", "score",
             "confidence", "sources_used", "computed_at", "stale_since", "stale_reason"
