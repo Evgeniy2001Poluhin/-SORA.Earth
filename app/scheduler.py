@@ -1247,29 +1247,51 @@ def init_scheduler(start: bool = True):
         replace_existing=True,
     )
 
-    # Environmental crisis detection — runs after ingesters
+    # Environmental crisis detection — stood down by default.
+    #
+    # This detector queries region_signals for OpenAQ metric names. Nothing has
+    # written to that table since the ingester runner moved to
+    # environmental_observations on 2026-07-30 (#116), and OpenAQ itself was
+    # stood down because its stations stopped reporting in September 2017 (#57).
+    # The job structurally finds zero violations on every run and only logs.
+    #
+    # Not registered rather than registered-and-skipping: a job that exists and
+    # does nothing still shows up as scheduled. Re-enabling needs
+    # SORA_CRISIS_DETECTION_ENABLED and a source that actually writes the
+    # metrics this detector reads.
     try:
-        from app.services.crisis_detector import detect_crises
+        from app.services.crisis_detector import (
+            detect_crises,
+            crisis_detection_scheduling_refusal,
+        )
         from app.database import SessionLocal as _SL
 
-        def _scheduled_crisis_detection():
-            db = _SL()
-            try:
-                count = detect_crises(db)
-                logger.info("Crisis detection: %d violations found", count)
-            except Exception:
-                logger.exception("Crisis detection failed")
-            finally:
-                db.close()
+        _crisis_refusal = crisis_detection_scheduling_refusal()
+        if _crisis_refusal is None:
+            def _scheduled_crisis_detection():
+                db = _SL()
+                try:
+                    count = detect_crises(db)
+                    logger.info("Crisis detection: %d violations found", count)
+                except Exception:
+                    logger.exception("Crisis detection failed")
+                finally:
+                    db.close()
 
-        scheduler.add_job(
-            _scheduled_crisis_detection,
-            IntervalTrigger(hours=6),
-            id="auto_crisis_detection",
-            name="Detect environmental crises every 6h",
-            replace_existing=True,
-        )
-        logger.info("Crisis detection job scheduled (every 6h)")
+            scheduler.add_job(
+                _scheduled_crisis_detection,
+                IntervalTrigger(hours=6),
+                id="auto_crisis_detection",
+                name="Detect environmental crises every 6h",
+                replace_existing=True,
+            )
+            logger.info("Crisis detection job scheduled (every 6h)")
+        else:
+            logger.info(
+                "crisis detection not scheduled: %s "
+                "(set SORA_CRISIS_DETECTION_ENABLED=true to override)",
+                _crisis_refusal,
+            )
     except ImportError:
         logger.warning("crisis_detector not available, skipping job")
 
