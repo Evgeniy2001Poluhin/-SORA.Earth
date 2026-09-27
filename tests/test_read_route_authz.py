@@ -68,6 +68,8 @@ PUBLIC = {
     # Static file routes that return no stored user content.
     "/admin", "/", "/login", "/{full_path:path}",
     "/admin/{path:path}", "/app/{path:path}", "/auth/login", "/dev", "/favicon.ico",
+    # SPA routes that exist only where the SPA is built (the image) and serve SPA files.
+    "/{spa_path:path}", "/v2", "/v2/{full_path:path}",
 }
 
 # Routes that require any authenticated user (any role: viewer, analyst, admin).
@@ -254,12 +256,129 @@ def test_public_routes_do_not_require_auth(client):
         "the dependency says: %s" % protected
     )
 
-def test_authenticated_routes_reject_anonymous_as_401_not_403(client):
-    """AUTHENTICATED routes answer 401 to anonymous, not another status.
 
-    /api/v1/auth/me is in AUTHENTICATED and answers 401 by design when called
-    anonymously — the endpoint returns the current user's info, and there is
-    no current user. This is correct behaviour, not a misconfiguration: the
-    protected_read_routes_reject_anonymous test already checks it returns 401.
+def test_route_registry_complete_with_spa_present():
+    """The registry is complete in the image's configuration, where the SPA is built.
+
+    Three GET routes are registered only when the SPA is built: /{spa_path:path},
+    /v2, /v2/{full_path:path}. They are absent in CI's backend job (no SPA build)
+    but present in the production image. This test runs in a subprocess with a temp
+    SPA directory to verify the registry is complete where the SPA is present.
     """
-    pass  # Already covered by test_protected_read_routes_reject_anonymous.
+    import subprocess
+    import sys
+    import tempfile
+    import json
+    import os
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        spa_dir = Path(tmpdir)
+        # Create the SPA structure: index.html, assets/, spa/index.html, spa/assets/
+        (spa_dir / "index.html").write_text("<html></html>")
+        (spa_dir / "assets").mkdir()
+        (spa_dir / "spa").mkdir()
+        (spa_dir / "spa" / "index.html").write_text("<html></html>")
+        (spa_dir / "spa" / "assets").mkdir()
+
+        # Run a subprocess that imports app.main with SORA_SPA_DIR set and prints
+        # all GET/HEAD routes with their auth dependencies.
+        script = """
+import sys
+import os
+import json
+from fastapi.routing import APIRoute
+
+# Set the SPA directory before importing app.main
+os.environ["SORA_SPA_DIR"] = sys.argv[1]
+
+from app.main import app
+
+AUTH_DEPENDENCIES = {
+    "require_auth", "require_admin", "require_analyst_or_admin",
+    "require_api_key", "require_admin_apikey", "admin_auth",
+}
+
+def _auth_names(dependant, found=None):
+    found = found if found is not None else []
+    for sub in dependant.dependencies:
+        name = getattr(sub.call, "__name__", type(sub.call).__name__)
+        if name in AUTH_DEPENDENCIES:
+            found.append(name)
+        _auth_names(sub, found)
+    return found
+
+routes = []
+for route in app.routes:
+    if not isinstance(route, APIRoute):
+        continue
+    if "GET" in route.methods or "HEAD" in route.methods:
+        routes.append({
+            "path": route.path,
+            "auth_deps": _auth_names(route.dependant)
+        })
+
+print(json.dumps(routes))
+"""
+
+        env = os.environ.copy()
+        env.update({
+            "DATABASE_URL": "sqlite:///./test.db",
+            "SECRET_KEY": "test-secret",
+            "SORA_ADMIN_TOKEN": "test-admin",
+            "SORA_OFFLINE": "1",
+            "RUN_SCHEDULER": "false",
+        })
+        # Remove REDIS_URL if present (empty string causes ValueError)
+        env.pop("REDIS_URL", None)
+
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(spa_dir)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+            cwd=Path(__file__).parent.parent,
+        )
+
+        if result.returncode != 0:
+            raise AssertionError(
+                f"Subprocess failed with exit code {result.returncode}.\n"
+                f"stderr: {result.stderr}\nstdout: {result.stdout}"
+            )
+
+        # Parse the JSON from the last line (logging may appear earlier)
+        routes = json.loads(result.stdout.strip().splitlines()[-1])
+        by_path = {r["path"]: r for r in routes}
+
+        # (a) All three SPA paths ARE present (otherwise the check proves nothing).
+        spa_paths = ["/{spa_path:path}", "/v2", "/v2/{full_path:path}"]
+        missing_spa = [p for p in spa_paths if p not in by_path]
+        assert not missing_spa, (
+            f"SPA paths not present with SORA_SPA_DIR set: {missing_spa}. "
+            "The test cannot verify the registry without them."
+        )
+
+        # (b) Every GET route is classified (same exclusion of /{full_path:path} as _get_routes).
+        classified = PUBLIC | AUTHENTICATED | ADMIN | API_KEY
+        unclassified = sorted(
+            r["path"] for r in routes
+            if r["path"] != "/{full_path:path}" and r["path"] not in classified
+        )
+        assert not unclassified, (
+            f"GET routes with no access decision in the image configuration: {unclassified}. "
+            "Add each to PUBLIC, AUTHENTICATED, ADMIN or API_KEY."
+        )
+
+        # (c) No PUBLIC route carries an auth dependency.
+        protected = []
+        for path in sorted(PUBLIC):
+            route = by_path.get(path)
+            if route is None:
+                continue
+            deps = route["auth_deps"]
+            if deps:
+                protected.append(f"{path} ({', '.join(sorted(set(deps)))})")
+        assert not protected, (
+            f"PUBLIC routes that carry an auth dependency: {protected}"
+        )
