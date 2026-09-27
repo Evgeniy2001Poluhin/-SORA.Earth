@@ -3,7 +3,7 @@ import logging
 from app.prom_metrics import (sora_retrain_total, sora_full_pipeline_total,
                               sora_model_promoted, sora_model_rejected)
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
-from app.auth import require_admin
+from app.auth import require_admin, require_auth
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
 
@@ -99,7 +99,7 @@ def batch_evaluate(req: BatchRequest, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/batch/{batch_id}", tags=["batch"])
+@router.get("/batch/{batch_id}", tags=["batch"], dependencies=[Depends(require_auth)])
 def get_batch(batch_id: str, db: Session = Depends(get_db)):
     import json as _json
     record = db.query(BatchResultDB).filter(BatchResultDB.batch_id == batch_id).first()
@@ -118,7 +118,7 @@ def get_batch(batch_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/batch", tags=["batch"])
-def list_batches(limit: int = 20, db: Session = Depends(get_db)):
+def list_batches(limit: int = 20, db: Session = Depends(get_db), _user=Depends(require_auth)):
     records = (
         db.query(BatchResultDB)
         .order_by(BatchResultDB.created_at.desc())

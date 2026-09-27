@@ -3,7 +3,7 @@ import secrets
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.auth import require_admin
+from app.auth import require_admin, require_auth
 from app.services.outbound import OutboundRefused, check_outbound_url
 
 # No validation at import. An earlier version called validate_configuration()
@@ -46,7 +46,7 @@ def create_sub(body: SubIn, db: Session = Depends(get_db)):
     db.add(sub); db.commit(); db.refresh(sub)
     return {"id": sub.id, "url": sub.url, "event_type": sub.event_type, "secret": sub.secret, "active": sub.active}
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_auth)])
 def list_subs(db: Session = Depends(get_db)):
     return [{"id": s.id, "url": s.url, "event_type": s.event_type, "active": s.active,
              "created_at": s.created_at.isoformat() if s.created_at else None}

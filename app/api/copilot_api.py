@@ -1,8 +1,9 @@
 """Co-Pilot API with smart template-based explanations, RAG + Compliance Sentinel."""
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import logging
+from app.auth import require_auth
 from app.services.copilot import (
     explain_prediction,
     health as copilot_health,
@@ -210,12 +211,12 @@ from app.services.sessions import (
 from fastapi import HTTPException
 
 
-@router.get("/copilot/sessions")
+@router.get("/copilot/sessions", dependencies=[Depends(require_auth)])
 def sessions_list(limit: int = Query(50, ge=1, le=200)):
     return {"sessions": _ses_list(limit=limit)}
 
 
-@router.get("/copilot/sessions/{session_id}")
+@router.get("/copilot/sessions/{session_id}", dependencies=[Depends(require_auth)])
 def sessions_get(session_id: str):
     s = _ses_get(session_id)
     if not s:

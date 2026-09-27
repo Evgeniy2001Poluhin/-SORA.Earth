@@ -7,6 +7,7 @@ from fastapi import APIRouter, Query, HTTPException, Request, Depends
 from pydantic import BaseModel, Field
 
 from app.api.infra import admin_auth
+from app.auth import require_auth
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 _executor = None
@@ -195,8 +196,8 @@ async def country_ranking(
         "data":   [{"country": name, **data} for name, data in ranked[offset:offset + limit]],
     }
 
-@router.get("/predictions-log")
-def get_predictions_log(limit: int = 100):
+@router.get("/predictions-log", dependencies=[Depends(require_auth)])
+def get_predictions_log(limit: int = Query(100, ge=1, le=1000)):
     from app.main import get_db_sync
     from app.database import PredictionLog
     db = get_db_sync()

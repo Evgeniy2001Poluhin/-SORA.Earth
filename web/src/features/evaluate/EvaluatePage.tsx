@@ -107,9 +107,19 @@ export function EvaluatePage() {
   };
 
   const downloadPDF = () => {
+    const escapeHtml = (s: string | number | undefined | null): string => {
+      const str = String(s ?? "");
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#x27;");
+    };
     const w = window.open("", "_blank", "width=900,height=1200"); if(!w) return;
-    const rows = (result?.recommendations||[]).map(r=>`<li>${r}</li>`).join("");
-    w.document.write(`<html><head><title>${form.project_name} · ESG Report</title>
+    w.opener = null;
+    const rows = (result?.recommendations||[]).map(r=>`<li>${escapeHtml(r)}</li>`).join("");
+    w.document.write(`<html><head><title>${escapeHtml(form.project_name)} · ESG Report</title>
       <style>body{font:14px/1.5 -apple-system,sans-serif;padding:40px;color:#111}
       h1{font-size:28px;margin:0 0 6px}.muted{color:#666;font-size:12px;letter-spacing:.18em;text-transform:uppercase}
       .score{font:600 64px/1 ui-monospace,monospace;color:#0a8a5e;margin:24px 0 4px}
@@ -117,22 +127,22 @@ export function EvaluatePage() {
       .k{color:#666;width:40%}.badge{display:inline-block;padding:4px 10px;border-radius:999px;background:#e8f7ef;color:#0a8a5e;font-size:11px;letter-spacing:.18em;text-transform:uppercase}
       </style></head><body>
       <div class="muted">SORA.Earth · ESG Evaluation Report</div>
-      <h1>${form.project_name}</h1>
-      <span class="badge">${result?.risk_level} risk</span>
-      <div class="score">${result?.total_score?.toFixed(1)}</div>
-      <div class="muted">/ 100 · ESG Score · ${result?.success_probability?.toFixed(1)}% success probability</div>
+      <h1>${escapeHtml(form.project_name)}</h1>
+      <span class="badge">${escapeHtml(result?.risk_level)} risk</span>
+      <div class="score">${escapeHtml(result?.total_score?.toFixed(1))}</div>
+      <div class="muted">/ 100 · ESG Score · ${escapeHtml(result?.success_probability?.toFixed(1))}% success probability</div>
       <table>
-        <tr><td class="k">Country</td><td>${form.country}</td></tr>
-        <tr><td class="k">Budget (USD)</td><td>${form.budget_usd.toLocaleString()}</td></tr>
-        <tr><td class="k">CO₂ Reduction</td><td>${form.co2_reduction_tons_per_year} t/yr</td></tr>
-        <tr><td class="k">Social Impact</td><td>${form.social_impact_score} / 10</td></tr>
-        <tr><td class="k">Duration</td><td>${form.project_duration_months} months</td></tr>
-        <tr><td class="k">Environment</td><td>${result?.environment_score?.toFixed(1)}</td></tr>
-        <tr><td class="k">Social</td><td>${result?.social_score?.toFixed(1)}</td></tr>
-        <tr><td class="k">Economic</td><td>${result?.economic_score?.toFixed(1)}</td></tr>
+        <tr><td class="k">Country</td><td>${escapeHtml(form.country)}</td></tr>
+        <tr><td class="k">Budget (USD)</td><td>${escapeHtml(form.budget_usd.toLocaleString())}</td></tr>
+        <tr><td class="k">CO₂ Reduction</td><td>${escapeHtml(form.co2_reduction_tons_per_year)} t/yr</td></tr>
+        <tr><td class="k">Social Impact</td><td>${escapeHtml(form.social_impact_score)} / 10</td></tr>
+        <tr><td class="k">Duration</td><td>${escapeHtml(form.project_duration_months)} months</td></tr>
+        <tr><td class="k">Environment</td><td>${escapeHtml(result?.environment_score?.toFixed(1))}</td></tr>
+        <tr><td class="k">Social</td><td>${escapeHtml(result?.social_score?.toFixed(1))}</td></tr>
+        <tr><td class="k">Economic</td><td>${escapeHtml(result?.economic_score?.toFixed(1))}</td></tr>
       </table>
       <h3>Recommendations</h3><ul>${rows}</ul>
-      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${new Date().toISOString()} · ML Scoring Engine · RF·XGB·MLP·Stacking</div>
+      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${escapeHtml(new Date().toISOString())} · ML Scoring Engine · RF·XGB·MLP·Stacking</div>
       </body></html>`);
     w.document.close(); setTimeout(()=>w.print(), 300);
   };

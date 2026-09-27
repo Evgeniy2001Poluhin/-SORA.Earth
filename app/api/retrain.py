@@ -20,6 +20,7 @@ from app.auth import require_api_key
 from app.paths import data_dir, models_dir, staged_dir
 from app.model_source import INCOMPLETE_MARKER, discard_unfinished, prune_staged
 from app.schemas import RegistryRetryResult
+from app.security.spreadsheet import neutralize_cell
 
 router = APIRouter(prefix="/model", tags=["mlops"])
 
@@ -760,9 +761,7 @@ def _safe_for_log(value: str, limit: int = 200) -> str:
     trigger is quoted in case the log is later opened in a spreadsheet.
     """
     cleaned = "".join(ch if ch.isprintable() else "?" for ch in value[:limit])
-    if cleaned[:1] in ("=", "+", "-", "@"):
-        cleaned = "'" + cleaned
-    return cleaned
+    return neutralize_cell(cleaned, keep_numbers=False)
 
 
 def _resolve_upload_path(file_path: str) -> str:
