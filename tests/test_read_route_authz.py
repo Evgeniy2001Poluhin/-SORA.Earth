@@ -305,10 +305,12 @@ print(json.dumps(routes))
 
         env = os.environ.copy()
         env["SORA_SPA_DIR"] = str(spa_dir)
-        # Pop REDIS_URL: empty string (from the parent's test env) causes
-        # ValueError in redis.from_url() when the subprocess imports
-        # app.drift_detection. The parent doesn't fail because conftest.py
-        # imports app.main at module level before the test runs.
+        # Pop REDIS_URL. CI's test environment sets it empty, and
+        # app.drift_detection calls redis.from_url(REDIS_URL) at import. The
+        # parent survives that only because tests/conftest.py patches
+        # redis.from_url before importing the app; this subprocess has no such
+        # patch, so an empty value raises ValueError. Without the variable the
+        # default URL is used, and from_url does not connect.
         env.pop("REDIS_URL", None)
 
         result = subprocess.run(
