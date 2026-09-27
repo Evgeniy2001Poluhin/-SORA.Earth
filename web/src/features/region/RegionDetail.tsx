@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { useParams, Link } from "react-router-dom";
 import "./region-detail.css";
-import { ScoreKindNote } from "@/features/map/ProvenanceNotes";
+import { ScoreKindNote, StaleNote } from "@/features/map/ProvenanceNotes";
 import { sourcesCountText } from "@/features/map/regionProvenance";
 
 type Indicator = {
@@ -35,6 +35,7 @@ type RegionDetailData = {
   computed_at: string | null;
   score_kind?: string | null;
   score_vintage?: string | null;
+  stale_since?: string | null;
   indicators: Indicator[];
   indicators_count: number;
   signals_total: number;
@@ -92,6 +93,7 @@ export default function RegionDetail() {
       </div>
 
       <ScoreKindNote scoreKind={data.score_kind} scoreVintage={data.score_vintage} />
+      <StaleNote staleSince={data.stale_since} />
 
       {esg && (
         <div className="rd-kpis">

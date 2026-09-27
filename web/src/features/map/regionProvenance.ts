@@ -15,3 +15,11 @@
 export function sourcesCountText(confidence: number): string {
   return `${Math.round(confidence * 3)} из 3 ожидаемых`;
 }
+
+/** Short-form stale warning for tooltips: day and month only. */
+export function staleShortText(staleSince: string | null | undefined): string | null {
+  if (!staleSince) return null;
+  const date = new Date(staleSince);
+  const formatted = date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+  return `не подтверждено с ${formatted}`;
+}
