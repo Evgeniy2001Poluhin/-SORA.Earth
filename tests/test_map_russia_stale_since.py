@@ -177,7 +177,7 @@ class FakeAsyncpgConnection:
         if from_match:
             return from_match.group(1)
         return None
-    
+
     def _filter_rows(self, sql, args):
         """Filter backing rows based on WHERE clause."""
         # Check for WHERE region_code = $1
@@ -281,12 +281,12 @@ def test_asyncpg_load_from_db_emits_stale_since(monkeypatch):
         },
     ]
 
-    
+
     pool = FakeAsyncpgPool(backing_rows)
     async def get_pool():
         return pool
     monkeypatch.setattr(map_russia, "_get_pool", get_pool)
-    
+
     async def scenario():
         # Test _load_from_db
         regions = await map_russia._load_from_db()
@@ -345,12 +345,12 @@ def test_asyncpg_russia_regions_emits_source_and_stale_since(monkeypatch):
         },
     ]
 
-    
+
     pool = FakeAsyncpgPool(backing_rows)
     async def get_pool():
         return pool
     monkeypatch.setattr(map_russia, "_get_pool", get_pool)
-    
+
     async def scenario():
         result = await map_russia.russia_regions()
 
@@ -415,12 +415,12 @@ def test_asyncpg_region_detail_emits_stale_since(monkeypatch):
         },
     ]
 
-    
+
     pool = FakeAsyncpgPool(backing_rows)
     async def get_pool():
         return pool
     monkeypatch.setattr(map_russia, "_get_pool", get_pool)
-    
+
     async def scenario():
         # Test stale region
         stale_result = await map_russia.region_detail("RU-STALE")
@@ -430,6 +430,9 @@ def test_asyncpg_region_detail_emits_stale_since(monkeypatch):
         assert abs((parsed - stale_date).total_seconds()) < 1, (
             f"Expected {stale_date}, got {parsed}"
         )
+        # The region has no signals, so region_detail must not invent an indicator.
+        assert stale_result["indicators"] == [], stale_result["indicators"]
+        assert stale_result["signals_total"] == 0
 
         # Test fresh region
         fresh_result = await map_russia.region_detail("RU-FRESH2")
