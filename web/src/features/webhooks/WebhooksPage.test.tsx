@@ -195,4 +195,14 @@ describe("WebhooksPage with TanStack Query", () => {
 
     expect(screen.getByRole("button", { name: "Subscribe" })).toBeDisabled();
   });
+
+  it("shows a sign-in message when the server answers 401 (GHSA-jmpv-7wjf-87q9)", async () => {
+    stubFetch(() => ({ ok: false, status: 401, body: { detail: "Unauthorized" } }));
+    renderWithQuery(<WebhooksPage />);
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("Could not load webhooks: Sign in to view webhook subscriptions");
+    expect(screen.queryByText("No subscriptions yet")).toBeInTheDocument();
+  });
 });

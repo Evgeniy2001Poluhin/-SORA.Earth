@@ -2,8 +2,15 @@ import pytest
 from fastapi.testclient import TestClient
 import app.main as main_module
 from app.main import app
+from app.auth import create_access_token
 
 client = TestClient(app)
+
+
+def _signed_in():
+    """Reading stored evaluations requires a signed-in user (GHSA-jmpv-7wjf-87q9)."""
+    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    return {"Authorization": f"Bearer {token}"}
 
 PROJECT = {
     "name": "Test Project",
@@ -47,7 +54,7 @@ def test_history():
     `isinstance(body, list)`. The frontend has typed it as `HistoryPage` since
     the first commit -- the test was the only thing that disagreed.
     """
-    r = client.get("/api/v1/history")
+    r = client.get("/api/v1/history", headers=_signed_in())
     assert r.status_code == 200
 
     body = r.json()
@@ -153,6 +160,6 @@ def test_model_compare():
     assert r.status_code == 200
 
 def test_csv_export():
-    r = client.get("/api/v1/export/csv")
+    r = client.get("/api/v1/export/csv", headers=_signed_in())
     assert r.status_code == 200
     assert "text/csv" in r.headers.get("content-type", "")

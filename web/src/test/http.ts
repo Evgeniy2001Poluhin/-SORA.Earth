@@ -36,6 +36,7 @@ export interface FetchCall {
   url: string;
   method: string;
   body: unknown;
+  headers: Record<string, string>;
 }
 
 /** What the code under test actually asked for, so a test can assert the
@@ -51,10 +52,12 @@ export function callsOf(stub: ReturnType<typeof vi.fn>): FetchCall[] {
         /* leave it as the raw string */
       }
     }
+    const headers = (request.headers ?? {}) as Record<string, string>;
     return {
       url: String(input),
       method: String(request.method ?? "GET"),
       body,
+      headers,
     };
   });
 }

@@ -3,6 +3,7 @@
 from typing import Dict, Any
 
 import pytest
+from app.auth import create_access_token
 
 
 PROJECT: Dict[str, Any] = {
@@ -27,7 +28,10 @@ def test_evaluate_and_history_flow(client):
     Проверка теперь идёт по дельте, а не по «хотя бы одна»: набор не изолирован
     по базе между тестами, и непустая история могла бы остаться от соседа.
     """
-    before = client.get("/api/v1/history")
+    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    before = client.get("/api/v1/history", headers=headers)
     assert before.status_code == 200
     total_before = before.json()["total"]
 
@@ -38,7 +42,7 @@ def test_evaluate_and_history_flow(client):
     assert "risk_level" in data
     assert "success_probability" in data
 
-    hist = client.get("/api/v1/history")
+    hist = client.get("/api/v1/history", headers=headers)
     assert hist.status_code == 200
     page = hist.json()
 
@@ -118,7 +122,8 @@ def test_trends_and_prediction_history(client):
     assert trends.status_code == 200
     # допускаем разный формат (list/dict), главное — не 500
 
-    hist = client.get("/api/v1/predictions/history")
+    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    hist = client.get("/api/v1/predictions/history", headers={"Authorization": f"Bearer {token}"})
     assert hist.status_code == 200
     h_data = hist.json()
     assert isinstance(h_data, list)
@@ -128,14 +133,17 @@ def test_trends_and_prediction_history(client):
 # pending". Both routes exist: app/api/evaluate.py:287 and
 # app/api/predict.py:233. The marker outlived the gap it described.
 def test_export_csv_endpoints(client):
+    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    headers = {"Authorization": f"Bearer {token}"}
+
     # общий экспорт
-    r1 = client.get("/api/v1/export/csv")
+    r1 = client.get("/api/v1/export/csv", headers=headers)
     assert r1.status_code in (200, 204)
     if r1.status_code == 200:
         assert "text/csv" in r1.headers.get("content-type", "")
 
     # экспорт prediction log
-    r2 = client.get("/api/v1/predictions/export/csv")
+    r2 = client.get("/api/v1/predictions/export/csv", headers=headers)
     assert r2.status_code in (200, 204)
     if r2.status_code == 200:
         assert "text/csv" in r2.headers.get("content-type", "")

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { historyApi } from "../../api/endpoints/history";
 import type { HistoryParams } from "../../api/endpoints/history";
 import { errorMessage } from "@/lib/errors";
+import { auth, ApiError } from "@/api/client";
 import "./history.css";
 
 const PAGE = 20;
@@ -12,6 +13,7 @@ const RISKS: Array<"LOW" | "MED" | "HIGH"> = ["LOW", "MED", "HIGH"];
 export default function HistoryPage() {
   const nav = useNavigate();
   const [params, setParams] = useState<HistoryParams>({ limit: PAGE, offset: 0 });
+  const [csvError, setCsvError] = useState<string | null>(null);
 
   // Server state belongs to the query cache, not to an effect that writes state.
   const query = useQuery({
@@ -44,6 +46,36 @@ export default function HistoryPage() {
     const scored = data.items.filter((x) => typeof x.total_score === "number" && Number.isFinite(x.total_score));
     return scored.length ? scored.reduce((a, x) => a + x.total_score, 0) / scored.length : null;
   }, [data.items]);
+
+  const downloadCSV = async () => {
+    setCsvError(null);
+    try {
+      const headers: Record<string, string> = {};
+      const token = auth.get();
+      if (token) headers["Authorization"] = "Bearer " + token;
+
+      const response = await fetch("/api/v1/export/csv", { headers });
+      if (!response.ok) {
+        if (response.status === 401) {
+          setCsvError("Sign in to export CSV");
+        } else {
+          setCsvError(`Failed to download CSV: ${response.status}`);
+        }
+        return;
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "sora_earth_projects.csv";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setCsvError(`Could not download CSV: ${errorMessage(e)}`);
+    }
+  };
 
   return (
     <div className="hist-page">
@@ -88,10 +120,14 @@ export default function HistoryPage() {
           onChange={(e) => set({ date_to: e.target.value ? e.target.value + "T23:59:59" : undefined })}
         />
         <button className="hist-reset" onClick={() => setParams({ limit: PAGE, offset: 0 })}>Reset</button>
-        <a className="hist-export" href="/api/v1/export/csv">Export CSV</a>
+        <button className="hist-export" onClick={downloadCSV}>Export CSV</button>
       </div>
 
-      {err && <div className="hist-error">Failed to load: {err}</div>}
+      {(err || csvError) && <div className="hist-error">
+        {query.error instanceof ApiError && query.error.status === 401
+          ? "Sign in to view evaluation history"
+          : csvError || `Failed to load: ${err}`}
+      </div>}
 
       <div className="hist-table">
         <div className="hist-row hist-head">

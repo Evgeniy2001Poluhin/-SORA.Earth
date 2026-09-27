@@ -34,6 +34,15 @@ describe("SessionsSidebar", () => {
     expect(listText(container)).toMatch(/could not load/i);
   });
 
+  it("shows a sign-in message when the server answers 401 (GHSA-jmpv-7wjf-87q9)", async () => {
+    stubStatus(401);
+    const { container } = renderSidebar();
+    await waitFor(() => expect(listText(container)).not.toContain("Loading"));
+    expect(listText(container)).toContain("Sign in to see your chats");
+    expect(listText(container)).not.toContain("No chats yet");
+    expect(listText(container)).not.toContain("Could not load");
+  });
+
   // Controls: the true empty state, and a real list, are unchanged.
   it("still says there are no chats when the server says so", async () => {
     stubJson({ sessions: [] });

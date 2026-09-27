@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { copilotApi } from "../../api/endpoints/copilot";
+import { ApiError } from "../../api/client";
 
 interface Props {
   currentId: string | null;
@@ -86,9 +87,14 @@ export function SessionsSidebar({ currentId, onSelect, onNew, tick = 0, refreshT
         {loading && sessions.length === 0 ? (
           <div className="sessions-empty">Loading…</div>
         ) : query.isError && sessions.length === 0 ? (
+          // A 401 means the user is not signed in (#334): show a sign-in prompt.
           // A failed read is not an empty history (#236): "No chats yet" here
           // told the user their chats were gone when they could not be listed.
-          <div className="sessions-empty">Could not load chats</div>
+          <div className="sessions-empty">
+            {query.error instanceof ApiError && query.error.status === 401
+              ? "Sign in to see your chats"
+              : "Could not load chats"}
+          </div>
         ) : sessions.length === 0 ? (
           <div className="sessions-empty">No chats yet</div>
         ) : (

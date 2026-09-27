@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 import csv, hashlib, io, json, os, time
@@ -7,12 +7,14 @@ import numpy as np
 import torch
 from app.prom_metrics import sora_prediction_latency, sora_predictions_total
 
+from app.auth import require_auth
 from app.schemas import NeuralNetworkUnavailable
 from app.schemas import ProjectInput as Project
 from app.validators import ProjectInput as LegacyProjectInput
 from app.mlflow_tracking import log_prediction
 from app.middleware import METRICS
 from app.redis_cache import CACHE_NAMESPACE, cache_get, cache_set
+from app.security.spreadsheet import neutralize_cell
 
 router = APIRouter()
 
@@ -257,7 +259,7 @@ def shap_explain(project: Project):
     return {"feature_names": feature_names, "shap_values": vals}
 
 
-@router.get("/predictions/history")
+@router.get("/predictions/history", dependencies=[Depends(require_auth)])
 def predictions_history():
     from app.main import PRED_LOG
     if not PRED_LOG:
@@ -269,15 +271,25 @@ def predictions_history():
     return rows
 
 
-@router.get("/predictions/export/csv")
+@router.get("/predictions/export/csv", dependencies=[Depends(require_auth)])
 def export_predictions_csv():
     from app.main import PRED_LOG
     if not PRED_LOG or not os.path.exists(PRED_LOG):
         raise HTTPException(status_code=404, detail="No prediction log found")
+
+    # Read and neutralize CSV cells
+    output = io.StringIO()
     with open(PRED_LOG, "r") as f:
-        content = f.read()
+        reader = csv.reader(f)
+        writer = csv.writer(output)
+        for row in reader:
+            # Neutralize each cell (treating all as text for safety)
+            neutralized = [neutralize_cell(str(cell)) if cell else "" for cell in row]
+            writer.writerow(neutralized)
+
+    output.seek(0)
     return StreamingResponse(
-        io.BytesIO(content.encode()),
+        io.BytesIO(output.getvalue().encode()),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=sora_predictions_log.csv"},
     )
