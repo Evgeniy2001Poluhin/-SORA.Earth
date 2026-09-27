@@ -1033,7 +1033,9 @@ from fastapi.responses import FileResponse
 from fastapi import HTTPException
 from pathlib import Path as _P
 
-_SPA_DIR = _P(__file__).parent / "static"
+# Override via SORA_SPA_DIR to check the route registry with the SPA present,
+# as in the image. Production does not set this.
+_SPA_DIR = _P(os.environ.get("SORA_SPA_DIR") or (_P(__file__).parent / "static"))
 _SPA_INDEX = _SPA_DIR / "index.html"
 _SPA_ASSETS = _SPA_DIR / "assets"
 
@@ -1058,7 +1060,7 @@ if _SPA_INDEX.exists():
 from fastapi.staticfiles import StaticFiles as _SPA_Static
 from fastapi.responses import FileResponse as _SPA_File
 from pathlib import Path as _SPA_Path
-_SPA2 = _SPA_Path(__file__).parent / "static" / "spa"
+_SPA2 = _SPA_DIR / "spa"
 if _SPA2.exists() and (_SPA2 / "assets").exists():
     app.mount("/v2/assets", _SPA_Static(directory=str(_SPA2 / "assets")), name="spa_assets")
     @app.get("/v2", include_in_schema=False)
