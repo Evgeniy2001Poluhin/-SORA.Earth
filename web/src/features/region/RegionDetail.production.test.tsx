@@ -178,4 +178,39 @@ describe("RegionDetail on the production path", () => {
 
     expect(screen.getByText("89.3")).toBeInTheDocument();
   });
+
+  it("shows the stale warning when stale_since is set", async () => {
+    stubJson({ ...REGION_MOW_RESPONSE, stale_since: "2026-09-20T00:00:00Z" });
+
+    renderWithQuery(
+      <MemoryRouter initialEntries={["/region/RU-MOW"]}>
+        <Routes>
+          <Route path="/region/:code" element={<RegionDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("89.3", { exact: false });
+
+    expect(screen.getByText(/Не подтверждено с/)).toBeInTheDocument();
+    expect(screen.getByText(/источники не присылали данные/)).toBeInTheDocument();
+  });
+
+  it("does not show stale warning when stale_since is null (production payload)", async () => {
+    // The production payload has no stale_since or it's null
+    stubJson(REGION_MOW_RESPONSE);
+
+    renderWithQuery(
+      <MemoryRouter initialEntries={["/region/RU-MOW"]}>
+        <Routes>
+          <Route path="/region/:code" element={<RegionDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("89.3", { exact: false });
+    const page = document.body.textContent ?? "";
+
+    expect(page).not.toContain("Не подтверждено с");
+  });
 });

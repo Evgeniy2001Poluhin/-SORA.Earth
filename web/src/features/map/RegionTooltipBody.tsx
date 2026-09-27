@@ -7,12 +7,14 @@
  * RussiaMap.tsx had no tests at all.
  */
 import type { EnrichedRussianRegion } from "@/data/russia_regions";
+import { staleShortText } from "./regionProvenance";
 
 interface RegionTooltipBodyProps {
   region: EnrichedRussianRegion;
 }
 
 export default function RegionTooltipBody({ region: r }: RegionTooltipBodyProps) {
+  const staleText = staleShortText(r.staleSince);
   return (
     <>
       <strong>{r.capital}</strong>
@@ -26,6 +28,11 @@ export default function RegionTooltipBody({ region: r }: RegionTooltipBodyProps)
           <span style={{ color: "#5A9A6F" }}>E{Math.round(r.esgBreakdown.e_score)}</span>
           <span style={{ color: "#8FB069" }}>S{Math.round(r.esgBreakdown.s_score)}</span>
           <span style={{ color: "#C9A96E" }}>G{Math.round(r.esgBreakdown.g_score)}</span>
+        </div>
+      )}
+      {staleText && (
+        <div style={{ fontSize: 9, marginTop: 2, color: "#B85C5C" }}>
+          {staleText}
         </div>
       )}
     </>

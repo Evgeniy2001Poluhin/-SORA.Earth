@@ -28,6 +28,7 @@ export interface EnrichedRussianRegion extends RussianRegion {
   scoreKind?: string | null;
   scoreVintage?: string | null;
   updatedAt?: string | null;
+  staleSince?: string | null;
 }
 
 export const RUSSIA_REGIONS: RussianRegion[] = [

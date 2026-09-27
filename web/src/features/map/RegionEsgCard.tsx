@@ -6,7 +6,7 @@
  * than an element, which left this block — the part that makes claims about a
  * number — untestable. `RussiaMapModal.tsx` had no tests at all.
  */
-import { ScoreKindNote } from "./ProvenanceNotes";
+import { ScoreKindNote, StaleNote } from "./ProvenanceNotes";
 import { sourcesCountText } from "./regionProvenance";
 
 export type RegionEsgBreakdown = {
@@ -27,6 +27,8 @@ export type RegionEsgCardProps = {
   scoreVintage?: string | null;
   /** When the score was recomputed -- not when its inputs were measured. */
   updatedAt?: string | null;
+  /** When the region's score stopped being confirmed by fresh data. */
+  staleSince?: string | null;
 };
 
 function Row({ k, v, color }: { k: string; v: string; color?: string }) {
@@ -42,7 +44,7 @@ function Row({ k, v, color }: { k: string; v: string; color?: string }) {
 }
 
 export default function RegionEsgCard({
-  score, breakdown, confidence, sourcesUsed, scoreKind, scoreVintage, updatedAt,
+  score, breakdown, confidence, sourcesUsed, scoreKind, scoreVintage, updatedAt, staleSince,
 }: RegionEsgCardProps) {
   return (
     <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #1a1d20" }}>
@@ -51,6 +53,7 @@ export default function RegionEsgCard({
       </div>
 
       <ScoreKindNote scoreKind={scoreKind} scoreVintage={scoreVintage} />
+      <StaleNote staleSince={staleSince} />
 
       <Row k="Total" v={Number(score).toFixed(1)} />
       {breakdown && (

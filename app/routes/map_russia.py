@@ -49,10 +49,10 @@ log.info(f"[map_russia] loaded {len(_REGIONS_META)} region metadata entries")
 _MOCK = [
     {"code":"RU-MOW","name":"Moscow","capital":"Moscow","district":"CFO","lat":55.7558,"lon":37.6173,"population":13010112,
      "esg":{"score":89.0,"e_score":87.0,"s_score":88.0,"g_score":90.0},
-     "score_kind":"mock","score_vintage":None},
+     "score_kind":"mock","score_vintage":None,"stale_since":None},
     {"code":"RU-SPE","name":"SPb","capital":"SPb","district":"SZFO","lat":59.9343,"lon":30.3351,"population":5601911,
      "esg":{"score":77.0,"e_score":75.0,"s_score":78.0,"g_score":78.0},
-     "score_kind":"mock","score_vintage":None},
+     "score_kind":"mock","score_vintage":None,"stale_since":None},
 ]
 
 _pool = None
@@ -102,7 +102,7 @@ async def _load_from_db():
         async with pool.acquire() as c:
             rows = await c.fetch(
                 "SELECT region_code, e_score, s_score, g_score, score, "
-                "confidence, sources_used, computed_at "
+                "confidence, sources_used, computed_at, stale_since "
                 "FROM regional_esg_snapshot"
             )
     except Exception as e:
@@ -122,6 +122,7 @@ async def _load_from_db():
             "confidence": float(r["confidence"] or 0),
             "sources_used": list(r["sources_used"] or []),
             "updated_at": r["computed_at"].isoformat() if r["computed_at"] else None,
+            "stale_since": r["stale_since"].isoformat() if r["stale_since"] else None,
             **score_provenance(),
         })
     return regions
@@ -155,6 +156,7 @@ def _load_from_sqlalchemy():
             "sources_count": int(r.sources_count or 0),
             "signals_used": int(r.signals_used or 0),
             "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            "stale_since": r.stale_since.isoformat() if r.stale_since else None,
             **score_provenance(),
         })
     return regions
@@ -190,7 +192,7 @@ async def region_detail(region_code: str):
             snap = await c.fetchrow(
                 "SELECT region_code, e_score, s_score, g_score, score, "
                 "confidence, sources_used, ARRAY[]::text[] AS sources_missing, computed_at, "
-                "NULL::text AS model_version, NULL::jsonb AS features "
+                "NULL::text AS model_version, NULL::jsonb AS features, stale_since "
                 "FROM regional_esg_snapshot WHERE region_code = $1",
                 region_code,
             )
@@ -252,6 +254,7 @@ async def region_detail(region_code: str):
         "sources_missing": list(snap["sources_missing"]) if snap and snap["sources_missing"] else [],
         "model_version": snap["model_version"] if snap else None,
         "computed_at": snap["computed_at"].isoformat() if snap and snap["computed_at"] else None,
+        "stale_since": snap["stale_since"].isoformat() if snap and snap["stale_since"] else None,
         "features": dict(snap["features"]) if snap and snap["features"] else None,
         "indicators": indicators,
         "indicators_count": len(indicators),
