@@ -1,10 +1,9 @@
 /**
  * A 401 or 403 must not be retried, so the sign-in message appears immediately
- * rather than after three attempts and 7 seconds of loading skeleton.
+ * rather than after three retries and about 7 seconds of loading skeleton.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { render, waitFor } from "@testing-library/react";
 
 vi.mock("@/api/mock", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/mock")>();
@@ -14,17 +13,12 @@ vi.mock("@/api/mock", async (importOriginal) => {
 import HistoryPage from "@/features/history/HistoryPage";
 import { isMock } from "@/api/mock";
 import { stubStatus } from "@/test/http";
-import { renderWithQuery } from "@/test/utils";
-import { createAppQueryClient, shouldRetry } from "./queryClient";
+import { shouldRetry } from "./queryClient";
 import { ApiError } from "@/api/client";
+import { Providers } from "./providers";
 
-const renderPage = () =>
-  renderWithQuery(
-    <MemoryRouter>
-      <HistoryPage />
-    </MemoryRouter>,
-    { queryClient: createAppQueryClient() },
-  );
+// This test renders through the app's real Providers to exercise the module-level query client.
+const renderPage = () => render(<Providers><HistoryPage /></Providers>);
 
 describe("the guard on these tests", () => {
   it("really is in production mode", () => {
