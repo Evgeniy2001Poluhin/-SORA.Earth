@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from app.main import app
+from app.auth import create_access_token
 
 client = TestClient(app)
 
@@ -33,18 +34,22 @@ def test_batch_with_invalid():
 def test_batch_get_by_id():
     resp = client.post("/api/v1/batch/evaluate", json={"projects": SAMPLE_PROJECTS[:1]})
     batch_id = resp.json()["batch_id"]
-    resp2 = client.get(f"/api/v1/batch/{batch_id}")
+
+    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    resp2 = client.get(f"/api/v1/batch/{batch_id}", headers={"Authorization": f"Bearer {token}"})
     assert resp2.status_code == 200
     assert resp2.json()["batch_id"] == batch_id
 
 
 def test_batch_not_found():
-    resp = client.get("/api/v1/batch/nonexistent")
+    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    resp = client.get("/api/v1/batch/nonexistent", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 404
 
 
 def test_list_batches():
-    resp = client.get("/api/v1/batch")
+    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    resp = client.get("/api/v1/batch", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 

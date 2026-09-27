@@ -104,3 +104,76 @@ describe("EvaluatePage when the API answers with nothing", () => {
     expect(screen.getByText("Medium risk")).toBeInTheDocument();
   });
 });
+
+describe("PDF download escaping (GHSA-jmpv-7wjf-87q9)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("escapes HTML in project names and country names", async () => {
+    interface MockWindow {
+      document: {
+        write: ReturnType<typeof vi.fn>;
+        close: ReturnType<typeof vi.fn>;
+      };
+      print: ReturnType<typeof vi.fn>;
+      opener: null | undefined;
+    }
+
+    const mockWindow: MockWindow = {
+      document: {
+        write: vi.fn(),
+        close: vi.fn(),
+      },
+      print: vi.fn(),
+      opener: undefined,
+    };
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(mockWindow as unknown as Window);
+
+    stubJson({
+      total_score: 75.0,
+      environment_score: 70.0,
+      social_score: 80.0,
+      economic_score: 75.0,
+      risk_level: "Low",
+      success_probability: 80.0,
+      recommendations: ["Install solar panels"],
+      region: "Europe",
+    });
+
+    const { container } = renderPage();
+
+    // Fill form with markup in the project name. The input has no accessible name/id,
+    // so we query by the label text and find the input inside the field.
+    const user = userEvent.setup();
+    const fieldLabels = Array.from(container.querySelectorAll(".ev-field label"));
+    const projectNameField = fieldLabels.find((l) => l.textContent === "Project name")?.parentElement;
+    const nameInput = projectNameField?.querySelector("input");
+    if (!nameInput) throw new Error("Project name input not found");
+    await user.clear(nameInput);
+    await user.type(nameInput, '<b id="x">x</b>');
+
+    await runEvaluation();
+    await waitFor(() => expect(screen.queryByText(/No evaluation yet/i)).not.toBeInTheDocument(), {
+      timeout: 3000,
+    });
+
+    // Click Download PDF
+    const pdfButton = screen.getByText(/Download PDF/i);
+    await user.click(pdfButton);
+
+    // Check that window.open was called and document.write was called with escaped HTML
+    expect(openSpy).toHaveBeenCalled();
+    expect(mockWindow.document.write).toHaveBeenCalled();
+    const writtenHtml = mockWindow.document.write.mock.calls[0][0];
+
+    // The markup should be escaped
+    expect(writtenHtml).toContain("&lt;b id=&quot;x&quot;&gt;x&lt;/b&gt;");
+    expect(writtenHtml).not.toContain("<b id=\"x\">x</b>");
+
+    // And opener should be nulled
+    expect(mockWindow.opener).toBeNull();
+
+    openSpy.mockRestore();
+  });
+});

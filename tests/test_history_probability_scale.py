@@ -7,6 +7,7 @@ which is how a frontend fixture came to use fractions the API never sends. This
 pins the scale on the side that produces it, so the frontend has something to
 be checked against.
 """
+from app.auth import create_access_token
 
 
 def test_history_reports_the_probability_evaluate_reported(client):
@@ -16,7 +17,8 @@ def test_history_reports_the_probability_evaluate_reported(client):
     assert evaluated.status_code == 200, evaluated.text
     p = evaluated.json()["success_probability"]
 
-    items = client.get("/api/v1/history").json()["items"]
+    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    items = client.get("/api/v1/history", headers={"Authorization": f"Bearer {token}"}).json()["items"]
     row = next(i for i in items if i.get("name") == "scale-check")
 
     assert row["success_probability"] == p

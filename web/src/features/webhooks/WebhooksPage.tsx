@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { errorMessage } from "@/lib/errors";
+import { auth, ApiError } from "@/api/client";
 
 type Sub = { id:number; url:string; event_type:string; active:boolean; created_at:string };
 type Del = { id:number; subscription_id:number; event_type:string; status_code:number; ok:boolean; error:string; created_at:string };
@@ -29,8 +30,21 @@ async function failureText(r: Response): Promise<string> {
  * Which is exactly what success looked like.
  */
 async function expectOk(input: string, init?: RequestInit): Promise<Response> {
-  const r = await fetch(input, init);
-  if (!r.ok) throw new Error(await failureText(r));
+  const headers: Record<string, string> = { ...((init?.headers as Record<string, string>) || {}) };
+  const token = auth.get();
+  if (token) headers["Authorization"] = "Bearer " + token;
+
+  const r = await fetch(input, { ...init, headers });
+  if (!r.ok) {
+    const text = await failureText(r);
+    let body: unknown = text;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      // Not JSON, use text as body
+    }
+    throw new ApiError(r.status, `API ${r.status}: ${text}`, body, null);
+  }
   return r;
 }
 
@@ -54,7 +68,10 @@ export default function WebhooksPage() {
   // An empty list and a failed request look identical on screen, which is the
   // same fault in a different place -- so a failure says so.
   const loadProblem = subsError || delsError
-    ? errorMessage(subsError ?? delsError, "could not load webhooks")
+    ? ((subsError instanceof ApiError && subsError.status === 401) ||
+       (delsError instanceof ApiError && delsError.status === 401)
+        ? "Sign in to view webhook subscriptions"
+        : errorMessage(subsError ?? delsError, "could not load webhooks"))
     : null;
 
   const add = async () => {

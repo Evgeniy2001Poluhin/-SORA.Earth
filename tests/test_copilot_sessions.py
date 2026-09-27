@@ -1,6 +1,7 @@
 """Tests for /copilot/sessions endpoints + persistence integration."""
 import pytest
 from fastapi.testclient import TestClient
+from app.auth import create_access_token
 
 
 @pytest.fixture(scope="module")
@@ -11,7 +12,8 @@ def client():
 
 
 def test_sessions_list_endpoint(client):
-    r = client.get("/api/v1/copilot/sessions")
+    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    r = client.get("/api/v1/copilot/sessions", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
     body = r.json()
     assert "sessions" in body
@@ -19,7 +21,8 @@ def test_sessions_list_endpoint(client):
 
 
 def test_session_get_404_for_unknown(client):
-    r = client.get("/api/v1/copilot/sessions/does_not_exist_xyz")
+    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    r = client.get("/api/v1/copilot/sessions/does_not_exist_xyz", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 404
 
 
@@ -39,7 +42,8 @@ def test_explain_creates_session(client):
     assert sid and isinstance(sid, str)
 
     # Now session should be retrievable
-    r2 = client.get(f"/api/v1/copilot/sessions/{sid}")
+    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    r2 = client.get(f"/api/v1/copilot/sessions/{sid}", headers={"Authorization": f"Bearer {token}"})
     assert r2.status_code == 200
     s = r2.json()
     assert s["id"] == sid
@@ -55,7 +59,8 @@ def test_session_appears_in_list_after_explain(client):
     })
     sid = r.json()["session_id"]
 
-    r2 = client.get("/api/v1/copilot/sessions")
+    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    r2 = client.get("/api/v1/copilot/sessions", headers={"Authorization": f"Bearer {token}"})
     ids = [s["id"] for s in r2.json()["sessions"]]
     assert sid in ids
 
@@ -74,5 +79,6 @@ def test_session_delete_works(client):
     assert r2.json()["deleted"] is True
 
     # Now 404
-    r3 = client.get(f"/api/v1/copilot/sessions/{sid}")
+    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    r3 = client.get(f"/api/v1/copilot/sessions/{sid}", headers={"Authorization": f"Bearer {token}"})
     assert r3.status_code == 404

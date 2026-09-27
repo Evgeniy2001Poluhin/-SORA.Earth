@@ -4,7 +4,8 @@ from typing import List
 
 from fastapi import APIRouter, Depends, Request, Query
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
-from app.auth import require_admin
+from app.auth import require_admin, require_auth
+from app.security.spreadsheet import neutralize_cell
 
 from app.schemas import (
     ProjectInput as Project,
@@ -236,7 +237,7 @@ async def evaluate_project(request: Request, project: Project):
     return result
 
 
-@router.get("/history")
+@router.get("/history", dependencies=[Depends(require_auth)])
 def get_history(
     region: Optional[str] = Query(None),
     risk_level: Optional[str] = Query(None),
@@ -270,7 +271,7 @@ def get_history(
     finally:
         db.close()
 
-@router.get("/history/{eval_id}")
+@router.get("/history/{eval_id}", dependencies=[Depends(require_auth)])
 def get_evaluation_by_id(eval_id: int):
     from app.main import get_db_sync
     from fastapi import HTTPException
@@ -309,7 +310,7 @@ def clear_history():
     return {"status": "cleared"}
 
 
-@router.get("/export/csv")
+@router.get("/export/csv", dependencies=[Depends(require_auth)])
 def export_csv():
     from app.main import get_db_sync
 
@@ -328,10 +329,10 @@ def export_csv():
     ])
     for r in rows:
         w.writerow([
-            r.name, r.budget, r.co2_reduction, r.social_impact,
+            neutralize_cell(r.name or ""), r.budget, r.co2_reduction, r.social_impact,
             r.duration_months, r.total_score, r.environment_score,
             r.social_score, r.economic_score, r.success_probability,
-            r.risk_level, r.region, r.created_at,
+            neutralize_cell(r.risk_level or ""), neutralize_cell(r.region or ""), r.created_at,
         ])
     output.seek(0)
     return StreamingResponse(

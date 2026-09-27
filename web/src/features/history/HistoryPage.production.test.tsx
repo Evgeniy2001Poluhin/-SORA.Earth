@@ -16,8 +16,9 @@
  * Measured with transport stubs, not deduced.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { waitFor } from "@testing-library/react";
+import { waitFor, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
 
 vi.mock("@/api/mock", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/mock")>();
@@ -145,5 +146,50 @@ describe("the success probability column", () => {
     const cells = Array.from(container.querySelector(".hist-item")!.children).map((c) => c.textContent);
     expect(cells).toContain("28%");
     expect(cells).not.toContain("2750%");
+  });
+});
+
+describe("Authentication (GHSA-jmpv-7wjf-87q9)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows a sign-in message when the server answers 401", async () => {
+    stubStatus(401);
+    const { container } = renderPage();
+    await waitFor(() => expect(container.querySelector(".hist-error")).not.toBeNull());
+    const errorDiv = container.querySelector(".hist-error");
+    expect(errorDiv?.textContent).toContain("Sign in to view evaluation history");
+    expect(errorDiv?.textContent).not.toContain("Failed to load");
+  });
+
+  it("shows evaluation rows when the server answers 200", async () => {
+    stubJson({ items: [row(1, 70)], total: 1, limit: 20, offset: 0 });
+    const { container } = renderPage();
+    await waitFor(() => expect(container.querySelector(".hist-item")).not.toBeNull());
+    expect(container.textContent).not.toContain("Sign in");
+  });
+
+  it("sends the Authorization header when exporting CSV", async () => {
+    // Set a token
+    const { auth } = await import("@/api/client");
+    auth.set("test-token-abc123");
+
+    const stub = stubJson({ items: [], total: 0, limit: 20, offset: 0 });
+    renderPage();
+    await waitFor(() => screen.findByText(/Export CSV/i));
+
+    const user = userEvent.setup();
+    await user.click(screen.getByText(/Export CSV/i));
+
+    // Check that fetch was called with the Authorization header
+    const { callsOf } = await import("@/test/http");
+    const calls = callsOf(stub);
+    const exportCall = calls.find((c) => c.url.includes("/api/v1/export/csv"));
+    expect(exportCall).toBeDefined();
+    expect(exportCall?.headers?.["Authorization"]).toBe("Bearer test-token-abc123");
+
+    // Clean up
+    auth.set(null);
   });
 });
