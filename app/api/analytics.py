@@ -148,13 +148,14 @@ async def model_compare(project: ModelCompareRequest):
     feats_9 = m.make_features_base(legacy)
     feats_7 = m.make_features_xgb(legacy)
 
-    # rf, xgb, and nn only when its weights are loaded (#320); the ensemble is
-    # the blend of whatever ran, as /predict/stacking serves it.
+    # RandomForest, and neural network only when its weights are loaded (#320).
+    # XGBoost removed (FINDING-9): returns constant 93.73%. The ensemble is the
+    # blend of whatever ran, as /predict/stacking serves it.
     probabilities = _base_probabilities(m.rf_model, m.xgb_model, m.nn_model, feats_9, feats_7)
     ens_p = _blend(probabilities)
     thr = m.best_threshold
 
-    display = {"rf": "RandomForest", "xgb": "XGBoost", "nn": "NeuralNet"}
+    display = {"rf": "RandomForest", "nn": "NeuralNet"}
     models = {
         display[name]: {"probability": round(p * 100, 2), "prediction": int(p >= thr)}
         for name, p in probabilities.items()
@@ -258,7 +259,7 @@ def model_health(_: None = Depends(admin_auth)):
     return {
         "models": {
             "random_forest": {"loaded": rf_model is not None, "type": "RandomForestClassifier"},
-            "xgboost": {"loaded": xgb_model is not None, "type": "XGBClassifier"},
+            "xgboost": {"loaded": xgb_model is not None, "type": "XGBClassifier", "note": "not used in blends (FINDING-9: returns constant)"},
             "pytorch_mlp": {"loaded": nn_model is not None, "type": "SoraNet"},
             "ensemble_v2": {"loaded": ensemble_model_v2 is not None, "type": "StackingClassifier"},
         },
@@ -274,9 +275,9 @@ def model_health(_: None = Depends(admin_auth)):
         },
         # Derived, not a literal: this endpoint is named model-health and reports
         # each model's loaded flag, so its status must reflect them. The champion
-        # is RandomForest + XGBoost (the neural network is optional, #320); a
-        # missing one is "degraded", never "healthy" (#324 class).
-        "status": "healthy" if (rf_model is not None and xgb_model is not None) else "degraded",
+        # is RandomForest (the neural network is optional, #320; XGBoost removed
+        # in FINDING-9). A missing RandomForest is "degraded".
+        "status": "healthy" if rf_model is not None else "degraded",
     }
 @router.get("/data-health")
 def data_health(window_hours: int = 24):

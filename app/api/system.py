@@ -14,11 +14,14 @@ def _check_models():
         # The neural network is optional and reported, not required (#320). It
         # was required here while an unloaded one counted as present; requiring
         # it honestly would take readiness down wherever the weights are absent.
-        ok = all([rf_model is not None, xgb_model is not None])
+        # XGBoost is loaded but not used in blends (FINDING-9: returns constant),
+        # so it no longer affects health status.
+        ok = rf_model is not None
         return {
             "status": "healthy" if ok else "degraded",
             "loaded": ok,
             "neural_network_loaded": nn_model is not None,
+            "xgboost_loaded": xgb_model is not None,
         }
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
