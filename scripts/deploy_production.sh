@@ -1334,12 +1334,13 @@ echo "  acceptance: exclude only User-Agent $DEPLOY_PROBE_UA when counting user-
 # is reachable: _check_db returns "degraded" on error, not "unhealthy", so a
 # failed database connection still produces 200 "healthy" (#21).
 #
-# Read here rather than during the retry loop above: the body matters only once
-# the status code is known to be 200, so parsing it earlier would waste the work
-# on every retry. Best-effort: an unreadable body is a warning, not a refusal,
-# because the 200 above already proves the site is serving.
+# Read after the retry loop above, once the status is known to be 200. Not
+# best-effort, unlike the model provenance read further down: a body that cannot
+# be fetched or parsed gives "unknown", and a deployment that cannot show its
+# database is reachable is not accepted -- the same rollback as any other failed
+# check. Bounded like http_code, so a stalled response fails instead of hanging.
 DB_HEALTH="unknown"
-if _health_body="$(curl -fsS -A "$DEPLOY_PROBE_UA" "$SITE/api/v1/health" 2>/dev/null)"; then
+if _health_body="$(curl -fsS -m 20 -A "$DEPLOY_PROBE_UA" "$SITE/api/v1/health" 2>/dev/null)"; then
     DB_HEALTH="$(printf '%s' "$_health_body" | python3 -c '
 import json, sys
 try:
