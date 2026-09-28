@@ -64,6 +64,16 @@ REQUIRED_WINDOWS = 12
 MIN_COVERAGE = 0.80
 TRAINING_DAYS = {7: 90, 30: 180}
 
+# The M3 target, as docs/M3_FORECAST_DECLARATION.md §1 declares it:
+# `openmeteo:temperature`, one target. A report is
+# evidential only when computed on this target; archive backtests or alternative
+# indicators are marked as non-evidential, naming both the given and declared
+# target. scripts/evaluate_forecast.py takes its defaults from here rather than
+# restating them, so the declaration lives in one place.
+DECLARED_SOURCE = "openmeteo"
+DECLARED_INDICATOR = "temperature"
+DECLARED_TARGET = f"{DECLARED_SOURCE}:{DECLARED_INDICATOR}"
+
 
 @dataclass(frozen=True)
 class Observation:
