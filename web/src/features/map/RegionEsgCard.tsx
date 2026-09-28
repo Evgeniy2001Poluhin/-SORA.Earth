@@ -6,6 +6,7 @@
  * than an element, which left this block — the part that makes claims about a
  * number — untestable. `RussiaMapModal.tsx` had no tests at all.
  */
+import { Link } from "react-router-dom";
 import { ScoreKindNote, StaleNote } from "./ProvenanceNotes";
 import { sourcesCountText } from "./regionProvenance";
 
@@ -29,6 +30,8 @@ export type RegionEsgCardProps = {
   updatedAt?: string | null;
   /** When the region's score stopped being confirmed by fresh data. */
   staleSince?: string | null;
+  /** Region code for the link to the detail page. */
+  code?: string | null;
 };
 
 function Row({ k, v, color }: { k: string; v: string; color?: string }) {
@@ -44,7 +47,7 @@ function Row({ k, v, color }: { k: string; v: string; color?: string }) {
 }
 
 export default function RegionEsgCard({
-  score, breakdown, confidence, sourcesUsed, scoreKind, scoreVintage, updatedAt, staleSince,
+  score, breakdown, confidence, sourcesUsed, scoreKind, scoreVintage, updatedAt, staleSince, code,
 }: RegionEsgCardProps) {
   return (
     <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #1a1d20" }}>
@@ -77,6 +80,14 @@ export default function RegionEsgCard({
       {updatedAt && (
         <div style={{ marginTop: 4, fontSize: 10, opacity: 0.4 }}>
           Updated: {new Date(updatedAt).toLocaleString("ru-RU")}
+        </div>
+      )}
+
+      {code && (
+        <div style={{ marginTop: 8 }}>
+          <Link to={`/region/${code}`} style={{ fontSize: 12, color: "#5A9A6F", textDecoration: "none" }}>
+            Подробнее →
+          </Link>
         </div>
       )}
     </div>
