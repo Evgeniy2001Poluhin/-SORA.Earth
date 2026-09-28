@@ -979,7 +979,8 @@ procedure, and a green container health check is not evidence that the site
 works.** The script exists because every incident in the month it was written
 came from deploying by hand, and it is not a wrapper around convenience: it
 recreates nginx *after* the backend, runs `nginx -t`, checks the upstream, the
-certificate store, and finally `https://sora-earth.online/health` from outside.
+certificate store, checks `https://sora-earth.online/health` from outside for
+HTTP 200, and verifies the database health status in the response body.
 
 **Two configurations are bind-mounted single files, and a container pins the
 inode it started with.** `nginx/nginx.conf` and `infra/prometheus.yml` both

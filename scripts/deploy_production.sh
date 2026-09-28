@@ -1328,6 +1328,38 @@ done
 echo "  probe attempts $PROBE_ATTEMPTS, of which retried $PROBE_RETRIES; final 200 on every path"
 echo "  acceptance: exclude only User-Agent $DEPLOY_PROBE_UA when counting user-facing 5xx"
 
+# Database health, read from the body of /api/v1/health.
+#
+# 200 on /api/v1/health proves the process is up. It does not prove the database
+# is reachable: _check_db returns "degraded" on error, not "unhealthy", so a
+# failed database connection still produces 200 "healthy" (#21).
+#
+# Read here rather than during the retry loop above: the body matters only once
+# the status code is known to be 200, so parsing it earlier would waste the work
+# on every retry. Best-effort: an unreadable body is a warning, not a refusal,
+# because the 200 above already proves the site is serving.
+DB_HEALTH="unknown"
+if _health_body="$(curl -fsS -A "$DEPLOY_PROBE_UA" "$SITE/api/v1/health" 2>/dev/null)"; then
+    DB_HEALTH="$(printf '%s' "$_health_body" | python3 -c '
+import json, sys
+try:
+    checks = (json.load(sys.stdin) or {}).get("checks") or {}
+    db = checks.get("database") or {}
+    print(db.get("status") or "unknown")
+except Exception:
+    print("unknown")
+' 2>/dev/null || echo unknown)"
+fi
+
+case "$DB_HEALTH" in
+    healthy)
+        echo "  database health: $DB_HEALTH"
+        ;;
+    *)
+        fail "database health check reports '$DB_HEALTH', expected 'healthy'. The site answers 200 but cannot reach the database."
+        ;;
+esac
+
 # ------------------------------------------------------------------- the record
 
 # Accepted. Nothing after this point should roll back: the deployment is the
