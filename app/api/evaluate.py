@@ -219,10 +219,6 @@ async def evaluate_project(request: Request, project: Project):
         "renewable_share": bench["renewable_share"],
         "esg_rank": bench["esg_rank"],
         "hdi": bench["hdi"],
-        "project_vs_country": {
-            "esg_score_diff": round(result["total_score"] - bench["esg_rank"], 2),
-            "above_average": result["total_score"] > 50,
-        },
     }
 
     m = METRICS
