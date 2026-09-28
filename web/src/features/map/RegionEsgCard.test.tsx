@@ -29,6 +29,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 import RegionEsgCard, { type RegionEsgCardProps } from "./RegionEsgCard";
 
@@ -42,7 +43,11 @@ const BASE: RegionEsgCardProps = {
 };
 
 const textOf = (props: Partial<RegionEsgCardProps> = {}) =>
-  render(<RegionEsgCard {...BASE} {...props} />).container.textContent ?? "";
+  render(
+    <MemoryRouter>
+      <RegionEsgCard {...BASE} {...props} />
+    </MemoryRouter>
+  ).container.textContent ?? "";
 
 describe("the region ESG card", () => {
   it("still shows the score itself", () => {
@@ -105,5 +110,29 @@ describe("the region ESG card", () => {
     const text = textOf({ confidence: null });
 
     expect(text).not.toContain("Источников");
+  });
+
+  it("renders a link to the detail page when code is provided", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <RegionEsgCard {...BASE} code="RU-MOW" />
+      </MemoryRouter>
+    );
+
+    const link = container.querySelector('a[href="/region/RU-MOW"]');
+    expect(link).toBeInTheDocument();
+    expect(link?.textContent).toContain("Подробнее →");
+  });
+
+  it("omits the link when code is not provided", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <RegionEsgCard {...BASE} code={null} />
+      </MemoryRouter>
+    );
+
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("Подробнее →");
+    expect(container.querySelector('a[href^="/region/"]')).toBeNull();
   });
 });

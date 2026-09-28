@@ -53,5 +53,6 @@ export function cardPropsOf(region: EnrichedRussianRegion): RegionEsgCardProps {
     scoreVintage: region.scoreVintage,
     updatedAt: region.updatedAt,
     staleSince: region.staleSince,
+    code: region.code,
   };
 }

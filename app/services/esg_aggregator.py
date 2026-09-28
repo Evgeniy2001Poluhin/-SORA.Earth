@@ -251,10 +251,11 @@ def _norm(v, lo, hi):
     return _clip(100 * (v - lo) / (hi - lo))
 
 
-def _latest_by_region(db):
-    """Newest valid observation per (region, source, indicator).
+def _ranked_required_observations():
+    """Ranked subquery: newest valid observation per (region, source, indicator).
 
-    Returns (metrics_by_region, newest_delivered_at, rows_examined, vintage).
+    Returns a subquery with columns (region_id, source, indicator, value, unit,
+    delivered_at, temporal_kind, period_start, period_end, source_revision, rn).
 
     Each pair's delivery timestamp is `updated_at` (which app/ingesters/persist.py
     sets on the first write and refreshes on every repeat), falling back to
@@ -268,12 +269,13 @@ def _latest_by_region(db):
     production is PostgreSQL but the test suite runs on SQLite, and a read path
     that changes shape between them is worse than a longer query.
     """
-    ranked = (
+    return (
         select(
             EnvironmentalObservation.region_id,
             EnvironmentalObservation.source,
             EnvironmentalObservation.indicator,
             EnvironmentalObservation.value,
+            EnvironmentalObservation.unit,
             func.coalesce(
                 EnvironmentalObservation.updated_at,
                 EnvironmentalObservation.ingested_at
@@ -332,13 +334,21 @@ def _latest_by_region(db):
         .subquery()
     )
 
+
+def _latest_by_region(db):
+    """Newest valid observation per (region, source, indicator).
+
+    Returns (metrics_by_region, newest_delivered_at, rows_examined, vintage).
+    """
+    ranked = _ranked_required_observations()
+
     result = defaultdict(dict)
     newest_delivery = None
     examined = 0
 
     vintage: dict[str, str] = {}
 
-    for (region_id, source, indicator, value, delivered_at, kind,
+    for (region_id, source, indicator, value, unit, delivered_at, kind,
          period_start, period_end, source_revision, _rn) in db.execute(
         select(ranked).where(ranked.c.rn == 1)
     ):
@@ -359,6 +369,58 @@ def _latest_by_region(db):
             newest_delivery = delivered_at
 
     return result, newest_delivery, examined, vintage
+
+
+def required_inputs_for_region(db, region_id: str) -> list[dict]:
+    """Six inputs of the ESG score for one region, in declared order.
+
+    For each (source, indicator) in REQUIRED_METRICS: the rank-1 row for that
+    region as {"source", "indicator", "value", "unit", "temporal_kind",
+    "period_start", "period_end", "delivered_at", "source_revision",
+    "missing": False}, or {"source", "indicator", "value": None, ...,
+    "missing": True} when the region has no such row.
+
+    One query, filtered to the region. The selection and ranking are identical to
+    `_latest_by_region`: same helper, same filter, same ordering.
+    """
+    ranked = _ranked_required_observations()
+    rows = db.execute(
+        select(ranked).where(ranked.c.rn == 1, ranked.c.region_id == region_id)
+    ).fetchall()
+
+    # Index by (source, indicator) for fast lookup
+    by_key = {(r.source, r.indicator): r for r in rows}
+
+    result = []
+    for source, indicator in REQUIRED_METRICS:
+        r = by_key.get((source, indicator))
+        if r is None:
+            result.append({
+                "source": source,
+                "indicator": indicator,
+                "value": None,
+                "unit": None,
+                "temporal_kind": None,
+                "period_start": None,
+                "period_end": None,
+                "delivered_at": None,
+                "source_revision": None,
+                "missing": True,
+            })
+        else:
+            result.append({
+                "source": source,
+                "indicator": indicator,
+                "value": r.value,
+                "unit": r.unit,
+                "temporal_kind": r.temporal_kind,
+                "period_start": r.period_start,
+                "period_end": r.period_end,
+                "delivered_at": r.delivered_at,
+                "source_revision": r.source_revision,
+                "missing": False,
+            })
+    return result
 
 
 def _get(metrics, key):

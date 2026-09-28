@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 import { enrichRegions, cardPropsOf } from "./enrichRegions";
 import { RUSSIA_REGIONS } from "@/data/russia_regions";
@@ -78,7 +79,11 @@ describe("the full path from API to card", () => {
   it("shows the structural index note for a structural score", () => {
     const enriched = enrichRegions([RU_AST_API]);
     const ast = enriched.find((r) => r.code === "RU-AST")!;
-    const { container } = render(<RegionEsgCard {...cardPropsOf(ast)} />);
+    const { container } = render(
+      <MemoryRouter>
+        <RegionEsgCard {...cardPropsOf(ast)} />
+      </MemoryRouter>
+    );
     const text = container.textContent ?? "";
 
     expect(text).toContain("Структурный индекс");
@@ -89,7 +94,11 @@ describe("the full path from API to card", () => {
     const mockItem: Region = { ...RU_AST_API, score_kind: "mock", score_vintage: null };
     const enriched = enrichRegions([mockItem]);
     const ast = enriched.find((r) => r.code === "RU-AST")!;
-    const { container } = render(<RegionEsgCard {...cardPropsOf(ast)} />);
+    const { container } = render(
+      <MemoryRouter>
+        <RegionEsgCard {...cardPropsOf(ast)} />
+      </MemoryRouter>
+    );
     const text = container.textContent ?? "";
 
     expect(text).toContain("Заглушка");
@@ -100,7 +109,11 @@ describe("the full path from API to card", () => {
     const staleItem: Region = { ...RU_AST_API, stale_since: "2026-09-20T00:00:00Z" };
     const enriched = enrichRegions([staleItem]);
     const ast = enriched.find((r) => r.code === "RU-AST")!;
-    const { container } = render(<RegionEsgCard {...cardPropsOf(ast)} />);
+    const { container } = render(
+      <MemoryRouter>
+        <RegionEsgCard {...cardPropsOf(ast)} />
+      </MemoryRouter>
+    );
     const text = container.textContent ?? "";
 
     expect(text).toContain("Не подтверждено с");
@@ -111,7 +124,11 @@ describe("the full path from API to card", () => {
     const freshItem: Region = { ...RU_AST_API, stale_since: null };
     const enriched = enrichRegions([freshItem]);
     const ast = enriched.find((r) => r.code === "RU-AST")!;
-    const { container } = render(<RegionEsgCard {...cardPropsOf(ast)} />);
+    const { container } = render(
+      <MemoryRouter>
+        <RegionEsgCard {...cardPropsOf(ast)} />
+      </MemoryRouter>
+    );
     const text = container.textContent ?? "";
 
     expect(text).not.toContain("Не подтверждено с");
@@ -133,5 +150,15 @@ describe("enrichRegions carries stale_since", () => {
     const ast = enriched.find((r) => r.code === "RU-AST")!;
 
     expect(ast.staleSince).toBeNull();
+  });
+});
+
+describe("cardPropsOf carries code for the detail page link", () => {
+  it("includes the region code", () => {
+    const enriched = enrichRegions([RU_AST_API]);
+    const ast = enriched.find((r) => r.code === "RU-AST")!;
+    const props = cardPropsOf(ast);
+
+    expect(props.code).toBe("RU-AST");
   });
 });
