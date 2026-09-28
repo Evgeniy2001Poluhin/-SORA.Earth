@@ -39,12 +39,12 @@ class TestE4BiodiversityCategories:
         assert e4["score"] == 85.0, "biodiversity should get biodiversity score"
         assert result["audit_ready"] is True
 
-    def test_agro_category_scores_high(self):
-        """Training data 'agro' category should count as biodiversity."""
+    def test_agro_stays_neutral(self):
+        """'agro' never matched the old substrings; the list keeps it neutral."""
         proj = ProjectInput(**BASE_INPUTS, category="agro")
         result = assess_csrd(proj)
         e4 = result["categories"]["E4_Biodiversity"]
-        assert e4["score"] == 85.0, "agro should count as biodiversity"
+        assert e4["score"] == 50.0, "agro is not reclassified as biodiversity"
 
     def test_no_reforestation_planned_scores_low(self):
         """RED-FIRST: Text negating reforestation should NOT get biodiversity score.
@@ -134,13 +134,27 @@ class TestE3WaterCategories:
         # base 55 + 5*1.5 = 62.5
         assert e3["score"] == 62.5, "solar should get renewable score"
 
-    def test_energy_category_scores_medium(self):
-        """Training 'energy' category should get renewable score."""
+    def test_energy_stays_neutral(self):
+        """'energy' contains neither 'solar' nor 'wind'; it stays at the base."""
         inputs = {**BASE_INPUTS, "category": "energy", "social_impact": 5}
         proj = ProjectInput(**inputs)
         result = assess_csrd(proj)
         e3 = result["categories"]["E3_Water"]
-        assert e3["score"] == 62.5
+        # base 45 + 5*1.5 = 52.5
+        assert e3["score"] == 52.5
+
+    def test_water_treatment_preset_stays_a_water_project(self):
+        """CONTROL: the interface's own 'Water Treatment' preset keeps its class.
+
+        The old substring test counted it as water; an explicit list that forgot
+        it would have quietly downgraded the preset the CSRD page offers.
+        """
+        inputs = {**BASE_INPUTS, "category": "Water Treatment", "social_impact": 5}
+        proj = ProjectInput(**inputs)
+        result = assess_csrd(proj)
+        e3 = result["categories"]["E3_Water"]
+        # base 80 + 5*1.5 = 87.5
+        assert e3["score"] == 87.5
 
     def test_wind_energy_scores_medium(self):
         """Wind energy gets medium E3 score."""
@@ -226,11 +240,11 @@ class TestCaseInsensitivity:
         result = assess_csrd(proj)
 
         cat_lower = category.lower()
-        if cat_lower in ("reforestation", "agro", "biodiversity"):
+        if cat_lower in ("reforestation", "biodiversity"):
             assert result["categories"]["E4_Biodiversity"]["score"] == 85.0
         elif cat_lower == "water":
             assert result["categories"]["E3_Water"]["score"] >= 80.0
-        elif cat_lower in ("solar energy", "wind energy", "energy"):
+        elif cat_lower in ("solar energy", "wind energy"):
             assert result["categories"]["E3_Water"]["score"] >= 55.0
 
 

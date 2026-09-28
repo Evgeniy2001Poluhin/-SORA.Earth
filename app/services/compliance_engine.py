@@ -6,23 +6,29 @@ ESRS_WEIGHTS = {
     "S1_Workforce": 0.20, "G1_Governance": 0.20,
 }
 
-# Explicit category mappings to prevent substring false positives
-# Categories from training data: agro, energy, water, waste, edu, Unknown
-# Categories used in API defaults: "Solar Energy"
-# Map normalized category to (biodiversity_relevant, water_relevant, renewable_relevant)
+# Explicit category mappings, replacing substring tests (finding 2): "no
+# reforestation is planned" and "reform of procurement" matched "refor", and
+# "wastewater" matched "water". The category is free text, so the set lists the
+# values that actually arrive -- the interface's presets ("Solar Energy",
+# "Reforestation", "Water Treatment", "Other") and the training data's
+# categories (agro, energy, water, waste, edu, Unknown) -- and each keeps the
+# classification the old substring test gave it. Only the false matches change;
+# anything not listed gets the neutral branch.
+# (biodiversity_relevant, water_relevant, renewable_relevant)
 CATEGORY_ATTRIBUTES = {
-    # Training data categories
-    "agro": (True, False, False),  # Agriculture/reforestation
-    "energy": (False, False, True),  # Renewable energy (solar, wind)
-    "water": (False, True, False),  # Water projects
-    "waste": (False, False, False),  # Waste management
-    "edu": (False, False, False),  # Education
-    "unknown": (False, False, False),  # Unknown
-    # API default categories
-    "solar energy": (False, False, True),
-    "wind energy": (False, False, True),
     "reforestation": (True, False, False),
     "biodiversity": (True, False, False),
+    "water": (False, True, False),
+    "water treatment": (False, True, False),
+    "solar energy": (False, False, True),
+    "wind energy": (False, False, True),
+    # Neutral, as they were: the old substrings matched none of these.
+    "agro": (False, False, False),
+    "energy": (False, False, False),
+    "waste": (False, False, False),
+    "edu": (False, False, False),
+    "unknown": (False, False, False),
+    "other": (False, False, False),
 }
 
 def _normalize_category(cat: str) -> str:
