@@ -107,10 +107,11 @@ def test_what_if():
 
 @pytest.mark.timeout(60)
 def test_monte_carlo():
+    # /analytics/monte-carlo computed with an old formula and understated risk
+    # (finding 6). It answers 410 and names the endpoint that uses the model.
     r = client.post("/api/v1/analytics/monte-carlo", json=PROJECT)
-    assert r.status_code == 200
-    data = r.json()
-    assert "mean_score" in data or "mean" in str(data).lower()
+    assert r.status_code == 410
+    assert r.json()["detail"]["replacement"] == "/api/v1/evaluate/monte-carlo"
 
 # ---- PDF Report ----
 
