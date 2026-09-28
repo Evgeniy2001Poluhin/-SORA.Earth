@@ -195,3 +195,35 @@ def test_prediction_is_integer_zero_or_one(client):
         )
     finally:
         db.close()
+
+
+@pytest.mark.parametrize("offset, expected", [(0.0, 1), (-0.1, 0)])
+def test_prediction_at_the_threshold_boundary(client, offset, expected):
+    """Exactly at the threshold is a positive prediction; just below is not.
+
+    Called on log_prediction directly with a controlled probability, because no
+    real project lands on the threshold to a tenth of a percent -- which is why
+    `>=` becoming `>` survived every test above.
+    """
+    from app.database import PredictionLog
+    from app.main import best_threshold, get_db_sync, log_prediction
+    from types import SimpleNamespace
+
+    probability = round(best_threshold * 100 + offset, 4)
+    # The same shape /evaluate passes: a project with attributes, not a dict.
+    project = SimpleNamespace(budget=100000, co2_reduction=100, social_impact=5,
+                              duration_months=12, category="Solar Energy", region="Europe")
+    log_prediction("evaluate", project, {"success_probability": probability})
+
+    db = get_db_sync()
+    try:
+        row = db.query(PredictionLog).filter(
+            PredictionLog.endpoint == "evaluate"
+        ).order_by(PredictionLog.id.desc()).first()
+    finally:
+        db.close()
+    assert row is not None and row.probability == probability
+    assert row.prediction == expected, (
+        f"probability {probability} against threshold {best_threshold * 100}: "
+        f"prediction {row.prediction}, expected {expected}"
+    )
