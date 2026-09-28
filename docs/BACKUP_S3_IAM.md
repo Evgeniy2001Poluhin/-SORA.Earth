@@ -139,20 +139,26 @@ Never in `docker-compose.yml`, never in a shell profile, never in argv.
 only into the client's own environment — asserted by
 `test_no_script_puts_a_credential_in_argv`.
 
-On this host they belong in systemd credentials, which keep the value out of
-the unit file and out of the process's environment for anything but the
-service:
+On this host the files live in `/etc/sora-earth`, `0400`, owned by `sora`,
+and `/etc/sora-earth/backup.env` names them:
 
-```ini
-[Service]
-LoadCredential=s3-access-key:/etc/sora/s3-access-key
-LoadCredential=s3-secret-key:/etc/sora/s3-secret-key
-Environment=BACKUP_S3_ACCESS_KEY_FILE=%d/s3-access-key
-Environment=BACKUP_S3_SECRET_KEY_FILE=%d/s3-secret-key
+```sh
+BACKUP_S3_ACCESS_KEY_FILE=/etc/sora-earth/s3-access-key
+BACKUP_S3_SECRET_KEY_FILE=/etc/sora-earth/s3-secret-key
 ```
 
-The files under `/etc/sora` are `0400 root:root`. `%d` is the credentials
-directory systemd creates for the unit, readable only by it.
+`sora-backup.service` runs as `sora` and reads `backup.env` through
+`EnvironmentFile=`, so the file holds paths and settings, never a key. The unit
+carries no inline `Environment=` except the runtime directory -- asserted by
+`tests/test_backup_schedule.py::test_no_secret_is_written_into_the_unit` -- so
+the credentials cannot drift into the world-readable unit file either.
+
+This section used to recommend systemd `LoadCredential=` with the files under
+`/etc/sora`, `0400 root:root`. The unit never did that, the test forbids the
+inline `Environment=` lines it needs, and a service running as `sora` cannot
+read a `root`-only file: following that advice produced keys the backup could
+not use. `LoadCredential=` would be a reasonable design; it would have to arrive
+as a change to the unit and its test, not as advice beside them.
 
 ## What still needs a decision
 

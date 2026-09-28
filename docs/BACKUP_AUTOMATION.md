@@ -169,6 +169,7 @@ journalctl -u sora-backup.service --since '2 days ago'
 | `BACKUP_ALERT_HOOK` | executable called on failure |
 | `BACKUP_PYTHON` | interpreter for `backup_crypt.py`, default `python3`; needs `cryptography` |
 | `BACKUP_RUNTIME_DIR` | `0700` directory owned by the service user, for the lock; **required in production** |
+| `PG_CONTAINER`, `PGUSER` | the container `pg_dump` runs in, and the role it connects as. `PGUSER` defaults to `postgres`; set it to the role the database was initialised with (`POSTGRES_USER`) -- on production the one the local daily dump uses |
 
 Credentials are read from files and exported to the client, never passed as
 arguments — an argument list is readable by every process on the host. That rule
