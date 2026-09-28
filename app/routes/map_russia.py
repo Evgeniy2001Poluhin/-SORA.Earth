@@ -180,13 +180,15 @@ async def russia_regions():
 
 @router.get("/russia/{region_code}")
 async def region_detail(region_code: str):
-    """Detailed region view: snapshot + signals + per-metric trend."""
+    """Detailed region view: snapshot + inputs of the score."""
     pool = await _get_pool()
     if pool is None:
         return {"error": "DB unavailable", "region_code": region_code}
 
     meta = _REGIONS_META.get(region_code, {"code": region_code, "name": region_code})
 
+    # Read the snapshot (asyncpg)
+    snap = None
     try:
         async with pool.acquire() as c:
             snap = await c.fetchrow(
@@ -196,17 +198,31 @@ async def region_detail(region_code: str):
                 "FROM regional_esg_snapshot WHERE region_code = $1",
                 region_code,
             )
-            signals = await c.fetch(
-                "SELECT source, metric, value, unit, observed_at, metadata_json AS metadata "
-                "FROM region_signals WHERE region_code = $1 "
-                "ORDER BY observed_at DESC",
-                region_code,
-            )
     except Exception as e:
         log.warning(f"[region_detail] DB read failed: {e}")
         return {"error": str(e), "region_code": region_code}
 
-    if snap is None and not signals:
+    # Read the inputs (SQLAlchemy in a thread). None, not [], when the read
+    # fails: an empty list would render as "no inputs" and hide the failure.
+    inputs = None
+    try:
+        from app.database import SessionLocal
+        from app.services.esg_aggregator import required_inputs_for_region
+
+        def _get_inputs():
+            db = SessionLocal()
+            try:
+                return required_inputs_for_region(db, region_code)
+            finally:
+                db.close()
+
+        inputs = await asyncio.to_thread(_get_inputs)
+    except Exception as e:
+        log.warning(f"[region_detail] inputs read failed: {e}")
+
+    # "region not found" means: no snapshot row and every input read and missing.
+    # A failed read is not evidence that the region does not exist.
+    if snap is None and inputs is not None and all(inp["missing"] for inp in inputs):
         return {"error": "region not found", "region_code": region_code}
 
     esg = None
@@ -218,33 +234,17 @@ async def region_detail(region_code: str):
             "g_score": float(snap["g_score"] or 0),
         }
 
-    indicators = []
-    by_metric = {}
-    for s in signals:
-        key = (s["source"], s["metric"])
-        if key not in by_metric:
-            by_metric[key] = []
-        by_metric[key].append(s)
-
-    for (source, metric), rows in by_metric.items():
-        rows_sorted = sorted(rows, key=lambda r: r["observed_at"])
-        latest = rows_sorted[-1]
-        trend = [
-            {
-                "date": r["observed_at"].isoformat() if r["observed_at"] else None,
-                "value": float(r["value"]) if r["value"] is not None else None,
-            }
-            for r in rows_sorted
-        ]
-        indicators.append({
-            "source": source,
-            "metric": metric,
-            "value": float(latest["value"]) if latest["value"] is not None else None,
-            "unit": latest["unit"],
-            "observed_at": latest["observed_at"].isoformat() if latest["observed_at"] else None,
-            "trend": trend,
-            "points_count": len(trend),
-        })
+    # Serialize inputs: datetimes as ISO strings; None stays None (read failed)
+    inputs_serialized = None if inputs is None else []
+    for inp in inputs or []:
+        s = {**inp}
+        if s.get("period_start"):
+            s["period_start"] = s["period_start"].isoformat()
+        if s.get("period_end"):
+            s["period_end"] = s["period_end"].isoformat()
+        if s.get("delivered_at"):
+            s["delivered_at"] = s["delivered_at"].isoformat()
+        inputs_serialized.append(s)
 
     return {
         "region": meta,
@@ -256,9 +256,7 @@ async def region_detail(region_code: str):
         "computed_at": snap["computed_at"].isoformat() if snap and snap["computed_at"] else None,
         "stale_since": snap["stale_since"].isoformat() if snap and snap["stale_since"] else None,
         "features": dict(snap["features"]) if snap and snap["features"] else None,
-        "indicators": indicators,
-        "indicators_count": len(indicators),
-        "signals_total": len(signals),
+        "inputs": inputs_serialized,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         **score_provenance(),
     }

@@ -430,9 +430,8 @@ def test_asyncpg_region_detail_emits_stale_since(monkeypatch):
         assert abs((parsed - stale_date).total_seconds()) < 1, (
             f"Expected {stale_date}, got {parsed}"
         )
-        # The region has no signals, so region_detail must not invent an indicator.
-        assert stale_result["indicators"] == [], stale_result["indicators"]
-        assert stale_result["signals_total"] == 0
+        # The region detail now returns inputs, not indicators.
+        assert "inputs" in stale_result
 
         # Test fresh region
         fresh_result = await map_russia.region_detail("RU-FRESH2")

@@ -4,14 +4,17 @@ import "./region-detail.css";
 import { ScoreKindNote, StaleNote } from "@/features/map/ProvenanceNotes";
 import { sourcesCountText } from "@/features/map/regionProvenance";
 
-type Indicator = {
+type Input = {
   source: string;
-  metric: string;
+  indicator: string;
   value: number | null;
   unit: string | null;
-  observed_at: string | null;
-  trend?: { date: string; value: number | null }[];
-  points_count: number;
+  temporal_kind: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  delivered_at: string | null;
+  source_revision: string | null;
+  missing: boolean;
 };
 
 /** GET /api/v1/map/russia/{code} answers with a region, or an error envelope. */
@@ -36,9 +39,8 @@ type RegionDetailData = {
   score_kind?: string | null;
   score_vintage?: string | null;
   stale_since?: string | null;
-  indicators: Indicator[];
-  indicators_count: number;
-  signals_total: number;
+  /** null when the server could not read the inputs -- not the same as none. */
+  inputs: Input[] | null;
 };
 
 const GREEN = "#5A9A6F";
@@ -51,6 +53,46 @@ function colorForScore(s: number): string {
   if (s >= 40) return YELLOW;
   if (s >= 20) return "#D08770";
   return RED;
+}
+
+const INDICATOR_LABELS: Record<string, string> = {
+  "esg_index_baseline": "Базовый ESG-индекс",
+  "unemployment_rate": "Уровень безработицы",
+  "avg_income_rub": "Средний доход",
+  "life_expectancy": "Ожидаемая продолжительность жизни",
+  "budget_transparency": "Прозрачность бюджета",
+  "digital_gov_index": "Индекс цифрового госуправления",
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  "sber_veb_baseline": "Сбер/ВЭБ, базовая линия",
+  "rosstat": "Росстат",
+};
+
+const UNIT_LABELS: Record<string, string> = {
+  "%": "%",
+  "RUB": "₽",
+  "years": "лет",
+  "0-100": "из 100",
+};
+
+function formatValue(value: number, unit: string | null): string {
+  const number = value.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+  return unit ? `${number} ${UNIT_LABELS[unit] ?? unit}` : number;
+}
+
+function formatPeriod(input: Input): string {
+  if (input.temporal_kind === "period" && input.period_start && input.period_end) {
+    // The period bounds are midnight UTC: read the year in UTC, or a viewer
+    // west of Greenwich sees 2024-01-01 as 2023.
+    const start = new Date(input.period_start).getUTCFullYear();
+    const end = new Date(input.period_end).getUTCFullYear();
+    return start === end ? String(start) : `${start}-${end}`;
+  }
+  if (input.temporal_kind === "not_applicable") {
+    return "без периода";
+  }
+  return "-";
 }
 
 export default function RegionDetail() {
@@ -124,28 +166,37 @@ export default function RegionDetail() {
         )}
       </div>
 
-      <h2 className="rd-section-title">Indicators<span className="count">({data.indicators_count})</span></h2>
+      <h2 className="rd-section-title">Входные данные оценки</h2>
       <div className="rd-table-wrap">
         <table className="rd-table">
           <thead>
             <tr>
-              <th>Source</th>
-              <th>Metric</th>
-              <th className="num">Value</th>
-              <th>Unit</th>
-              <th>Observed</th>
-              <th className="num">Points</th>
+              <th>Показатель</th>
+              <th className="num">Значение</th>
+              <th>Источник</th>
+              <th>Период</th>
+              <th>Получено</th>
             </tr>
           </thead>
           <tbody>
-            {data.indicators.map((ind, i) => (
+            {data.inputs == null && (
+              <tr>
+                <td colSpan={5} className="muted">Входные данные недоступны: сервер не смог их прочитать</td>
+              </tr>
+            )}
+            {data.inputs && data.inputs.map((inp, i) => (
               <tr key={i}>
-                <td>{ind.source}</td>
-                <td className="mono">{ind.metric}</td>
-                <td className="num">{ind.value != null ? ind.value.toFixed(2) : "-"}</td>
-                <td className="muted">{ind.unit || "-"}</td>
-                <td className="muted">{ind.observed_at ? new Date(ind.observed_at).toLocaleDateString("ru-RU") : "-"}</td>
-                <td className="num muted">{ind.points_count}</td>
+                <td>{INDICATOR_LABELS[inp.indicator] || inp.indicator}</td>
+                <td className="num">
+                  {inp.missing || inp.value == null
+                    ? <span className="muted">нет данных</span>
+                    : formatValue(inp.value, inp.unit)}
+                </td>
+                <td className="muted">{SOURCE_LABELS[inp.source] || inp.source}</td>
+                <td className="muted">{formatPeriod(inp)}</td>
+                <td className="muted">
+                  {inp.delivered_at ? new Date(inp.delivered_at).toLocaleDateString("ru-RU") : "-"}
+                </td>
               </tr>
             ))}
           </tbody>
