@@ -178,7 +178,7 @@ def predict_stacking(project: Project):
 
     # The composition is part of the key, so a result blended from a different
     # set of models is never served for this one.
-    composition = "rf+xgb+nn" if m.nn_model is not None else "rf+xgb"
+    composition = "rf+nn" if m.nn_model is not None else "rf"
     ck = _cache_key("stacking:" + composition, project.model_dump())
     cached = cache_get(ck)
     if cached:
