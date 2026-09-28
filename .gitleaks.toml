@@ -54,3 +54,19 @@ regexes = [
   # exception that will outlive the reason for it.
   '''not-a-real-credential-invalid-by-design''',
 ]
+
+# Six historical commits, and only these (GHSA-7ph8-9q6j-3fr9). The full
+# history scan finds 11 values in them: API keys the owner has revoked at the
+# provider, and test placeholders. They stay in the public history -- rewriting
+# it would break every clone and remove nothing from copies already made -- so
+# the commits are excluded instead of the values being matched by pattern. No
+# rule and no path is relaxed: every other commit, and every future one, is
+# scanned exactly as before, which is the point of making the scan pass again.
+commits = [
+  "997de75e9547c4d42b1eb01fc4882b7281e4bb78",  # 2026-05-07 tests/test_coverage_final.py
+  "ad29a2c6ef558cd6353905e98eb3b8e99b38a924",  # 2026-04-07 tests/test_coverage_final.py
+  "b05dc990bdf066b2aa942de6fd2bd8b99b1c4977",  # 2026-04-09 tests/test_coverage_final.py
+  "e77294599d817c54979b3ea08892bfd4a40b2c4d",  # 2026-04-15 tests/test_coverage_final.py
+  "bb5aeb45fa708e10e82126365401d982d7bbd521",  # 2026-07-10 SECURITY_AUDIT_RESULTS.md, SECURITY_FIXES_SUMMARY.md
+  "a90dd25a546cf90edd82f622c8b37f39eb8f762c",  # 2026-07-30 tests/test_secret_validation.py
+]
