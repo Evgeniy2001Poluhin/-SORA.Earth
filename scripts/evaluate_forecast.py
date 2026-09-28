@@ -30,8 +30,13 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-DEFAULT_SOURCE = "openmeteo"
-DEFAULT_INDICATOR = "temperature"
+from app.services.forecasting.entry_conditions import (
+    DECLARED_SOURCE,
+    DECLARED_INDICATOR,
+)
+
+DEFAULT_SOURCE = DECLARED_SOURCE
+DEFAULT_INDICATOR = DECLARED_INDICATOR
 
 
 def declared_points():

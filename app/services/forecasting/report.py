@@ -185,7 +185,7 @@ def build_report(
 
     # Phase 9: Candidate models evaluation
     from .challengers import CANDIDATES
-    from .evaluation import compare_to_baselines, evaluate_by_region
+    from .evaluation import evaluate_by_region
 
     # Determine which candidates to evaluate
     available = {c.name: c for c in CANDIDATES}
@@ -249,25 +249,6 @@ def build_report(
                 train_size=train_size,
                 n_windows=entry_conditions.REQUIRED_WINDOWS,
                 season_length=season_length,
-            )
-
-            # Also run compare_to_baselines for a single representative point
-            # to get the full comparison
-            first_point = points_in_data[0]
-            point_frame = pd.DataFrame(
-                [{"ds": pd.Timestamp(o.period_end), "y": o.value}
-                 for o in observations if o.region == first_point]
-            ).sort_values("ds").reset_index(drop=True)
-
-            comparison = compare_to_baselines(
-                lambda train_df, h, m=model: (m.fit(train_df, "y"), m.predict(h).yhat)[1],
-                point_frame,
-                target_col="y",
-                horizon=primary,
-                train_size=train_size,
-                n_windows=entry_conditions.REQUIRED_WINDOWS,
-                season_length=season_length,
-                candidate_name=spec.name,
             )
 
             # Compute metrics (both MASE and MAE)
@@ -336,7 +317,6 @@ def build_report(
                 "eligible_for_promotion": eligible,
                 "regions_scored": len(regional.reports),
                 "regions_skipped": len(regional.skipped),
-                "comparison_summary": comparison.summary(),
             }
 
         except Exception as exc:
@@ -362,6 +342,13 @@ def build_report(
             "the point set was taken from the data, so 'every declared region "
             "present' passed vacuously")
 
+    # Check target matches the declared M3 target
+    declared_target = entry_conditions.DECLARED_TARGET
+    if target != declared_target:
+        refusals.append(
+            f"the target is {target}, not the declared M3 target {declared_target}")
+
+    report["declared_target"] = declared_target
     report["evidential"] = not refusals
     report["why_not_evidential"] = refusals
     return report

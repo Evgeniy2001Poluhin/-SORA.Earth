@@ -141,16 +141,19 @@ def test_candidates_evaluated_on_same_windows_as_baselines():
     evaluated = [name for name, info in candidates_section.items() if info.get("evaluated")]
     assert len(evaluated) > 0, "At least one candidate should be evaluated"
 
-    # For each evaluated candidate, check they were scored on the same number of windows
+    # For each evaluated candidate, check they have the all-region fields
     for name, info in candidates_section.items():
         if info.get("evaluated"):
-            summary = info.get("comparison_summary", {})
-            # The candidate should have been compared to baselines
-            assert "candidate" in summary, f"{name}: comparison_summary should have candidate"
+            # All-region fields should be present
+            assert "mean_mase" in info, f"{name}: should have mean_mase"
+            assert "mean_mae" in info, f"{name}: should have mean_mae"
+            assert "beats_every_baseline" in info, f"{name}: should have beats_every_baseline"
+            assert "per_baseline_mae_ratios" in info, f"{name}: should have per_baseline_mae_ratios"
 
-            # Check that baselines were scored in comparison
-            baselines_scored = summary.get("baselines_scored", 0)
-            assert baselines_scored > 0, f"{name}: at least one baseline should be scored"
+            # comparison_summary should NOT be present
+            assert "comparison_summary" not in info, (
+                f"{name}: comparison_summary should not be present"
+            )
 
     # Determinism: run twice and check identical results
     report2 = build_report(
