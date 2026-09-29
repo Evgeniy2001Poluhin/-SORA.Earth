@@ -76,7 +76,7 @@ export function HomePage() {
         <div className="home-globe" ref={host}/>
       </section>
       <section className="home-kpis">
-        <Kpi k="Models" v="4" sub="RF · XGB · MLP · Stacking"/>
+        <Kpi k="Models" v="3" sub="RF · MLP · Stacking"/>
         <Kpi k="Production AUC" v="0.82" sub="CV 0.98 · calibrated"/>
         <Kpi k="Retrain cycles" v="29" sub="closed-loop · drift→retrain"/>
         <Kpi k="API endpoints" v="154" sub="FastAPI · /api/v1"/>

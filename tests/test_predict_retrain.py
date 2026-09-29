@@ -94,7 +94,8 @@ class TestPredict:
         assert r.status_code == 200
         d = r.json()
         assert d["model"] == "StackingEnsemble"
-        expected = {"rf", "xgb"} | ({"nn"} if main_module.nn_model is not None else set())
+        # XGBoost removed (FINDING-9): only rf and optionally nn
+        expected = {"rf"} | ({"nn"} if main_module.nn_model is not None else set())
         assert set(d["base_models"]) == expected
 
     def test_predict_compare(self):
@@ -103,8 +104,10 @@ class TestPredict:
         d = r.json()
         assert len(d["projects"]) == 2
         assert d["projects"][0]["probability"] >= d["projects"][1]["probability"]
-        for key in ["RandomForest", "XGBoost", "StackingEnsemble"]:
+        # XGBoost removed (FINDING-9)
+        for key in ["RandomForest", "StackingEnsemble"]:
             assert key in d
+        assert "XGBoost" not in d
         assert ("NeuralNet" in d) == (main_module.nn_model is not None)
 
     def test_predict_explain(self):

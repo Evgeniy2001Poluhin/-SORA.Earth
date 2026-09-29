@@ -5,6 +5,9 @@ label them RandomForest / XGBoost / NeuralNet / StackingEnsemble -- numbers that
 never touched a model, served to the compare panel. It now runs the same models
 the prediction routes run, so the "RandomForest" probability is the one
 `rf_model` actually produces, and the neural network appears only when loaded.
+
+XGBoost removed (FINDING-9): returns constant 93.73% for every project, so it
+no longer appears in model-compare output.
 """
 URL = "/api/v1/analytics/model-compare"
 PAYLOAD = {"budget": 150000, "co2_reduction": 60, "social_impact": 7, "duration_months": 12}
@@ -29,9 +32,7 @@ def test_the_random_forest_probability_is_the_models_own(client):
     assert body["models"]["RandomForest"]["probability"] == round(real["rf"] * 100, 2), (
         "the RandomForest number is not what rf_model produced"
     )
-    assert body["models"]["XGBoost"]["probability"] == round(real["xgb"] * 100, 2), (
-        "the XGBoost number is not what xgb_model produced"
-    )
+    # XGBoost removed (FINDING-9): no longer in output
 
 
 def test_the_neural_network_appears_only_when_loaded(client):
@@ -49,7 +50,9 @@ def test_the_neural_network_appears_only_when_loaded(client):
 def test_the_shape_and_ensemble_are_preserved(client):
     body = client.post(URL, json=PAYLOAD).json()
     assert set(body) == {"models", "best_model", "threshold"}
-    assert "RandomForest" in body["models"] and "XGBoost" in body["models"]
+    assert "RandomForest" in body["models"]
+    # XGBoost removed (FINDING-9)
+    assert "XGBoost" not in body["models"]
     assert "StackingEnsemble" in body["models"]
     for entry in body["models"].values():
         assert set(entry) == {"probability", "prediction"}

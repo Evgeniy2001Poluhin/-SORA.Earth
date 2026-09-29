@@ -101,8 +101,8 @@ def test_a_loaded_champion_is_reported_healthy(health):
 
 @pytest.mark.parametrize(
     "rf, xgb",
-    [(False, True), (True, False), (False, False)],
-    ids=["no-randomforest", "no-xgboost", "nothing-loaded"],
+    [(False, True), (False, False)],
+    ids=["no-randomforest", "nothing-loaded"],
 )
 def test_a_champion_that_did_not_load_is_not_reported_healthy(health, rf, xgb):
     answer = health(rf=rf, xgb=xgb)
@@ -113,6 +113,14 @@ def test_a_champion_that_did_not_load_is_not_reported_healthy(health, rf, xgb):
         f"green HEALTHY"
     )
     assert answer["model_status"] == "degraded", answer["model_status"]
+
+
+def test_an_unused_xgboost_does_not_decide_health(health):
+    """XGBoost serves nothing since finding 9, so its absence is not a fault.
+
+    The case used to be in the list above; the RandomForest cases stay there.
+    """
+    assert health(rf=True, xgb=False)["model_status"] == "healthy"
 
 
 @pytest.mark.parametrize(
