@@ -40,8 +40,10 @@ export function UncertaintyCard({ payload }: Props) {
   //
   // Guarded on the fields actually rendered rather than on the object, so a
   // payload that arrives without them renders nothing, exactly as a failed
-  // request already does.
-  if (!q.data?.prediction?.mean ||
+  // request already does. All three checks use `typeof !== "number"` rather
+  // than truthiness: a mean of 0 is a real answer (every tree votes "no"),
+  // and 0 is falsy.
+  if (typeof q.data?.prediction?.mean !== "number" ||
       typeof q.data?.tree_distribution?.n_trees !== "number" ||
       typeof q.data?.tree_distribution?.votes_for !== "number") return null;
   const u = q.data;

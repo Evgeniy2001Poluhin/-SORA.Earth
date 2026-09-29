@@ -157,4 +157,21 @@ describe("UncertaintyCard on the production path", () => {
     expect(screen.queryByText(/median/)).not.toBeInTheDocument();
     expect(container.querySelector(".uc-bar")).toBeNull();
   });
+
+  it("a unanimous 'no' (mean=0, votes_for=0) still renders the card", async () => {
+    // When all trees vote against success, mean is exactly 0. The previous
+    // guard `!q.data?.prediction?.mean` treated 0 as falsy and the card
+    // disappeared. A unanimous vote is still a real answer and must be shown.
+    const unanimousNo = {
+      ...SERVER_UNCERTAINTY,
+      prediction: { mean: 0, median: 0, lower_90: 0, upper_90: 0 },
+      tree_distribution: { ...SERVER_UNCERTAINTY.tree_distribution, votes_for: 0 },
+    };
+    stubJson(unanimousNo);
+
+    renderWithQuery(<UncertaintyCard payload={PAYLOAD} />);
+
+    await waitFor(() => expect(screen.getByText("0.0%")).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getByText(`0 of ${unanimousNo.tree_distribution.n_trees} trees vote for success`)).toBeInTheDocument();
+  });
 });
