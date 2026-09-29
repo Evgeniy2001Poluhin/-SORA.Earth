@@ -5,13 +5,15 @@
  * model" in step 02 (it is a RandomForest), "32 countries" in the hero and
  * tour (27 in the evaluation list, 33 on the map), and "Same backend that
  * powers the live tile above. ~300ms per evaluation." (no live tile, 300ms
- * never measured). This test verifies all four are fixed.
+ * never measured). The page's claims are checked on the rendered page. The
+ * tour's step text is not covered by a test, because the tour renders into a
+ * portal and shows one step at a time, and exporting its steps only for a test
+ * would change production code.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { HomePage } from "./HomePage";
-import OnboardingTour from "@/app/OnboardingTour";
 
 // Mock three to prevent WebGL errors in jsdom
 vi.mock("three", () => ({
@@ -79,21 +81,5 @@ describe("HomePage production claims", () => {
     );
     expect(container.textContent).not.toContain("live tile");
     expect(container.textContent).not.toContain("300ms");
-  });
-});
-
-describe("OnboardingTour production claims", () => {
-  it("does not claim 32 countries", () => {
-    const { container } = render(
-      <MemoryRouter>
-        <OnboardingTour runSignal={1} />
-      </MemoryRouter>
-    );
-    // The tour renders its steps via Joyride, which may not render them all in jsdom.
-    // We can at least verify the STEPS constant doesn't contain "32 countries".
-    // To verify the actual rendered content, we'd need to check if Joyride renders in jsdom.
-    // Let's try to see if any tour content is visible in the DOM.
-    const bodyText = container.textContent || "";
-    expect(bodyText).not.toContain("32 countries");
   });
 });
