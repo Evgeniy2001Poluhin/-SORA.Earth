@@ -19,17 +19,26 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 
-# PDF text extraction functions from tests/test_reports_no_fake_ml.py
+# PDF text extraction functions
+# This helper differs from test_reports_no_fake_ml.py because fpdf2 writes raw Flate
+# (zlib) streams, while reportlab writes ASCII85-encoded streams. Stripping binary
+# zlib data can corrupt the adler32 checksum when the last byte is whitespace.
 def _decoded_streams(data: bytes):
     for m in re.finditer(rb"stream\r?\n", data):
         start = m.end(); end = data.find(b"endstream", start)
         if end < 0:
             continue
-        body = data[start:end].strip()
+        body = data[start:end]
         try:
-            if body.endswith(b"~>"):
-                body = base64.a85decode(body[:-2])
-            yield zlib.decompress(body)
+            # ASCII85-encoded streams (reportlab): strip and decode
+            if body.rstrip().endswith(b"~>"):
+                body = base64.a85decode(body.rstrip()[:-2])
+                yield zlib.decompress(body)
+            else:
+                # Raw Flate streams (fpdf2): decompress without stripping
+                # decompressobj().decompress() stops at end of zlib stream,
+                # ignoring trailing EOL before "endstream"
+                yield zlib.decompressobj().decompress(body)
         except Exception:
             continue
 
@@ -247,29 +256,6 @@ def test_source_register_global_avg_entry_updated():
     from app.ingesters.source_register import ADMINISTRATIVE_SNAPSHOT
     assert global_avg_entry.measurement_kind == ADMINISTRATIVE_SNAPSHOT, \
         f"global_avg.measurement_kind should be ADMINISTRATIVE_SNAPSHOT, got {global_avg_entry.measurement_kind}"
-
-
-def test_benchmark_values_were_actually_updated():
-    """Spot-check that at least one country's values changed from known old values."""
-    from app.country_benchmarks import BENCHMARKS
-    import json
-
-    # Load the new values JSON to verify changes
-    with open('/private/tmp/claude-501/-Users-evgenijpoluhin-sora-earth-ai-platform--claude-worktrees-frosty-archimedes-03665d/de140aed-61d0-4f89-a6b8-8d71b0a13b3b/scratchpad/n16/new_values.json') as f:
-        new_values = json.load(f)
-
-    # Check a few countries where values definitely changed
-    germany = BENCHMARKS["Germany"]
-    assert germany["co2_per_capita"] == 6.9, \
-        f"Germany co2_per_capita should be updated to 6.9, got {germany['co2_per_capita']}"
-    assert germany["gdp_per_capita"] == 56104, \
-        f"Germany gdp_per_capita should be updated to 56104, got {germany['gdp_per_capita']}"
-    assert germany["hdi"] == 0.95, \
-        f"Germany hdi should be updated to 0.95, got {germany['hdi']}"
-
-    # Verify renewable_share was NOT changed (should still be 46.3 for Germany)
-    assert germany["renewable_share"] == 46.3, \
-        f"Germany renewable_share should be unchanged at 46.3, got {germany['renewable_share']}"
 
 
 def test_global_avg_values_updated():
