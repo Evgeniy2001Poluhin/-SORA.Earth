@@ -12,8 +12,6 @@
 .btn-ghost:hover{border-color:rgba(47,224,166,.45);color:var(--planet)}
 .home-globe{position:relative;aspect-ratio:1;max-width:520px;justify-self:end;width:100%;
   filter:drop-shadow(0 20px 60px rgba(47,224,166,.18))}
-.home-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
-.kpi{padding:18px}
 
 /* === Sprint H additions === */
 .home-globe { width:100%; min-height:420px; aspect-ratio:1/1; }
