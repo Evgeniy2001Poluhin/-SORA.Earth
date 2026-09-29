@@ -22,26 +22,23 @@ const PAYLOAD = {
 };
 
 describe("UncertaintyCard in mock mode", () => {
-  it("gets p5 and p95 from the uncertainty mock", async () => {
+  it("gets votes_for from the uncertainty mock", async () => {
     const data = await calibrationApi.uncertainty({
       budget: 150000, co2_reduction: 120, social_impact: 8, duration_months: 24,
     });
 
-    // The card reads tree_distribution.p5 / .p95 directly; the type omitted
-    // both until the contract was checked against app/api/calibration.py.
-    expect(Number.isFinite(data.tree_distribution.p5)).toBe(true);
-    expect(Number.isFinite(data.tree_distribution.p95)).toBe(true);
-    expect(data.tree_distribution.p5).toBeLessThanOrEqual(data.tree_distribution.p95);
-    expect(data.tree_distribution.p5).toBe(data.prediction.lower_90);
-    expect(data.tree_distribution.p95).toBe(data.prediction.upper_90);
+    // The card reads tree_distribution.votes_for to show the tree vote.
+    expect(Number.isFinite(data.tree_distribution.votes_for)).toBe(true);
+    expect(data.tree_distribution.votes_for).toBeGreaterThanOrEqual(0);
+    expect(data.tree_distribution.votes_for).toBeLessThanOrEqual(data.tree_distribution.n_trees);
   });
 
-  it("renders the 5-95% band that p5/p95 feed", async () => {
+  it("renders the mean probability and tree vote", async () => {
     renderWithQuery(<UncertaintyCard payload={PAYLOAD} />);
 
-    // "5-95%" is the label over the tree_distribution.p5 / .p95 range.
-    await waitFor(() => expect(screen.getByText("5-95%")).toBeInTheDocument(), { timeout: 3000 });
-    expect(screen.getByText("trees")).toBeInTheDocument();
-    expect(screen.getByText("std")).toBeInTheDocument();
+    // The card shows "{votes_for} of {n_trees} trees vote for success".
+    await waitFor(() => expect(screen.getByText(/trees vote for success/)).toBeInTheDocument(), { timeout: 3000 });
+    // The mean probability is shown as a percentage.
+    expect(screen.getByText(/72\.3%/)).toBeInTheDocument();
   });
 });

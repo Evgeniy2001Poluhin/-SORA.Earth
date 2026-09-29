@@ -189,6 +189,7 @@ def predict_with_uncertainty(project: dict):
     hi = float(np.percentile(tree_preds, 95))
     std = float(np.std(tree_preds))
     confidence = "high" if std < 0.1 else "medium" if std < 0.2 else "low"
+    votes_for = int(np.sum(tree_preds >= 0.5))
 
     return {
         "probability": round(base_proba * 100, 2),
@@ -205,6 +206,7 @@ def predict_with_uncertainty(project: dict):
             "max": float(np.max(tree_preds)),
             "p5": lo,
             "p95": hi,
+            "votes_for": votes_for,
         },
         "confidence": confidence,
         "uncertainty": {
