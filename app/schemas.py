@@ -907,6 +907,7 @@ class UncertaintyTreeDistribution(BaseModel):
     max: float
     p5: float = Field(..., description="Identical to prediction.lower_90.")
     p95: float = Field(..., description="Identical to prediction.upper_90.")
+    votes_for: int = Field(..., description="Number of trees whose probability >= 0.5 for the success class.")
 
 
 class UncertaintyDetail(BaseModel):

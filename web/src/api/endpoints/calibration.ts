@@ -11,7 +11,7 @@ const DISC:DiscrepancyResponse={
 const UNC:UncertaintyResponse={
   probability:72.3,
   prediction:{mean:0.723,median:0.720,lower_90:0.672,upper_90:0.774},
-  tree_distribution:{std:0.031,n_trees:100,min:0.610,max:0.845,p5:0.672,p95:0.774},
+  tree_distribution:{std:0.031,n_trees:100,min:0.610,max:0.845,p5:0.672,p95:0.774,votes_for:72},
   confidence:"high",
   uncertainty:{method:"RF tree variance",mean:72.3,std:3.1,ci_90:[67.2,77.4],n_trees:100},
   reliability:"high"};
