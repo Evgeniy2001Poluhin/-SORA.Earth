@@ -65,7 +65,7 @@ export function HomePage() {
           </motion.h1>
           <motion.p initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{delay:.15,duration:.6,ease:[.16,1,.3,1]}}
             style={{color:"var(--muted)",maxWidth:"58ch",fontSize:16,lineHeight:1.6}}>
-            Score sustainability projects across 32 countries with a closed-loop MLOps pipeline: drift detection, automated retraining, SHAP explanations and AI Teammate oversight.
+            Score sustainability projects across countries with a closed-loop MLOps pipeline: drift detection, automated retraining, SHAP explanations and AI Teammate oversight.
           </motion.p>
           <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{delay:.25,duration:.6,ease:[.16,1,.3,1]}}
             style={{display:"flex",gap:12,marginTop:26}}>
@@ -75,26 +75,17 @@ export function HomePage() {
         </div>
         <div className="home-globe" ref={host}/>
       </section>
-      <section className="home-kpis">
-        <Kpi k="Models" v="4" sub="RF · XGB · MLP · Stacking"/>
-        <Kpi k="Production AUC" v="0.82" sub="CV 0.98 · calibrated"/>
-        <Kpi k="Retrain cycles" v="29" sub="closed-loop · drift→retrain"/>
-        <Kpi k="API endpoints" v="154" sub="FastAPI · /api/v1"/>
-        <Kpi k="Services" v="7" sub="Docker Compose"/>
-        <Kpi k="Tests passed" v="392" sub="0 failed"/>
-      </section>
       <section className="home-how">
         <div className="eyebrow">HOW IT WORKS</div>
         <div className="how-grid">
           <div className="how-step"><span className="how-num">01</span><h3>Submit</h3><p>Project name, country, budget, CO₂, social score, duration. Six fields, no spreadsheets.</p></div>
-          <div className="how-step"><span className="how-num">02</span><h3>Score</h3><p>Stacked ML model returns ESG total + env/soc/eco breakdown, success probability and risk level.</p></div>
+          <div className="how-step"><span className="how-num">02</span><h3>Score</h3><p>A RandomForest model returns ESG total + env/soc/eco breakdown, success probability and risk level.</p></div>
           <div className="how-step"><span className="how-num">03</span><h3>Compare</h3><p>Run two projects side-by-side. See the gap on every axis. Decide with nrs, not narratives.</p></div>
         </div>
       </section>
       <section className="home-cta">
         <div>
           <h2 className="display" style={{fontSize:"clamp(28px,3.6vw,44px)",margin:0}}>Ready to score your project?</h2>
-          <p style={{color:"var(--muted)",marginTop:8}}>Same backend that powers the live tile above. ~300ms per evaluation.</p>
         </div>
         <div style={{display:"flex",gap:12}}>
           <Link to="/evaluate" className="btn-primary">Run evaluation</Link>
@@ -103,11 +94,4 @@ export function HomePage() {
       </section>
     </div>
   );
-}
-function Kpi({k,v,sub}:{k:string;v:string;sub:string}) {
-  return (<div className="kpi card">
-    <div className="eyebrow" style={{marginBottom:10}}>{k}</div>
-    <div className="display tabular" style={{fontSize:36,lineHeight:1,marginBottom:6}}>{v}</div>
-    <div style={{color:"var(--muted)",fontSize:12.5}}>{sub}</div>
-  </div>);
 }

@@ -344,6 +344,12 @@ case "$*" in
         printf '%s' "$(cat "$STUB_DIR/probe_ext_get_only" 2>/dev/null || echo 405)"; exit 0 ;;
     *"/api/v1/auth/login"*)
         printf '%s' "$(cat "$STUB_DIR/probe_ext_post" 2>/dev/null || echo 422)"; exit 0 ;;
+    # The database health check reads the body of /api/v1/health. -fsS with no
+    # -w or -o means it wants the body, not the status code. Separate from the
+    # status-code path below, which uses -w '%{http_code}' -o /dev/null.
+    *"-fsS"*"/api/v1/health"*)
+        cat "$STUB_DIR/health_body" 2>/dev/null || echo '{"status":"healthy","checks":{"database":{"status":"healthy"},"models":{"status":"healthy"},"external_data":{"status":"healthy"}}}'
+        exit 0 ;;
 esac
 total=$(wc -l < "$seq_file")
 line=$(( n <= total ? n : total ))
@@ -2042,6 +2048,40 @@ check "the mismatch is reported" \
     "$(grep -c 'backend reports SORA_ENV=development' "$SANDBOX/out")" "1"
 check "and it does not also claim the guards are active" \
     "$(grep -c 'the secret guards are active' "$SANDBOX/out")" "0"
+rm -rf "$SANDBOX"
+
+echo "== database degraded: the deployment is refused and rolled back =="
+# The defect (#21): _check_db returns "degraded" on error, not "unhealthy", so
+# the overall status is still "healthy" with 200. The script checks HTTP 200 but
+# must also check checks.database.status in the body.
+# A previous deployment is recorded so the rollback actually happens and is observable.
+# Without one, the script takes the exit-76 path (nothing to restore) instead of a rollback.
+new_sandbox
+with_previous_deployment
+cat > "$STUB_DIR/health_body" <<'JSON'
+{"status":"healthy","checks":{"database":{"status":"degraded","error":"connection refused"},"models":{"status":"healthy"},"external_data":{"status":"healthy"}}}
+JSON
+run_guard
+refused_because "database degraded is refused" "database health check reports 'degraded'"
+check "the refusal names what it expected" \
+    "$(grep -c "expected 'healthy'" "$SANDBOX/out")" "1"
+check "and it rolled back" \
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo yes || echo no)" "yes"
+check "a degraded database: exit says the previous state is back" "$RC" "1"
+check "a degraded database: the recorded images were restored" \
+    "$(grep -qc 'restored the images that were running' "$SANDBOX/out" && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+echo "== database healthy: the deployment is accepted =="
+# The control: when the database is healthy, the check passes.
+new_sandbox
+cat > "$STUB_DIR/health_body" <<'JSON'
+{"status":"healthy","checks":{"database":{"status":"healthy"},"models":{"status":"healthy"},"external_data":{"status":"healthy"}}}
+JSON
+run_guard
+check "database healthy is accepted" "$RC" "0"
+check "and it confirms the database health" \
+    "$(grep -c 'database health: healthy' "$SANDBOX/out")" "1"
 rm -rf "$SANDBOX"
 
 echo "== a failing case fails the run, wherever it is written =="

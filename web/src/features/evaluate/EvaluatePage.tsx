@@ -142,7 +142,7 @@ export function EvaluatePage() {
         <tr><td class="k">Economic</td><td>${escapeHtml(result?.economic_score?.toFixed(1))}</td></tr>
       </table>
       <h3>Recommendations</h3><ul>${rows}</ul>
-      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${escapeHtml(new Date().toISOString())} · ML Scoring Engine · RF·XGB·MLP·Stacking</div>
+      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${escapeHtml(new Date().toISOString())} · ML Scoring Engine · RF·MLP·Stacking</div>
       </body></html>`);
     w.document.close(); setTimeout(()=>w.print(), 300);
   };
@@ -162,7 +162,7 @@ export function EvaluatePage() {
         </div>
         <div className="ev-hero-meta">
           <Row k="Unit"   v={<><span style={{color:"var(--planet)"}}>◆</span> ML Scoring Engine</>}/>
-          <Row k="Models" v="RF · XGB · MLP · Stacking"/>
+          <Row k="Models" v="RF · MLP · Stacking"/>
           <Row k="AUC"    v={<span className="tabular">0.82 prod · 0.98 cv</span>}/>
           <Row k="Status" v={<span className="status-pill">Operational</span>}/>
         </div>

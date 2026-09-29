@@ -10,8 +10,7 @@ export interface EvaluateResponse {
   esg_weights: { environment: number; social: number; economic: number };
   region: string; lat: number; lon: number;
   country_benchmark: { country: string; co2_per_capita: number; renewable_share: number;
-    esg_rank: number; hdi: number;
-    project_vs_country: { esg_score_diff: number; above_average: boolean } };
+    esg_rank: number; hdi: number };
 }
 export interface ShapFeature {
   feature: string; value: number; shap_value: number;

@@ -135,7 +135,8 @@ def test_stacking_does_not_average_in_an_absent_network():
     r = client.post("/api/v1/predict/stacking", json=PROJECT)
     assert r.status_code == 200
     body = r.json()
-    assert set(body["base_models"]) == {"rf", "xgb"}, body["base_models"]
+    # XGBoost left every blend (finding 9); without weights, RandomForest alone.
+    assert set(body["base_models"]) == {"rf"}, body["base_models"]
     expected = _mean(list(body["base_models"].values()))
     assert math.isclose(body["probability"], expected, abs_tol=0.02), body
 
@@ -145,7 +146,7 @@ def test_compare_does_not_report_an_absent_network():
     assert r.status_code == 200
     body = r.json()
     for project in body["projects"]:
-        assert set(project["base_models"]) == {"rf", "xgb"}, project
+        assert set(project["base_models"]) == {"rf"}, project  # no xgb: finding 9
     assert "NeuralNet" not in body
 
 
@@ -245,11 +246,11 @@ def test_with_weights_the_neural_route_answers(loaded_network):
     assert 0.0 <= body["probability"] <= 100.0
 
 
-def test_with_weights_stacking_averages_all_three(loaded_network):
+def test_with_weights_stacking_averages_rf_and_the_network(loaded_network):
     r = client.post("/api/v1/predict/stacking", json={**PROJECT, "name": "control stacking"})
     assert r.status_code == 200
     body = r.json()
-    assert set(body["base_models"]) == {"rf", "xgb", "nn"}, body["base_models"]
+    assert set(body["base_models"]) == {"rf", "nn"}, body["base_models"]  # no xgb: finding 9
     expected = _mean(list(body["base_models"].values()))
     assert math.isclose(body["probability"], expected, abs_tol=0.02), body
 
