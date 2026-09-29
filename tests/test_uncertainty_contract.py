@@ -50,7 +50,7 @@ def test_prediction_block(payload):
 
 
 def test_tree_distribution_carries_p5_and_p95_and_votes_for(payload):
-    """UncertaintyCard reads tree_distribution.p5 / .p95 and votes_for."""
+    """UncertaintyCard reads votes_for and n_trees; p5 / p95 stay in the response for API clients."""
     dist = payload["tree_distribution"]
     assert set(dist) == {"std", "n_trees", "min", "max", "p5", "p95", "votes_for"}
     assert isinstance(dist["n_trees"], int)
