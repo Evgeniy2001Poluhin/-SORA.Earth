@@ -33,7 +33,7 @@ const PAYLOAD = {
 const SERVER_UNCERTAINTY = {
   probability: 60,
   prediction: { mean: 0.6, median: 0.6, lower_90: 0.5, upper_90: 0.7 },
-  tree_distribution: { std: 0.02, n_trees: 33, min: 0.45, max: 0.75, p5: 0.5, p95: 0.7 },
+  tree_distribution: { std: 0.02, n_trees: 33, min: 0.45, max: 0.75, p5: 0.5, p95: 0.7, votes_for: 20 },
   confidence: "medium",
   uncertainty: { method: "RF tree variance", mean: 60, std: 2, ci_90: [50, 70], n_trees: 33 },
   reliability: "medium",
@@ -62,14 +62,14 @@ describe("UncertaintyCard on the production path", () => {
     expect(call.method).toBe("POST");
   });
 
-  it("renders the server's interval, not the canned one", async () => {
+  it("renders the server's tree vote, not the canned one", async () => {
     stubJson(SERVER_UNCERTAINTY);
 
     renderWithQuery(<UncertaintyCard payload={PAYLOAD} />);
 
-    // 33 trees, not the canned 100.
-    await waitFor(() => expect(screen.getByText("33")).toBeInTheDocument(), { timeout: 3000 });
-    expect(screen.getByText("50.0-70.0%")).toBeInTheDocument();
+    // 20 of 33 trees vote for success, not the canned 72 of 100.
+    await waitFor(() => expect(screen.getByText("20 of 33 trees vote for success")).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getByText("60.0%")).toBeInTheDocument();
     expect(screen.getByText("MEDIUM CONFIDENCE")).toBeInTheDocument();
   });
 
@@ -98,7 +98,7 @@ describe("UncertaintyCard on the production path", () => {
     expect(scoreLikeNumbersIn({ ...(error as Error) })).toEqual([]);
   });
 
-  it("an empty 200 draws no interval rather than one reading 0.0%", async () => {
+  it("an empty 200 draws nothing rather than rendering 0.0%", async () => {
     // #236. This test was written first to pin the defect: `if (!q.data)`
     // guarded `undefined` while `{}` is truthy, and every read below was
     // `?? 0`, so a 200 carrying nothing painted a complete confidence
@@ -117,11 +117,14 @@ describe("UncertaintyCard on the production path", () => {
     expect(container.textContent ?? "").not.toContain("0.0%");
   });
 
-  it("a partial 200 missing tree_distribution still draws nothing", async () => {
-    // Half an answer is not an answer: the card reads from both
-    // `prediction` and `tree_distribution`, so either being absent has to
-    // mean the same thing as neither arriving.
-    stubJson({ prediction: { mean: 0.6, median: 0.6, lower_90: 0.5, upper_90: 0.7 } });
+  it("a partial 200 missing votes_for still draws nothing", async () => {
+    // Half an answer is not an answer: the card reads prediction.mean,
+    // tree_distribution.n_trees, and tree_distribution.votes_for, so any
+    // being absent has to mean the same thing as none arriving.
+    stubJson({
+      prediction: { mean: 0.6, median: 0.6, lower_90: 0.5, upper_90: 0.7 },
+      tree_distribution: { std: 0.02, n_trees: 33, min: 0.45, max: 0.75, p5: 0.5, p95: 0.7 }
+    });
 
     const { container } = renderWithQuery(<UncertaintyCard payload={PAYLOAD} />);
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -140,5 +143,18 @@ describe("UncertaintyCard on the production path", () => {
       timeout: 3000,
     });
     expect(container.textContent ?? "").not.toMatch(/%/);
+  });
+
+  it("does not render the old UI elements (5-95%, median, bar)", async () => {
+    stubJson(SERVER_UNCERTAINTY);
+
+    const { container } = renderWithQuery(<UncertaintyCard payload={PAYLOAD} />);
+
+    await waitFor(() => expect(screen.getByText("60.0%")).toBeInTheDocument(), { timeout: 3000 });
+
+    // The old UI is gone.
+    expect(screen.queryByText("5-95%")).not.toBeInTheDocument();
+    expect(screen.queryByText(/median/)).not.toBeInTheDocument();
+    expect(container.querySelector(".uc-bar")).toBeNull();
   });
 });

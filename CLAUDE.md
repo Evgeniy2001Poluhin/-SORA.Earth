@@ -458,12 +458,15 @@ disagree about one project. Response model `UncertaintyOk` in `app/schemas.py`:
 
 ```
 prediction          {mean, median, lower_90, upper_90}   -- fractions, 0..1
-tree_distribution   {std, n_trees, min, max, p5, p95}     -- p5/p95 equal lower_90/upper_90
+tree_distribution   {std, n_trees, min, max, p5, p95, votes_for}  -- p5/p95 equal lower_90/upper_90
+                                                                      votes_for is the count of trees
+                                                                      with probability >= 0.5 for success
 uncertainty         {method, mean, std, ci_90, n_trees}
 ```
 
-p5/p95 came in with `ad86863`. The evaluate page shows them in
-`web/src/features/evaluate/UncertaintyCard.tsx` as the "5-95%" band.
+p5/p95 came in with `ad86863`. The evaluate page shows the mean probability and
+tree vote in `web/src/features/evaluate/UncertaintyCard.tsx`: the mean as a
+percentage and "{votes_for} of {n_trees} trees vote for success".
 
 **`POST /api/v1/calibration/discrepancy`** -- three models side by side
 (`rf_v1`, `stacking_v2`, `calibrated_v2`) and a weighted consensus. This is where
