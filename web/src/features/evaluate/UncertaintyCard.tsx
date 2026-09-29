@@ -40,40 +40,31 @@ export function UncertaintyCard({ payload }: Props) {
   //
   // Guarded on the fields actually rendered rather than on the object, so a
   // payload that arrives without them renders nothing, exactly as a failed
-  // request already does.
-  if (!q.data?.prediction || !q.data?.tree_distribution) return null;
+  // request already does. All three checks use `typeof !== "number"` rather
+  // than truthiness: a mean of 0 is a real answer (every tree votes "no"),
+  // and 0 is falsy.
+  if (typeof q.data?.prediction?.mean !== "number" ||
+      typeof q.data?.tree_distribution?.n_trees !== "number" ||
+      typeof q.data?.tree_distribution?.votes_for !== "number") return null;
   const u = q.data;
-  const lo = (u?.prediction?.lower_90 ?? 0) * 100;
-  const med = (u?.prediction?.median ?? 0) * 100;
-  const hi = (u?.prediction?.upper_90 ?? 0) * 100;
-  const width = Math.max(1, hi - lo);
-  const medPos = ((med - lo) / width) * 100;
+  const meanProb = (u.prediction.mean * 100).toFixed(1);
 
   return (
     <div className="uncertainty-card">
       <div className="uncertainty-head">
-        <div className="eyebrow">Confidence interval (tree-level)</div>
+        <div className="eyebrow">Tree vote (RandomForest)</div>
         <span className="uc-badge" style={{ background: (CONF_COLOR[u.confidence] ?? "#888") + "22", color: CONF_COLOR[u.confidence] ?? "#888", borderColor: CONF_COLOR[u.confidence] ?? "#888" }}>
           {(u.confidence ?? "").toUpperCase()} CONFIDENCE
         </span>
       </div>
 
-      <div className="uc-bar-wrap">
-        <div className="uc-bar">
-          <div className="uc-bar-fill" style={{ width: "100%" }} />
-          <div className="uc-bar-marker" style={{ left: medPos + "%" }} />
+      <div style={{ padding: "16px 0", fontSize: "14px" }}>
+        <div style={{ fontSize: "28px", fontWeight: "600", color: "var(--text)", marginBottom: "8px" }}>
+          {meanProb}%
         </div>
-        <div className="uc-labels tabular">
-          <span>{lo.toFixed(1)}%</span>
-          <span style={{ color: "#2FE0A6" }}>median {med.toFixed(1)}%</span>
-          <span>{hi.toFixed(1)}%</span>
+        <div style={{ color: "var(--muted)" }}>
+          {u.tree_distribution.votes_for} of {u.tree_distribution.n_trees} trees vote for success
         </div>
-      </div>
-
-      <div className="uc-meta">
-        <div><span className="muted">std</span> <span className="tabular">{((u.tree_distribution?.std ?? 0) * 100).toFixed(2)}%</span></div>
-        <div><span className="muted">5-95%</span> <span className="tabular">{(((u.tree_distribution?.p5 ?? u.tree_distribution?.min) ?? 0) * 100).toFixed(1)}-{(((u.tree_distribution?.p95 ?? u.tree_distribution?.max) ?? 0) * 100).toFixed(1)}%</span></div>
-        <div><span className="muted">trees</span> <span className="tabular">{(u.tree_distribution?.n_trees ?? 0)}</span></div>
       </div>
     </div>
   );
