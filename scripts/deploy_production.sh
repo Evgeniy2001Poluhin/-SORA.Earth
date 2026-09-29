@@ -1328,6 +1328,39 @@ done
 echo "  probe attempts $PROBE_ATTEMPTS, of which retried $PROBE_RETRIES; final 200 on every path"
 echo "  acceptance: exclude only User-Agent $DEPLOY_PROBE_UA when counting user-facing 5xx"
 
+# Database health, read from the body of /api/v1/health.
+#
+# 200 on /api/v1/health proves the process is up. It does not prove the database
+# is reachable: _check_db returns "degraded" on error, not "unhealthy", so a
+# failed database connection still produces 200 "healthy" (#21).
+#
+# Read after the retry loop above, once the status is known to be 200. Not
+# best-effort, unlike the model provenance read further down: a body that cannot
+# be fetched or parsed gives "unknown", and a deployment that cannot show its
+# database is reachable is not accepted -- the same rollback as any other failed
+# check. Bounded like http_code, so a stalled response fails instead of hanging.
+DB_HEALTH="unknown"
+if _health_body="$(curl -fsS -m 20 -A "$DEPLOY_PROBE_UA" "$SITE/api/v1/health" 2>/dev/null)"; then
+    DB_HEALTH="$(printf '%s' "$_health_body" | python3 -c '
+import json, sys
+try:
+    checks = (json.load(sys.stdin) or {}).get("checks") or {}
+    db = checks.get("database") or {}
+    print(db.get("status") or "unknown")
+except Exception:
+    print("unknown")
+' 2>/dev/null || echo unknown)"
+fi
+
+case "$DB_HEALTH" in
+    healthy)
+        echo "  database health: $DB_HEALTH"
+        ;;
+    *)
+        fail "database health check reports '$DB_HEALTH', expected 'healthy'. The site answers 200 but cannot reach the database."
+        ;;
+esac
+
 # ------------------------------------------------------------------- the record
 
 # Accepted. Nothing after this point should roll back: the deployment is the

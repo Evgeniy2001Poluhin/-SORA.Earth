@@ -25,7 +25,7 @@ const STEPS: Step[] = [
   {
     target: '[data-tour="map"]',
     title: "Geospatial map",
-    content: "Explore ESG scores across 32 countries on an interactive map.",
+    content: "Explore ESG scores by country on an interactive map.",
   },
   {
     target: '[data-tour="status"]',
