@@ -294,6 +294,14 @@ def log_prediction(endpoint, input_data, result, latency_ms=None):
     try:
         from app.database import PredictionLog
         db = get_db_sync()
+
+        # Compute prediction from probability and model threshold
+        probability = result.get("probability") or result.get("success_probability")
+        prediction = None
+        if probability is not None:
+            # probability is stored as percentage (0-100), threshold is in [0, 1]
+            prediction = 1 if (probability / 100.0) >= best_threshold else 0
+
         log = PredictionLog(
             endpoint=endpoint,
             budget=input_data.budget,
@@ -302,8 +310,8 @@ def log_prediction(endpoint, input_data, result, latency_ms=None):
             duration_months=input_data.duration_months,
             category=getattr(input_data, "category", None),
             region=getattr(input_data, "region", None),
-            prediction=result.get("prediction"),
-            probability=result.get("probability") or result.get("success_probability"),
+            prediction=prediction,
+            probability=probability,
             esg_total_score=result.get("total_score"),
             latency_ms=latency_ms,
         )

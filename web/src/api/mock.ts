@@ -32,7 +32,6 @@ export function mockEvaluate(req: EvaluateRequest): MockEvaluateResult {
     lat: 0, lon: 0,
     country_benchmark: {
       country: req.country, co2_per_capita: 0, renewable_share: 0, esg_rank: 0, hdi: 0,
-      project_vs_country: { esg_score_diff: 0, above_average: total >= 60 },
     },
     shap_values: { budget_usd: r()*0.3-0.15, co2_reduction: r()*0.4, social_impact: r()*0.25, duration: r()*0.2-0.1 },
   };
