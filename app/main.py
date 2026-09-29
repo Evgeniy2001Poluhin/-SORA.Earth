@@ -665,6 +665,40 @@ REGIONAL_FACTORS = {
 }
 
 
+def _esg_components(budget, co2_reduction, social_impact, cb, rf):
+    """Pure helper computing the three ESG sub-scores.
+
+    Args:
+        budget: Project budget in USD
+        co2_reduction: CO2 reduction in t/yr
+        social_impact: Social impact score (0-10)
+        cb: Country benchmark dict with keys co2_per_capita, renewable_share, hdi, gdp_per_capita
+        rf: Regional factors dict with keys env_mult, soc_mult, eco_mult
+
+    Returns:
+        (score_env, score_soc, score_eco): Three scores in [0, 1]
+    """
+    c_co2 = float(cb.get("co2_per_capita", 4.7))
+    c_ren = float(cb.get("renewable_share", 28.3))
+    c_hdi = float(cb.get("hdi", 0.739))
+    c_gdp = float(cb.get("gdp_per_capita", 20000))
+
+    co2_norm = min(co2_reduction / 500.0, 1.0)
+    country_env = max(0.0, min(1.0, (c_ren / 100.0) * 0.6 + max(0, 15 - c_co2) / 15.0 * 0.4))
+    score_env = min((0.55 * co2_norm + 0.45 * country_env) * rf["env_mult"], 1.0)
+
+    country_soc = max(0.4, min(1.0, c_hdi))
+    score_soc = min(social_impact / 10.0 * country_soc * rf["soc_mult"], 1.0)
+
+    gdp_pivot = max(20000.0, min(c_gdp, 80000.0))
+    budget_ratio = budget / gdp_pivot
+    sig = 1.0 / (1.0 + math.exp(-2.5 * (budget_ratio - 2.0)))
+    gdp_bonus = 0.10 * math.tanh((c_gdp - 20000) / 30000)
+    score_eco = max(0.0, min(0.85, sig * 0.9 * rf["eco_mult"] + gdp_bonus))
+
+    return (score_env, score_soc, score_eco)
+
+
 def calculate_esg(project, region_name: str = "Europe"):
     rf = REGIONAL_FACTORS.get(region_name, REGIONAL_FACTORS["Europe"])
     try:
@@ -673,20 +707,11 @@ def calculate_esg(project, region_name: str = "Europe"):
         cb = BENCHMARKS.get(country_key, GLOBAL_AVG) if BENCHMARKS else GLOBAL_AVG
     except Exception:
         cb = {"co2_per_capita": 4.7, "renewable_share": 28.3, "hdi": 0.739, "gdp_per_capita": 20000}
-    c_co2 = float(cb.get("co2_per_capita", 4.7))
-    c_ren = float(cb.get("renewable_share", 28.3))
-    c_hdi = float(cb.get("hdi", 0.739))
-    c_gdp = float(cb.get("gdp_per_capita", 20000))
-    co2_norm = min(project.co2_reduction / 500.0, 1.0)
-    country_env = max(0.0, min(1.0, (c_ren / 100.0) * 0.6 + max(0, 15 - c_co2) / 15.0 * 0.4))
-    score_env = min((0.55 * co2_norm + 0.45 * country_env) * rf["env_mult"], 1.0)
-    country_soc = max(0.4, min(1.0, c_hdi))
-    score_soc = min(project.social_impact / 10.0 * country_soc * rf["soc_mult"], 1.0)
-    gdp_pivot = max(20000.0, min(c_gdp, 80000.0))
-    budget_ratio = project.budget / gdp_pivot
-    sig = 1.0 / (1.0 + math.exp(-2.5 * (budget_ratio - 2.0)))
-    gdp_bonus = 0.10 * math.tanh((c_gdp - 20000) / 30000)
-    score_eco = max(0.0, min(0.85, sig * 0.9 * rf["eco_mult"] + gdp_bonus))
+
+    score_env, score_soc, score_eco = _esg_components(
+        project.budget, project.co2_reduction, project.social_impact, cb, rf
+    )
+
     duration_factor = 0.9 if project.duration_months > 48 else (0.95 if project.duration_months > 36 else 1.0)
     total = round((score_env * 0.4 + score_soc * 0.3 + score_eco * 0.3) * duration_factor * 100, 2)
     total = min(total, 100.0)
@@ -702,16 +727,71 @@ def calculate_esg(project, region_name: str = "Europe"):
         success_prob_v2 = success_prob
 
     recommendations = []
+
+    # CO2 advice: find smallest integer t/yr in (current, 500] that reaches >= 0.7, or declare unreachable
     if score_env < 0.7:
-        target_co2 = max(int(project.co2_reduction * 1.5), int(project.co2_reduction + (0.7 - score_env) * 200))
-        recommendations.append(f"Increase CO2 reduction from {project.co2_reduction:.0f} to {target_co2:.0f}+ t/yr to reach Strong environmental rating")
+        target_co2 = None
+        for t in range(int(project.co2_reduction) + 1, 501):
+            s_env, _, _ = _esg_components(project.budget, t, project.social_impact, cb, rf)
+            if s_env >= 0.7:
+                target_co2 = t
+                break
+        if target_co2 is not None:
+            recommendations.append(f"Increase CO2 reduction from {project.co2_reduction:.0f} to {target_co2}+ t/yr to reach a Strong environmental rating")
+        else:
+            s_env_max, _, _ = _esg_components(project.budget, 500, project.social_impact, cb, rf)
+            country_name = getattr(project, "region", None) or "this country"
+            recommendations.append(f"A Strong environmental rating (70) is out of reach in {country_name} through CO2 reduction: at 500+ t/yr the score is {s_env_max * 100:.1f}; the rest is set by the country's renewable share and emissions per capita")
+
+    # Social advice: find smallest integer in (current, 10] that reaches >= 0.7, or declare unreachable
     if score_soc < 0.7:
-        target_si = min(int(project.social_impact + (0.7 - score_soc) * 10) + 1, 10)
-        recommendations.append(f"Boost social impact score from {project.social_impact} to {target_si}+ (add community engagement, job creation programs)")
-    if score_eco < 0.5:
-        recommendations.append(f"Budget of ${project.budget:,.0f} is below optimal. Consider $75,000+ for stronger economic score")
-    elif score_eco < 0.7:
-        recommendations.append("Budget is moderate. Increasing to $120,000+ would significantly improve economic rating")
+        target_si = None
+        for t in range(int(project.social_impact) + 1, 11):
+            _, s_soc, _ = _esg_components(project.budget, project.co2_reduction, t, cb, rf)
+            if s_soc >= 0.7:
+                target_si = t
+                break
+        if target_si is not None:
+            recommendations.append(f"Raise social impact from {project.social_impact:g} to {target_si}+ to reach a Strong social rating (community engagement, job creation programs)")
+        else:
+            _, s_soc_max, _ = _esg_components(project.budget, project.co2_reduction, 10, cb, rf)
+            country_name = getattr(project, "region", None) or "this country"
+            recommendations.append(f"A Strong social rating (70) is out of reach in {country_name}: at the maximum social impact of 10 the score is {s_soc_max * 100:.1f}, limited by the country's HDI")
+
+    # Budget advice: find smallest multiple of $1,000 above current that reaches >= 0.7, up to 1e12
+    if score_eco < 0.7:
+        target_budget = None
+        # Start from current budget rounded up to next $1,000
+        start_budget = (int(project.budget / 1000) + 1) * 1000
+
+        # Check if reachable at max first
+        _, _, s_eco_max = _esg_components(1e12, project.co2_reduction, project.social_impact, cb, rf)
+        if s_eco_max >= 0.7:
+            # Binary search for the threshold budget
+            low = start_budget
+            high = int(1e12)
+            while low < high:
+                mid = ((low + high) // 2000) * 1000  # Round to nearest $1,000
+                _, _, s_eco = _esg_components(mid, project.co2_reduction, project.social_impact, cb, rf)
+                if s_eco >= 0.7:
+                    high = mid
+                else:
+                    low = mid + 1000
+            target_budget = low
+            # Verify the target
+            _, _, s_eco_verify = _esg_components(target_budget, project.co2_reduction, project.social_impact, cb, rf)
+            if s_eco_verify >= 0.7:
+                recommendations.append(f"Increase budget from ${project.budget:,.0f} to ${target_budget:,.0f}+ to reach a Strong economic rating")
+            else:
+                # Should not happen, but fall back to unreachable
+                country_name = getattr(project, "region", None) or "this country"
+                recommendations.append(f"A Strong economic rating (70) is out of reach in {country_name}: at any budget the score is capped at {s_eco_max * 100:.1f}, set by the country's GDP per capita")
+        else:
+            # Unreachable even at max budget
+            country_name = getattr(project, "region", None) or "this country"
+            recommendations.append(f"A Strong economic rating (70) is out of reach in {country_name}: at any budget the score is capped at {s_eco_max * 100:.1f}, set by the country's GDP per capita")
+
+    # Other recommendations unchanged
     if project.duration_months > 36:
         recommendations.append(f"Duration of {project.duration_months} months applies a penalty. Consider splitting into phases under 36 months")
     elif project.duration_months < 6:
@@ -719,7 +799,7 @@ def calculate_esg(project, region_name: str = "Europe"):
     if total < 50:
         recommendations.append("⚠️ High risk: focus on CO2 reduction and social impact as priority improvements")
     elif total >= 75 and success_prob >= 70:
-        recommendations.append("[OK] Excellent ESG profile — ready for green bond certification")
+        recommendations.append("[OK] Strong ESG profile: a candidate for assessment against green bond standards")
     if not recommendations:
         recommendations.append("Strong project across all ESG dimensions — consider scaling up")
 
