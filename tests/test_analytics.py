@@ -14,52 +14,56 @@ PROJECT = {
 import pytest
 
 class TestMonteCarlo:
+    """Tests for /analytics/monte-carlo, which now returns 410 Gone (Finding 6 fix).
+
+    The endpoint used an incorrect ESG formula and has been removed. These tests
+    now verify that it returns 410 with the correct replacement information.
+    """
     pytestmark = pytest.mark.timeout(60)
-    pytestmark = pytest.mark.timeout(60)
+
     def test_default_params(self):
+        """The endpoint returns 410 Gone regardless of parameters."""
         r = client.post("/api/v1/analytics/monte-carlo", json=PROJECT)
-        assert r.status_code == 200
+        assert r.status_code == 410
         d = r.json()
-        assert d["simulations"] == 1000
-        assert "score_stats" in d
-        assert "risk_distribution" in d
+        assert "detail" in d
+        assert d["detail"]["replacement"] == "/api/v1/evaluate/monte-carlo"
 
     def test_custom_simulations(self):
+        """Returns 410 even with custom simulations parameter."""
         data = {**PROJECT, "simulations": 100}
         r = client.post("/api/v1/analytics/monte-carlo", json=data)
-        assert r.status_code == 200
-        assert r.json()["simulations"] == 100
+        assert r.status_code == 410
 
     def test_max_simulations_cap(self):
-        # Pydantic Field(le=10000) отклоняет значения > 10000
+        """Pydantic validation (Field(le=10000)) still rejects invalid values."""
         data = {**PROJECT, "simulations": 99999}
         r = client.post("/api/v1/analytics/monte-carlo", json=data)
         assert r.status_code == 422
 
     def test_max_simulations_valid(self):
+        """Returns 410 even with valid max simulations."""
         data = {**PROJECT, "simulations": 10000}
         r = client.post("/api/v1/analytics/monte-carlo", json=data)
-        assert r.status_code == 200
-        assert r.json()["simulations"] == 10000
+        assert r.status_code == 410
 
     def test_score_stats_keys(self):
+        """Returns 410 (no score_stats in response anymore)."""
         r = client.post("/api/v1/analytics/monte-carlo", json=PROJECT)
-        stats = r.json()["score_stats"]
-        for key in ["mean", "std", "min", "max", "p5", "p25", "median", "p75", "p95"]:
-            assert key in stats
-            assert isinstance(stats[key], (int, float))
+        assert r.status_code == 410
+        assert "detail" in r.json()
 
     def test_risk_distribution_sums(self):
+        """Returns 410 (no risk_distribution in response anymore)."""
         r = client.post("/api/v1/analytics/monte-carlo", json=PROJECT)
-        dist = r.json()["risk_distribution"]
-        total = dist["low_risk_pct"] + dist["medium_risk_pct"] + dist["high_risk_pct"]
-        assert 99 <= total <= 101
+        assert r.status_code == 410
 
     def test_different_regions(self):
+        """Returns 410 for all regions."""
         for region in ["Germany", "Brazil", "Nigeria", "Japan"]:
             data = {**PROJECT, "region": region}
             r = client.post("/api/v1/analytics/monte-carlo", json={**data, "simulations": 50})
-            assert r.status_code == 200
+            assert r.status_code == 410
 
 
 class TestModelCompare:
@@ -135,18 +139,20 @@ class TestCountryRanking:
 # --- Monte Carlo & Model Compare ---
 
 def test_monte_carlo_basic():
+    """POST /analytics/monte-carlo now returns 410 Gone (Finding 6 fix)."""
     r = client.post("/api/v1/analytics/monte-carlo", json={
         "name": "Test", "budget": 100000, "co2_reduction": 50,
         "social_impact": 7, "duration_months": 24,
         "region": "Germany", "simulations": 10
     })
-    assert r.status_code == 200
+    assert r.status_code == 410
     data = r.json()
-    assert "score_stats" in data
-    assert "simulations" in data
-    assert data["simulations"] == 10
+    assert "detail" in data
+    detail = data["detail"]
+    assert detail["replacement"] == "/api/v1/evaluate/monte-carlo"
 
 def test_monte_carlo_invalid():
+    """Validation still happens before the 410 Gone."""
     r = client.post("/api/v1/analytics/monte-carlo", json={
         "budget": -1, "simulations": 5
     })
@@ -167,16 +173,4 @@ def test_model_compare_invalid():
     r = client.post("/api/v1/analytics/model-compare", json={"budget": -1})
     assert r.status_code == 422
 
-# --- Coverage fix: run _run_monte_carlo in-process ---
-
-def test_run_monte_carlo_direct():
-    """Вызываем _run_monte_carlo напрямую — покрывает строки 49-104."""
-    from app.api.analytics import _run_monte_carlo
-    result = _run_monte_carlo({
-        "name": "Test", "budget": 100000, "co2_reduction": 50,
-        "social_impact": 7, "duration_months": 24,
-        "region": "Germany", "simulations": 10
-    })
-    assert "score_stats" in result
-    assert result["simulations"] == 10
-    assert "risk_distribution" in result
+# _run_monte_carlo was removed in Finding 6 fix - it used an incorrect ESG formula

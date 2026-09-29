@@ -1,8 +1,4 @@
-"""Monte Carlo simulation endpoint for risk analysis."""
-import asyncio
-import os
-
-import numpy as np
+"""Analytics endpoints for ESG benchmarking and model health."""
 from fastapi import APIRouter, Query, HTTPException, Request, Depends
 from pydantic import BaseModel, Field
 
@@ -10,7 +6,6 @@ from app.api.infra import admin_auth
 from app.auth import require_auth
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
-_executor = None
 
 _mc_limiter = None
 
@@ -46,87 +41,25 @@ class ModelCompareRequest(BaseModel):
     region: str = "Germany"
 
 
-def _run_monte_carlo(data: dict) -> dict:
-    from app.main import COUNTRIES, REGIONAL_FACTORS, rf_model, make_features
-    from app.schemas import ProjectInput as Project
-
-    n = min(data['simulations'], 10000)
-    rng = np.random.default_rng()
-
-    budget_arr   = np.clip(rng.normal(data['budget'],          data['budget'] * 0.15,         n), 1000, None)
-    co2_arr      = np.clip(rng.normal(data['co2_reduction'],   data['co2_reduction'] * 0.2,   n), 1, 100)
-    social_arr   = np.clip(rng.normal(data['social_impact'],   1.0,                           n), 1, 10)
-    duration_arr = np.clip(rng.normal(data['duration_months'], data['duration_months'] * 0.1, n).astype(int), 1, None)
-
-    cdata      = COUNTRIES.get(data['region'], {'region': 'Europe'})
-    region_str = cdata.get('region', 'Europe')
-    rf = REGIONAL_FACTORS.get(region_str, REGIONAL_FACTORS['Europe'])
-
-    score_env = np.minimum(co2_arr / 100.0 * rf['env_mult'] + rf['renewable_bonus'], 1.0)
-    score_soc = np.minimum(social_arr / 10.0 * rf['soc_mult'], 1.0)
-    score_eco = np.minimum(1.0 / (1.0 + np.exp(-0.00005 * (budget_arr - 50000))) * rf['eco_mult'], 1.0)
-    dur_factor = np.where(duration_arr > 48, 0.9, np.where(duration_arr > 36, 0.95, 1.0))
-    scores = np.minimum((score_env * 0.4 + score_soc * 0.3 + score_eco * 0.3) * dur_factor * 100, 100.0)
-
-    # Прямая аппроксимация вероятности успеха из итогового score.
-    probs = np.clip(
-        15 + 0.85 * scores + 8 * (score_env - score_eco),
-        0,
-        100,
-    )
-
-
-
-    low    = float(np.mean((scores >= 75) & (probs >= 70))) * 100
-    medium = float(np.mean((scores >= 50) & (scores < 75))) * 100
-    high   = float(np.mean(scores < 50)) * 100
-    total  = low + medium + high
-    if total > 0:
-        low, medium, high = low/total*100, medium/total*100, high/total*100
-
-    def p(arr, q): return round(float(np.percentile(arr, q)), 2)
-
-    mean_score = float(np.mean(scores))
-    mean_prob  = float(np.mean(probs))
-    if mean_score >= 75 and mean_prob >= 70:
-        risk_label = "LOW"  # pragma: no cover
-    elif mean_score >= 50 and mean_prob >= 50:
-        risk_label = "MEDIUM"
-    else:
-        risk_label = "HIGH"  # pragma: no cover
-
-    return {
-        "simulations": n,
-        "score_stats": {
-            "mean": round(mean_score, 2), "std": round(float(np.std(scores)), 2),
-            "min": p(scores, 0), "max": p(scores, 100),
-            "p5": p(scores, 5), "p25": p(scores, 25),
-            "median": round(float(np.median(scores)), 2),
-            "p75": p(scores, 75), "p95": p(scores, 95),
-        },
-        "probability_stats": {
-            "mean": round(mean_prob, 2), "std": round(float(np.std(probs)), 2),
-            "min": p(probs, 0), "max": p(probs, 100),
-            "median": round(float(np.median(probs)), 2),
-        },
-        "risk_distribution": {
-            "low_risk_pct":    round(low, 1),
-            "medium_risk_pct": round(medium, 1),
-            "high_risk_pct":   round(high, 1),
-        },
-        "risk_summary": risk_label,
-    }
-
-
-@router.post("/monte-carlo", summary="Monte Carlo risk simulation")
+@router.post("/monte-carlo", summary="Monte Carlo risk simulation (GONE)")
 async def monte_carlo_simulation(req: MonteCarloRequest, _: None = Depends(monte_carlo_dep)):
-    loop = asyncio.get_running_loop()
-    try:
-        result = await loop.run_in_executor(_executor, _run_monte_carlo, req.dict())
-    except Exception as e:  # pragma: no cover
-        # временно пробрасываем текст ошибки наружу для отладки
-        raise HTTPException(status_code=500, detail=f"Simulation failed: {type(e).__name__}: {e}")  # pragma: no cover
-    return result
+    """This endpoint has been removed.
+
+    It used an old ESG formula that didn't see country data and computed
+    probability from a manual formula instead of the RF model. Use the
+    replacement at /api/v1/evaluate/monte-carlo.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "error": "This endpoint has been removed",
+            "reason": "Used an incorrect ESG formula that overestimated scores by ~16 points on average",
+            "replacement": "/api/v1/evaluate/monte-carlo",
+            "detail": "The shadow endpoint used a copy of an old ESG formula without country awareness "
+                      "and a manual probability formula instead of the RandomForest model. "
+                      "Use /api/v1/evaluate/monte-carlo for correct Monte Carlo simulations.",
+        }
+    )
 
 
 @router.post("/model-compare", summary="Compare all ML models on a project")
