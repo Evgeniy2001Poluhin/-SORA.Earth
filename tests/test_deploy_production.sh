@@ -2054,7 +2054,10 @@ echo "== database degraded: the deployment is refused and rolled back =="
 # The defect (#21): _check_db returns "degraded" on error, not "unhealthy", so
 # the overall status is still "healthy" with 200. The script checks HTTP 200 but
 # must also check checks.database.status in the body.
+# A previous deployment is recorded so the rollback actually happens and is observable.
+# Without one, the script takes the exit-76 path (nothing to restore) instead of a rollback.
 new_sandbox
+with_previous_deployment
 cat > "$STUB_DIR/health_body" <<'JSON'
 {"status":"healthy","checks":{"database":{"status":"degraded","error":"connection refused"},"models":{"status":"healthy"},"external_data":{"status":"healthy"}}}
 JSON
@@ -2064,6 +2067,9 @@ check "the refusal names what it expected" \
     "$(grep -c "expected 'healthy'" "$SANDBOX/out")" "1"
 check "and it rolled back" \
     "$([ -f "$STUB_DIR/rolled_back" ] && echo yes || echo no)" "yes"
+check "a degraded database: exit says the previous state is back" "$RC" "1"
+check "a degraded database: the recorded images were restored" \
+    "$(grep -qc 'restored the images that were running' "$SANDBOX/out" && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
 
 echo "== database healthy: the deployment is accepted =="
