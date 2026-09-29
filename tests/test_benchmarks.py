@@ -10,7 +10,7 @@ def test_country_benchmark_known():
     assert resp.status_code == 200
     data = resp.json()
     assert data["country"] == "Germany"
-    assert data["benchmarks"]["co2_per_capita"] == 7.9
+    assert data["benchmarks"]["co2_per_capita"] == 6.9  # Updated 2024 value (was 7.9)
     assert data["benchmarks"]["esg_rank"] == 8
 
 

@@ -583,12 +583,14 @@ def test_reliability_diagram_builder_call_count(monkeypatch):
 def test_evaluate_total_score_control():
     """POST /api/v1/evaluate total_score for social_impact 1,4,7,10 matches expected values (must pass before and after)."""
     c = _make_client()
-    
+
+    # Updated 2026-09-29: Germany benchmark values refreshed (CO2, GDP, HDI)
+    # Old values: {1: 36.09, 4: 44.99, 7: 53.9, 10: 62.8}
     expected = {
-        1: 36.09,
-        4: 44.99,
-        7: 53.9,
-        10: 62.8
+        1: 32.45,
+        4: 41.43,
+        7: 50.4,
+        10: 59.38
     }
     
     for si, exp_score in expected.items():

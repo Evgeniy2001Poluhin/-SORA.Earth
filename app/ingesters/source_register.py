@@ -199,34 +199,41 @@ SOURCE_REGISTER: Dict[str, SourceFacts] = {
         measurement_kind=ADMINISTRATIVE_SNAPSHOT,
         model=None,
         status=STATUS_ACTIVE,
-        coverage="32 countries, 7 indicators",
-        last_verified_data=None,
+        coverage="30 countries (32 keys with the United States and United Kingdom aliases), 7 indicators",
+        last_verified_data="2024 (co2_per_capita, gdp_per_capita from World Bank); 2022 (hdi from UNDP)",
         requires_api_key=False,
         notes=(
-            "Static benchmark values in app/country_benchmarks.py BENCHMARKS dict, "
-            "described as 'based on World Bank & UN data (expanded v2)' with no year "
-            "recorded for the values. Third fallback in the country-data chain "
+            "Static benchmark values in app/country_benchmarks.py BENCHMARKS dict. "
+            "Three indicators (co2_per_capita, gdp_per_capita, hdi) refreshed to one common year "
+            "per indicator for all 30 countries from named World Bank and UNDP series (see SOURCES "
+            "in that module). renewable_share carried over unchanged from prior dataset (values match "
+            "World Bank EG.ELC.RNEW.ZS for years varying by country, 2011-2021); esg_rank, gini_index "
+            "and gov_effectiveness have no stated source or year (esg_rank and gov_effectiveness are not "
+            "used by the ESG score in calculate_esg). Third fallback in the country-data chain "
             "(_fetch_with_fallback_impl), after World Bank and OECD. Serves "
             "BENCHMARK_ONLY_INDICATORS (co2_per_capita, gov_effectiveness) which are "
             "not fetched from the network, plus fills gaps for the five INDICATORS when "
-            "World Bank and OECD both return nothing. The esg_rank field, present in "
-            "every benchmark record, has no stated source."
+            "World Bank and OECD both return nothing."
         ),
     ),
     "global_avg": SourceFacts(
         name="global_avg",
-        measurement_kind=STATIC_BASELINE,
+        measurement_kind=ADMINISTRATIVE_SNAPSHOT,
         model=None,
         status=STATUS_ACTIVE,
         coverage="7 indicators",
-        last_verified_data=None,
+        last_verified_data="2024 (co2_per_capita, gdp_per_capita from World Bank world aggregates); 2022 (hdi from UNDP world average)",
         requires_api_key=False,
         notes=(
             "Global average constants in app/country_benchmarks.py GLOBAL_AVG dict. "
+            "Three values (co2_per_capita, gdp_per_capita, hdi) refreshed to World Bank world aggregates "
+            "(series WLD) for 2024 and UNDP world average (row ZZK.WORLD) for HDI 2022. "
+            "Four fields remain author constants with no stated source: renewable_share (28.3; close to "
+            "the World Bank world value for 2020, 28.0, but not equal), esg_rank (50), gini_index (35.0) "
+            "and gov_effectiveness (0.0). "
             "Used only when SORA_OFFLINE=1 as the fourth and final fallback in the "
             "country-data chain (_fetch_with_fallback_impl), after World Bank, OECD, "
-            "and benchmark. No measurement or model stands behind these numbers; they "
-            "are constants chosen by an author and committed as literals."
+            "and benchmark."
         ),
     ),
 }

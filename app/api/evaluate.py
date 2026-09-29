@@ -14,7 +14,7 @@ from app.schemas import (
     MonteCarloOk,
     MonteCarloUnavailable,
 )
-from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
+from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG, SOURCES
 from app.cache import cache
 from app import external_data
 from app.drift_detection import drift_detector
@@ -532,6 +532,21 @@ def generate_pdf_report(project: Project):
         pdf.cell(60, 8, k + ":", 0)
         pdf.cell(0, 8, str(v), ln=True)
     pdf.ln(6)
+
+    # Data provenance (built from SOURCES, not hard-coded)
+    co2_src = SOURCES["co2_per_capita"]
+    gdp_src = SOURCES["gdp_per_capita"]
+    hdi_src = SOURCES["hdi"]
+    ren_src = SOURCES["renewable_share"]
+    provenance = (
+        f"Country data: CO2 per capita - {co2_src['source']}, {co2_src['year']}; "
+        f"GDP per capita - {gdp_src['source']}, {gdp_src['year']}; "
+        f"HDI - {hdi_src['source']}, {hdi_src['year']}; "
+        f"renewable share of electricity - {ren_src['source']}, year varies by country ({ren_src['years']})."
+    )
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.multi_cell(0, 6, provenance)
+    pdf.ln(4)
 
     if esg.get("recommendations"):
         pdf.set_font("Helvetica", "B", 14)
