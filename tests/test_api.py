@@ -79,7 +79,9 @@ def test_predict_compare():
     assert r.status_code == 200
     data = r.json()
     assert "RandomForest" in data
-    assert "XGBoost" in data
+    # XGBoost returns one probability for every project (finding 9) and is no
+    # longer part of any served comparison or blend.
+    assert "XGBoost" not in data
 
 def test_predict_neural():
     # This asserted 200 and passed for months without the weights: the route

@@ -74,8 +74,11 @@ class TestModelCompare:
         assert r.status_code == 200
         d = r.json()
         assert "models" in d
-        for name in ["RandomForest", "XGBoost", "StackingEnsemble"]:
+        for name in ["RandomForest", "StackingEnsemble"]:
             assert name in d["models"]
+        # XGBoost returns one probability for every project (finding 9) and is
+        # no longer served in any comparison.
+        assert "XGBoost" not in d["models"]
         # The neural network appears only when its weights are loaded (#320, #323):
         # it used to be a hand-written formula that was always present.
         assert ("NeuralNet" in d["models"]) == (main.nn_model is not None)
@@ -164,7 +167,7 @@ def test_model_compare_basic():
     data = r.json()
     assert "models" in data
     assert "RandomForest" in data["models"]
-    assert "XGBoost" in data["models"]
+    assert "XGBoost" not in data["models"]  # finding 9
 
 def test_model_compare_invalid():
     r = client.post("/api/v1/analytics/model-compare", json={"budget": -1})

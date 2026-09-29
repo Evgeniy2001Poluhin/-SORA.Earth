@@ -18,7 +18,7 @@ APP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 def test_prediction_cache_keys_are_namespaced_under_sora_cache():
     from app.api.predict import _cache_key
 
-    for prefix in ("predict", "neural", "stacking:rf+xgb"):
+    for prefix in ("predict", "neural", "stacking:rf"):
         key = _cache_key(prefix, {"budget": 1, "co2_reduction": 2})
         assert key.startswith("sora:cache:"), (
             "%r is not under the invalidatable namespace" % key

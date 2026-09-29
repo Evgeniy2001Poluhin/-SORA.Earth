@@ -59,10 +59,14 @@ def _base_probabilities(rf_model, xgb_model, nn_model, feats_9, feats_7):
     used to be averaged in unconditionally, so on every environment without
     `pytorch_mlp.pth` a third of each blended probability came from a random
     network. The three routes that blend share this so none can drift back.
+
+    XGBoost is excluded (FINDING-9): it was trained on scaled features but
+    receives unscaled ones, so it returns a constant 93.73% for every project.
+    The PDF report, stacking, and compare routes all used to blend it in, which
+    pulled probabilities toward that constant regardless of project quality.
     """
     probabilities = {
         "rf": float(rf_model.predict_proba(feats_9)[0][1]),
-        "xgb": float(xgb_model.predict_proba(feats_7)[0][1]),
     }
     if nn_model is not None:
         probabilities["nn"] = _nn_forward(nn_model, feats_9)
@@ -174,7 +178,7 @@ def predict_stacking(project: Project):
 
     # The composition is part of the key, so a result blended from a different
     # set of models is never served for this one.
-    composition = "rf+xgb+nn" if m.nn_model is not None else "rf+xgb"
+    composition = "rf+nn" if m.nn_model is not None else "rf"
     ck = _cache_key("stacking:" + composition, project.model_dump())
     cached = cache_get(ck)
     if cached:
@@ -236,8 +240,9 @@ def predict_compare(req: CompareRequest):
     response = {
         "projects": results_sorted,
         "RandomForest": per_model("rf"),
-        "XGBoost": per_model("xgb"),
     }
+    # XGBoost removed (FINDING-9): it returns a constant 93.73% for every
+    # project, so comparing it is meaningless.
     # Omitted, not nulled, when the network has no weights (#320, as #316).
     if m.nn_model is not None:
         response["NeuralNet"] = per_model("nn")
