@@ -76,7 +76,7 @@ def test_country_benchmark_still_includes_indicators(client):
     bench = response.json()["country_benchmark"]
 
     # These are the actual country indicators and should stay
-    assert bench["co2_per_capita"] == 3.5
+    assert bench["co2_per_capita"] == 3.6  # Updated 2024 value (was 3.5)
     assert bench["renewable_share"] == 60.1
     assert bench["esg_rank"] == 1
-    assert bench["hdi"] == 0.947
+    assert bench["hdi"] == 0.952  # Updated 2022 value (was 0.947)
