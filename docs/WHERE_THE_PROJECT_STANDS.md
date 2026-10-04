@@ -1,6 +1,7 @@
 # Where the project stands, and what is worth doing next
 
     written    2026-08-14
+    reconciled 2026-10-04 against main@5762cb9a0
     supersedes ROADMAP.md, ROADMAP_DEFENSE_v6.md, ROADMAP_DEFENSE_v6.2.md,
                PROJECT_ANALYSIS_2026-07-17.md, IMPROVEMENTS_2026-07-17.md
     does not   supersede ROADMAP_ENV_CRISIS_2026.md, which remains the phase
@@ -100,7 +101,10 @@ admin endpoint nobody called.
 What is **not** done is the alerting rule. A gauge in Prometheus still requires
 someone to look, and choosing when a dip is worth waking someone for is the
 same kind of decision as the five forecast alerts in #284 — the owner's, not a
-side effect of adding the metric.
+side effect of adding the metric. Issue #284 is now closed: those five alerts
+belonged to the negatively closed M2 experiment and were removed, while the
+five operational platform alerts remain. That cleanup does not silently choose
+a threshold or paging policy for M3 coverage.
 
 ### B. Make the eventual measurement trustworthy — before it runs
 
@@ -137,9 +141,14 @@ has a §9 and why M3 was declared before accumulation counted.
 
 ### C. Close what does not depend on the clock
 
-`#98` certificate hook · `#26` after a release audit · `#164` period corrections
-rewrite rows in place · `#156` inherited startup jobs · `#75` no consumer reads
-the point-in-time accessor.
+`#98` certificate hook · `#26` after a release audit · `#156` inherited startup
+jobs.
+
+Two provenance items formerly listed here are closed. Issue #164 added
+append-only period-attribution history and guards against update, delete and
+truncate. Issue #75 then wired forecast feature construction to that
+point-in-time history. The guarantee is prospective: a vintage or correction
+that was never recorded cannot be reconstructed retroactively.
 
 ## 4. What not to do in this window
 

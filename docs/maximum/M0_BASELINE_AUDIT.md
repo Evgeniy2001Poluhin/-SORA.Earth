@@ -1,5 +1,11 @@
 # M0 BASELINE AUDIT — SORA.Earth Maximum
 
+> **HISTORICAL SNAPSHOT.** Every status and SHA below describes the audit on
+> 2026-07-24. It is retained as evidence of the original baseline and is not a
+> current CI, PR, production, or roadmap report. Current sequencing lives in
+> `docs/DEVELOPMENT_ROADMAP.md`; current M0 disposition lives in
+> `docs/maximum/M0_GAP_REGISTER.md`.
+
 **Audit Date:** 2026-07-24  
 **Auditor:** Claude Opus 4.5  
 **Branch:** `fix/environmental-ingestion-persistence`  

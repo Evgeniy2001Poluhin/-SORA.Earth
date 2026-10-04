@@ -2,6 +2,7 @@
 
 **Status:** CURRENT — this is the only active plan in this repository
 **Adopted:** 2026-08-16 · **Base:** `ff59610` · **Decisions:** repository owner
+**Reconciled:** 2026-10-04 against `main@5762cb9a0`
 
 ## Why this document is singular
 
@@ -148,6 +149,15 @@ reasons that have nothing to do with the claim.
 The P0 that remains is a measurement, not a build: `registry_ok` exists in
 `app/promotion.py` and `app/registry_retry.py`, and what is not known is how
 many rows were written before it did.
+
+Three October reconciliations are complete and must not return to the work
+queue:
+
+| Issue | Result | Evidence in the tree |
+|---|---|---|
+| #164 | Period attribution corrections are append-only | `country_indicator_period_history` plus the PostgreSQL mutation guards and point-in-time tests |
+| #75 | Forecast features consume point-in-time period history | `app/services/forecasting/features.py` reads with `series_as_of`; the limitation is prospective because unrecorded historical vintages cannot be reconstructed |
+| #284 | Five obsolete M2 forecast-quality alerts retired | `tests/test_obsolete_esg_forecast_alerts_are_absent.py` fixes the provisioned set at the five operational alerts |
 
 ## What needs elapsed time
 
