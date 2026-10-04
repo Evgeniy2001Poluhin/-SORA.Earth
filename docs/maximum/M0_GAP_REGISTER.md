@@ -1,8 +1,16 @@
 # M0 GAP REGISTER — SORA.Earth Maximum
 
 **Created:** 2026-07-24  
-**Last Updated:** 2026-07-30  
+**Last Updated:** 2026-10-04
 **Status:** Active
+
+This register is an evidence ledger, not the active work queue. Current
+sequencing is defined only by `docs/DEVELOPMENT_ROADMAP.md`. The latest
+repository reconciliation is `main@5762cb9a0`, after #433 closed the #164/#75
+period-history chain and #434 closed #284. Those issues do not change the gap
+counts below; they remove stale work from the active roadmap. M0 remains open
+while the OPEN, PARTIAL and UNVERIFIED rows below remain unresolved or are
+deliberately accepted by the owner.
 
 ## Standing on 2026-07-30
 
