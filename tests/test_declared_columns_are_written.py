@@ -84,6 +84,32 @@ KNOWN_UNWRITTEN = {
     "CountryIndicatorHistory.period_response_sha256",
     "CountryIndicatorHistory.period_resolved_at",
 
+    # #164. These are written by the PostgreSQL trigger
+    # cih_record_period_change(), not by Python assignment. The AST scanner is
+    # intentionally Python-only; listing the trigger-owned columns here keeps
+    # that limitation explicit without pretending the audit table is dead.
+    "CountryIndicatorPeriodHistory.history_row_id",
+    "CountryIndicatorPeriodHistory.changed_at",
+    "CountryIndicatorPeriodHistory.database_actor",
+    "CountryIndicatorPeriodHistory.old_as_of_date",
+    "CountryIndicatorPeriodHistory.new_as_of_date",
+    "CountryIndicatorPeriodHistory.old_period_status",
+    "CountryIndicatorPeriodHistory.new_period_status",
+    "CountryIndicatorPeriodHistory.old_period_run_id",
+    "CountryIndicatorPeriodHistory.new_period_run_id",
+    "CountryIndicatorPeriodHistory.old_period_method",
+    "CountryIndicatorPeriodHistory.new_period_method",
+    "CountryIndicatorPeriodHistory.old_period_rule_version",
+    "CountryIndicatorPeriodHistory.new_period_rule_version",
+    "CountryIndicatorPeriodHistory.old_period_candidates",
+    "CountryIndicatorPeriodHistory.new_period_candidates",
+    "CountryIndicatorPeriodHistory.old_period_source_vintage",
+    "CountryIndicatorPeriodHistory.new_period_source_vintage",
+    "CountryIndicatorPeriodHistory.old_period_response_sha256",
+    "CountryIndicatorPeriodHistory.new_period_response_sha256",
+    "CountryIndicatorPeriodHistory.old_period_resolved_at",
+    "CountryIndicatorPeriodHistory.new_period_resolved_at",
+
     # No writer anywhere. `scheduled_run_ingesters` records a run's status and
     # its error, and how many rows the run actually wrote is exactly the number
     # an operator asks for first. Reported 2026-09-21; not fixed here, because

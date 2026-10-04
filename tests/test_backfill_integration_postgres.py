@@ -309,6 +309,27 @@ def test_a_newer_rule_withdraws_an_older_verdict_and_the_date_goes_with_it(scrat
     assert row["period_status"] == "recovered_inferred"
     assert row["as_of_date"].year == 2016
 
+    with engine.connect() as conn:
+        transitions = conn.execute(
+            text(
+                "SELECT old_period_status, new_period_status, "
+                "       old_as_of_date, new_as_of_date "
+                "FROM country_indicator_period_history "
+                "WHERE history_row_id = :row_id ORDER BY changed_at, id"
+            ),
+            {"row_id": row_id},
+        ).all()
+    assert [(old, new) for old, new, _old_date, _new_date in transitions] == [
+        (None, "recovered_inferred"),
+        ("recovered_inferred", "recovered_inferred"),
+        ("recovered_inferred", "ambiguous"),
+        ("ambiguous", "recovered_inferred"),
+    ]
+    assert transitions[2].old_as_of_date is not None
+    assert transitions[2].new_as_of_date is None
+    assert transitions[3].old_as_of_date is None
+    assert transitions[3].new_as_of_date.year == 2016
+
 
 @requires_postgres
 def test_an_unobtainable_page_leaves_the_row_for_a_later_run(scratch_db, stub):

@@ -131,6 +131,65 @@ class CountryIndicatorHistory(Base):
     )
 
 
+class CountryIndicatorPeriodHistory(Base):
+    """Append-only record of changes to an observation's period attribution.
+
+    The source row keeps the latest attribution for compatibility.  This table
+    keeps both sides of every correction so a point-in-time reader can recover
+    what period the system assigned before a later backfill changed it.
+    """
+
+    __tablename__ = "country_indicator_period_history"
+
+    id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        sa.Identity(always=True),
+        primary_key=True,
+        autoincrement=True,
+    )
+    history_row_id = Column(Integer, nullable=False)
+    country_iso3 = Column(String(10), nullable=False)
+    indicator_code = Column(String(100), nullable=False)
+    source = Column(String(50), nullable=False)
+    value = Column(Float, nullable=True)
+    fetched_at = Column(DateTime, nullable=False)
+    # UTC without timezone, matching fetched_at and the cutoff accepted by
+    # point_in_time.py.  Mixing timestamptz with a naive cutoff would let the
+    # session TimeZone move the reconstruction boundary.
+    changed_at = Column(DateTime, nullable=False)
+    database_actor = Column(Text, nullable=False)
+
+    old_as_of_date = Column(DateTime, nullable=True)
+    new_as_of_date = Column(DateTime, nullable=True)
+    old_period_status = Column(Text, nullable=True)
+    new_period_status = Column(Text, nullable=True)
+    old_period_run_id = Column(Text, nullable=True)
+    new_period_run_id = Column(Text, nullable=True)
+    old_period_method = Column(Text, nullable=True)
+    new_period_method = Column(Text, nullable=True)
+    old_period_rule_version = Column(Text, nullable=True)
+    new_period_rule_version = Column(Text, nullable=True)
+    old_period_candidates = Column(Integer, nullable=True)
+    new_period_candidates = Column(Integer, nullable=True)
+    old_period_source_vintage = Column(Text, nullable=True)
+    new_period_source_vintage = Column(Text, nullable=True)
+    old_period_response_sha256 = Column(Text, nullable=True)
+    new_period_response_sha256 = Column(Text, nullable=True)
+    old_period_resolved_at = Column(DateTime(timezone=True), nullable=True)
+    new_period_resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_ciph_row_changed", "history_row_id", "changed_at", "id"),
+        Index(
+            "ix_ciph_lookup",
+            "country_iso3",
+            "indicator_code",
+            "fetched_at",
+            "changed_at",
+        ),
+    )
+
+
 class IngesterRun(Base):
     """One run of an ingester.
 

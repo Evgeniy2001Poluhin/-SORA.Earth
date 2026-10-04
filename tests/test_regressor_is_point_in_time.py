@@ -42,6 +42,7 @@ def indicator_db(monkeypatch):
         poolclass=StaticPool,
     )
     database.CountryIndicatorHistory.__table__.create(engine)
+    database.CountryIndicatorPeriodHistory.__table__.create(engine)
     Session = sessionmaker(bind=engine)
     monkeypatch.setattr(database, "SessionLocal", Session)
     return Session

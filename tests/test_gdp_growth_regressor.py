@@ -36,13 +36,14 @@ PER_CAPITA_GROWTH = "NY.GDP.PCAP.KD.ZG"
 
 @pytest.fixture
 def indicator_db(monkeypatch):
-    """A real database holding only country_indicator_history."""
+    """A real database holding the point-in-time tables."""
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
     database.CountryIndicatorHistory.__table__.create(engine)
+    database.CountryIndicatorPeriodHistory.__table__.create(engine)
     # The other two regressors read region_signals. Without it they raise, the
     # broad `except` swallows it, and the test would pass over a silenced error.
     database.RegionSignal.__table__.create(engine)
