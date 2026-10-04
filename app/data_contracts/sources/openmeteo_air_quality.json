@@ -1,0 +1,102 @@
+{
+  "access": {
+    "artifact": null,
+    "authentication": "none",
+    "cadence": "every 6 hours",
+    "endpoint": "https://air-quality-api.open-meteo.com/v1/air-quality"
+  },
+  "contract_version": "1.0",
+  "coverage": "21 declared regions, hourly",
+  "fallback_policy": "Never present modelled CAMS output as an OpenAQ station measurement.",
+  "fields": [
+    {
+      "minimum": 0,
+      "name": "pm10",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "µg/m³"
+    },
+    {
+      "minimum": 0,
+      "name": "pm2_5",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "µg/m³"
+    },
+    {
+      "minimum": 0,
+      "name": "nitrogen_dioxide",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "µg/m³"
+    },
+    {
+      "minimum": 0,
+      "name": "sulphur_dioxide",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "µg/m³"
+    },
+    {
+      "minimum": 0,
+      "name": "ozone",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "µg/m³"
+    },
+    {
+      "minimum": 0,
+      "name": "carbon_monoxide",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "µg/m³"
+    }
+  ],
+  "identity": {
+    "deduplication_key": [
+      "source",
+      "source_record_id"
+    ],
+    "required_fields": [
+      "region_code",
+      "metric",
+      "value",
+      "unit",
+      "event_time",
+      "latitude",
+      "longitude"
+    ]
+  },
+  "maintainer": "SORA.Earth",
+  "measurement_kind": "modelled",
+  "missing_value_policy": "Skip missing or non-numeric pollutant values; retain successful regions.",
+  "parser": {
+    "module": "app.ingesters.openmeteo_air_quality",
+    "version_source": "git_sha"
+  },
+  "publisher": "Open-Meteo / CAMS",
+  "rights": {
+    "attribution_required": true,
+    "license_id": "CC-BY-4.0",
+    "notes": "Open-Meteo states that API data is CC BY 4.0; free API use is non-commercial and rate limited.",
+    "terms_url": "https://open-meteo.com/en/terms",
+    "verification_status": "verified",
+    "verified_on": "2026-10-04"
+  },
+  "source_id": "openmeteo_air_quality",
+  "status": "active",
+  "temporal": {
+    "frequency": "hourly model output",
+    "freshness_axis": "event_time",
+    "kinds": [
+      "observed"
+    ],
+    "max_vintage_hours": null
+  }
+}

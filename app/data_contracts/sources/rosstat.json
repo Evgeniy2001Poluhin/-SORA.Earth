@@ -1,0 +1,97 @@
+{
+  "access": {
+    "artifact": "data.rosstat_snapshot_2024",
+    "authentication": "not_applicable",
+    "cadence": "polled every 180 days from the committed snapshot",
+    "endpoint": null
+  },
+  "contract_version": "1.0",
+  "coverage": "85 declared regions, 5 metrics",
+  "fallback_policy": "No fallback in this ingester.",
+  "fields": [
+    {
+      "maximum": 100,
+      "minimum": 0,
+      "name": "unemployment_rate",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "%"
+    },
+    {
+      "minimum": 0,
+      "name": "avg_income_rub",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "RUB"
+    },
+    {
+      "minimum": 0,
+      "name": "life_expectancy",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "years"
+    },
+    {
+      "maximum": 100,
+      "minimum": 0,
+      "name": "budget_transparency",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "0-100"
+    },
+    {
+      "maximum": 100,
+      "minimum": 0,
+      "name": "digital_gov_index",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "0-100"
+    }
+  ],
+  "identity": {
+    "deduplication_key": [
+      "source",
+      "source_record_id"
+    ],
+    "required_fields": [
+      "region_code",
+      "metric",
+      "value",
+      "unit",
+      "period_start",
+      "period_end",
+      "source_revision"
+    ]
+  },
+  "maintainer": "SORA.Earth",
+  "measurement_kind": "administrative_snapshot",
+  "missing_value_policy": "A missing metric is absent; no cross-region or cross-field imputation.",
+  "parser": {
+    "module": "app.ingesters.rosstat",
+    "version_source": "git_sha"
+  },
+  "publisher": "Rosstat / Minfin / Mincifry compilation",
+  "rights": {
+    "attribution_required": null,
+    "license_id": null,
+    "notes": "The repository has not retained upstream URLs, licences, and attribution terms for every compiled field.",
+    "terms_url": null,
+    "verification_status": "unverified",
+    "verified_on": null
+  },
+  "source_id": "rosstat",
+  "status": "active",
+  "temporal": {
+    "frequency": "annual 2024 snapshot",
+    "freshness_axis": "period_end",
+    "kinds": [
+      "period"
+    ],
+    "max_vintage_hours": null
+  }
+}
