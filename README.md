@@ -44,17 +44,14 @@ SORA.Earth AI Platform — полнофункциональная платфор
 
 - **Наблюдаемость и прод**
   - Prometheus‑метрики на `/metrics` — реестр `prometheus_client`, HTTP + доменные `sora_*`. Это тот путь, который скрейпит `infra/prometheus.yml`. `/api/v1/metrics/prometheus` отдаёт тот же реестр.
-  - Grafana‑дашборд “SORA MLOps Overview” и **10 алертов** из
+  - Grafana-дашборд “SORA MLOps Overview” и **5 алертов** для
+    операционного контура из
     `grafana/provisioning/alerting/alerts.yml`, названных так же, как там:
     `Drift Detected`, `No Successful Retrain`, `Retrain Failed`,
-    `High Prediction Latency`, `App Unreachable`,
-    `Forecast MAE Degradation (Score)`, `Forecast MAE Spike (20% increase)`,
-    `Forecast RMSE Degradation (Score)`, `Forecast RMSE Spike (2× baseline)`,
-    `Forecast R² Negative (Score)`.
-    Здесь стояло «5 алертов (drift, retrain fail, AUC drop, latency, app
-    down)»: алертов десять, а алерта на падение AUC нет ни одного (#284).
-    Пять прогнозных сейчас не могут сработать — метрики, за которыми они
-    следят, исчезают при каждом выкате; это открыто как #284.
+    `High Prediction Latency`, `App Unreachable`.
+    Пять алертов качества старого ESG-прогноза удалены по #284: M2
+    закрыт с результатом «преимущество не доказано», а M3 имеет другую
+    цель и ещё не достиг доказательного окна.
   - Nginx reverse proxy (80 и 443, TLS от Let's Encrypt) с rate limiting, security‑заголовками, gzip и WebSocket‑проксированием.
 
 ---
