@@ -1009,6 +1009,11 @@ jobs:
             exit 1
           fi
           echo "refused, and the recorded revision did not move"
+          # The assertion deliberately leaves the shared CI database at the
+          # irreversible boundary.  Restore it before pytest imports
+          # tests/conftest.py, which correctly requires every model table to
+          # have been provisioned by migrations rather than create_all().
+          alembic upgrade head
 
       # 3. Everything BELOW the boundary, on its own database: it cannot be
       #    reached from head any more without crossing f2c9a1d47b30.
