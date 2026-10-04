@@ -1,0 +1,61 @@
+{
+  "access": {
+    "artifact": "app.ingesters.sber_veb_baseline.BASELINE",
+    "authentication": "not_applicable",
+    "cadence": "annual scheduler read; changes only by reviewed commit",
+    "endpoint": null
+  },
+  "contract_version": "1.0",
+  "coverage": "85 declared regions, 1 metric",
+  "fallback_policy": "No fallback in this ingester.",
+  "fields": [
+    {
+      "maximum": 100,
+      "minimum": 0,
+      "name": "esg_index_baseline",
+      "nullable": false,
+      "provenance_status": "unknown",
+      "type": "number",
+      "unit": "0-100"
+    }
+  ],
+  "identity": {
+    "deduplication_key": [
+      "source",
+      "source_record_id"
+    ],
+    "required_fields": [
+      "region_code",
+      "metric",
+      "value",
+      "unit",
+      "source_revision"
+    ]
+  },
+  "maintainer": "SORA.Earth",
+  "measurement_kind": "static_baseline",
+  "missing_value_policy": "A missing region has no baseline; do not use zero.",
+  "parser": {
+    "module": "app.ingesters.sber_veb_baseline",
+    "version_source": "git_sha"
+  },
+  "publisher": "SORA.Earth author-maintained constants",
+  "rights": {
+    "attribution_required": null,
+    "license_id": null,
+    "notes": "No external measurement, licence, or versioned source is established for these author constants.",
+    "terms_url": null,
+    "verification_status": "unverified",
+    "verified_on": null
+  },
+  "source_id": "sber_veb_baseline",
+  "status": "active",
+  "temporal": {
+    "frequency": "not a time series",
+    "freshness_axis": "source_revision",
+    "kinds": [
+      "not_applicable"
+    ],
+    "max_vintage_hours": null
+  }
+}

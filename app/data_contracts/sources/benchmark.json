@@ -1,0 +1,111 @@
+{
+  "access": {
+    "artifact": "app.country_benchmarks.BENCHMARKS",
+    "authentication": "not_applicable",
+    "cadence": "changes only by reviewed commit",
+    "endpoint": null
+  },
+  "contract_version": "1.0",
+  "coverage": "30 countries (32 keys with the United States and United Kingdom aliases), 7 indicators",
+  "fallback_policy": "Global average only in explicit offline mode.",
+  "fields": [
+    {
+      "minimum": 0,
+      "name": "co2_per_capita",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "tonnes CO2e/person"
+    },
+    {
+      "maximum": 100,
+      "minimum": 0,
+      "name": "renewable_share",
+      "nullable": false,
+      "provenance_status": "partial",
+      "type": "number",
+      "unit": "percent"
+    },
+    {
+      "minimum": 1,
+      "name": "esg_rank",
+      "nullable": false,
+      "provenance_status": "unknown",
+      "type": "integer",
+      "unit": "rank"
+    },
+    {
+      "maximum": 1,
+      "minimum": 0,
+      "name": "hdi",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "index 0-1"
+    },
+    {
+      "minimum": 0,
+      "name": "gdp_per_capita",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "current USD"
+    },
+    {
+      "maximum": 100,
+      "minimum": 0,
+      "name": "gini_index",
+      "nullable": false,
+      "provenance_status": "unknown",
+      "type": "number",
+      "unit": "index 0-100"
+    },
+    {
+      "name": "gov_effectiveness",
+      "nullable": false,
+      "provenance_status": "unknown",
+      "type": "number",
+      "unit": "WGI estimate"
+    }
+  ],
+  "identity": {
+    "deduplication_key": [
+      "country",
+      "indicator",
+      "source"
+    ],
+    "required_fields": [
+      "country",
+      "indicator",
+      "value",
+      "source"
+    ]
+  },
+  "maintainer": "SORA.Earth",
+  "measurement_kind": "administrative_snapshot",
+  "missing_value_policy": "Return no benchmark for an unknown country/field; do not synthesize one.",
+  "parser": {
+    "module": "app.country_benchmarks",
+    "version_source": "git_sha"
+  },
+  "publisher": "World Bank / UNDP / unresolved legacy fields",
+  "rights": {
+    "attribution_required": null,
+    "license_id": null,
+    "notes": "Some fields have named World Bank or UNDP provenance; four fields still lack complete source/year evidence, so the combined dataset cannot claim one verified licence.",
+    "terms_url": null,
+    "verification_status": "unverified",
+    "verified_on": null
+  },
+  "source_id": "benchmark",
+  "status": "active",
+  "temporal": {
+    "frequency": "mixed annual snapshots and unresolved constants",
+    "freshness_axis": "not_configured",
+    "kinds": [
+      "period",
+      "not_applicable"
+    ],
+    "max_vintage_hours": null
+  }
+}

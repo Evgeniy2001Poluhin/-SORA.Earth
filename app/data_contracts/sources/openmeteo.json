@@ -1,0 +1,134 @@
+{
+  "access": {
+    "artifact": null,
+    "authentication": "none",
+    "cadence": "hourly",
+    "endpoint": "https://api.open-meteo.com/v1/forecast"
+  },
+  "contract_version": "1.0",
+  "coverage": "21 declared regions, hourly",
+  "fallback_policy": "No source substitution inside the ingester; Open-Meteo may select the model when none is requested.",
+  "fields": [
+    {
+      "name": "temperature",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "celsius"
+    },
+    {
+      "maximum": 100,
+      "minimum": 0,
+      "name": "humidity",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "percent"
+    },
+    {
+      "name": "heat_index",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "celsius"
+    },
+    {
+      "minimum": 0,
+      "name": "precipitation",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "mm"
+    },
+    {
+      "minimum": 0,
+      "name": "rain",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "mm"
+    },
+    {
+      "minimum": 0,
+      "name": "pressure_msl",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "hPa"
+    },
+    {
+      "minimum": 0,
+      "name": "pressure_surface",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "hPa"
+    },
+    {
+      "minimum": 0,
+      "name": "wind_speed",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "km/h"
+    },
+    {
+      "maximum": 360,
+      "minimum": 0,
+      "name": "wind_direction",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "degrees"
+    },
+    {
+      "minimum": 0,
+      "name": "wind_gusts",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "km/h"
+    }
+  ],
+  "identity": {
+    "deduplication_key": [
+      "source",
+      "source_record_id"
+    ],
+    "required_fields": [
+      "region_code",
+      "metric",
+      "value",
+      "unit",
+      "event_time",
+      "latitude",
+      "longitude"
+    ]
+  },
+  "maintainer": "SORA.Earth",
+  "measurement_kind": "modelled",
+  "missing_value_policy": "Skip absent variables and failed regions; do not synthesize a value.",
+  "parser": {
+    "module": "app.ingesters.openmeteo",
+    "version_source": "git_sha"
+  },
+  "publisher": "Open-Meteo and selected weather-model providers",
+  "rights": {
+    "attribution_required": true,
+    "license_id": "CC-BY-4.0",
+    "notes": "Open-Meteo states that API data is CC BY 4.0; free API use is non-commercial and rate limited.",
+    "terms_url": "https://open-meteo.com/en/terms",
+    "verification_status": "verified",
+    "verified_on": "2026-10-04"
+  },
+  "source_id": "openmeteo",
+  "status": "active",
+  "temporal": {
+    "frequency": "hourly model output",
+    "freshness_axis": "event_time",
+    "kinds": [
+      "observed"
+    ],
+    "max_vintage_hours": null
+  }
+}
