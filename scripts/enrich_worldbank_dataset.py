@@ -19,9 +19,12 @@ import pandas as pd
 import requests
 from tqdm import tqdm
 
+ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dataset_identity import (  # noqa: E402
-    StageCounts, assert_unique_keys, project_key, write_manifest,
+    StageCounts, assert_unique_keys, project_key, publish_world_bank_snapshot,
+    write_manifest,
 )
 
 
@@ -357,6 +360,10 @@ def main():
     parser.add_argument("--raw-output", default=None,
                          help="path to save the raw, unfiltered API response before mapping "
                          "(default: <output>.raw.json)")
+    parser.add_argument(
+        "--snapshot-root", default=os.getenv("SORA_DATA_SNAPSHOT_ROOT"),
+        help="optional immutable snapshot store root (or SORA_DATA_SNAPSHOT_ROOT)",
+    )
     args = parser.parse_args()
 
     # Step 1: Fetch World Bank projects
@@ -461,27 +468,49 @@ def main():
     print(combined_df['category'].value_counts().head())
 
 
+    fetch_timestamp = datetime.now(timezone.utc).isoformat()
+    commit_sha = _git_commit_sha()
+    stages = [
+        StageCounts("wb_fetched_raw", len(wb_projects)),
+        StageCounts("wb_mapped", len(mapped_projects),
+                    reason="passed budget/duration validity checks in map_wb_project_to_schema"),
+        StageCounts("combined_before_dedup", before_count),
+        StageCounts("no_source_project_id", no_id_count,
+                    reason="kept, not deduplicated -- see dataset_identity.synthetic_key"),
+        StageCounts("duplicate_keys_removed", duplicate_count),
+        StageCounts("total_written", len(combined_df)),
+    ]
+    query_params = {"max_projects": args.max_projects}
+    snapshot_id = None
+    if args.snapshot_root:
+        published = publish_world_bank_snapshot(
+            args.snapshot_root,
+            output_path=args.output,
+            raw_path=raw_path,
+            fetch_timestamp=fetch_timestamp,
+            commit_sha=commit_sha,
+            query_params=query_params,
+            stage_counts=stages,
+            columns=list(combined_df.columns),
+            unique_ids=int(unique_ids),
+            duplicate_ids=int(duplicate_count),
+        )
+        snapshot_id = published.snapshot_id
+        print(f"Published immutable snapshot -> {snapshot_id}")
+
     manifest_path = args.output + ".manifest.json"
     write_manifest(
         manifest_path,
         source_url="https://search.worldbank.org/api/v2/projects",
-        query_params={"max_projects": args.max_projects},
-        fetch_timestamp=datetime.now(timezone.utc).isoformat(),
-        commit_sha=_git_commit_sha(),
-        stage_counts=[
-            StageCounts("wb_fetched_raw", len(wb_projects)),
-            StageCounts("wb_mapped", len(mapped_projects),
-                        reason="passed budget/duration validity checks in map_wb_project_to_schema"),
-            StageCounts("combined_before_dedup", before_count),
-            StageCounts("no_source_project_id", no_id_count,
-                        reason="kept, not deduplicated -- see dataset_identity.synthetic_key"),
-            StageCounts("duplicate_keys_removed", duplicate_count),
-            StageCounts("total_written", len(combined_df)),
-        ],
+        query_params=query_params,
+        fetch_timestamp=fetch_timestamp,
+        commit_sha=commit_sha,
+        stage_counts=stages,
         unique_ids=int(unique_ids),
         duplicate_ids=int(duplicate_count),
         columns=list(combined_df.columns),
         output_path=args.output,
+        snapshot_id=snapshot_id,
     )
     print(f"Wrote manifest -> {manifest_path}")
 

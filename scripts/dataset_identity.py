@@ -35,7 +35,12 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Iterable, Optional
+
+from app.data_snapshots import SnapshotSpec, PublishedSnapshot, publish_snapshot
+from app.ingesters.data_contracts import source_contract
 
 
 class MissingSourceProjectId(ValueError):
@@ -145,7 +150,8 @@ def write_manifest(path: str, *, source_url: str, query_params: dict,
                     fetch_timestamp: str, commit_sha: str,
                     stage_counts: Iterable[StageCounts],
                     unique_ids: int, duplicate_ids: int,
-                    columns: Iterable[str], output_path: Optional[str] = None) -> None:
+                    columns: Iterable[str], output_path: Optional[str] = None,
+                    snapshot_id: Optional[str] = None) -> None:
     """Write the manifest atomically: a temp file, then one rename.
 
     A manifest left half-written by an interrupted run is worse than no
@@ -166,6 +172,8 @@ def write_manifest(path: str, *, source_url: str, query_params: dict,
         "schema_hash": schema_hash(columns),
         "columns": columns,
     }
+    if snapshot_id is not None:
+        manifest["snapshot_id"] = snapshot_id
     if output_path is not None:
         import os
         if os.path.exists(output_path):
@@ -180,3 +188,61 @@ def write_manifest(path: str, *, source_url: str, query_params: dict,
         os.fsync(fh.fileno())
     import os
     os.replace(tmp_path, path)
+
+
+def publish_world_bank_snapshot(
+    root: str,
+    *,
+    output_path: str,
+    raw_path: Optional[str],
+    fetch_timestamp: str,
+    commit_sha: str,
+    query_params: dict,
+    stage_counts: Iterable[StageCounts],
+    columns: Iterable[str],
+    unique_ids: int,
+    duplicate_ids: int,
+) -> PublishedSnapshot:
+    """Publish one World Bank project build into the immutable store.
+
+    The project endpoint and the indicator endpoint are separate sources. Both
+    are named because these builders use project records plus GDP indicator
+    enrichment. Existing CSV and sidecar outputs remain the compatibility
+    interface; the snapshot is the immutable provenance record.
+    """
+    timestamp = datetime.fromisoformat(fetch_timestamp.replace("Z", "+00:00"))
+    counts = list(stage_counts)
+    count_map = {item.stage: item.count for item in counts}
+    if len(count_map) != len(counts):
+        raise ValueError("snapshot stage names must be unique")
+
+    source_ids = ("world_bank_projects", "world_bank")
+    versions = {
+        source_id: source_contract(source_id)["contract_version"]
+        for source_id in source_ids
+    }
+    raw = Path(raw_path).read_bytes() if raw_path is not None else None
+    normalized = Path(output_path).read_bytes()
+    spec = SnapshotSpec(
+        source_ids=source_ids,
+        contract_versions=versions,
+        fetch_time=timestamp,
+        as_of_time=timestamp,
+        parser_git_sha=commit_sha,
+        request_parameters=query_params,
+        stage_counts=count_map,
+        schema_fields=tuple(columns),
+        quality_checks={
+            "composite_identity": "source+source_project_id",
+            "unique_source_ids": unique_ids,
+            "duplicate_source_ids": duplicate_ids,
+            "raw_representation": (
+                "decoded_project_records_json" if raw is not None else "not_retained"
+            ),
+        },
+        exclusions=(
+            "publisher transport bytes are not retained",
+            "synthetic base rows have no recoverable publisher identity",
+        ),
+    )
+    return publish_snapshot(root, spec, normalized=normalized, raw=raw)
