@@ -1,0 +1,119 @@
+{
+  "access": {
+    "artifact": null,
+    "authentication": "none",
+    "cadence": "operator-triggered dataset build",
+    "endpoint": "https://search.worldbank.org/api/v2/projects"
+  },
+  "contract_version": "1.0",
+  "coverage": "World Bank Projects portfolio fetched by bounded or full portfolio runs",
+  "fallback_policy": "No substitute source is labelled as a World Bank project; optional GDP enrichment is tracked separately as world_bank.",
+  "fields": [
+    {
+      "name": "source_project_id",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "string",
+      "unit": null
+    },
+    {
+      "name": "name",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "string",
+      "unit": null
+    },
+    {
+      "minimum": 0,
+      "name": "budget",
+      "nullable": false,
+      "provenance_status": "partial",
+      "type": "number",
+      "unit": "current USD"
+    },
+    {
+      "minimum": 0,
+      "name": "duration_months",
+      "nullable": false,
+      "provenance_status": "partial",
+      "type": "number",
+      "unit": "months"
+    },
+    {
+      "name": "category",
+      "nullable": false,
+      "provenance_status": "partial",
+      "type": "string",
+      "unit": null
+    },
+    {
+      "name": "region",
+      "nullable": false,
+      "provenance_status": "partial",
+      "type": "string",
+      "unit": null
+    },
+    {
+      "minimum": 0,
+      "name": "co2_reduction",
+      "nullable": false,
+      "provenance_status": "partial",
+      "type": "number",
+      "unit": "tonnes CO2e/year"
+    },
+    {
+      "maximum": 100,
+      "minimum": 0,
+      "name": "social_impact",
+      "nullable": false,
+      "provenance_status": "partial",
+      "type": "number",
+      "unit": "derived score (pipeline scale)"
+    },
+    {
+      "maximum": 1,
+      "minimum": 0,
+      "name": "success",
+      "nullable": false,
+      "provenance_status": "partial",
+      "type": "integer",
+      "unit": "binary"
+    }
+  ],
+  "identity": {
+    "deduplication_key": [
+      "source",
+      "source_project_id"
+    ],
+    "required_fields": [
+      "source",
+      "source_project_id"
+    ]
+  },
+  "maintainer": "SORA.Earth",
+  "measurement_kind": "administrative_fetched",
+  "missing_value_policy": "Rows without a publisher project id are rejected; unavailable model features use documented deterministic derivations or the row is rejected.",
+  "parser": {
+    "module": "scripts.fetch_wb_projects",
+    "version_source": "git_sha"
+  },
+  "publisher": "World Bank",
+  "rights": {
+    "attribution_required": true,
+    "license_id": "CC-BY-4.0-WORLD-BANK-TERMS",
+    "notes": "Default World Bank-produced open-data licence; project-level metadata may carry additional terms and must be retained when present.",
+    "terms_url": "https://datacatalog.worldbank.org/public-licenses",
+    "verification_status": "verified",
+    "verified_on": "2026-10-04"
+  },
+  "source_id": "world_bank_projects",
+  "status": "active",
+  "temporal": {
+    "frequency": "publisher portfolio updates",
+    "freshness_axis": "source_revision",
+    "kinds": [
+      "period"
+    ],
+    "max_vintage_hours": null
+  }
+}

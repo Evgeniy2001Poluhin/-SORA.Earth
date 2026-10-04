@@ -176,6 +176,22 @@ SOURCE_REGISTER: Dict[str, SourceFacts] = {
             "SORA_OFFLINE=1). Each value's indicator_sources says which source answered."
         ),
     ),
+    "world_bank_projects": SourceFacts(
+        name="world_bank_projects",
+        measurement_kind=ADMINISTRATIVE_FETCHED,
+        model=None,
+        status=STATUS_ACTIVE,
+        coverage="World Bank Projects portfolio fetched by bounded or full portfolio runs",
+        last_verified_data=None,
+        requires_api_key=False,
+        notes=(
+            "World Bank Projects API (search.worldbank.org/api/v2/projects). "
+            "Distinct from world_bank, which names annual indicator series: project "
+            "identity, lifecycle dates, sectors and financing feed the training-dataset "
+            "builders in scripts/enrich_worldbank_dataset.py and "
+            "scripts/fetch_wb_projects.py."
+        ),
+    ),
     "oecd": SourceFacts(
         name="oecd",
         measurement_kind=ADMINISTRATIVE_FETCHED,

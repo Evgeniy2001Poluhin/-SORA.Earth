@@ -56,14 +56,13 @@ import time
 
 import requests
 
+ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dataset_identity import (  # noqa: E402
     MissingSourceProjectId, StageCounts, assert_unique_keys, project_key,
-    write_manifest,
+    publish_world_bank_snapshot, write_manifest,
 )
-
-ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-sys.path.insert(0, ROOT)  # so `app.external_data` is importable
 
 API_URL = "https://search.worldbank.org/api/v2/projects"
 FL = ("id,project_name,totalamt,status,sector,regionname,countryshortname,countrycode,"
@@ -446,6 +445,10 @@ def main():
     ap.add_argument("--out", default=os.path.join(ROOT, "data", "projects_enriched.csv"))
     ap.add_argument("--no-combine", action="store_true",
                     help="write only World Bank rows (skip the synthetic base)")
+    ap.add_argument(
+        "--snapshot-root", default=os.getenv("SORA_DATA_SNAPSHOT_ROOT"),
+        help="optional immutable snapshot store root (or SORA_DATA_SNAPSHOT_ROOT)",
+    )
     args = ap.parse_args()
 
     global FQ
@@ -529,27 +532,49 @@ def main():
         print(f"  GDP/capita: min={min(gdps):.0f} max={max(gdps):.0f} "
               f"mean={sum(gdps)/len(gdps):.0f} (median fill={gdp_median:.0f})")
 
+    fetch_timestamp = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    commit_sha = _git_commit_sha()
+    stages = [
+        StageCounts("wb_fetched", len(collected)),
+        StageCounts("wb_mapped_with_id", len(wb_records),
+                    reason="rows with a non-empty World Bank project id"),
+        StageCounts("wb_skipped_no_id", skipped_no_id_total,
+                    reason="World Bank row had no project id; not written"),
+        StageCounts("synthetic_rows", len(rows) - len(wb_records)),
+        StageCounts("total_written", len(rows)),
+    ]
+    query_params = {"sector": FQ or None, "min": args.min or None,
+                    "no_combine": args.no_combine}
+    snapshot_id = None
+    if args.snapshot_root:
+        published = publish_world_bank_snapshot(
+            args.snapshot_root,
+            output_path=args.out,
+            raw_path=None,
+            fetch_timestamp=fetch_timestamp,
+            commit_sha=commit_sha,
+            query_params=query_params,
+            stage_counts=stages,
+            columns=COLUMNS,
+            unique_ids=len(set(wb_keys)),
+            duplicate_ids=duplicate_count,
+        )
+        snapshot_id = published.snapshot_id
+        print(f"Published immutable snapshot -> {snapshot_id}")
+
     manifest_path = args.out + ".manifest.json"
     write_manifest(
         manifest_path,
         source_url="https://search.worldbank.org/api/v2/projects",
-        query_params={"sector": FQ or None, "min": args.min or None,
-                      "no_combine": args.no_combine},
-        fetch_timestamp=_dt.datetime.now(_dt.timezone.utc).isoformat(),
-        commit_sha=_git_commit_sha(),
-        stage_counts=[
-            StageCounts("wb_fetched", len(collected)),
-            StageCounts("wb_mapped_with_id", len(wb_records),
-                        reason="rows with a non-empty World Bank project id"),
-            StageCounts("wb_skipped_no_id", skipped_no_id_total,
-                        reason="World Bank row had no project id; not written"),
-            StageCounts("synthetic_rows", len(rows) - len(wb_records)),
-            StageCounts("total_written", len(rows)),
-        ],
+        query_params=query_params,
+        fetch_timestamp=fetch_timestamp,
+        commit_sha=commit_sha,
+        stage_counts=stages,
         unique_ids=len(set(wb_keys)),
         duplicate_ids=duplicate_count,
         columns=COLUMNS,
         output_path=args.out,
+        snapshot_id=snapshot_id,
     )
     print(f"Wrote manifest -> {os.path.relpath(manifest_path, ROOT)}")
 

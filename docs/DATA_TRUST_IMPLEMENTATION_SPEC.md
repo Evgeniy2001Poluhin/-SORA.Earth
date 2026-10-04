@@ -52,7 +52,8 @@ what remains unproven; it is not silently filled with an assumption.
 | `openmeteo` | modelled | hourly regional coverage, temporal rows | exact variables/units/ranges/model selection/licence |
 | `rosstat` | administrative snapshot | named 2024 module and period semantics | upstream references/licence/checksum/field contract |
 | `sber_veb_baseline` | static baseline | explicit author-constant classification | origin/rights unresolved; literal schema and limitations |
-| `world_bank` | administrative fetched | source tags, periods, composite project identity | per-indicator units/ranges/licence/snapshot policy |
+| `world_bank` | administrative fetched | indicator source tags and periods | per-indicator units/ranges/licence/snapshot policy |
+| `world_bank_projects` | administrative fetched | publisher project ids, lifecycle dates, sectors and financing | derived-field semantics/raw-byte retention/snapshot policy |
 | `oecd` | administrative fetched | fallback source tags and source registration | period propagation, flow contracts, licence/snapshot policy |
 | `benchmark` | administrative snapshot | per-field provenance notes and known unknowns | machine-readable field-level sources/periods/rights |
 | `global_avg` | administrative snapshot | fallback boundary and known unknowns | machine-readable field-level sources/periods/rights |
