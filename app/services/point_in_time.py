@@ -32,11 +32,10 @@ the first credits the model with values published after the date it is being
 scored on, which is not a smaller error than a wrong number -- it is a number
 that could not have been known.
 
-**One caveat, measured rather than assumed.** `value` and `fetched_at` are
-never rewritten, so the value as of D is stable. `as_of_date` is not: the #58
-backfill retroactively assigned a period to 45,065 production rows, and the row
-keeps no record of what it said before. So the *period a value describes* is
-reproducible only until the next such correction. See the issue.
+`value` and `fetched_at` are never rewritten.  Since #164, corrections to
+`as_of_date` and its provenance are recorded in
+`country_indicator_period_history`; the series query below reconstructs the
+attribution that was in force at the cutoff instead of reading today's period.
 """
 
 from datetime import datetime
@@ -86,28 +85,50 @@ _VALUE_AS_OF_FROM = text(_VALUE_SQL.format(source_filter="AND source = :source")
 # on, and a read path that silently changes shape between them is worse than a
 # slightly longer query.
 _SERIES_SQL = """
-    SELECT as_of_date, value
+    SELECT effective_as_of_date, value
       FROM (
-            SELECT as_of_date,
+            SELECT effective_as_of_date,
                    value,
                    row_number() OVER (
-                       PARTITION BY as_of_date
+                       PARTITION BY effective_as_of_date
                        ORDER BY fetched_at DESC, id DESC
                    ) AS rn
-              FROM country_indicator_history
-             WHERE country_iso3 = :iso3
-               AND indicator_code = :code
-               AND fetched_at <= :as_of
-               AND as_of_date IS NOT NULL
-               AND value IS NOT NULL
-               {source_filter}
+              FROM (
+                    SELECT c.id,
+                           c.value,
+                           c.fetched_at,
+                           CASE
+                             WHEN EXISTS (
+                                  SELECT 1
+                                    FROM country_indicator_period_history h
+                                   WHERE h.history_row_id = c.id
+                                     AND h.changed_at > :as_of
+                             )
+                             THEN (
+                                  SELECT h.old_as_of_date
+                                    FROM country_indicator_period_history h
+                                   WHERE h.history_row_id = c.id
+                                     AND h.changed_at > :as_of
+                                   ORDER BY h.changed_at, h.id
+                                   LIMIT 1
+                             )
+                             ELSE c.as_of_date
+                           END AS effective_as_of_date
+                      FROM country_indicator_history c
+                     WHERE c.country_iso3 = :iso3
+                       AND c.indicator_code = :code
+                       AND c.fetched_at <= :as_of
+                       AND c.value IS NOT NULL
+                       {source_filter}
+                   ) attributed
+             WHERE effective_as_of_date IS NOT NULL
            ) ranked
      WHERE rn = 1
-     ORDER BY as_of_date
+     ORDER BY effective_as_of_date
 """
 
 _SERIES_AS_OF = text(_SERIES_SQL.format(source_filter=""))
-_SERIES_AS_OF_FROM = text(_SERIES_SQL.format(source_filter="AND source = :source"))
+_SERIES_AS_OF_FROM = text(_SERIES_SQL.format(source_filter="AND c.source = :source"))
 
 
 def value_as_of(
@@ -151,9 +172,9 @@ def series_as_of(
 ) -> Dict[datetime, float]:
     """Each observation period, carrying the value in force at `as_of`.
 
-    Periods first published after `as_of` are absent, and a period revised
-    after it carries the earlier value -- the series as it stood, not as it
-    reads now.
+    Periods first published after `as_of` are absent. A value revised later
+    carries the earlier value, and a period attribution corrected later carries
+    the earlier attribution -- the series as it stood, not as it reads now.
 
     Rows with no `as_of_date` are excluded: they have no period to attach a
     value to, and much of the table carries none (#58).

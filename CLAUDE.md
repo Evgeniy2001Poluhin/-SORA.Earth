@@ -293,7 +293,7 @@ Feature engineering: `make_features()` computes derived features (budget_per_mon
 
 ### Database Schema
 
-Sixteen SQLAlchemy models in `app/database.py`, with the table each one
+Seventeen SQLAlchemy models in `app/database.py`, with the table each one
 creates. The table names are what `psql` needs, and they are not the class
 names lowercased: most are plural, two are not.
 
@@ -303,6 +303,7 @@ names lowercased: most are plural, two are not.
 | `PredictionLog` | `predictions_log` |
 | `DataRefreshLog` | `data_refresh_log` |
 | `CountryIndicatorHistory` | `country_indicator_history` |
+| `CountryIndicatorPeriodHistory` | `country_indicator_period_history` |
 | `IngesterRun` | `ingester_runs` |
 | `RetrainLog` | `retrain_log` |
 | `BatchResultDB` | `batch_results` |
