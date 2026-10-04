@@ -196,8 +196,9 @@ def test_correction_and_audit_row_roll_back_together(db):
 @pytest.mark.parametrize("statement", [
     "UPDATE country_indicator_period_history SET new_period_status = 'ambiguous'",
     "DELETE FROM country_indicator_period_history",
+    "TRUNCATE country_indicator_period_history",
 ])
-def test_audit_history_cannot_be_rewritten_or_deleted(db, statement):
+def test_audit_history_refuses_destructive_operations(db, statement):
     row_id = _insert(db)
     _correct(
         db,

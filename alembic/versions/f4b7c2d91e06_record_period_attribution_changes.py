@@ -253,6 +253,10 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_ciph_append_only
 BEFORE UPDATE OR DELETE ON country_indicator_period_history
 FOR EACH ROW EXECUTE FUNCTION ciph_refuse_rewrite();
+
+CREATE TRIGGER trg_ciph_refuse_truncate
+BEFORE TRUNCATE ON country_indicator_period_history
+FOR EACH STATEMENT EXECUTE FUNCTION ciph_refuse_rewrite();
 """
 
 
@@ -283,6 +287,10 @@ def downgrade() -> None:
     op.execute("DROP FUNCTION IF EXISTS cih_record_period_change()")
     op.execute(
         "DROP TRIGGER IF EXISTS trg_ciph_append_only "
+        "ON country_indicator_period_history"
+    )
+    op.execute(
+        "DROP TRIGGER IF EXISTS trg_ciph_refuse_truncate "
         "ON country_indicator_period_history"
     )
     op.execute("DROP FUNCTION IF EXISTS ciph_refuse_rewrite()")

@@ -37,3 +37,4 @@ def test_period_history_revision_generates_offline_sql():
     assert "CREATE TABLE IF NOT EXISTS country_indicator_period_history" in result.stdout
     assert "CREATE TRIGGER trg_cih_record_period_change" in result.stdout
     assert "CREATE TRIGGER trg_ciph_append_only" in result.stdout
+    assert "CREATE TRIGGER trg_ciph_refuse_truncate" in result.stdout
