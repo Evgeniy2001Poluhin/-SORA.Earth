@@ -171,22 +171,27 @@ def test_rewriting_the_vintage_is_refused(db):
     db.rollback()
 
 
-def test_correcting_a_period_is_still_allowed(db):
-    """The #58 backfill assigned periods to 45,065 production rows.
-
-    A guard that forbade that would forbid the one maintenance path this table
-    has, so the trigger has to permit it -- and this is the test that says so
-    rather than leaving it to be discovered by a failing backfill.
-    """
+def test_correcting_a_period_is_recorded_at_the_time_it_became_known(db):
+    """A correction stays possible without rewriting an earlier answer."""
     _write(db, [(None, 4.92, datetime(2026, 6, 1))])
+
+    before = db.execute(text(
+        "SELECT clock_timestamp() AT TIME ZONE 'UTC'"
+    )).scalar_one()
 
     db.execute(text(
         "UPDATE country_indicator_history "
         "SET as_of_date = '2024-01-01', period_status = 'recovered_inferred'"))
     db.commit()
 
-    series = series_as_of(db, "RUS", CODE, datetime(2026, 7, 1))
-    assert series[datetime(2024, 1, 1)] == pytest.approx(4.92)
+    after = db.execute(text(
+        "SELECT clock_timestamp() AT TIME ZONE 'UTC'"
+    )).scalar_one()
+
+    assert series_as_of(db, "RUS", CODE, before) == {}
+    assert series_as_of(db, "RUS", CODE, after)[
+        datetime(2024, 1, 1)
+    ] == pytest.approx(4.92)
 
 
 def test_a_value_set_to_null_is_also_refused(db):
