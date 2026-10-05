@@ -21,10 +21,10 @@ def _alembic(*args):
     )
 
 
-def test_period_history_revision_is_the_only_head():
+def test_snapshot_linkage_revision_is_the_only_head():
     result = _alembic("heads")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.strip() == "f4b7c2d91e06 (head)"
+    assert result.stdout.strip() == "a6c4e91d7b20 (head)"
 
 
 def test_period_history_revision_generates_offline_sql():

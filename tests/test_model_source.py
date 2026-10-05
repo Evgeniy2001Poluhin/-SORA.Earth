@@ -416,6 +416,34 @@ def test_activation_records_which_run_produced_the_champion(layout):
     assert manifest["activated_at"].endswith("Z")
 
 
+def test_activation_repeats_verified_snapshot_ids(layout):
+    run = a_run()
+    candidate = stage(layout, run)
+    snapshot_ids = ["a" * 64, "b" * 64]
+    meta = json.loads((candidate / "meta.json").read_text())
+    meta["snapshot_ids"] = snapshot_ids
+    (candidate / "meta.json").write_text(json.dumps(meta))
+
+    activate(run)
+
+    manifest = json.loads(
+        (layout["runtime"] / "active" / "activation.json").read_text())
+    assert manifest["snapshot_ids"] == snapshot_ids
+
+
+def test_activation_refuses_malformed_snapshot_evidence(layout):
+    run = a_run()
+    candidate = stage(layout, run)
+    meta = json.loads((candidate / "meta.json").read_text())
+    meta["snapshot_ids"] = ["not-a-snapshot"]
+    (candidate / "meta.json").write_text(json.dumps(meta))
+
+    with pytest.raises(ValueError, match="64 lowercase hexadecimal"):
+        activate(run)
+
+    assert not (layout["runtime"] / "active").exists()
+
+
 def test_the_manifest_travels_with_the_rename_not_after_it(layout):
     """Writing it after the swap would leave a window in which a champion exists
     with no record of which run made it — and a crash there is exactly when the

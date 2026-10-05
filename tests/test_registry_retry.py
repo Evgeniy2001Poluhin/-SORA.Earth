@@ -63,7 +63,10 @@ def _stage(run_id, *, complete=True, incomplete=False):
 _UNSET = object()
 
 
-def make_run(sessions, *, model_version=VERSION, run_id=_UNSET, registry_ok=False):
+def make_run(
+    sessions, *, model_version=VERSION, run_id=_UNSET, registry_ok=False,
+    snapshot_ids_json=None,
+):
     from datetime import datetime
 
     run_id = str(uuid.uuid4()) if run_id is _UNSET else run_id
@@ -75,6 +78,7 @@ def make_run(sessions, *, model_version=VERSION, run_id=_UNSET, registry_ok=Fals
         row = RetrainLog(
             started_at=datetime.utcnow(), status="success", model_version=model_version,
             run_id=run_id, metrics_json=json.dumps(metrics),
+            snapshot_ids_json=snapshot_ids_json,
         )
         db.add(row)
         db.commit()
@@ -104,6 +108,7 @@ class Accepting:
 
     def __init__(self):
         self.registered = []
+        self.tags = {}
 
     def start_run(self, run_name=None):
         return self._Run()
@@ -112,7 +117,7 @@ class Accepting:
         self.metrics = metrics
 
     def set_tag(self, key, value):
-        pass
+        self.tags[key] = value
 
     @property
     def sklearn(self):
@@ -145,6 +150,22 @@ def test_the_staged_candidate_is_registered_without_retraining(monkeypatch, sess
     assert journal(sessions, log_id)["registry_ok"] is True
     # Only real numbers reach log_metrics: registry_ok is a bool, split_kind a string.
     assert api.metrics == {"roc_auc": 0.9063, "test_samples": 3400}
+
+
+def test_registry_retry_repeats_the_journal_snapshot_ids(monkeypatch, sessions, runtime):
+    monkeypatch.setattr(mlflow_tracking, "_OFFLINE", False)
+    snapshot_ids = ["a" * 64, "b" * 64]
+    log_id, run_id = make_run(
+        sessions,
+        snapshot_ids_json=json.dumps(snapshot_ids, separators=(",", ":")),
+    )
+    _stage(run_id)
+    api = Accepting()
+
+    result = registry_retry.retry_registration(log_id, api=api, session_factory=sessions)
+
+    assert result["outcome"] == registry_retry.REGISTERED
+    assert json.loads(api.tags["sora.snapshot_ids"]) == snapshot_ids
 
 
 def test_a_second_call_after_success_does_not_register_again(monkeypatch, sessions, runtime):
