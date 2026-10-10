@@ -56,14 +56,14 @@ def test_every_selectable_country_has_its_own_benchmark():
     )
 
 
-@pytest.mark.parametrize("gap, reason", sorted(KNOWN_WITHOUT_BENCHMARK.items()))
-def test_a_recorded_gap_is_still_a_gap(gap, reason):
+def test_a_recorded_gap_is_still_a_gap():
     """An allowance that no longer matches anything is a stale rule."""
-    assert gap in main.COUNTRIES, f"{gap} is no longer selectable; drop the allowance"
-    assert gap not in BENCHMARKS, (
-        f"{gap} now has a benchmark, so the allowance ({reason}) is out of date "
-        f"and should be removed"
-    )
+    for gap, reason in KNOWN_WITHOUT_BENCHMARK.items():
+        assert gap in main.COUNTRIES, f"{gap} is no longer selectable; drop the allowance"
+        assert gap not in BENCHMARKS, (
+            f"{gap} now has a benchmark, so the allowance ({reason}) is out of date "
+            f"and should be removed"
+        )
 
 
 @pytest.mark.parametrize("country", ["United States", "United Kingdom"])
@@ -77,11 +77,15 @@ def test_a_country_whose_data_exists_is_scored_on_it(country):
     )
 
 
-def test_the_global_fallback_still_works():
-    """Control: the path this is about still works where it always worked."""
-    from app.schemas import ProjectInput
-    from app.main import calculate_esg
+def test_the_short_spellings_still_resolve_to_the_same_figures():
+    """The same object, not a copy: a copy drifts the first time one is edited."""
+    assert BENCHMARKS["United States"] is BENCHMARKS["USA"]
+    assert BENCHMARKS["United Kingdom"] is BENCHMARKS["UK"]
 
-    proj = ProjectInput(**PROJECT, region="Atlantis")
-    result = calculate_esg(proj, region_name="Europe")
-    assert result["environment_score"] > 0
+
+def test_a_country_with_a_benchmark_is_unaffected():
+    """Control: the path this is about still works where it always worked."""
+    answer = client.post("/api/v1/evaluate", json={**PROJECT, "region": "Germany"})
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["country_benchmark"]["country"] == "Germany"
+    assert BENCHMARKS["Germany"] != GLOBAL_AVG
