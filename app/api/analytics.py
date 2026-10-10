@@ -121,7 +121,14 @@ async def country_ranking(
     offset: int = Query(0,  ge=0,         description="Skip N results"),
 ):
     from app.country_benchmarks import BENCHMARKS
-    ranked = sorted(BENCHMARKS.items(), key=lambda x: x[1]["esg_rank"])
+    # Countries with a rank first in rank order, then countries without a rank alphabetically
+    def _sort_key(item):
+        name, data = item
+        rank = data["esg_rank"]
+        if rank is None:
+            return (1, name)  # No rank: sort after ranked countries, by name
+        return (0, rank)  # Has rank: sort by rank value
+    ranked = sorted(BENCHMARKS.items(), key=_sort_key)
     total  = len(ranked)
     return {
         "total":  total,
