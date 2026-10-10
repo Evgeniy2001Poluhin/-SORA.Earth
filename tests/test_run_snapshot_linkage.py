@@ -84,3 +84,21 @@ def test_tampered_snapshot_is_refused(tmp_path):
     (root / snapshot_id / "normalized.bin").write_bytes(b"tampered")
     with pytest.raises(RunSnapshotError, match="verification failed"):
         resolve_training_snapshot_ids(dataset, snapshot_root=root)
+
+
+@pytest.mark.parametrize("value", [[["a" * 64]], [{"snapshot_id": "a" * 64}], [None], [42]])
+@pytest.mark.parametrize("entrypoint", ["encode", "decode", "resolve"])
+def test_non_string_snapshot_ids_raise_domain_error(value, entrypoint, tmp_path):
+    with pytest.raises(RunSnapshotError, match="64 lowercase hexadecimal"):
+        if entrypoint == "encode":
+            encode_snapshot_ids(value)
+        elif entrypoint == "decode":
+            decode_snapshot_ids(json.dumps(value))
+        else:
+            dataset, root, _ = _linked_dataset(tmp_path)
+            sidecar = dataset.with_name(dataset.name + ".manifest.json")
+            manifest = json.loads(sidecar.read_text())
+            manifest.pop("snapshot_id")
+            manifest["snapshot_ids"] = value
+            sidecar.write_text(json.dumps(manifest))
+            resolve_training_snapshot_ids(dataset, snapshot_root=root)

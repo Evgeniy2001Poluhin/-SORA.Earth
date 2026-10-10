@@ -35,10 +35,10 @@ def encode_snapshot_ids(snapshot_ids: Iterable[str]) -> str:
     values = list(snapshot_ids)
     if not values:
         raise RunSnapshotError("new runs require at least one dataset snapshot")
-    if len(values) != len(set(values)):
-        raise RunSnapshotError("dataset snapshot ids must be unique and ordered")
     if any(not isinstance(value, str) or not _SNAPSHOT_ID.fullmatch(value) for value in values):
         raise RunSnapshotError("dataset snapshot ids must be 64 lowercase hexadecimal characters")
+    if len(values) != len(set(values)):
+        raise RunSnapshotError("dataset snapshot ids must be unique and ordered")
     return json.dumps(values, separators=(",", ":"))
 
 
