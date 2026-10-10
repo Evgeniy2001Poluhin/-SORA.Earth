@@ -1,4 +1,6 @@
 """Generate baseline regression scores by calling the live API.
+
+REQUIRES: a live server at http://localhost:8000
 7 countries x 6 presets = 42 pinned cases.
 """
 import json
@@ -9,7 +11,7 @@ import httpx
 
 API = "http://localhost:8000/api/v1/evaluate"
 
-COUNTRIES = ["Sweden", "Germany", "UK", "USA", "Brazil", "India", "Japan"]
+COUNTRIES = ["Sweden", "Germany", "United Kingdom", "United States", "Brazil", "India", "Japan"]
 
 PRESETS = {
     "Solar":         {"co2_reduction_tons_per_year": 250, "budget_usd": 150000, "social_impact_score": 8, "project_duration_months": 24},
@@ -48,7 +50,7 @@ def main():
                     print("ERR ", country, preset_name, e)
                     skipped.append({"country": country, "preset": preset_name, "error": str(e)})
 
-    target = Path("tests/baseline_scores.json")
+    target = Path(__file__).parent / "baseline_scores.json"
     target.write_text(json.dumps({"cases": out, "skipped": skipped}, indent=2))
     print("Written", len(out), "cases to", target, "(skipped", len(skipped), ")")
     if not out:

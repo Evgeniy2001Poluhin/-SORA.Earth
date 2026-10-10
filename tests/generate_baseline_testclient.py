@@ -4,16 +4,8 @@
 import json
 import sys
 from pathlib import Path
-from fastapi.testclient import TestClient
 
-# Import app AFTER conftest patches are applied
-sys.path.insert(0, str(Path(__file__).parent))
-import conftest  # noqa: F401 - loads mock_redis fixture
-from app.main import app
-
-client = TestClient(app)
-
-COUNTRIES = ["Sweden", "Germany", "UK", "USA", "Brazil", "India", "Japan"]
+COUNTRIES = ["Sweden", "Germany", "United Kingdom", "United States", "Brazil", "India", "Japan"]
 
 PRESETS = {
     "Solar":         {"co2_reduction_tons_per_year": 250, "budget_usd": 150000, "social_impact_score": 8, "project_duration_months": 24},
@@ -31,6 +23,13 @@ ASSERT_FIELDS = [
 
 
 def main():
+    # Put repository root on sys.path BEFORE importing conftest
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    import conftest  # noqa: F401 - loads mock_redis fixture
+    from app.main import app
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
     out, skipped = [], []
 
     for country in COUNTRIES:
@@ -52,7 +51,7 @@ def main():
                 print("ERR ", country, preset_name, e)
                 skipped.append({"country": country, "preset": preset_name, "error": str(e)})
 
-    target = Path("tests/baseline_scores.json")
+    target = Path(__file__).parent / "baseline_scores.json"
     target.write_text(json.dumps({"cases": out, "skipped": skipped}, indent=2))
     print(f"\nWritten {len(out)} cases to {target} (skipped {len(skipped)})")
     if not out:
