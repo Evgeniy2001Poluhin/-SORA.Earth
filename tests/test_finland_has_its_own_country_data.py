@@ -16,27 +16,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-def test_every_selectable_country_has_a_benchmark():
-    """
-    Every country in app.countries.COUNTRIES has a row in BENCHMARKS.
-
-    This catches the gap that Finland was: the country could be selected, but the ESG
-    score fell back to the global average because BENCHMARKS.get(name, GLOBAL_AVG)
-    found nothing. The message lists the missing ones.
-    """
-    from app.countries import COUNTRIES
-    from app.country_benchmarks import BENCHMARKS
-
-    # Every country must have a benchmark (including aliases)
-    missing = []
-    for country_name in COUNTRIES.keys():
-        if country_name not in BENCHMARKS:
-            missing.append(country_name)
-
-    assert not missing, (
-        f"Countries in COUNTRIES but missing from BENCHMARKS: {sorted(missing)}. "
-        f"Add a row for each one, or remove them from COUNTRIES."
-    )
 
 
 def test_finland_is_scored_from_its_own_row(client):

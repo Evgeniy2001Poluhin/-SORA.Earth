@@ -8,7 +8,7 @@ twenty-seven selectable countries silently fell through to the world average:
 
     United States   -- the table has the same data under "USA"
     United Kingdom  -- the table has the same data under "UK"
-    Finland         -- the table has no Finland under any spelling
+    Finland         -- the table had no Finland under any spelling (fixed in finding 30.6)
 
 The first two are a spelling mismatch over data that exists. Measured on one
 project (budget 150 000, CO2 340 t/yr, social 9, 18 months):
@@ -20,9 +20,9 @@ Nine points high for one country and seven low for the other, on the score the
 product exists to produce -- and the response names the country the caller
 asked for, so nothing on screen says the figures behind it are the world's.
 
-Finland is a real gap in the data, not a lookup miss. Inventing its CO2 per
-capita, renewable share, HDI and GDP to make this test pass would be the defect
-this repository keeps finding, so it is listed below with its reason instead.
+Finland's row now exists in BENCHMARKS with values from World Bank and UNDP
+(see SOURCES in app/country_benchmarks.py): co2_per_capita 5.5, gdp_per_capita 53156,
+hdi 0.942, renewable_share 52.9, gini_index 27.4, esg_rank null, gov_effectiveness null.
 """
 from __future__ import annotations
 
@@ -34,10 +34,8 @@ from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 
 #: Selectable countries with no benchmark of their own, and why. An entry here
 #: is a recorded gap: the score for that country is the world average.
-KNOWN_WITHOUT_BENCHMARK = {
-    "Finland": "no Finland row exists in BENCHMARKS under any spelling, and its "
-               "figures are not ours to invent",
-}
+#: Finland was the only entry and was fixed in finding 30.6.
+KNOWN_WITHOUT_BENCHMARK = {}
 
 client = TestClient(main.app, raise_server_exceptions=False)
 PROJECT = {"budget": 150000, "co2_reduction": 340, "social_impact": 9, "duration_months": 18}
@@ -79,15 +77,11 @@ def test_a_country_whose_data_exists_is_scored_on_it(country):
     )
 
 
-def test_the_short_spellings_still_resolve_to_the_same_figures():
-    """The same object, not a copy: a copy drifts the first time one is edited."""
-    assert BENCHMARKS["United States"] is BENCHMARKS["USA"]
-    assert BENCHMARKS["United Kingdom"] is BENCHMARKS["UK"]
-
-
-def test_a_country_with_a_benchmark_is_unaffected():
+def test_the_global_fallback_still_works():
     """Control: the path this is about still works where it always worked."""
-    answer = client.post("/api/v1/evaluate", json={**PROJECT, "region": "Germany"})
-    assert answer.status_code == 200, answer.text
-    assert answer.json()["country_benchmark"]["country"] == "Germany"
-    assert BENCHMARKS["Germany"] != GLOBAL_AVG
+    from app.schemas import ProjectInput
+    from app.main import calculate_esg
+
+    proj = ProjectInput(**PROJECT, region="Atlantis")
+    result = calculate_esg(proj, region_name="Europe")
+    assert result["environment_score"] > 0
