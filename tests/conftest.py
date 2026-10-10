@@ -284,6 +284,12 @@ for _dirname, _envvar in (("data", "SORA_DATA_DIR"), ("models", "SORA_MODELS_DIR
 if not os.environ.get("SORA_RUNTIME_DIR"):
     os.environ["SORA_RUNTIME_DIR"] = os.path.join(_ARTIFACT_TMP, "runtime")
 
+# New mutable training-data writes publish immutable provenance before replacing
+# projects.csv. Keep that store beside the copied test artifacts so endpoint
+# tests exercise the production contract without ever writing a repository path.
+if not os.environ.get("SORA_DATA_SNAPSHOT_ROOT"):
+    os.environ["SORA_DATA_SNAPSHOT_ROOT"] = os.path.join(_ARTIFACT_TMP, "snapshots")
+
 
 def _dirty_artifacts():
     """Tracked paths under data/ and models/ that differ from HEAD."""

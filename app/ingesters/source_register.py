@@ -41,6 +41,9 @@ ADMINISTRATIVE_FETCHED = "administrative_fetched"
 #: A constant chosen by an author and committed as a literal. No measurement
 #: and no model stands behind the number.
 STATIC_BASELINE = "static_baseline"
+#: A record submitted directly by an authenticated operator.  It is neither a
+#: measurement made by SORA nor a publisher-owned administrative record.
+OPERATOR_SUBMITTED = "operator_submitted"
 
 STATUS_ACTIVE = "active"
 STATUS_DISABLED_NO_CURRENT_STATIONS = "disabled_no_current_stations"
@@ -73,6 +76,20 @@ class SourceFacts:
 
 
 SOURCE_REGISTER: Dict[str, SourceFacts] = {
+    "operator_training_data": SourceFacts(
+        name="operator_training_data",
+        measurement_kind=OPERATOR_SUBMITTED,
+        model=None,
+        status=STATUS_ACTIVE,
+        coverage="Rows accepted through SORA's administrator-only training-data endpoints",
+        last_verified_data=None,
+        requires_api_key=True,
+        notes=(
+            "A composite training dataset produced after an authenticated "
+            "operator adds labelled rows. It records the publication action, "
+            "not a claim that SORA independently measured the submitted values."
+        ),
+    ),
     "openaq": SourceFacts(
         name="openaq",
         measurement_kind=MEASURED,

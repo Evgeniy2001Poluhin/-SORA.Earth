@@ -185,12 +185,16 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
     snapshot_ids = None
 
     try:
-        if not os.path.exists(PROJECTS_CSV):
-            raise HTTPException(400, "No training data (projects.csv) found")
+        # Writers use this same lock through both mutable replacements.  Capture
+        # the verified bytes while it is held so a retrain cannot pair a new CSV
+        # with the previous sidecar during publication.
+        with _dataset_lock():
+            if not os.path.exists(PROJECTS_CSV):
+                raise HTTPException(400, "No training data (projects.csv) found")
 
-        from app.run_snapshots import resolve_training_dataset
-        resolved_dataset = resolve_training_dataset(PROJECTS_CSV)
-        snapshot_ids = resolved_dataset.snapshot_ids
+            from app.run_snapshots import resolve_training_dataset
+            resolved_dataset = resolve_training_dataset(PROJECTS_CSV)
+            snapshot_ids = resolved_dataset.snapshot_ids
 
         #: Which bytes this run trained on (#164 line of work; the
         #: `data snapshot -> run_id` link of the roadmap's definition of done).
@@ -726,10 +730,15 @@ def data_refresh(
         "region": "Unknown",
     }
 
-    df_existing = pd.read_csv(PROJECTS_CSV)
-    df_new = pd.concat(
-        [df_existing, _stamped(pd.DataFrame([new_row]))], ignore_index=True)
-    df_new.to_csv(PROJECTS_CSV, index=False)
+    with _dataset_lock():
+        df_existing = pd.read_csv(PROJECTS_CSV)
+        df_new = pd.concat(
+            [df_existing, _stamped(pd.DataFrame([new_row]))], ignore_index=True)
+        try:
+            _replace_projects_csv(df_new)
+        except Exception as exc:
+            logger.warning("data refresh could not publish immutable training provenance: %s", type(exc).__name__)
+            raise HTTPException(500, "Failed to persist the dataset; it is unchanged") from exc
 
     # Read last retrain total_samples from RetrainLog
     from app.database import SessionLocal, RetrainLog
@@ -853,24 +862,52 @@ def _open_upload(file_path: str) -> int:
     return fd
 
 
-def _replace_projects_csv(df_merged) -> None:
-    """Replace the training set atomically, so a failure cannot truncate it.
-
-    Written to a temporary file in the same directory -- therefore the same
-    filesystem, which os.replace requires -- then flushed, fsynced and renamed.
-    The directory is fsynced afterwards so the rename itself survives a crash.
-    """
-    directory = os.path.dirname(PROJECTS_CSV)
-    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".projects-", suffix=".csv")
+def _write_dataset_temp(directory: str, prefix: str, suffix: str, content: bytes) -> str:
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=prefix, suffix=suffix)
     try:
-        with os.fdopen(fd, "w", newline="") as tmp:
-            df_merged.to_csv(tmp, index=False)
+        with os.fdopen(fd, "wb") as tmp:
+            tmp.write(content)
             tmp.flush()
             os.fsync(tmp.fileno())
-        os.replace(tmp_path, PROJECTS_CSV)
     except BaseException:
-        if os.path.exists(tmp_path):
+        with contextlib.suppress(OSError):
             os.unlink(tmp_path)
+        raise
+    return tmp_path
+
+
+def _replace_projects_csv(df_merged) -> None:
+    """Publish a verified snapshot, CSV and sidecar as one locked operation.
+
+    Immutable publication happens first: an error there cannot leave a new CSV
+    with no provenance. CSV and manifest are then durable temp files in the
+    target directory and are replaced while writers and retraining share the
+    dataset lock. A crash between the two renames is fail-closed: retraining
+    sees a digest mismatch rather than accepting unprovenanced bytes.
+    """
+    from app.training_dataset import publish_training_dataset
+
+    directory = os.path.dirname(PROJECTS_CSV)
+    csv_bytes = df_merged.to_csv(index=False).encode("utf-8")
+    published = publish_training_dataset(
+        csv_bytes, schema_fields=tuple(str(column) for column in df_merged.columns)
+    )
+    manifest_bytes = json.dumps({
+        "snapshot_ids": [published.snapshot_id],
+        "content_sha256": hashlib.sha256(csv_bytes).hexdigest(),
+    }, sort_keys=True).encode("utf-8") + b"\n"
+    csv_tmp = _write_dataset_temp(directory, ".projects-", ".csv", csv_bytes)
+    sidecar_tmp = _write_dataset_temp(
+        directory, ".projects-manifest-", ".json", manifest_bytes
+    )
+    sidecar = PROJECTS_CSV + ".manifest.json"
+    try:
+        os.replace(csv_tmp, PROJECTS_CSV)
+        os.replace(sidecar_tmp, sidecar)
+    except BaseException:
+        for path in (csv_tmp, sidecar_tmp):
+            with contextlib.suppress(OSError):
+                os.unlink(path)
         raise
 
     try:
