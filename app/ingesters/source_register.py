@@ -199,17 +199,20 @@ SOURCE_REGISTER: Dict[str, SourceFacts] = {
         measurement_kind=ADMINISTRATIVE_SNAPSHOT,
         model=None,
         status=STATUS_ACTIVE,
-        coverage="30 countries (32 keys with the United States and United Kingdom aliases), 7 indicators",
+        coverage="31 countries (33 keys with the United States and United Kingdom aliases), 7 indicators",
         last_verified_data="2024 (co2_per_capita, gdp_per_capita from World Bank); 2022 (hdi from UNDP)",
         requires_api_key=False,
         notes=(
             "Static benchmark values in app/country_benchmarks.py BENCHMARKS dict. "
             "Three indicators (co2_per_capita, gdp_per_capita, hdi) refreshed to one common year "
-            "per indicator for all 30 countries from named World Bank and UNDP series (see SOURCES "
+            "per indicator for all 31 countries from named World Bank and UNDP series (see SOURCES "
             "in that module). renewable_share carried over unchanged from prior dataset (values match "
-            "World Bank EG.ELC.RNEW.ZS for years varying by country, 2011-2021); esg_rank, gini_index "
-            "and gov_effectiveness have no stated source or year (esg_rank and gov_effectiveness are not "
-            "used by the ESG score in calculate_esg). Third fallback in the country-data chain "
+            "World Bank EG.ELC.RNEW.ZS for years varying by country, 2011-2021); Finland's renewable_share "
+            "is the 2021 value of this series (added 2026-09-30). esg_rank and gov_effectiveness have no "
+            "stated source or year for 30 countries (esg_rank and gov_effectiveness are not used by the "
+            "ESG score in calculate_esg); Finland has no esg_rank or gov_effectiveness (null). "
+            "gini_index has no stated source for 30 countries; Finland's gini_index is World Bank "
+            "SI.POV.GINI 2023. Third fallback in the country-data chain "
             "(_fetch_with_fallback_impl), after World Bank and OECD. Serves "
             "BENCHMARK_ONLY_INDICATORS (co2_per_capita, gov_effectiveness) which are "
             "not fetched from the network, plus fills gaps for the five INDICATORS when "
