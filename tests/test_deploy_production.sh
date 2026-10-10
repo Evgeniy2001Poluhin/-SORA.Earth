@@ -211,9 +211,12 @@ case "$argv" in
         echo "$n" > "$STUB_DIR/migrate_calls"
         [ -f "$STUB_DIR/migrate_fails" ] && exit 1
         exit 0 ;;
-    *"up -d postgres"*)
+    *"up -d --wait postgres"*)
         [ -f "$STUB_DIR/postgres_fails" ] && exit 1
         exit 0 ;;
+    *"up -d postgres"*)
+        echo "postgres start must wait for health before migrations" >&2
+        exit 1 ;;
     *"up -d --no-build --remove-orphans"*)
         # Both the deployment start and the rollback restore spell this the same
         # way. They differ in one thing only: the restore passes a second `-f`,
@@ -431,14 +434,32 @@ check "the stubbed docker answers" \
 # beside it, because a pass-through that forgot to freeze would be the other way
 # to make this line green.
 # shellcheck disable=SC2031
-check "an unhandled date falls through to the system date, not to itself" \
-    "$( export STUB_DIR; PATH="$STUB_DIR/bin:$PATH" timeout 10 date -u -d @86400 +%Y-%m-%d 2>/dev/null || echo "recursed or hung" )" \
-    "1970-01-02"
-# shellcheck disable=SC2031
-check "and the run-id format is still frozen" \
-    "$( export STUB_DIR; PATH="$STUB_DIR/bin:$PATH" date -u +%Y%m%dT%H%M%SZ )" \
-    "20260803T120000Z"
+if [ "${ONLY_POSTGRES_WAIT_CASE:-0}" != "1" ]; then
+    check "an unhandled date falls through to the system date, not to itself" \
+        "$( export STUB_DIR; PATH="$STUB_DIR/bin:$PATH" timeout 10 date -u -d @86400 +%Y-%m-%d 2>/dev/null || echo "recursed or hung" )" \
+        "1970-01-02"
+    # shellcheck disable=SC2031
+    check "and the run-id format is still frozen" \
+        "$( export STUB_DIR; PATH="$STUB_DIR/bin:$PATH" date -u +%Y%m%dT%H%M%SZ )" \
+        "20260803T120000Z"
+fi
 rm -rf "$SANDBOX"
+
+echo "== PostgreSQL is healthy before the one-shot migrator =="
+new_sandbox
+run_guard
+check "postgres start waits for health" "$RC" "0"
+check "and compose receives the health wait flag" \
+    "$(grep -qx 'compose -p p -f .*/compose.yml up -d --wait postgres' "$STUB_DIR/calls" && echo yes || echo no)" \
+    "yes"
+rm -rf "$SANDBOX"
+
+# The focused red/green oracle runs only this scenario. The EXIT trap still
+# reports any failed assertion, so an old `up -d postgres` invocation cannot
+# turn a red test green by taking this early exit.
+if [ "${ONLY_POSTGRES_WAIT_CASE:-0}" = "1" ]; then
+    exit 0
+fi
 
 echo "== it refuses to deploy anything but current, clean main =="
 new_sandbox
