@@ -14,7 +14,7 @@
     "source_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
     "status": {"enum": ["active", "disabled_no_current_stations"]},
     "measurement_kind": {
-      "enum": ["measured", "modelled", "administrative_snapshot", "administrative_fetched", "static_baseline"]
+      "enum": ["measured", "modelled", "administrative_snapshot", "administrative_fetched", "static_baseline", "operator_submitted"]
     },
     "coverage": {"type": "string", "minLength": 1},
     "publisher": {"type": "string", "minLength": 1},

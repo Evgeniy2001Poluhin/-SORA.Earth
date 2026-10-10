@@ -57,6 +57,7 @@ what remains unproven; it is not silently filled with an assumption.
 | `oecd` | administrative fetched | fallback source tags and source registration | period propagation, flow contracts, licence/snapshot policy |
 | `benchmark` | administrative snapshot | per-field provenance notes and known unknowns | machine-readable field-level sources/periods/rights |
 | `global_avg` | administrative snapshot | fallback boundary and known unknowns | machine-readable field-level sources/periods/rights |
+| `operator_training_data` | operator submitted | authenticated administrator mutation, immutable composite snapshot | submitted-value provenance and rights remain explicitly unverified |
 
 ## Users and stories
 
