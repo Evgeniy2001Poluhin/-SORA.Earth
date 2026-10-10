@@ -76,7 +76,9 @@ class TestExpandedIndicators:
 
     def test_gov_effectiveness_range(self):
         for country, data in BENCHMARKS.items():
-            assert -2.5 <= data["gov_effectiveness"] <= 2.5, f"{country} out of range"
+            gov = data["gov_effectiveness"]
+            if gov is not None:  # Finland has None (archived WGI series)
+                assert -2.5 <= gov <= 2.5, f"{country} out of range"
 
 
 class TestTTLCache:

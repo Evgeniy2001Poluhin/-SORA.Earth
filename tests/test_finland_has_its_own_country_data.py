@@ -43,27 +43,18 @@ def test_finland_is_scored_from_its_own_row(client):
     """
     Finland is scored from BENCHMARKS["Finland"], not GLOBAL_AVG.
 
-    POST /evaluate for Finland gives different scores than for a project with the same
-    inputs but in a country that uses GLOBAL_AVG fallback (or we can compare Finland's
-    benchmark values vs global avg to ensure they differ significantly).
+    calculate_esg looks up BENCHMARKS.get(project.region, GLOBAL_AVG) and uses it to
+    compute the three sub-scores. This test calls /evaluate for Finland and verifies
+    the environment_score, social_score, and economic_score match what _esg_components
+    produces with BENCHMARKS["Finland"], and differ from what it produces with GLOBAL_AVG.
     """
+    from app.main import _esg_components, REGIONAL_FACTORS
     from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
 
-    # Finland's benchmark should differ from GLOBAL_AVG in at least one key dimension
-    finland = BENCHMARKS["Finland"]
+    # Finland is in region "Europe" (app/countries.py), so evaluate uses
+    # calculate_esg(project, "Europe"), which uses REGIONAL_FACTORS["Europe"]
+    rf = REGIONAL_FACTORS["Europe"]
 
-    # Check that Finland's values differ from global average
-    co2_diff = abs(finland["co2_per_capita"] - GLOBAL_AVG["co2_per_capita"])
-    hdi_diff = abs(finland["hdi"] - GLOBAL_AVG["hdi"])
-    renew_diff = abs(finland["renewable_share"] - GLOBAL_AVG["renewable_share"])
-
-    # At least one should differ by a meaningful amount
-    assert co2_diff > 1.0 or hdi_diff > 0.05 or renew_diff > 5.0, (
-        f"Finland benchmark too close to GLOBAL_AVG. Differences: "
-        f"CO2={co2_diff}, HDI={hdi_diff}, Renewable={renew_diff}"
-    )
-
-    # Make sure the evaluate endpoint uses Finland's benchmark
     payload = {
         "project_name": "Helsinki Solar",
         "budget": 100000,
@@ -77,10 +68,41 @@ def test_finland_is_scored_from_its_own_row(client):
     assert resp.status_code == 200
     result = resp.json()
 
-    # The response should include Finland's benchmark, not "Global Average"
-    assert "country_benchmark" in result
-    bench = result["country_benchmark"]
-    assert bench["country"] == "Finland", f"Expected Finland benchmark, got {bench['country']}"
+    # Compute expected scores from Finland's benchmark
+    finland_env, finland_soc, finland_eco = _esg_components(
+        payload["budget"],
+        payload["co2_reduction"],
+        payload["social_impact"],
+        BENCHMARKS["Finland"],
+        rf,
+    )
+
+    # The response sub-scores should match Finland's benchmark (scaled to 0-100, rounded to 1 decimal)
+    assert result["environment_score"] == round(finland_env * 100, 1), (
+        f"Environment score {result['environment_score']} != expected {round(finland_env * 100, 1)} from Finland benchmark"
+    )
+    assert result["social_score"] == round(finland_soc * 100, 1)
+    assert result["economic_score"] == round(finland_eco * 100, 1)
+
+    # Compute what the scores would be with GLOBAL_AVG
+    global_env, global_soc, global_eco = _esg_components(
+        payload["budget"],
+        payload["co2_reduction"],
+        payload["social_impact"],
+        GLOBAL_AVG,
+        rf,
+    )
+
+    # At least one sub-score must differ from GLOBAL_AVG by more than 0.5 points
+    env_diff = abs(result["environment_score"] - round(global_env * 100, 1))
+    soc_diff = abs(result["social_score"] - round(global_soc * 100, 1))
+    eco_diff = abs(result["economic_score"] - round(global_eco * 100, 1))
+
+    assert max(env_diff, soc_diff, eco_diff) > 0.5, (
+        f"Finland scores too close to GLOBAL_AVG. "
+        f"Env diff: {env_diff}, Soc diff: {soc_diff}, Eco diff: {eco_diff}. "
+        f"This suggests calculate_esg is using GLOBAL_AVG instead of Finland's benchmark."
+    )
 
 
 def test_ranking_route_handles_null_esg_rank(client):
@@ -156,33 +178,38 @@ def test_evaluate_endpoint_for_finland_returns_null_esg_rank(client):
     assert bench["hdi"] == 0.942
 
 
-def test_map_route_handles_null_gov_effectiveness(client):
+def test_map_route_handles_null_gov_effectiveness():
     """
-    GET /api/v1/map/countries for Finland: 200, no crash.
+    _live_esg handles None for gov_effectiveness by falling back to 0.0.
 
-    The route computes a live ESG score from gov_effectiveness, which is None for
-    Finland. The _live_esg function must handle None by falling back to 0.0, not
-    crashing with TypeError on (None + 2.5).
+    The function reads gov_effectiveness from indicators, then from d, then defaults to 0.0.
+    This test calls _live_esg with a data dict where d["gov_effectiveness"] = None
+    (as it is for Finland in the benchmark), and verifies it doesn't crash and uses 0.0.
     """
-    resp = client.get("/api/v1/map/countries")
-    assert resp.status_code == 200
+    from app.api.map_data import _live_esg
+    from unittest.mock import patch
+    from app.country_benchmarks import BENCHMARKS
 
-    data = resp.json()
-    assert "countries" in data
+    finland_data = BENCHMARKS["Finland"].copy()
+    finland_data["live"] = {
+        "indicators": {}  # Empty indicators, so it falls back to d["gov_effectiveness"]
+    }
 
-    # Find Finland in the response
-    finland = next((c for c in data["countries"] if c["name"] == "Finland"), None)
-    assert finland is not None, "Finland not found in map countries response"
-
-    # The response should have an esg score (computed despite gov_effectiveness being None)
-    assert "esg" in finland
-    assert isinstance(finland["esg"], (int, float))
-
-    # If "gov_effectiveness" is in the response, it should be a number (the 0.0 fallback)
-    # rounded to 2 decimals, not None
-    if "gov_effectiveness" in finland:
-        assert isinstance(finland["gov_effectiveness"], (int, float)), (
-            f"gov_effectiveness should be a number (fallback), got {type(finland['gov_effectiveness'])}"
+    with patch("app.external_data.get_merged_country_data") as mock_get:
+        mock_get.return_value = finland_data
+        
+        # Call _live_esg for Finland
+        total_score, extra, source = _live_esg("Finland", 87)  # 87 is Finland's hardcoded esg in COUNTRIES
+        
+        # Should not crash
+        assert isinstance(total_score, (int, float))
+        assert isinstance(extra, dict)
+        
+        # extra should contain gov_effectiveness rounded to 2 decimals
+        # When None falls back to 0.0, round(0.0, 2) = 0.0
+        assert "gov_effectiveness" in extra
+        assert extra["gov_effectiveness"] == 0.0, (
+            f"Expected gov_effectiveness=0.0 (fallback from None), got {extra['gov_effectiveness']}"
         )
 
 
