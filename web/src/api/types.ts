@@ -10,7 +10,7 @@ export interface EvaluateResponse {
   esg_weights: { environment: number; social: number; economic: number };
   region: string; lat: number; lon: number;
   country_benchmark: { country: string; co2_per_capita: number; renewable_share: number;
-    esg_rank: number; hdi: number };
+    esg_rank: number | null; hdi: number };
 }
 export interface ShapFeature {
   feature: string; value: number; shap_value: number;
@@ -84,11 +84,11 @@ export type RankingItem = {
   country: string;
   co2_per_capita: number;
   renewable_share: number;
-  esg_rank: number;
+  esg_rank: number | null;
   hdi: number;
   gdp_per_capita: number;
   gini_index: number;
-  gov_effectiveness: number;
+  gov_effectiveness: number | null;
 };
 export type RankingResponse = {
   total: number;
