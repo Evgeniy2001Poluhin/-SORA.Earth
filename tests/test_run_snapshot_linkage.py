@@ -86,6 +86,33 @@ def test_tampered_snapshot_is_refused(tmp_path):
         resolve_training_snapshot_ids(dataset, snapshot_root=root)
 
 
+def test_multiple_snapshots_are_refused_without_an_immutable_composition(tmp_path):
+    dataset, root, first_id = _linked_dataset(tmp_path)
+    second = publish_snapshot(
+        root,
+        SnapshotSpec(
+            source_ids=("world_bank_projects",),
+            contract_versions={"world_bank_projects": "1.0"},
+            fetch_time=datetime(2026, 10, 5, tzinfo=timezone.utc),
+            as_of_time=datetime(2026, 10, 5, tzinfo=timezone.utc),
+            parser_git_sha=SHA,
+            request_parameters={"part": 2},
+            stage_counts={"written": 1},
+            schema_fields=("budget", "success"),
+            quality_checks={"valid": True},
+        ),
+        normalized=dataset.read_bytes(),
+    )
+    sidecar = dataset.with_name(dataset.name + ".manifest.json")
+    manifest = json.loads(sidecar.read_text())
+    manifest.pop("snapshot_id")
+    manifest["snapshot_ids"] = [first_id, second.snapshot_id]
+    sidecar.write_text(json.dumps(manifest))
+
+    with pytest.raises(RunSnapshotError, match="composite snapshot"):
+        resolve_training_snapshot_ids(dataset, snapshot_root=root)
+
+
 @pytest.mark.parametrize("value", [[["a" * 64]], [{"snapshot_id": "a" * 64}], [None], [42]])
 @pytest.mark.parametrize("entrypoint", ["encode", "decode", "resolve"])
 def test_non_string_snapshot_ids_raise_domain_error(value, entrypoint, tmp_path):

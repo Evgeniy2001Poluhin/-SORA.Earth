@@ -83,6 +83,11 @@ def resolve_training_dataset(
     encoded = encode_snapshot_ids(values or [])
     snapshot_ids = decode_snapshot_ids(encoded)
     assert snapshot_ids is not None
+    if len(snapshot_ids) != 1:
+        raise RunSnapshotError(
+            "training dataset must reference one immutable composite snapshot; "
+            "multiple snapshot_ids do not prove how their bytes were composed"
+        )
 
     try:
         content = dataset.read_bytes()
@@ -94,10 +99,10 @@ def resolve_training_dataset(
         raise RunSnapshotError("training dataset bytes disagree with the sidecar digest")
 
     try:
-        loaded = [load_snapshot(root, snapshot_id) for snapshot_id in snapshot_ids]
+        loaded = load_snapshot(root, snapshot_ids[0])
     except SnapshotError as exc:
         raise RunSnapshotError(f"training dataset snapshot verification failed: {exc}") from exc
-    if len(loaded) == 1 and loaded[0].manifest["normalized"]["sha256"] != actual:
+    if loaded.manifest["normalized"]["sha256"] != actual:
         raise RunSnapshotError("training dataset bytes disagree with the immutable snapshot")
     return ResolvedTrainingDataset(snapshot_ids=snapshot_ids, content=content)
 
