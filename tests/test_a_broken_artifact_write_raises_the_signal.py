@@ -19,6 +19,7 @@ permission test that runs as root passes for the wrong reason, and CI has a job
 that runs as root.
 """
 import pytest
+from pathlib import Path
 
 
 @pytest.fixture
@@ -28,6 +29,11 @@ def dataset(tmp_path, monkeypatch):
     import pandas as pd
 
     import app.api.retrain as retrain
+    from app.run_snapshots import ResolvedTrainingDataset
+    monkeypatch.setattr(
+        "app.run_snapshots.resolve_training_dataset",
+        lambda path: ResolvedTrainingDataset(("a" * 64,), Path(path).read_bytes()),
+    )
 
     rng = np.random.default_rng(0)
     n = 60

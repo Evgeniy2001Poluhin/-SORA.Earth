@@ -68,6 +68,7 @@ def retry_registration(retrain_log_id: int, *, api=None, session_factory=None):
     from app.mlflow_tracking import log_model_registry
     from app.model_source import INCOMPLETE_MARKER, _exclusive, validate_run_id
     from app.paths import staged_dir
+    from app.run_snapshots import decode_snapshot_ids
 
     db = (session_factory or SessionLocal)()
     try:
@@ -146,6 +147,7 @@ def retry_registration(retrain_log_id: int, *, api=None, session_factory=None):
             model, "RandomForest_retrain",
             {k: v for k, v in metrics.items()
              if isinstance(v, (int, float)) and not isinstance(v, bool)},
+            snapshot_ids=decode_snapshot_ids(row.snapshot_ids_json),
             api=api,
         )
 

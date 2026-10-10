@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Iterable, Optional
 
 
 def new_run_id() -> str:
@@ -52,6 +52,7 @@ def _finish_retrain_log(
     message: Optional[str] = None,
     model_version: Optional[str] = None,
     data_version: Optional[str] = None,
+    snapshot_ids: Optional[Iterable[str]] = None,
     metrics: Optional[dict] = None,
     error_message: Optional[str] = None,
     training_status: Optional[str] = None,
@@ -75,6 +76,7 @@ def _finish_retrain_log(
     from app.database import SessionLocal, RetrainLog, project_status
     from datetime import datetime
     import json
+    from app.run_snapshots import encode_snapshot_ids
     db = SessionLocal()
     try:
         row = db.query(RetrainLog).filter(RetrainLog.id == log_id).first()
@@ -100,6 +102,8 @@ def _finish_retrain_log(
         row.message = message
         row.model_version = model_version
         row.data_version = data_version
+        if snapshot_ids is not None:
+            row.snapshot_ids_json = encode_snapshot_ids(snapshot_ids)
         row.metrics_json = json.dumps(metrics, ensure_ascii=False) if metrics else None
 
         # The same values, in columns. Written from the dict rather than parsed
@@ -351,7 +355,9 @@ def retrain_models(trigger_source: str = "manual"):
 
         result = _do_retrain(min_samples=50, trigger_source=trigger_source)
         metrics = result.get("metrics", {}) if isinstance(result, dict) else {}
+        snapshot_ids = result.get("snapshot_ids") if isinstance(result, dict) else None
         status["metrics"] = metrics
+        status["snapshot_ids"] = snapshot_ids
         status["status"] = "success"
 
         _finish_retrain_log(
@@ -359,6 +365,7 @@ def retrain_models(trigger_source: str = "manual"):
             status="success",
             message="Retraining completed successfully",
             metrics=metrics,
+            snapshot_ids=snapshot_ids,
         )
         logger.info("Retrain completed: %s", metrics)
         if sora_retrain_total: sora_retrain_total.labels(status="success").inc()
@@ -413,6 +420,7 @@ def retrain_models(trigger_source: str = "manual"):
             message="Retraining completed successfully" if status["status"] == "success" else status.get("reason", "Retraining failed"),
             metrics=status.get("metrics"),
             error_message=status.get("error"),
+            snapshot_ids=status.get("snapshot_ids"),
         )
     except Exception:
         pass
@@ -769,6 +777,7 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
             failure_reason=reject_reason,
             message="Closed loop: %s" % ("promoted" if promoted else "rejected"),
             metrics={"old_auc": float(old_auc) if old_auc else None, "new_auc": float(new_auc) if new_auc else None, "promoted": promoted, "reject_reason": reject_reason},
+            snapshot_ids=(result.get("snapshot_ids") if isinstance(result, dict) else None),
         )
         return {"status": "ok", "drift_detected": True, "retrained": True, "promoted": promoted,
                 "activated": bool(promoted and run_id and activation_error is None),
