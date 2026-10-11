@@ -1,0 +1,69 @@
+{
+  "access": {
+    "artifact": null,
+    "authentication": "none",
+    "cadence": "on World Bank miss during profile refresh",
+    "endpoint": "https://sdmx.oecd.org/public/rest/data/{flow}"
+  },
+  "contract_version": "1.0",
+  "coverage": "2 indicators with OECD mappings",
+  "fallback_policy": "Static benchmark follows an OECD miss.",
+  "fields": [
+    {
+      "minimum": 0,
+      "name": "gdp_per_capita",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "current USD"
+    },
+    {
+      "maximum": 100,
+      "minimum": 0,
+      "name": "gini_index",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "index 0-100"
+    }
+  ],
+  "identity": {
+    "deduplication_key": [
+      "country",
+      "indicator",
+      "source"
+    ],
+    "required_fields": [
+      "country",
+      "indicator",
+      "value",
+      "source"
+    ]
+  },
+  "maintainer": "SORA.Earth",
+  "measurement_kind": "administrative_fetched",
+  "missing_value_policy": "Return no value on empty, malformed, or failed responses.",
+  "parser": {
+    "module": "app.external_data",
+    "version_source": "git_sha"
+  },
+  "publisher": "OECD",
+  "rights": {
+    "attribution_required": null,
+    "license_id": null,
+    "notes": "OECD API terms and dataset-specific attribution have not yet been captured and reviewed in this repository.",
+    "terms_url": null,
+    "verification_status": "unverified",
+    "verified_on": null
+  },
+  "source_id": "oecd",
+  "status": "active",
+  "temporal": {
+    "frequency": "dataset dependent; period is not propagated by the current parser",
+    "freshness_axis": "not_configured",
+    "kinds": [
+      "not_applicable"
+    ],
+    "max_vintage_hours": null
+  }
+}

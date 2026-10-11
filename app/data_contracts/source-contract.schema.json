@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sora-earth.online/contracts/source-contract-v1.schema.json",
+  "title": "SORA.Earth source contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version", "source_id", "status", "measurement_kind", "coverage",
+    "publisher", "maintainer", "access", "rights", "temporal", "identity",
+    "missing_value_policy", "fallback_policy", "parser", "fields"
+  ],
+  "properties": {
+    "contract_version": {"const": "1.0"},
+    "source_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+    "status": {"enum": ["active", "disabled_no_current_stations"]},
+    "measurement_kind": {
+      "enum": ["measured", "modelled", "administrative_snapshot", "administrative_fetched", "static_baseline"]
+    },
+    "coverage": {"type": "string", "minLength": 1},
+    "publisher": {"type": "string", "minLength": 1},
+    "maintainer": {"const": "SORA.Earth"},
+    "access": {
+      "type": "object", "additionalProperties": false,
+      "required": ["endpoint", "artifact", "authentication", "cadence"],
+      "properties": {
+        "endpoint": {"type": ["string", "null"], "format": "uri-template"},
+        "artifact": {"type": ["string", "null"]},
+        "authentication": {"enum": ["none", "optional_api_key", "not_applicable"]},
+        "cadence": {"type": "string", "minLength": 1}
+      }
+    },
+    "rights": {
+      "type": "object", "additionalProperties": false,
+      "required": ["verification_status", "license_id", "terms_url", "attribution_required", "verified_on", "notes"],
+      "properties": {
+        "verification_status": {"enum": ["verified", "unverified"]},
+        "license_id": {"type": ["string", "null"]},
+        "terms_url": {"type": ["string", "null"], "format": "uri"},
+        "attribution_required": {"type": ["boolean", "null"]},
+        "verified_on": {"type": ["string", "null"], "format": "date"},
+        "notes": {"type": "string", "minLength": 1}
+      }
+    },
+    "temporal": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kinds", "freshness_axis", "max_vintage_hours", "frequency"],
+      "properties": {
+        "kinds": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["observed", "period", "not_applicable"]}},
+        "freshness_axis": {"enum": ["event_time", "period_end", "source_revision", "not_configured"]},
+        "max_vintage_hours": {"type": ["integer", "null"], "minimum": 1},
+        "frequency": {"type": "string", "minLength": 1}
+      }
+    },
+    "identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["required_fields", "deduplication_key"],
+      "properties": {
+        "required_fields": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "deduplication_key": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "missing_value_policy": {"type": "string", "minLength": 1},
+    "fallback_policy": {"type": "string", "minLength": 1},
+    "parser": {
+      "type": "object", "additionalProperties": false,
+      "required": ["module", "version_source"],
+      "properties": {
+        "module": {"type": "string", "minLength": 1},
+        "version_source": {"const": "git_sha"}
+      }
+    },
+    "fields": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "type", "unit", "nullable"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "type": {"enum": ["number", "integer", "string"]},
+          "unit": {"type": ["string", "null"]},
+          "nullable": {"type": "boolean"},
+          "minimum": {"type": "number"},
+          "maximum": {"type": "number"},
+          "provenance_status": {"enum": ["verified", "partial", "unknown"]}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "access": {
+    "artifact": "app.country_benchmarks.GLOBAL_AVG",
+    "authentication": "not_applicable",
+    "cadence": "changes only by reviewed commit",
+    "endpoint": null
+  },
+  "contract_version": "1.0",
+  "coverage": "7 indicators",
+  "fallback_policy": "Final fallback only when SORA_OFFLINE=1.",
+  "fields": [
+    {
+      "minimum": 0,
+      "name": "co2_per_capita",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "tonnes CO2e/person"
+    },
+    {
+      "maximum": 100,
+      "minimum": 0,
+      "name": "renewable_share",
+      "nullable": false,
+      "provenance_status": "partial",
+      "type": "number",
+      "unit": "percent"
+    },
+    {
+      "minimum": 1,
+      "name": "esg_rank",
+      "nullable": false,
+      "provenance_status": "unknown",
+      "type": "integer",
+      "unit": "rank"
+    },
+    {
+      "maximum": 1,
+      "minimum": 0,
+      "name": "hdi",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "index 0-1"
+    },
+    {
+      "minimum": 0,
+      "name": "gdp_per_capita",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "current USD"
+    },
+    {
+      "maximum": 100,
+      "minimum": 0,
+      "name": "gini_index",
+      "nullable": false,
+      "provenance_status": "unknown",
+      "type": "number",
+      "unit": "index 0-100"
+    },
+    {
+      "name": "gov_effectiveness",
+      "nullable": false,
+      "provenance_status": "unknown",
+      "type": "number",
+      "unit": "WGI estimate"
+    }
+  ],
+  "identity": {
+    "deduplication_key": [
+      "indicator",
+      "source"
+    ],
+    "required_fields": [
+      "indicator",
+      "value",
+      "source"
+    ]
+  },
+  "maintainer": "SORA.Earth",
+  "measurement_kind": "administrative_snapshot",
+  "missing_value_policy": "No further fallback exists; unresolved values remain absent.",
+  "parser": {
+    "module": "app.country_benchmarks",
+    "version_source": "git_sha"
+  },
+  "publisher": "World Bank / UNDP / unresolved author constants",
+  "rights": {
+    "attribution_required": null,
+    "license_id": null,
+    "notes": "Three fields have named aggregate sources; four are author constants without established source or licence.",
+    "terms_url": null,
+    "verification_status": "unverified",
+    "verified_on": null
+  },
+  "source_id": "global_avg",
+  "status": "active",
+  "temporal": {
+    "frequency": "mixed annual aggregates and constants",
+    "freshness_axis": "not_configured",
+    "kinds": [
+      "period",
+      "not_applicable"
+    ],
+    "max_vintage_hours": null
+  }
+}

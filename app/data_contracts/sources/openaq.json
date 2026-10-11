@@ -1,0 +1,106 @@
+{
+  "access": {
+    "artifact": null,
+    "authentication": "optional_api_key",
+    "cadence": "disabled until the registered re-enable condition is met",
+    "endpoint": "https://api.openaq.org/v3/locations"
+  },
+  "contract_version": "1.0",
+  "coverage": "none for the declared regions",
+  "fallback_policy": "No substitution. Modelled Open-Meteo values remain a distinct source and kind.",
+  "fields": [
+    {
+      "maximum": 500,
+      "minimum": 0,
+      "name": "pm25_ugm3",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "ug/m3"
+    },
+    {
+      "maximum": 600,
+      "minimum": 0,
+      "name": "pm10_ugm3",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "ug/m3"
+    },
+    {
+      "maximum": 500,
+      "minimum": 0,
+      "name": "o3_ugm3",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "ug/m3"
+    },
+    {
+      "maximum": 2000,
+      "minimum": 0,
+      "name": "no2_ugm3",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "ug/m3"
+    },
+    {
+      "maximum": 1000,
+      "minimum": 0,
+      "name": "so2_ugm3",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "ug/m3"
+    },
+    {
+      "maximum": 50000,
+      "minimum": 0,
+      "name": "co_ugm3",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "ug/m3"
+    }
+  ],
+  "identity": {
+    "deduplication_key": [
+      "source",
+      "source_record_id"
+    ],
+    "required_fields": [
+      "region_code",
+      "metric",
+      "value",
+      "unit",
+      "event_time"
+    ]
+  },
+  "maintainer": "SORA.Earth",
+  "measurement_kind": "measured",
+  "missing_value_policy": "Discard rows without a known sensor parameter, numeric value, or usable observation identity.",
+  "parser": {
+    "module": "app.ingesters.openaq",
+    "version_source": "git_sha"
+  },
+  "publisher": "OpenAQ",
+  "rights": {
+    "attribution_required": null,
+    "license_id": null,
+    "notes": "OpenAQ data/API terms have not yet been captured and reviewed in this repository.",
+    "terms_url": null,
+    "verification_status": "unverified",
+    "verified_on": null
+  },
+  "source_id": "openaq",
+  "status": "disabled_no_current_stations",
+  "temporal": {
+    "frequency": "source observations; scheduler disabled",
+    "freshness_axis": "not_configured",
+    "kinds": [
+      "observed"
+    ],
+    "max_vintage_hours": null
+  }
+}

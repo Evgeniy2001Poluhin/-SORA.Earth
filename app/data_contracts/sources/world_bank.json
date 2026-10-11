@@ -1,0 +1,95 @@
+{
+  "access": {
+    "artifact": null,
+    "authentication": "none",
+    "cadence": "daily profile refresh; optional history refresh",
+    "endpoint": "https://api.worldbank.org/v2/country/{iso3}/indicator/{indicator}"
+  },
+  "contract_version": "1.0",
+  "coverage": "30 countries, 5 indicators, annual series",
+  "fallback_policy": "OECD for mapped fields, then benchmark; every returned field retains its actual source label.",
+  "fields": [
+    {
+      "maximum": 100,
+      "minimum": 0,
+      "name": "renewable_share",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "percent"
+    },
+    {
+      "minimum": 0,
+      "name": "life_expectancy",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "years"
+    },
+    {
+      "minimum": 0,
+      "name": "gdp_per_capita",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "current USD"
+    },
+    {
+      "name": "gdp_growth",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "percent"
+    },
+    {
+      "maximum": 100,
+      "minimum": 0,
+      "name": "gini_index",
+      "nullable": false,
+      "provenance_status": "verified",
+      "type": "number",
+      "unit": "index 0-100"
+    }
+  ],
+  "identity": {
+    "deduplication_key": [
+      "country",
+      "indicator",
+      "period",
+      "source"
+    ],
+    "required_fields": [
+      "country",
+      "indicator",
+      "value",
+      "period",
+      "source"
+    ]
+  },
+  "maintainer": "SORA.Earth",
+  "measurement_kind": "administrative_fetched",
+  "missing_value_policy": "Try older published periods within the configured lookup, then return no value.",
+  "parser": {
+    "module": "app.external_data",
+    "version_source": "git_sha"
+  },
+  "publisher": "World Bank",
+  "rights": {
+    "attribution_required": true,
+    "license_id": "CC-BY-4.0-WORLD-BANK-TERMS",
+    "notes": "Default World Bank-produced open-data licence; per-indicator metadata may override it and must be retained.",
+    "terms_url": "https://datacatalog.worldbank.org/public-licenses",
+    "verification_status": "verified",
+    "verified_on": "2026-10-04"
+  },
+  "source_id": "world_bank",
+  "status": "active",
+  "temporal": {
+    "frequency": "annual indicator series",
+    "freshness_axis": "period_end",
+    "kinds": [
+      "period"
+    ],
+    "max_vintage_hours": null
+  }
+}
