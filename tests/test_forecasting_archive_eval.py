@@ -675,61 +675,97 @@ def test_manifest_digest_changes_when_file_bytes_change(tmp_path):
     assert digest_v1 != digest_v2
 
 
-def test_end_to_end_on_synthetic_archive(tmp_path):
-    """Full evaluation on a small synthetic archive returns deterministic results."""
-    archive_dir = tmp_path / "archive"
+def _write_two_point_archive(archive_dir: Path) -> None:
+    """DEU and FRA only, for 2025 and 2026, days 1..90 of each year. Nineteen declared
+    points are absent and the days are not contiguous, so evaluate_archive must refuse."""
     weather_dir = archive_dir / "weather"
     weather_dir.mkdir(parents=True)
 
-    points = ["DEU", "FRA"]
-    years = [2025, 2026]
-
-    for point in points:
-        for year in years:
+    for index, point in enumerate(["DEU", "FRA"]):
+        for year in [2025, 2026]:
             times = []
             temps = []
-            base_temp = 5.0 + hash(point) % 10
             for day in range(1, 91):
                 for hour in range(24):
-                    try:
-                        dt = datetime(year, 1, 1) + timedelta(days=day - 1, hours=hour)
-                        times.append(dt.strftime("%Y-%m-%dT%H:%M"))
-                        temps.append(base_temp + np.sin(day / 7) * 3 + hour / 24)
-                    except ValueError:
-                        break
+                    dt = datetime(year, 1, 1) + timedelta(days=day - 1, hours=hour)
+                    times.append(dt.strftime("%Y-%m-%dT%H:%M"))
+                    temps.append(5.0 + index + np.sin(day / 7) * 3 + hour / 24)
 
-            hourly_data = {
-                "hourly": {
-                    "time": times,
-                    "temperature_2m": temps,
-                }
-            }
-
+            hourly_data = {"hourly": {"time": times, "temperature_2m": temps}}
             file_path = weather_dir / f"{point}_{year}.json.gz"
             with gzip.open(file_path, "wt", encoding="utf-8") as f:
                 json.dump(hourly_data, f)
 
-    report1 = evaluate_archive(archive_dir, horizons=[7])
-    report2 = evaluate_archive(archive_dir, horizons=[7])
 
-    assert report1["label"] == RESULT_LABEL
-    assert report1["declaration"] == DECLARATION
-    assert report1["target"] == TARGET_NAME
+def test_end_to_end_report_on_complete_archive(tmp_path):
+    """A complete 21-point archive yields an unrefused report. Every candidate carries a
+    verdict with its bootstrap interval, the header fields are the module constants, and
+    a second run reproduces the first apart from generated_at.
 
-    assert report1["snapshot_digest"] == report2["snapshot_digest"]
-    assert report1["manifest_digest"].startswith("sha256:")
+    Two windows, so the bootstrap has something to resample."""
+    from app.services.forecasting.challengers import CANDIDATES
 
-    if report1.get("refused"):
-        assert "refusal_reasons" in report1
-    else:
-        assert "results_by_horizon" in report1
+    archive_dir = tmp_path / "archive"
+    points = _write_complete_archive(archive_dir)
+    assert len(points) == 21
+
+    def run_evaluation():
+        return evaluate_archive(
+            archive_dir,
+            horizons=[FIXTURE_HORIZON],
+            window_configs=_fixture_window_configs(n_windows=2),
+        )
+
+    report = run_evaluation()
+
+    assert report["refused"] is False, f"Evaluation refused: {report.get('refusal_reasons')}"
+    assert report["label"] == RESULT_LABEL
+    assert report["target"] == TARGET_NAME
+    assert report["declaration"] == DECLARATION
+
+    verdicts = report["results_by_horizon"][FIXTURE_HORIZON]["candidate_verdicts"]
+    expected_candidates = {spec.name for spec in CANDIDATES if spec.role != "shadow"}
+    assert set(verdicts) == expected_candidates, f"Verdicts: {verdicts}"
+
+    for name, verdict in verdicts.items():
+        assert {"beats_all", "succeeded", "bootstrap_ci_95"} <= set(verdict), (
+            f"{name} has no complete verdict: {verdict}"
+        )
+        interval = verdict["bootstrap_ci_95"]
+        assert {"lower", "upper"} <= set(interval), f"{name} interval: {interval}"
+        assert interval["lower"] <= interval["upper"], f"{name} interval inverted: {interval}"
+
+    second = run_evaluation()
+    first_comparable = dict(report)
+    first_comparable.pop("generated_at")
+    second_comparable = dict(second)
+    second_comparable.pop("generated_at")
+    assert first_comparable == second_comparable
+
+
+def test_end_to_end_refuses_an_incomplete_point_set(tmp_path):
+    """A two-point archive is refused. The refusal names exactly the declared points
+    that are absent, and no results are computed."""
+    from app.ingesters.openmeteo import REGION_CAPITALS
+
+    archive_dir = tmp_path / "archive"
+    _write_two_point_archive(archive_dir)
+
+    report = evaluate_archive(archive_dir, horizons=[7])
+
+    declared = sorted(code for code, _lat, _lon in REGION_CAPITALS)
+    expected_missing = sorted(set(declared) - {"DEU", "FRA"})
+    assert report["refused"] is True
+    assert report["refusal_reasons"]["missing_declared_points"] == expected_missing
+    assert "results_by_horizon" not in report
 
 
 def test_constants_match_declaration_document():
     """Constants in the module must match the declaration text exactly."""
     declaration_path = REPO_ROOT / "docs" / "M3A_ARCHIVE_DECLARATION.md"
-    if not declaration_path.exists():
-        pytest.skip("Declaration file not found")
+    assert declaration_path.exists(), (
+        f"Declaration file is part of the repository and is missing: {declaration_path}"
+    )
 
     with open(declaration_path, encoding="utf-8") as f:
         text = f.read()
