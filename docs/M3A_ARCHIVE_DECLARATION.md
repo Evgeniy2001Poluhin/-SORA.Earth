@@ -1,7 +1,8 @@
 # M3-A — forecast declaration on the archived series (preregistration)
 
-    version              1.0
+    version              1.1
     declared             2026-10-11
+    amended              2026-10-11 (1.1, before any run, after the co-architect review)
     vintage              Open-Meteo Historical Forecast API, downloaded 2026-10-11
     label                pseudo-real-time (M2 protocol §2.2), never a real-time claim
     relation to M3       a separate run; it neither replaces nor gates
@@ -83,26 +84,78 @@ files        one gzipped JSON per point and year, kept with the owner's
              archive, with a SHA-256 manifest
 ```
 
-**Vintage identification** follows M2 §2.2. Every report carries:
+**The vintage is pinned, not merely printed.** The manifest digest of the 189
+weather files — SHA-256 over the sorted lines `<relative path>\t<sha256 of the
+file>` — must equal
 
-- the manifest digest of the files;
+```
+sha256:2d2ad4c1781102c810b8330adae0e6ad08dc99abed4ece91b21010b08a6b9f49
+```
+
+Any other value is a refusal before any model is fitted. A missing, added or
+altered file changes it. The bytes that are hashed are the bytes that are
+parsed: each file is read once.
+
+A fresh download is a new vintage, because the provider may revise the
+archive. A new vintage needs a new version of this declaration. Results from
+two vintages are not compared as though they shared one.
+
+**Every report also carries** (M2 §2.2):
+
 - `snapshot_digest` of the rows it scored;
+- the label;
+- the commit SHA of this declaration: the last commit that changed this file;
 - the commit SHA of the code that ran;
-- the label.
+- the versions of Python, numpy, pandas, scikit-learn and xgboost.
 
-A fresh download is a new vintage: the provider may revise the archive.
-Results from two vintages are not compared as though they shared one.
+The run refuses if either SHA cannot be determined, or if the working tree has
+tracked modifications. An official result must name exactly what produced it.
 
 **Nothing is mixed in.** Rows from production's live `openmeteo` ingester,
 from ERA5, or from the copies recovered on 2026-10-11 are not part of this
 series.
 
-**Missing days are refused, not filled.** If any point-day in the period falls
-below the 19-hour floor, the run refuses and reports the count. Nothing is
-interpolated. Measured for 2026-04-01..10-10: 4 053 of 4 053 point-days meet
-the floor. The run checks the whole period. The refusal also keeps row
-positions equal to calendar days, which is what the window arithmetic in
-`app/services/forecasting/evaluation.py` assumes.
+**The whole grid is checked, and anything short of it is refused, not filled.**
+The expected grid is the 21 declared points × the 3 205 days from 2018-01-01 to
+2026-10-10, which is 67 305 point-days. Every one of them must have at least 19
+distinct UTC hours. Nothing is interpolated. The run refuses before fitting
+anything, and reports what it found, if any of these holds:
+
+- a point-day of the grid has fewer than 19 hours — a wholly absent day counts
+  as zero hours. Checking only the dates that are present would miss an
+  entire absent year: the co-architect review showed that a series missing all
+  of 2018 passed such a check;
+- the first or last day differs from the declared bounds;
+- a point is missing, or a point is present that is not declared;
+- a (point, hour) appears more than once — this archive is hourly, so a
+  duplicate is a corrupt input, not something to average away;
+- a value is not finite;
+- a timestamp is not on the hour.
+
+The refusal also keeps row positions equal to calendar days, which is what the
+window arithmetic in `app/services/forecasting/evaluation.py` assumes.
+
+Measured independently on 2026-10-11 by counting the hours in the files, before
+any evaluation: all 67 305 point-days have all 24 hours.
+
+## 3a. What the series is, and what a result does not show
+
+The Historical Forecast API stitches together the first hours of successive
+runs of numerical weather models. Without a `models` parameter, the provider
+chooses the model per location, and models and their versions change over
+time. Nothing here establishes that the series is homogeneous across nine
+years. The comparison with production's recorded readings covers a few weeks
+of 2026, not the history.
+
+So a success under §9 means one thing only: forecasting this modelled series
+beat the baselines on the declared windows. It does not mean:
+
+- accuracy against thermometers;
+- the skill of a numerical weather forecast at a 7- or 30-day lead time;
+- that the result holds in climate regimes outside the evaluated period.
+
+The download script and its log are kept with the archive as the request
+record.
 
 ## 4. Horizons
 
@@ -137,7 +190,7 @@ As M2 §3.
 - **Primary:** macro MAE in °C. MAE is computed per point, then averaged with
   equal weight across the 21 points, per horizon.
 - **Secondary:** RMSE, MASE (M2 §3.2) and bias, with the same aggregation.
-- **Intervals:** bootstrap, seeded (`seed=0`), as the existing report does.
+- **Intervals and the success test:** §9.
 
 ## 7. Baselines — fixed here, before any model is run
 
@@ -168,8 +221,14 @@ As M2 §3.
 
 ## 8. Candidates — frozen
 
-`linear_trend` and `xgboost_lag`, as defined in
-`app/services/forecasting/challengers.py` at the commit that adds this file.
+Exactly two candidates, named in the code as an explicit list rather than
+taken from whatever `CANDIDATES` holds:
+
+- `linear_trend`;
+- `xgboost_lag`.
+
+Each is used with its constructor parameters as they stand in
+`app/services/forecasting/challengers.py` at the code commit the run records.
 `lstm` has role `shadow`: if it is run, it is reported separately and never
 counted.
 
@@ -179,15 +238,53 @@ dropped because it lost.
 
 ## 9. What counts as success
 
-Per horizon, a candidate succeeds only if both hold:
+**The family of claims.** 2 candidates × 2 horizons = 4 possible claims of
+success. The family-wise error rate is held at α = 0.05 by Bonferroni, so each
+claim is tested one-sided at α/4 = 0.0125.
 
-- its macro MAE is lower than every baseline's macro MAE (ties lose);
-- the 95% paired bootstrap interval of `candidate − strongest baseline` lies
-  entirely below zero.
+**A claim (candidate c, horizon h) succeeds only if c beats every one of the
+four baselines.** No "strongest baseline" is picked from the results. For each
+baseline b:
 
-Otherwise it has not succeeded, whatever its secondary metrics show. Each
-candidate's verdict is reported for both horizons. No best combination is
-picked afterwards.
+- the unit is the window: d_w = macro MAE of c in window w − macro MAE of b in
+  window w. The 21 points stay together inside a window;
+- the statistic is the mean of d_w over the windows;
+- its upper bound is the 98.75th percentile of a **circular block bootstrap**
+  over the time-ordered windows (one-sided 1 − 0.0125). That bound must be
+  below zero.
+
+Requiring every baseline is an intersection–union test, so it needs no further
+correction across baselines. It implies that c's macro MAE is lower than every
+baseline's. A tie is not lower, so ties lose.
+
+**The bootstrap, fixed now and never tuned:**
+
+- block length L = ⌈n^(1/3)⌉, where n is the number of windows:
+  - h=7: n = 104, L = 5;
+  - h=30: n = 24, L = 3;
+- blocks of L consecutive windows wrap around the end of the sequence;
+- each resample draws ⌈n / L⌉ block starts uniformly and truncates to n
+  windows;
+- 10 000 resamples, `numpy.random.default_rng(0)`;
+- one set of resampled index sequences per horizon is used for every
+  candidate–baseline comparison of that horizon.
+
+Non-overlapping windows do not make neighbouring weeks independent. Weather,
+season and the shared expanding training history connect them, and the blocks
+keep that dependence in the resamples. A block length chosen because it
+produced a success would void the test, which is why the rule is written here.
+
+**Pairing is checked by dates, not by counts.** Every (model, point) report
+must hold exactly n windows with the same `train_end`, `test_start` and
+`test_end` as every other, and every per-window MAE must be finite. Otherwise
+the claim is "not_comparable" — never a bootstrap over a shorter or shifted
+sample.
+
+**Power.** At h=30 there are 24 windows in 8 blocks. A claim that fails there
+is weak evidence that no effect exists, and is reported in those words.
+
+Otherwise a claim has not succeeded, whatever its secondary metrics show. All
+four claims are reported. No best combination is picked afterwards.
 
 ## 10. How results may be described
 
@@ -212,3 +309,4 @@ picked afterwards.
 | version | date | reason |
 |---|---|---|
 | 1.0 | 2026-10-11 | Declared before any run on the archive, after the second loss of the live series. |
+| 1.1 | 2026-10-11 | Revised **before any run**, after the co-architect review (GPT): the whole 67 305-point-day grid is checked (a missing year passed the old check); the archive digest is pinned; the declaration and code SHAs and library versions are recorded, and a dirty tree is refused; the candidates are an explicit list; success is a family-wise, intersection–union test against every baseline with a circular block bootstrap; windows are paired by dates; the limits of a modelled series are stated (§3a). |
