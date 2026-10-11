@@ -13,6 +13,7 @@ reaches `runtime/active/`.
 """
 import json
 import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -52,6 +53,11 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("SORA_RUNTIME_DIR", str(tmp_path / "runtime"))
 
     import app.api.retrain as retrain
+    from app.run_snapshots import ResolvedTrainingDataset
+    monkeypatch.setattr(
+        "app.run_snapshots.resolve_training_dataset",
+        lambda path: ResolvedTrainingDataset(("a" * 64,), Path(path).read_bytes()),
+    )
     monkeypatch.setattr(retrain, "MODELS_DIR", str(seed))
     monkeypatch.setattr(retrain, "DATA_DIR", str(data), raising=False)
     return {"seed": seed, "runtime": tmp_path / "runtime", "retrain": retrain}

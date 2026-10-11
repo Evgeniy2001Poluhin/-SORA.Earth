@@ -4,6 +4,7 @@ from app.auth import require_admin
 import contextlib
 import fcntl
 import hashlib
+import io
 import os, csv, pickle, json, stat, tempfile, time
 from datetime import datetime
 
@@ -181,10 +182,15 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
     #: has no dataset to name -- which is a different fact from one that read a
     #: dataset and failed afterwards, and the row should be able to say which.
     data_version = None
+    snapshot_ids = None
 
     try:
         if not os.path.exists(PROJECTS_CSV):
             raise HTTPException(400, "No training data (projects.csv) found")
+
+        from app.run_snapshots import resolve_training_dataset
+        resolved_dataset = resolve_training_dataset(PROJECTS_CSV)
+        snapshot_ids = resolved_dataset.snapshot_ids
 
         #: Which bytes this run trained on (#164 line of work; the
         #: `data snapshot -> run_id` link of the roadmap's definition of done).
@@ -198,10 +204,9 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
         #: appended to by more than that path -- so before this, two champions
         #: trained a week apart were indistinguishable in the record except by
         #: `total_samples` and a timestamp.
-        with open(PROJECTS_CSV, "rb") as _handle:
-            data_version = "sha256:" + hashlib.sha256(_handle.read()).hexdigest()
+        data_version = "sha256:" + resolved_dataset.content_sha256
 
-        df = pd.read_csv(PROJECTS_CSV)
+        df = pd.read_csv(io.BytesIO(resolved_dataset.content))
         required = ["budget", "co2_reduction", "social_impact", "duration_months", "success"]
         missing = [c for c in required if c not in df.columns]
         if missing:
@@ -434,6 +439,7 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
             # is not the size of the file. Both are recorded: the digest names
             # the dataset, the counts say how much of it was usable.
             "data_version": data_version,
+            "snapshot_ids": list(snapshot_ids),
             "data_rows_read": int(before),
         }
         with open(os.path.join(staged, "meta.json"), "w") as f:
@@ -480,13 +486,16 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
             #: closing note says the unification must be filed fresh. No open
             #: issue carries it, so this half is unowned rather than scheduled.
             "data_version": data_version,
+            "snapshot_ids": list(snapshot_ids),
         }
 
         try:
             from app.mlflow_tracking import log_model_registry
             registry_ok = log_model_registry(
                 rf, "RandomForest_retrain",
-                {"auc": auc or 0, "f1": f1, "accuracy": acc})
+                {"auc": auc or 0, "f1": f1, "accuracy": acc},
+                snapshot_ids=snapshot_ids,
+            )
             new_metrics["registry_ok"] = bool(registry_ok)
         except Exception as exc:
             # Absent is not the same as False, and the difference decides
@@ -510,6 +519,7 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
         _finish_retrain_log(
             log_id=log_id,
             data_version=data_version,
+            snapshot_ids=snapshot_ids,
             # No `status`: it is derived from the stages by project_status, so
             # this row cannot disagree with its own fields (#199 phase 2B).
             training_status="success",
@@ -541,6 +551,7 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
         _finish_retrain_log(
             log_id=log_id,
             data_version=data_version,
+            snapshot_ids=snapshot_ids,
             training_status="failed",
             failure_reason=type(e).__name__,
             message="Manual retraining failed",

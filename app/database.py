@@ -303,6 +303,9 @@ class RetrainLog(Base):
     failure_reason = Column(Text, nullable=True)
     model_version = Column(String(100), nullable=True)
     data_version = Column(String(100), nullable=True)
+    #: Ordered immutable inputs for new runs. NULL means legacy/unknown; it is
+    #: never backfilled because historical snapshot identity was not recorded.
+    snapshot_ids_json = Column(Text, nullable=True)
     metrics_json = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
     message = Column(Text, nullable=True)

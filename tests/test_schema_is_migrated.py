@@ -281,6 +281,36 @@ def test_both_paths_to_head_produce_the_same_schema():
         )
 
 
+@requires_postgres
+@slow
+@pytest.mark.parametrize("column_sql", [
+    "snapshot_ids_json integer",
+    "snapshot_ids_json text NOT NULL",
+    "snapshot_ids_json text DEFAULT 'invented'",
+])
+def test_snapshot_linkage_refuses_an_incompatible_existing_column(column_sql):
+    """The create_all compatibility path may skip only an exact ORM column."""
+    admin, name, url = _scratch()
+    try:
+        assert _alembic(url, "upgrade", "f4b7c2d91e06").returncode == 0
+        engine = create_engine(url)
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE retrain_log ADD COLUMN " + column_sql
+            ))
+        engine.dispose()
+
+        result = _alembic(url, "upgrade", "head")
+        current = _alembic(url, "current")
+    finally:
+        _drop(admin, name)
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, f"incompatible column was accepted: {column_sql}"
+    assert "snapshot linkage migration refuses to complete" in output
+    assert "f4b7c2d91e06" in current.stdout, current.stdout
+
+
 def _canonical_then(url, *statements):
     """Reach head, rewind the *recorded* revision only, mutate, and re-run.
 

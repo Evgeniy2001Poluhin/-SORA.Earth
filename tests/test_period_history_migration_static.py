@@ -21,10 +21,10 @@ def _alembic(*args):
     )
 
 
-def test_period_history_revision_is_the_only_head():
+def test_snapshot_linkage_revision_is_the_only_head():
     result = _alembic("heads")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.strip() == "f4b7c2d91e06 (head)"
+    assert result.stdout.strip() == "a6c4e91d7b20 (head)"
 
 
 def test_period_history_revision_generates_offline_sql():
@@ -38,3 +38,16 @@ def test_period_history_revision_generates_offline_sql():
     assert "CREATE TRIGGER trg_cih_record_period_change" in result.stdout
     assert "CREATE TRIGGER trg_ciph_append_only" in result.stdout
     assert "CREATE TRIGGER trg_ciph_refuse_truncate" in result.stdout
+
+
+def test_snapshot_linkage_revision_generates_guarded_offline_sql():
+    result = _alembic(
+        "upgrade",
+        "f4b7c2d91e06:a6c4e91d7b20",
+        "--sql",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "DO $snapshot_linkage$" in result.stdout
+    assert "ALTER TABLE retrain_log ADD COLUMN snapshot_ids_json TEXT" in result.stdout
+    assert "%%I" not in result.stdout
+    assert "snapshot linkage migration refuses to complete" in result.stdout

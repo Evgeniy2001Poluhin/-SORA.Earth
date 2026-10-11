@@ -20,6 +20,7 @@ the metrics as `split_kind`, so a stored number says which question it answers.
 """
 import numpy as np
 import pytest
+from pathlib import Path
 
 
 def _frame(n=400, positive=0.7):
@@ -40,6 +41,11 @@ def _frame(n=400, positive=0.7):
 @pytest.fixture
 def dataset(tmp_path, monkeypatch):
     import app.api.retrain as retrain
+    from app.run_snapshots import ResolvedTrainingDataset
+    monkeypatch.setattr(
+        "app.run_snapshots.resolve_training_dataset",
+        lambda path: ResolvedTrainingDataset(("a" * 64,), Path(path).read_bytes()),
+    )
 
     path = tmp_path / "projects.csv"
     models = tmp_path / "models"

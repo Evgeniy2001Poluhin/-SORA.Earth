@@ -14,6 +14,7 @@ clean rows and says how many it discarded, or refuses with a message that names
 the reason.
 """
 import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -41,6 +42,11 @@ def _frame(n=40, successes=None):
 def dataset(tmp_path, monkeypatch):
     """`projects.csv` under this test's control."""
     import app.api.retrain as retrain
+    from app.run_snapshots import ResolvedTrainingDataset
+    monkeypatch.setattr(
+        "app.run_snapshots.resolve_training_dataset",
+        lambda path: ResolvedTrainingDataset(("a" * 64,), Path(path).read_bytes()),
+    )
 
     path = tmp_path / "projects.csv"
     monkeypatch.setattr(retrain, "PROJECTS_CSV", str(path))

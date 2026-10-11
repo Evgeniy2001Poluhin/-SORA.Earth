@@ -485,7 +485,14 @@ def _registry_api():
     return mlflow
 
 
-def log_model_registry(model, model_name: str, metrics: dict, *, api=None) -> bool:
+def log_model_registry(
+    model,
+    model_name: str,
+    metrics: dict,
+    *,
+    snapshot_ids=None,
+    api=None,
+) -> bool:
     """Register the model, and **say whether it worked** (#189).
 
     This returned None either way, so a caller could not tell a registered
@@ -512,10 +519,16 @@ def log_model_registry(model, model_name: str, metrics: dict, *, api=None) -> bo
     api = _registry_api() if api is None else api
     _ensure_experiment_once(api)
     try:
+        from app.run_snapshots import encode_snapshot_ids
+
         with api.start_run(run_name=f"register_{model_name}"):
             api.log_metrics(metrics)
-            api.sklearn.log_model(model, model_name)
             api.set_tag("type", "model_registry")
+            if snapshot_ids is not None:
+                api.set_tag("sora.snapshot_ids", encode_snapshot_ids(snapshot_ids))
+            # Establish lineage before uploading the artefact. If MLflow
+            # refuses the tag, no model is filed without its input evidence.
+            api.sklearn.log_model(model, model_name)
         return True
     except Exception as e:
         _log_mlflow_failure("log_model_registry", e)

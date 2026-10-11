@@ -309,6 +309,25 @@ def _version_of(path: str) -> Optional[str]:
         return None
 
 
+def _snapshot_ids_of(path: str):
+    """Read verified snapshot references from candidate metadata.
+
+    None is the explicit legacy state. Malformed evidence is refused during
+    activation rather than copied into the serving manifest.
+    """
+    import json
+    from app.run_snapshots import decode_snapshot_ids, encode_snapshot_ids
+
+    meta = os.path.join(path, "meta.json")
+    if not os.path.exists(meta):
+        return None
+    with open(meta, encoding="utf-8") as handle:
+        values = (json.load(handle) or {}).get("snapshot_ids")
+    if values is None:
+        return None
+    return list(decode_snapshot_ids(encode_snapshot_ids(values)) or ())
+
+
 def _auc_of(path: str) -> Optional[float]:
     """The champion's own AUC, from its `metrics.json`. Both spellings are read."""
     import json
@@ -514,6 +533,7 @@ def activate(run_id: str) -> ModelSource:
             json.dump({
                 "run_id": run_id,
                 "model_version": _version_of(nxt),
+                "snapshot_ids": _snapshot_ids_of(nxt),
                 "activated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
             }, handle)
 
