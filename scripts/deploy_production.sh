@@ -924,7 +924,10 @@ APP_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null
 [ -n "$APP_IMAGE_ID" ] \
     || fail "built $APP_IMAGE but cannot read its id, so nothing below can be verified against it"
 
-"${DC[@]}" up -d postgres \
+# `run --no-deps migrate` deliberately bypasses compose's dependency health
+# gate. On a fresh volume initdb takes long enough for a TCP connection to be
+# refused, so wait for PostgreSQL's own healthcheck before running Alembic.
+"${DC[@]}" up -d --wait postgres \
     || fail "postgres would not start, so migrations cannot run"
 
 # One migrator, from that exact image, before anything is recreated.

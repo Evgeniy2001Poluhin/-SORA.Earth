@@ -532,11 +532,13 @@ async function runBenchmark() {
         gov_effectiveness: 'Government effectiveness'
       };
       Object.entries(metrics.benchmarks).forEach(([k, v]) => {
+        const displayValue = v === null || v === undefined ? '—' : Number(v).toFixed(1);
+        const barWidth = v === null || v === undefined ? 0 : Math.min(100, Math.max(8, Number(v)));
         html += `<div class="bench-row">
           <div class="bench-label">${labels[k] ?? k}</div>
-          <div class="bench-val" style="col(--accent)">${Number(v).toFixed(1)}</div>
+          <div class="bench-val" style="col(--accent)">${displayValue}</div>
           <div class="bench-val" style="color:var(--text-faint)">Global</div>
-          <div><div class="bench-bar-wrap"><div class="bench-bar" style="width:${Math.min(100, Math.max(8, Number(v)))}%;background:var(--accent)"></div></div></div>
+          <div><div class="bench-bar-wrap"><div class="bench-bar" style="width:${barWidth}%;background:var(--accent)"></div></div></div>
         </div>`;
       });
       html += '<div style="margin-top:var(--space-4);font-size:var(--text-xs);color:var(--text-faint)">Source returned benchmark object rather than pairwise country/global rows.</div>';
