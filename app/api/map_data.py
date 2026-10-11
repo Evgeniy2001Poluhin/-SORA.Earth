@@ -63,7 +63,12 @@ def _live_esg(name: str, fallback: int):
         co2 = ind.get("co2_per_capita", d.get("co2_per_capita", 5.0))
         renew = ind.get("renewable_share", d.get("renewable_share", 20.0))
         gini = ind.get("gini_index", d.get("gini_index", 35.0))
-        gov = ind.get("gov_effectiveness", d.get("gov_effectiveness", 0.0))
+        # gov_effectiveness can be None (e.g., Finland); the fallback chain uses 0.0
+        gov = ind.get("gov_effectiveness")
+        if gov is None:
+            gov = d.get("gov_effectiveness")
+        if gov is None:
+            gov = 0.0
         hdi = d.get("hdi", 0.7)
         e = 0.6*min(renew,100) + 0.4*max(0,(16-co2)/16*100)
         soc = 0.7*hdi*100 + 0.3*max(0,(60-gini)/40*100)

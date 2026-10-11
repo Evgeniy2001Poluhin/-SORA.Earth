@@ -46,7 +46,7 @@ concurrency:
 
 jobs:
   backend-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -149,7 +149,7 @@ jobs:
             -v --timeout=60
 
   frontend-checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     defaults:
       run:
@@ -192,7 +192,7 @@ jobs:
   # the runtime stage, which installs torch and takes minutes.
   production-spa-build:
     name: production-spa-build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -286,7 +286,7 @@ jobs:
           echo "the guard rejected the mock bundle, as it must"
 
   environmental-postgres-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 10 was right when this job ran one test file. It now also runs the schema
     # checks -- 18 cases, each creating its own database and driving alembic in a
     # subprocess. Measured on the runner: ~2.5 min for pip install, then roughly
@@ -507,7 +507,7 @@ jobs:
           MLFLOW_TRACKING_URI: "sqlite:///./test_mlflow.db"
 
   integration-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Importing app.main costs 4m18s here -- torch, SHAP, transformers, chromadb --
     # before a single test runs. 15 minutes killed the job mid-suite; backend-tests
     # already allows 30 for the same import.
@@ -641,7 +641,7 @@ jobs:
   # the problem and left it standing for months.
   api-contract-ratchet:
     name: response contract ratchet
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -689,7 +689,7 @@ jobs:
           fi
 
   shell-scripts:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -887,7 +887,7 @@ jobs:
   # bootstrapped with Base.metadata.create_all(), which is not reproducible from
   # the repository, so this gate runs the chain against an empty PostgreSQL.
   migration-bootstrap:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     services:
       postgres:
@@ -1233,7 +1233,7 @@ jobs:
   required-checks:
     name: required-checks
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs:
       - backend-tests
       - environmental-postgres-tests
