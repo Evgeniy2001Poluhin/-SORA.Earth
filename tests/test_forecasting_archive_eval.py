@@ -1451,6 +1451,62 @@ def test_point_day_with_18_hours_is_refused_and_19_accepted(tmp_path):
     assert spy_ok.call_count > 0
 
 
+def test_first_day_with_18_hours_is_refused_and_named(tmp_path):
+    """DEU on the first day of the period, 2018-01-01, has 18 hours. The day is present,
+    so the first-day comparison passes and cannot see it. Only the per-point-day floor
+    can refuse it, and only if the grid loop includes the first day.
+
+    Mutation: skip the first day in the grid loop (`for day in grid_days` becomes
+    `for day in grid_days[1:]`). The short day is then never examined and the run is
+    not refused.
+    """
+    payloads = _complete_payloads()
+    payloads[("DEU", 2018)] = _without(
+        payloads[("DEU", 2018)],
+        lambda t: t.startswith("2018-01-01T") and int(t[11:13]) >= 18,
+    )
+    archive_dir = tmp_path / "archive"
+    _write_payloads(archive_dir, payloads)
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    reasons = report["refusal_reasons"]
+    assert reasons["first_few_below_floor"] == ["DEU 2018-01-01: 18 h"]
+    assert reasons["point_days_below_floor"] == 1
+    assert "first_day" not in reasons, "the first day is present, so first_day must not fire"
+    assert spy.call_count == 0
+
+
+def test_last_day_with_18_hours_is_refused_and_named(tmp_path):
+    """DEU on the last day of the period, 2020-12-31, has 18 hours. The day is present,
+    so the last-day comparison passes and cannot see it. Only the per-point-day floor
+    can refuse it, and only if the grid loop includes the last day.
+
+    Mutation: skip the last day in the grid loop (`for day in grid_days` becomes
+    `for day in grid_days[:-1]`). The short day is then never examined and the run is
+    not refused.
+    """
+    payloads = _complete_payloads()
+    payloads[("DEU", 2020)] = _without(
+        payloads[("DEU", 2020)],
+        lambda t: t.startswith("2020-12-31T") and int(t[11:13]) >= 18,
+    )
+    archive_dir = tmp_path / "archive"
+    _write_payloads(archive_dir, payloads)
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    reasons = report["refusal_reasons"]
+    assert reasons["first_few_below_floor"] == ["DEU 2020-12-31: 18 h"]
+    assert reasons["point_days_below_floor"] == 1
+    assert "last_day" not in reasons, "the last day is present, so last_day must not fire"
+    assert spy.call_count == 0
+
+
 def test_undeclared_point_is_refused(tmp_path):
     """A file for a point that is not in REGION_CAPITALS. The refusal names it.
 
