@@ -24,32 +24,32 @@ SOURCES = {
         "source": "UNDP Human Development Report",
         "series": "HDI",
         "year": 2022,
-        "note": "Human Development Index; 2022 is the latest year present for all 30 countries in the UNDP HDR time series downloaded on 2026-09-29",
+        "note": "Human Development Index; 2022 is the latest year present for all 31 countries in the UNDP HDR time series downloaded on 2026-09-29",
     },
     "renewable_share": {
         "source": "World Bank",
         "series": "EG.ELC.RNEW.ZS",
         "year": None,
         "years": "2011-2021",
-        "note": "Renewable share of electricity output; values carried over unchanged from prior dataset. They match this series for years that vary by country (2011-2021, several only approximately), and the series has no year common to all 30 countries after 2011, so it was not refreshed.",
+        "note": "Renewable share of electricity output; values carried over unchanged from prior dataset. They match this series for years that vary by country (2011-2021, several only approximately), and the series has no year common to all 31 countries after 2011, so it was not refreshed. Finland's value is the 2021 value of this series (added 2026-09-30).",
     },
     "esg_rank": {
         "source": None,
         "series": None,
         "year": None,
-        "note": "Source and year not established; not used by the ESG score (see calculate_esg in app/main.py)",
+        "note": "Source and year not established; not used by the ESG score (see calculate_esg in app/main.py). Finland has no esg_rank (null).",
     },
     "gini_index": {
         "source": None,
         "series": None,
         "year": None,
-        "note": "Source and year not established; not used by the ESG score (see calculate_esg in app/main.py)",
+        "note": "Source and year not established for 30 countries; not used by the ESG score (see calculate_esg in app/main.py). Finland's value is World Bank SI.POV.GINI 2023.",
     },
     "gov_effectiveness": {
         "source": None,
         "series": None,
         "year": None,
-        "note": "Source and year not established; not used by the ESG score (see calculate_esg in app/main.py)",
+        "note": "Source and year not established; not used by the ESG score (see calculate_esg in app/main.py). Finland has no gov_effectiveness (null), as the World Bank WGI series is archived in the API.",
     },
 }
 
@@ -84,6 +84,7 @@ BENCHMARKS = {
     "Albania":      {"co2_per_capita": 1.8,  "renewable_share": 74.3, "esg_rank": 56, "hdi": 0.789, "gdp_per_capita": 11374,   "gini_index": 33.2, "gov_effectiveness": -0.11},
     "Algeria":      {"co2_per_capita": 4.0,  "renewable_share": 1.1,  "esg_rank": 63, "hdi": 0.745, "gdp_per_capita": 5753,   "gini_index": 27.6, "gov_effectiveness": -0.62},
     "Afghanistan":  {"co2_per_capita": 0.3,  "renewable_share": 78.2, "esg_rank": 70, "hdi": 0.462, "gdp_per_capita": 417,    "gini_index": 29.4, "gov_effectiveness": -1.65},
+    "Finland":      {"co2_per_capita": 5.5,  "renewable_share": 52.9, "esg_rank": None, "hdi": 0.942, "gdp_per_capita": 53156, "gini_index": 27.4, "gov_effectiveness": None},
 }
 
 # `COUNTRIES` in app/main.py -- the list the interface offers and `/evaluate`
