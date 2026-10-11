@@ -150,10 +150,17 @@ As M2 §3.
    The forecast for day *d* is the mean of the target over every calendar
    day within ±3 days of *d*'s month-day, in every earlier year whose
    matching days all fall on or before the origin. 29 February is matched as
-   28 February. At least two earlier years are required. Where there are fewer,
-   that point-window is not scored for this baseline, and the count is
-   reported. With history from 2018 and windows from 2024, no point-window
-   has fewer than six.
+   28 February.
+
+   **Which years count.** An earlier year qualifies if all seven of its window
+   dates fall on or before the origin **and** at least one of them is
+   observed. Its observed days enter one pooled mean together with those of
+   every other qualifying year.
+
+   At least two qualifying years are required. Where there are fewer, that
+   point-window is not scored for this baseline, and the count is reported.
+   With complete history from 2018 and windows from 2024, no point-window has
+   fewer than six.
 
    A temperature model that cannot beat the average of the same week in
    previous years has learned the calendar, not the weather. At h=30 this is
