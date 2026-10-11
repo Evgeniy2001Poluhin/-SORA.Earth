@@ -225,6 +225,7 @@ abort_deployment() {
     # means "the rollback did not complete" -- an operator has to look, rather
     # than read "restored" and move on.
     echo "  the recorded images could not be restored; rebuilding instead" >&2
+    export SORA_GIT_SHA="$PREV_COMMIT"
     if "${DC[@]}" up -d --build --remove-orphans >/dev/null 2>&1 \
         && "${DC[@]}" up -d --force-recreate nginx >/dev/null 2>&1; then
         journal_write rollback-incomplete "rebuilt ${PREV_COMMIT:0:12}; images not verified"
@@ -917,6 +918,10 @@ journal_write mutating
 # invocations of the same Dockerfile are two build results, and "the migration
 # came from the deployed image" would have been a resemblance rather than a
 # fact.
+# Bake the checked-out code revision into the image; .git is not shipped.
+# Override inherited values: a caller's stale SHA must never label this build.
+SORA_GIT_SHA="$(git rev-parse HEAD)" || fail "cannot identify the source being built"
+export SORA_GIT_SHA
 "${DC[@]}" build backend \
     || fail "the application image would not build"
 

@@ -366,6 +366,11 @@ def main():
     )
     args = parser.parse_args()
 
+    from app.training_dataset import refuse_active_dataset_output
+    for output in (args.output, args.output + ".tmp", args.output + ".manifest.json",
+                   args.raw_output or (args.output + ".raw.json")):
+        refuse_active_dataset_output(output, snapshot_root=args.snapshot_root)
+
     # Step 1: Fetch World Bank projects
     wb_projects = fetch_wb_projects(rows_per_page=500, max_projects=args.max_projects)
 

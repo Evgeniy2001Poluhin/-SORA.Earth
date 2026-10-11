@@ -67,6 +67,25 @@ def resolve_training_dataset(
     if not root_value:
         raise RunSnapshotError("SORA_DATA_SNAPSHOT_ROOT is required for new training runs")
     root = Path(root_value)
+    if dataset.is_symlink():
+        # Resolve once: a concurrent publisher may switch the pointer after
+        # this call, but both bytes and metadata below belong to this version.
+        try:
+            target = dataset.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise RunSnapshotError("training snapshot pointer is unreadable") from exc
+        snapshot_id = target.parent.name
+        expected = root.resolve() / snapshot_id / "normalized.bin"
+        if not _SNAPSHOT_ID.fullmatch(snapshot_id) or target != expected:
+            raise RunSnapshotError("training pointer must name a snapshot in the configured store")
+        try:
+            loaded = load_snapshot(root, snapshot_id)
+            content = target.read_bytes()
+        except (SnapshotError, OSError) as exc:
+            raise RunSnapshotError("training dataset snapshot verification failed") from exc
+        if hashlib.sha256(content).hexdigest() != loaded.manifest["normalized"]["sha256"]:
+            raise RunSnapshotError("training snapshot changed during verification")
+        return ResolvedTrainingDataset(snapshot_ids=(snapshot_id,), content=content)
     sidecar = Path(str(dataset) + ".manifest.json")
     try:
         manifest = json.loads(sidecar.read_text(encoding="utf-8"))

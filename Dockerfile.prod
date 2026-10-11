@@ -141,6 +141,9 @@ RUN pip install --no-cache-dir --prefer-binary --user -r /tmp/requirements-prod.
 # Stage 2: runtime
 FROM python:3.11-slim AS runtime
 
+ARG SORA_GIT_SHA=""
+ENV SORA_GIT_SHA=${SORA_GIT_SHA}
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8000 \

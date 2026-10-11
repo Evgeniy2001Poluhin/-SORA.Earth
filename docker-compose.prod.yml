@@ -140,6 +140,7 @@ services:
       dockerfile: Dockerfile.prod
       target: runtime
       args:
+        SORA_GIT_SHA: ${SORA_GIT_SHA:-}
         # Not a URL the app routes with -- web/src/api/client.ts hardcodes the
         # path. It is the switch that decides whether the built frontend talks
         # to the API at all: web/src/api/mock.ts turns eight endpoint modules

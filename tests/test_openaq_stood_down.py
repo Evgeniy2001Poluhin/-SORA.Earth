@@ -130,7 +130,7 @@ def test_the_parser_and_its_tests_are_kept():
 
 
 def test_every_source_kind_is_distinct_where_the_sources_are():
-    """Five kinds, because collapsing them hides what a number is worth.
+    """Distinct kinds preserve how a value was obtained, including operator input.
 
     `derived` covered both rosstat and sber_veb_baseline in the first version
     of this register. It should not: rosstat is a dated copy of statistics
@@ -150,7 +150,10 @@ def test_every_source_kind_is_distinct_where_the_sources_are():
     assert SOURCE_REGISTER["world_bank"].measurement_kind != SOURCE_REGISTER["rosstat"].measurement_kind
 
     kinds = {f.name: f.measurement_kind for f in SOURCE_REGISTER.values()}
-    assert len(set(kinds.values())) == 5, (
+    assert set(kinds.values()) == {
+        "measured", "modelled", "administrative_snapshot",
+        "administrative_fetched", "static_baseline", "operator_submitted",
+    }, (
         f"the register collapsed distinct sources into one kind: {kinds}"
     )
 

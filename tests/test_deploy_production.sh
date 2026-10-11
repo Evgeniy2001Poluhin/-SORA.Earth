@@ -204,6 +204,7 @@ case "$argv" in
         cat "$STUB_DIR/app_image_id" 2>/dev/null || echo "sha256:image"
         exit 0 ;;
     *"build backend"*)
+        printf '%s\n' "${SORA_GIT_SHA:-missing}" > "$STUB_DIR/build_source_sha"
         [ -f "$STUB_DIR/build_fails" ] && exit 1
         exit 0 ;;
     *"run --rm --no-deps migrate"*|*"run --rm --build migrate"*|*"run --rm migrate"*)
@@ -1494,6 +1495,8 @@ new_sandbox
 run_guard
 check "the image is built once, explicitly" \
     "$(grep -c 'build backend' "$STUB_DIR/calls")" "1"
+check "the image records the actual checked-out Git revision" \
+    "$(cat "$STUB_DIR/build_source_sha")" "$(git -C "$REPO" rev-parse HEAD)"
 # --no-build on the start: a rebuild there could produce a different image than
 # the one just migrated from, which is the gap the shared tag closes.
 check "and the containers start without rebuilding" \

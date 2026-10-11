@@ -14,7 +14,7 @@
     "source_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
     "status": {"enum": ["active", "disabled_no_current_stations"]},
     "measurement_kind": {
-      "enum": ["measured", "modelled", "administrative_snapshot", "administrative_fetched", "static_baseline"]
+      "enum": ["measured", "modelled", "administrative_snapshot", "administrative_fetched", "static_baseline", "operator_submitted"]
     },
     "coverage": {"type": "string", "minLength": 1},
     "publisher": {"type": "string", "minLength": 1},
@@ -25,7 +25,7 @@
       "properties": {
         "endpoint": {"type": ["string", "null"], "format": "uri-template"},
         "artifact": {"type": ["string", "null"]},
-        "authentication": {"enum": ["none", "optional_api_key", "not_applicable"]},
+        "authentication": {"enum": ["none", "optional_api_key", "required_admin", "not_applicable"]},
         "cadence": {"type": "string", "minLength": 1}
       }
     },

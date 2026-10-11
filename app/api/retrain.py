@@ -2,6 +2,7 @@ from fastapi import Depends
 from app.auth import require_admin
 """Model retraining and metrics API."""
 import contextlib
+from pathlib import Path
 import fcntl
 import hashlib
 import io
@@ -22,6 +23,7 @@ from app.paths import data_dir, models_dir, staged_dir
 from app.model_source import INCOMPLETE_MARKER, discard_unfinished, prune_staged
 from app.schemas import RegistryRetryResult
 from app.security.spreadsheet import neutralize_cell
+from app.training_dataset import DatasetCommitUncertain
 
 router = APIRouter(prefix="/model", tags=["mlops"])
 
@@ -185,12 +187,14 @@ def _do_retrain(min_samples: int = 50, trigger_source: str = "manual"):
     snapshot_ids = None
 
     try:
-        if not os.path.exists(PROJECTS_CSV):
-            raise HTTPException(400, "No training data (projects.csv) found")
+        # Capture the version selected by the writer's single pointer switch.
+        with _dataset_lock():
+            if not os.path.exists(PROJECTS_CSV):
+                raise HTTPException(400, "No training data (projects.csv) found")
 
-        from app.run_snapshots import resolve_training_dataset
-        resolved_dataset = resolve_training_dataset(PROJECTS_CSV)
-        snapshot_ids = resolved_dataset.snapshot_ids
+            from app.run_snapshots import resolve_training_dataset
+            resolved_dataset = resolve_training_dataset(PROJECTS_CSV)
+            snapshot_ids = resolved_dataset.snapshot_ids
 
         #: Which bytes this run trained on (#164 line of work; the
         #: `data snapshot -> run_id` link of the roadmap's definition of done).
@@ -726,10 +730,18 @@ def data_refresh(
         "region": "Unknown",
     }
 
-    df_existing = pd.read_csv(PROJECTS_CSV)
-    df_new = pd.concat(
-        [df_existing, _stamped(pd.DataFrame([new_row]))], ignore_index=True)
-    df_new.to_csv(PROJECTS_CSV, index=False)
+    with _dataset_lock():
+        df_existing = pd.read_csv(PROJECTS_CSV)
+        df_new = pd.concat(
+            [df_existing, _stamped(pd.DataFrame([new_row]))], ignore_index=True)
+        try:
+            _replace_projects_csv(df_new)
+        except DatasetCommitUncertain as exc:
+            logger.error("data refresh commit durability is unconfirmed")
+            raise HTTPException(503, str(exc)) from exc
+        except Exception as exc:
+            logger.warning("data refresh could not publish immutable training provenance: %s", type(exc).__name__)
+            raise HTTPException(500, "Failed to persist the dataset; it is unchanged") from exc
 
     # Read last retrain total_samples from RetrainLog
     from app.database import SessionLocal, RetrainLog
@@ -854,35 +866,27 @@ def _open_upload(file_path: str) -> int:
 
 
 def _replace_projects_csv(df_merged) -> None:
-    """Replace the training set atomically, so a failure cannot truncate it.
+    """Called under the dataset lock: publish, then atomically select a version."""
+    from app.training_dataset import publish_training_dataset, activate_training_snapshot
+    from app.run_snapshots import resolve_training_dataset
 
-    Written to a temporary file in the same directory -- therefore the same
-    filesystem, which os.replace requires -- then flushed, fsynced and renamed.
-    The directory is fsynced afterwards so the rename itself survives a crash.
-    """
-    directory = os.path.dirname(PROJECTS_CSV)
-    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".projects-", suffix=".csv")
-    try:
-        with os.fdopen(fd, "w", newline="") as tmp:
-            df_merged.to_csv(tmp, index=False)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-        os.replace(tmp_path, PROJECTS_CSV)
-    except BaseException:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise
-
-    try:
-        dir_fd = os.open(directory, os.O_RDONLY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
-    except OSError:
-        # Not every filesystem allows fsync on a directory; the rename is still
-        # atomic, only its durability across a crash is weaker.
-        pass
+    dataset = Path(PROJECTS_CSV)
+    parent_id = None
+    if dataset.is_symlink() or Path(str(dataset) + ".manifest.json").exists():
+        previous = resolve_training_dataset(dataset)
+        previous_bytes = previous.content
+        parent_id = previous.snapshot_ids[0]
+    else:
+        previous_bytes = dataset.read_bytes()
+    previous_rows = len(pd.read_csv(io.BytesIO(previous_bytes)))
+    csv_bytes = df_merged.to_csv(index=False).encode("utf-8")
+    published = publish_training_dataset(
+        csv_bytes, schema_fields=tuple(str(column) for column in df_merged.columns),
+        row_count=len(df_merged), previous_content=previous_bytes,
+        submitted_content=df_merged.iloc[previous_rows:].to_csv(index=False).encode("utf-8"),
+        parent_snapshot_id=parent_id,
+    )
+    activate_training_snapshot(dataset, published)
 
 
 @contextlib.contextmanager
@@ -931,6 +935,9 @@ def _ingest_frame(df_new, auto_retrain: bool, _audit) -> dict:
         df_merged = pd.concat([df_existing, _stamped(df_new)], ignore_index=True)
         try:
             _replace_projects_csv(df_merged)
+        except DatasetCommitUncertain as exc:
+            _audit("commit_uncertain", rows=len(df_new), detail=type(exc).__name__)
+            raise HTTPException(503, str(exc)) from exc
         except Exception as e:
             _audit("failed_write", rows=len(df_new), detail=type(e).__name__)
             raise HTTPException(500, "Failed to persist the dataset; it is unchanged")

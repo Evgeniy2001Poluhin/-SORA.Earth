@@ -28,6 +28,8 @@ def dataset(tmp_path, monkeypatch):
     monkeypatch.setattr(retrain, "MODELS_DIR", str(models))
     monkeypatch.setattr(retrain, "PRED_LOG", str(tmp_path / "absent.csv"))
     monkeypatch.setattr(retrain, "DATASET_LOCK", str(tmp_path / ".lock"))
+    monkeypatch.setenv("SORA_DATA_SNAPSHOT_ROOT", str(tmp_path / "snapshots"))
+    monkeypatch.setenv("SORA_GIT_SHA", "a" * 40)
 
     # History, written before this feature existed: no recorded_at column.
     pd.DataFrame({
