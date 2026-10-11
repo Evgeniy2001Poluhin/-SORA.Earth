@@ -44,6 +44,10 @@ STATIC_BASELINE = "static_baseline"
 
 STATUS_ACTIVE = "active"
 STATUS_DISABLED_NO_CURRENT_STATIONS = "disabled_no_current_stations"
+#: Run on demand rather than on a schedule. A backfill tool, an operator-triggered
+#: repair, or any other source whose trigger is a human decision rather than a cron
+#: expression. Not meant to be scheduled automatically.
+STATUS_ON_DEMAND = "on_demand"
 
 
 @dataclass(frozen=True)
@@ -120,6 +124,44 @@ SOURCE_REGISTER: Dict[str, SourceFacts] = {
         last_verified_data=None,
         requires_api_key=False,
         notes="Weather reanalysis via Open-Meteo. Ten variables.",
+    ),
+    "openmeteo_archive": SourceFacts(
+        name="openmeteo_archive",
+        measurement_kind=MODELLED,
+        model=None,
+        status=STATUS_ON_DEMAND,
+        coverage="21 declared regions, hourly historical",
+        last_verified_data=None,
+        requires_api_key=False,
+        notes=(
+            "Historical weather data from Open-Meteo Historical Forecast API "
+            "(https://historical-forecast-api.open-meteo.com/v1/forecast). "
+            "Used to backfill gaps from server losses. These values are "
+            "reconstructed from later-fetched archives, not live readings: "
+            "event_time carries the archive hour, and source_revision identifies "
+            "the fetch date so re-fetches are distinct vintages. Never replaces "
+            "openmeteo rows: different source names ensure archive-derived and "
+            "live rows are always distinguishable."
+        ),
+    ),
+    "openmeteo_air_quality_archive": SourceFacts(
+        name="openmeteo_air_quality_archive",
+        measurement_kind=MODELLED,
+        model="CAMS reanalysis via Open-Meteo",
+        status=STATUS_ON_DEMAND,
+        coverage="21 declared regions, hourly historical",
+        last_verified_data=None,
+        requires_api_key=False,
+        notes=(
+            "Historical air quality from Open-Meteo Air Quality API "
+            "(https://air-quality-api.open-meteo.com/v1/air-quality with "
+            "start_date/end_date and hourly parameters). Used to backfill gaps "
+            "from server losses. CAMS reanalysis, modelled not measured -- the "
+            "same as openmeteo_air_quality, but fetched later from an archive. "
+            "source_revision identifies the fetch date. Never replaces "
+            "openmeteo_air_quality rows: different source names ensure "
+            "archive-derived and live rows are always distinguishable."
+        ),
     ),
     "rosstat": SourceFacts(
         name="rosstat",
