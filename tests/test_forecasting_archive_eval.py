@@ -10,9 +10,12 @@ to confirm it catches the defect, then restored and run green.
 from __future__ import annotations
 
 import gzip
+import importlib.util
+import inspect
 import json
 import os
 import re
+import subprocess
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
@@ -21,14 +24,19 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from app.services.forecasting import archive_eval
 from app.services.forecasting.archive_eval import (
     ARCHIVE_PERIOD_END,
     ARCHIVE_PERIOD_START,
     DECLARATION,
+    EXPECTED_MANIFEST_DIGEST,
+    FROZEN_CANDIDATES,
     HORIZONS,
     RESULT_LABEL,
     TARGET_NAME,
+    ProvenanceError,
     candidate_verdict,
+    collect_provenance,
     evaluate_archive,
     load_archive_rows,
     manifest_digest,
@@ -439,17 +447,16 @@ def _point_level(index: int) -> float:
     return 10.0 + index
 
 
-def _write_complete_archive(archive_dir: Path) -> list[str]:
-    """Hourly temperature for every declared point, FIXTURE_START..FIXTURE_END.
+def _complete_payloads() -> dict:
+    """Hourly temperature for every declared point, FIXTURE_START..FIXTURE_END, keyed
+    by (point, year) and holding (times, temperatures).
 
     Each point is an annual sine around its own level plus seeded noise, with 24
-    hourly values per day and no gaps. Returns the declared point codes in the
-    order evaluate_archive iterates them.
+    hourly values per day and no gaps. Tests take this and remove or corrupt what
+    they need, then write it with _write_payloads.
     """
     from app.ingesters.openmeteo import REGION_CAPITALS
 
-    weather_dir = archive_dir / "weather"
-    weather_dir.mkdir(parents=True)
     points = sorted(code for code, _lat, _lon in REGION_CAPITALS)
 
     rng = np.random.default_rng(20181231)
@@ -459,6 +466,7 @@ def _write_complete_archive(archive_dir: Path) -> list[str]:
     hour_wave = 2.0 * np.sin(2 * np.pi * np.arange(24) / 24)  # sums to zero over a day
     hour_suffixes = [f"T{hour:02d}:00" for hour in range(24)]
 
+    payloads: dict = {}
     for index, point in enumerate(points):
         daily = _point_level(index) + 8.0 * annual + rng.normal(0.0, 0.05, size=n_days)
         by_year: dict[int, tuple[list[str], list[float]]] = {}
@@ -467,11 +475,103 @@ def _write_complete_archive(archive_dir: Path) -> list[str]:
             stamp = day.isoformat()
             times.extend(f"{stamp}{suffix}" for suffix in hour_suffixes)
             temps.extend((value + hour_wave).tolist())
-        for year, (times, temps) in by_year.items():
-            file_path = weather_dir / f"{point}_{year}.json.gz"
-            with gzip.open(file_path, "wt", encoding="utf-8", compresslevel=1) as f:
-                json.dump({"hourly": {"time": times, "temperature_2m": temps}}, f)
-    return points
+        for year, payload in by_year.items():
+            payloads[(point, year)] = payload
+    return payloads
+
+
+def _write_payloads(archive_dir: Path, payloads: dict) -> None:
+    """Write (times, temperatures) payloads as weather/<POINT>_<YEAR>.json.gz files."""
+    weather_dir = archive_dir / "weather"
+    weather_dir.mkdir(parents=True, exist_ok=True)
+    for (point, year), (times, temps) in payloads.items():
+        file_path = weather_dir / f"{point}_{year}.json.gz"
+        with gzip.open(file_path, "wt", encoding="utf-8", compresslevel=1) as f:
+            json.dump({"hourly": {"time": times, "temperature_2m": temps}}, f)
+
+
+def _write_complete_archive(archive_dir: Path) -> list[str]:
+    """Write the complete fixture archive. Returns the declared point codes, sorted."""
+    from app.ingesters.openmeteo import REGION_CAPITALS
+
+    _write_payloads(archive_dir, _complete_payloads())
+    return sorted(code for code, _lat, _lon in REGION_CAPITALS)
+
+
+def _without(payload, drop) -> tuple[list[str], list[float]]:
+    """The payload with every hour whose timestamp satisfies drop() removed."""
+    times, temps = payload
+    kept = [(t, v) for t, v in zip(times, temps) if not drop(t)]
+    return [t for t, _ in kept], [v for _, v in kept]
+
+
+def _evaluate_fixture(archive_dir: Path, *, n_windows: int = FIXTURE_WINDOWS, **overrides):
+    """evaluate_archive over a synthetic archive.
+
+    The digest is the archive's own, and the grid bounds are the fixture's, where a
+    real run uses the pinned digest and the declared period. The clean-tree check is
+    off because these tests run in a checkout that may be dirty; the provenance tests
+    cover that check. Keyword overrides replace any of these.
+    """
+    kwargs = {
+        "horizons": [FIXTURE_HORIZON],
+        "window_configs": _fixture_window_configs(n_windows),
+        "expected_manifest_digest": manifest_digest(archive_dir),
+        "period_start": FIXTURE_START,
+        "period_end": FIXTURE_END,
+        "require_clean_tree": False,
+    }
+    kwargs.update(overrides)
+    return evaluate_archive(archive_dir, **kwargs)
+
+
+def _fit_spy():
+    """Counts fits. evaluate_rolling_origin is the one place every model is fitted, so a
+    refusal that happens before any fit leaves its count at zero."""
+    return mock.patch(
+        "app.services.forecasting.archive_eval.evaluate_rolling_origin",
+        wraps=evaluate_rolling_origin,
+    )
+
+
+def _git_in(path: Path, *args: str) -> str:
+    """Run git in a throwaway repository, with an identity and no signing."""
+    return subprocess.run(
+        [
+            "git",
+            "-c", "user.name=test",
+            "-c", "user.email=test@example.invalid",
+            "-c", "commit.gpgsign=false",
+            *args,
+        ],
+        cwd=path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def _init_declared_repo(path: Path, *, dirty: bool) -> None:
+    """A throwaway repository with the declaration committed, and optionally a tracked
+    modification. The real working tree is never touched."""
+    path.mkdir(parents=True)
+    _git_in(path, "init", "-q")
+    declaration = path / "docs" / "M3A_ARCHIVE_DECLARATION.md"
+    declaration.parent.mkdir()
+    declaration.write_text("declaration\n", encoding="utf-8")
+    _git_in(path, "add", "docs")
+    _git_in(path, "commit", "-q", "-m", "declaration")
+    if dirty:
+        declaration.write_text("declaration, edited\n", encoding="utf-8")
+
+
+def _load_cli():
+    """The CLI script, loaded as a module, without running it."""
+    script = REPO_ROOT / "scripts" / "evaluate_forecast_archive.py"
+    spec = importlib.util.spec_from_file_location("evaluate_forecast_archive", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _fixture_window_configs(n_windows: int = FIXTURE_WINDOWS) -> dict:
@@ -505,9 +605,7 @@ def test_no_silent_subset_one_baseline_fails_one_point(tmp_path):
         return original_fit(self, df, target_col, **kwargs)
 
     with mock.patch.object(ClimatologyForecast, "fit", fit_failing_for_ita_only):
-        report = evaluate_archive(
-            archive_dir, horizons=[FIXTURE_HORIZON], window_configs=_fixture_window_configs()
-        )
+        report = _evaluate_fixture(archive_dir)
 
     assert not report.get("refused"), f"Evaluation refused: {report.get('refusal_reasons')}"
     horizon_result = report["results_by_horizon"][FIXTURE_HORIZON]
@@ -517,9 +615,7 @@ def test_no_silent_subset_one_baseline_fails_one_point(tmp_path):
     assert failures["Climatology(±3d)"]["count"] == 1
     assert failures["Climatology(±3d)"]["first_few"][0].startswith("ITA:")
 
-    from app.services.forecasting.challengers import CANDIDATES
-
-    expected_candidates = {spec.name for spec in CANDIDATES if spec.role != "shadow"}
+    expected_candidates = set(FROZEN_CANDIDATES)
     verdicts = horizon_result["candidate_verdicts"]
     assert set(verdicts) == expected_candidates, f"Verdicts: {verdicts}"
 
@@ -550,9 +646,7 @@ def test_baseline_failing_everywhere_is_not_comparable(tmp_path):
         raise ValueError("simulated Climatology failure")
 
     with mock.patch.object(ClimatologyForecast, "fit", fit_always_fails):
-        report = evaluate_archive(
-            archive_dir, horizons=[FIXTURE_HORIZON], window_configs=_fixture_window_configs()
-        )
+        report = _evaluate_fixture(archive_dir)
 
     assert not report.get("refused"), f"Evaluation refused: {report.get('refusal_reasons')}"
     horizon_result = report["results_by_horizon"][FIXTURE_HORIZON]
@@ -561,9 +655,7 @@ def test_baseline_failing_everywhere_is_not_comparable(tmp_path):
     assert set(failures) == {"Climatology(±3d)"}, f"Only Climatology should fail: {failures}"
     assert failures["Climatology(±3d)"]["count"] == 21
 
-    from app.services.forecasting.challengers import CANDIDATES
-
-    expected_candidates = {spec.name for spec in CANDIDATES if spec.role != "shadow"}
+    expected_candidates = set(FROZEN_CANDIDATES)
     verdicts = horizon_result["candidate_verdicts"]
     assert set(verdicts) == expected_candidates, f"Verdicts: {verdicts}"
 
@@ -703,18 +795,12 @@ def test_end_to_end_report_on_complete_archive(tmp_path):
     a second run reproduces the first apart from generated_at.
 
     Two windows, so the bootstrap has something to resample."""
-    from app.services.forecasting.challengers import CANDIDATES
-
     archive_dir = tmp_path / "archive"
     points = _write_complete_archive(archive_dir)
     assert len(points) == 21
 
     def run_evaluation():
-        return evaluate_archive(
-            archive_dir,
-            horizons=[FIXTURE_HORIZON],
-            window_configs=_fixture_window_configs(n_windows=2),
-        )
+        return _evaluate_fixture(archive_dir, n_windows=2)
 
     report = run_evaluation()
 
@@ -724,7 +810,7 @@ def test_end_to_end_report_on_complete_archive(tmp_path):
     assert report["declaration"] == DECLARATION
 
     verdicts = report["results_by_horizon"][FIXTURE_HORIZON]["candidate_verdicts"]
-    expected_candidates = {spec.name for spec in CANDIDATES if spec.role != "shadow"}
+    expected_candidates = set(FROZEN_CANDIDATES)
     assert set(verdicts) == expected_candidates, f"Verdicts: {verdicts}"
 
     for name, verdict in verdicts.items():
@@ -751,7 +837,12 @@ def test_end_to_end_refuses_an_incomplete_point_set(tmp_path):
     archive_dir = tmp_path / "archive"
     _write_two_point_archive(archive_dir)
 
-    report = evaluate_archive(archive_dir, horizons=[7])
+    report = evaluate_archive(
+        archive_dir,
+        horizons=[7],
+        expected_manifest_digest=manifest_digest(archive_dir),
+        require_clean_tree=False,
+    )
 
     declared = sorted(code for code, _lat, _lon in REGION_CAPITALS)
     expected_missing = sorted(set(declared) - {"DEU", "FRA"})
@@ -796,6 +887,18 @@ def test_constants_match_declaration_document():
     target_match = re.search(r"openmeteo-historical-forecast:temperature_2m", text)
     assert target_match, "Target name not found"
     assert TARGET_NAME == "openmeteo-historical-forecast:temperature_2m"
+
+    # The declaration this code claims to implement, and the vintage it pins.
+    assert DECLARATION == "docs/M3A_ARCHIVE_DECLARATION.md v1.1"
+    latest_version = re.findall(r"^\| (\d+\.\d+) \|", text, re.MULTILINE)[-1]
+    assert DECLARATION.endswith(f"v{latest_version}"), (
+        f"DECLARATION {DECLARATION!r} is not the latest amendment {latest_version}"
+    )
+    assert EXPECTED_MANIFEST_DIGEST in text, "pinned manifest digest is not in the declaration"
+
+    section_8 = text.split("## 8. Candidates")[1].split("## 9.")[0]
+    for name in FROZEN_CANDIDATES:
+        assert f"`{name}`" in section_8, f"frozen candidate {name} is not listed in section 8"
 
 
 # Verdict tests. candidate_verdict reads nothing but the per-window MAE of each
@@ -901,31 +1004,469 @@ def test_bootstrap_reuses_first_pass_reports_and_never_refits(tmp_path):
     Mutation g: a second evaluate_rolling_origin call per candidate point, whose
     windows then feed the verdict.
     """
-    from app.services.forecasting.challengers import CANDIDATES
-
     archive_dir = tmp_path / "archive"
     points = _write_complete_archive(archive_dir)
     assert len(points) == 21
 
     baselines = default_baselines(season_length=7, window=7) + [ClimatologyForecast()]
-    candidates = [spec for spec in CANDIDATES if spec.role != "shadow"]
     horizons = [FIXTURE_HORIZON]
 
-    with mock.patch(
-        "app.services.forecasting.archive_eval.evaluate_rolling_origin",
-        wraps=evaluate_rolling_origin,
-    ) as spy:
-        report = evaluate_archive(
-            archive_dir, horizons=horizons, window_configs=_fixture_window_configs(n_windows=2)
-        )
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir, n_windows=2)
 
     assert not report.get("refused"), f"Evaluation refused: {report.get('refusal_reasons')}"
     verdicts = report["results_by_horizon"][FIXTURE_HORIZON]["candidate_verdicts"]
-    assert set(verdicts) == {spec.name for spec in candidates}
+    assert set(verdicts) == set(FROZEN_CANDIDATES)
     for name, verdict in verdicts.items():
         assert "bootstrap_ci_95" in verdict, f"{name} did not reach the bootstrap: {verdict}"
 
-    expected_calls = (len(baselines) + len(candidates)) * len(points) * len(horizons)
+    expected_calls = (len(baselines) + len(FROZEN_CANDIDATES)) * len(points) * len(horizons)
     assert spy.call_count == expected_calls, (
         f"evaluate_rolling_origin called {spy.call_count} times, expected {expected_calls}"
     )
+
+
+# --- Input integrity (M3-A §3) ----------------------------------------------
+#
+# Each refusal below must happen before any model is fitted. The tests that expect
+# one assert that the fit spy was called zero times.
+
+
+def test_missing_first_year_is_refused_before_any_fit(tmp_path):
+    """The case the old check passed. The days that are present are contiguous, so a
+    series with all of 2018 absent looked complete. Against the grid, 2018 is zero
+    hours at every point, and the first observed day is 2019-01-01.
+
+    Mutation: check only the observed days, as the old code did, and drop the first
+    and last day comparisons. The run is then not refused.
+    """
+    archive_dir = tmp_path / "archive"
+    _write_complete_archive(archive_dir)
+    for file_path in list((archive_dir / "weather").glob("*_2018.json.gz")):
+        file_path.unlink()
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    reasons = report["refusal_reasons"]
+    assert reasons["first_day"] == {"expected": "2018-01-01", "observed": "2019-01-01"}
+    assert reasons["point_days_below_floor"] == 21 * 365
+    assert "results_by_horizon" not in report
+    assert spy.call_count == 0, f"{spy.call_count} fits ran on a refused archive"
+
+
+def test_one_point_missing_one_day_is_refused(tmp_path):
+    """DEU has no hours on 2019-03-05. The other twenty points do. The grid names
+    exactly that point-day, at zero hours.
+
+    Mutation: remove the per-point-day floor check from _integrity_refusals.
+    """
+    payloads = _complete_payloads()
+    payloads[("DEU", 2019)] = _without(
+        payloads[("DEU", 2019)], lambda t: t.startswith("2019-03-05T")
+    )
+    archive_dir = tmp_path / "archive"
+    _write_payloads(archive_dir, payloads)
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    reasons = report["refusal_reasons"]
+    assert reasons["point_days_below_floor"] == 1
+    assert reasons["first_few_below_floor"] == ["DEU 2019-03-05: 0 h"]
+    assert spy.call_count == 0
+
+
+def test_one_day_missing_at_every_point_is_refused(tmp_path):
+    """2019-03-05 is absent everywhere: twenty-one point-days at zero hours. The first
+    and last days are present, so only the grid count can see it.
+
+    Mutation: remove the per-point-day floor check from _integrity_refusals.
+    """
+    payloads = {
+        key: _without(payload, lambda t: t.startswith("2019-03-05T"))
+        for key, payload in _complete_payloads().items()
+    }
+    archive_dir = tmp_path / "archive"
+    _write_payloads(archive_dir, payloads)
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    reasons = report["refusal_reasons"]
+    assert reasons["point_days_below_floor"] == 21
+    assert "first_day" not in reasons and "last_day" not in reasons
+    assert spy.call_count == 0
+
+
+def test_last_day_missing_is_refused(tmp_path):
+    """2020-12-31 is absent at every point. The last observed day is 2020-12-30, and
+    the grid's last day is the declared end.
+
+    Mutation: remove the last-day comparison from _integrity_refusals.
+    """
+    payloads = {
+        key: _without(payload, lambda t: t.startswith("2020-12-31T"))
+        for key, payload in _complete_payloads().items()
+    }
+    archive_dir = tmp_path / "archive"
+    _write_payloads(archive_dir, payloads)
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    reasons = report["refusal_reasons"]
+    assert "last_day" in reasons, f"no last-day reason: {sorted(reasons)}"
+    assert reasons["last_day"] == {"expected": "2020-12-31", "observed": "2020-12-30"}
+    assert reasons["point_days_below_floor"] == 21
+    assert spy.call_count == 0
+
+
+def test_point_day_with_18_hours_is_refused_and_19_accepted(tmp_path):
+    """A point-day with 18 distinct hours is below the 19-hour floor and is refused.
+    The same day with 19 hours is accepted, and the run then fits.
+
+    Mutation: lower the floor by one (`< floor` to `< floor - 1`). The 18-hour day
+    then passes, and the first assertion fails.
+    """
+    short = _complete_payloads()
+    short[("DEU", 2019)] = _without(
+        short[("DEU", 2019)],
+        lambda t: t.startswith("2019-03-05T") and int(t[11:13]) >= 18,
+    )
+    short_dir = tmp_path / "short"
+    _write_payloads(short_dir, short)
+
+    with _fit_spy() as spy:
+        refused = _evaluate_fixture(short_dir)
+
+    assert refused["refused"] is True
+    assert refused["refusal_reasons"]["point_days_below_floor"] == 1
+    assert refused["refusal_reasons"]["first_few_below_floor"] == ["DEU 2019-03-05: 18 h"]
+    assert spy.call_count == 0
+
+    enough = _complete_payloads()
+    enough[("DEU", 2019)] = _without(
+        enough[("DEU", 2019)],
+        lambda t: t.startswith("2019-03-05T") and int(t[11:13]) >= 19,
+    )
+    enough_dir = tmp_path / "enough"
+    _write_payloads(enough_dir, enough)
+
+    with _fit_spy() as spy_ok:
+        accepted = _evaluate_fixture(enough_dir)
+
+    assert accepted["refused"] is False, accepted.get("refusal_reasons")
+    assert spy_ok.call_count > 0
+
+
+def test_undeclared_point_is_refused(tmp_path):
+    """A file for a point that is not in REGION_CAPITALS. The refusal names it.
+
+    Mutation: report no undeclared points.
+    """
+    payloads = _complete_payloads()
+    payloads[("XXX", 2019)] = payloads[("DEU", 2019)]
+    archive_dir = tmp_path / "archive"
+    _write_payloads(archive_dir, payloads)
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    assert report["refusal_reasons"]["undeclared_points"] == ["XXX"]
+    assert spy.call_count == 0
+
+
+def test_duplicated_point_hour_is_refused(tmp_path):
+    """DEU's first hour appears twice. A duplicated (point, hour) is a corrupt input,
+    not something to average away, so the run is refused.
+
+    Mutation: report no duplicated (point, hour).
+    """
+    payloads = _complete_payloads()
+    times, temps = payloads[("DEU", 2019)]
+    payloads[("DEU", 2019)] = (times + [times[0]], temps + [temps[0]])
+    archive_dir = tmp_path / "archive"
+    _write_payloads(archive_dir, payloads)
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    reasons = report["refusal_reasons"]
+    assert set(reasons) == {"duplicate_point_hours"}, sorted(reasons)
+    assert reasons["duplicate_point_hours"]["count"] == 1
+    assert reasons["duplicate_point_hours"]["first_few"][0].startswith(
+        "DEU 2019-01-01T00:00:00"
+    )
+    assert spy.call_count == 0
+
+
+def test_non_finite_value_is_refused(tmp_path):
+    """One temperature is NaN. JSON carries it, and it is refused rather than dropped
+    or filled. The day still has 23 hours, so the NaN is the only reason.
+
+    Mutation: accept non-finite values as ordinary readings.
+    """
+    payloads = _complete_payloads()
+    times, temps = payloads[("DEU", 2019)]
+    temps[times.index("2019-03-05T12:00")] = float("nan")
+    archive_dir = tmp_path / "archive"
+    _write_payloads(archive_dir, payloads)
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    assert set(report["refusal_reasons"]) == {"non_finite_values"}, sorted(report["refusal_reasons"])
+    assert report["refusal_reasons"]["non_finite_values"]["count"] == 1
+    assert spy.call_count == 0
+
+
+def test_half_past_timestamp_is_refused(tmp_path):
+    """One timestamp reads 07:30 where the hourly grid has 07:00. The hour is still
+    present, so the off-the-hour timestamp is the only reason.
+
+    Mutation: accept timestamps that are not on the hour.
+    """
+    payloads = _complete_payloads()
+    times, temps = payloads[("DEU", 2019)]
+    times[times.index("2019-03-05T07:00")] = "2019-03-05T07:30"
+    archive_dir = tmp_path / "archive"
+    _write_payloads(archive_dir, payloads)
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    assert set(report["refusal_reasons"]) == {"off_hour_timestamps"}, sorted(report["refusal_reasons"])
+    assert report["refusal_reasons"]["off_hour_timestamps"] == {
+        "count": 1,
+        "first_few": ["DEU 2019-03-05T07:30"],
+    }
+    assert spy.call_count == 0
+
+
+def test_digest_mismatch_is_refused_before_any_fit(tmp_path):
+    """One byte of one file is altered, and the run is refused on the digest before any
+    fit. The byte is the gzip header's modification time, which decompression ignores,
+    so the file still parses and the grid still passes. The digest is the only reason.
+
+    Mutation: drop the manifest digest comparison.
+    """
+    archive_dir = tmp_path / "archive"
+    _write_complete_archive(archive_dir)
+    pinned = manifest_digest(archive_dir)
+
+    target = archive_dir / "weather" / "DEU_2019.json.gz"
+    raw = bytearray(target.read_bytes())
+    raw[4] ^= 0x01  # MTIME, the first byte after the two magic bytes, method and flags
+    target.write_bytes(bytes(raw))
+    altered = manifest_digest(archive_dir)
+    assert altered != pinned
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir, expected_manifest_digest=pinned)
+
+    assert report["refused"] is True
+    assert set(report["refusal_reasons"]) == {"manifest_digest"}, sorted(report["refusal_reasons"])
+    assert report["refusal_reasons"]["manifest_digest"] == {"expected": pinned, "actual": altered}
+    assert spy.call_count == 0
+
+
+def test_synthetic_archive_is_refused_under_the_pinned_digest(tmp_path):
+    """Without an override, the run checks the pinned vintage. A synthetic archive is
+    refused on the digest and the expected value is EXPECTED_MANIFEST_DIGEST. The
+    defaults are part of the contract: the CLI relies on them.
+
+    Mutation: give expected_manifest_digest an empty default.
+    """
+    archive_dir = tmp_path / "archive"
+    _write_complete_archive(archive_dir)
+
+    with _fit_spy() as spy:
+        report = evaluate_archive(
+            archive_dir,
+            horizons=[FIXTURE_HORIZON],
+            window_configs=_fixture_window_configs(),
+            period_start=FIXTURE_START,
+            period_end=FIXTURE_END,
+            require_clean_tree=False,
+        )
+
+    assert report["refused"] is True
+    assert report["refusal_reasons"]["manifest_digest"]["expected"] == EXPECTED_MANIFEST_DIGEST
+    assert spy.call_count == 0
+
+    parameters = inspect.signature(evaluate_archive).parameters
+    assert parameters["expected_manifest_digest"].default == EXPECTED_MANIFEST_DIGEST
+    assert parameters["require_clean_tree"].default is True
+
+
+def test_missing_frozen_candidate_is_refused_before_any_fit(tmp_path, monkeypatch):
+    """If a frozen name is absent from challengers.CANDIDATES, the run refuses and names
+    it. The frozen list is never shortened to whatever happens to exist.
+
+    Mutation: drop the missing-candidate refusal.
+    """
+    from app.services.forecasting import challengers
+
+    monkeypatch.setattr(
+        challengers,
+        "CANDIDATES",
+        [spec for spec in challengers.CANDIDATES if spec.name != "xgboost_lag"],
+    )
+    archive_dir = tmp_path / "archive"
+    _write_complete_archive(archive_dir)
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    assert report["refusal_reasons"]["missing_frozen_candidates"] == ["xgboost_lag"]
+    assert spy.call_count == 0
+
+
+def test_frozen_candidates_are_what_gets_evaluated(tmp_path, monkeypatch):
+    """An entry added to challengers.CANDIDATES is not evaluated. The frozen list names
+    the candidates, and they are resolved by name.
+
+    Mutation: evaluate every non-shadow entry of challengers.CANDIDATES, as the old code did.
+    """
+    from app.services.forecasting import challengers
+
+    sentinel_calls: list[int] = []
+
+    def sentinel_factory():
+        sentinel_calls.append(1)
+        return challengers.CANDIDATES[0].factory()
+
+    extra = challengers.CandidateSpec(
+        name="sentinel_extra", factory=sentinel_factory, role="candidate"
+    )
+    monkeypatch.setattr(challengers, "CANDIDATES", [*challengers.CANDIDATES, extra])
+
+    archive_dir = tmp_path / "archive"
+    _write_complete_archive(archive_dir)
+    report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is False, report.get("refusal_reasons")
+    verdicts = report["results_by_horizon"][FIXTURE_HORIZON]["candidate_verdicts"]
+    assert set(verdicts) == set(FROZEN_CANDIDATES)
+    assert sentinel_calls == [], "the monkeypatched candidate was fitted"
+
+
+# --- Provenance (M3-A §3) ---------------------------------------------------
+
+
+def test_successful_report_carries_provenance(tmp_path):
+    """A run that goes ahead names the declaration commit, the code commit, the library
+    versions, and the digests it was computed from. The commits are full SHA-1 hashes.
+
+    Mutation: write an empty code commit into the report.
+    """
+    archive_dir = tmp_path / "archive"
+    _write_complete_archive(archive_dir)
+
+    report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is False, report.get("refusal_reasons")
+    assert report["declaration"] == DECLARATION
+    for key in ("declaration_sha", "code_sha"):
+        assert re.fullmatch(r"[0-9a-f]{40}", report[key]), f"{key} is {report[key]!r}"
+    assert set(report["versions"]) == {"python", "numpy", "pandas", "scikit-learn", "xgboost"}
+    for name, version in report["versions"].items():
+        assert version, f"{name} version is {version!r}"
+    assert report["manifest_digest"] == report["expected_manifest_digest"] == manifest_digest(archive_dir)
+    assert report["snapshot_digest"].startswith("sha256:")
+    assert report["candidates"] == list(FROZEN_CANDIDATES)
+
+
+def test_official_provenance_refuses_a_dirty_or_shallow_checkout(tmp_path, monkeypatch):
+    """collect_provenance names the declaration commit and HEAD for a clean, full
+    repository. A tracked modification refuses it. So does a shallow clone of the same
+    history, where the declaration commit cannot be determined. Tests that pass
+    require_clean_tree=False are exempt from both.
+
+    Mutation: remove the shallow-clone refusal. The shallow case then returns provenance.
+    """
+    full = tmp_path / "full"
+    _init_declared_repo(full, dirty=False)
+    monkeypatch.setattr(archive_eval, "REPO_ROOT", full)
+    provenance = collect_provenance(require_clean_tree=True)
+    assert re.fullmatch(r"[0-9a-f]{40}", provenance["declaration_sha"])
+    assert provenance["declaration_sha"] == provenance["code_sha"]
+
+    dirty = tmp_path / "dirty"
+    _init_declared_repo(dirty, dirty=True)
+    monkeypatch.setattr(archive_eval, "REPO_ROOT", dirty)
+    with pytest.raises(ProvenanceError, match="tracked modifications"):
+        collect_provenance(require_clean_tree=True)
+    assert collect_provenance(require_clean_tree=False)["code_sha"]
+
+    history = tmp_path / "history"
+    _init_declared_repo(history, dirty=False)
+    (history / "README.md").write_text("second commit\n", encoding="utf-8")
+    _git_in(history, "add", "README.md")
+    _git_in(history, "commit", "-q", "-m", "second")
+    shallow = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", f"file://{history}", str(shallow)],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.setattr(archive_eval, "REPO_ROOT", shallow)
+    with pytest.raises(ProvenanceError, match="shallow clone"):
+        collect_provenance(require_clean_tree=True)
+    assert collect_provenance(require_clean_tree=False)["code_sha"]
+
+
+def test_cli_refuses_a_dirty_tree_with_exit_1_and_reads_nothing(tmp_path, monkeypatch, capsys):
+    """A dirty tree is refused with exit 1 and a message, before the archive is read.
+    The archive directory given here does not exist; reading it would fail differently.
+
+    Mutation: disable the tracked-modification check.
+    """
+    repo = tmp_path / "repo"
+    _init_declared_repo(repo, dirty=True)
+    monkeypatch.setattr(archive_eval, "REPO_ROOT", repo)
+
+    code = _load_cli().main(["--archive-dir", str(tmp_path / "no-such-archive")])
+
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "refused" in err
+    assert "tracked modifications" in err
+
+
+def test_cli_refuses_when_git_is_unavailable(tmp_path, monkeypatch, capsys):
+    """With no git on PATH, the CLI exits 1 with a message. The run cannot name its
+    commits, so it does not run.
+
+    Mutation: make _git return an empty string when git cannot be run.
+    """
+    no_git = tmp_path / "no-git-here"
+    no_git.mkdir()
+    monkeypatch.setenv("PATH", str(no_git))
+
+    code = _load_cli().main(["--archive-dir", str(tmp_path / "no-such-archive")])
+
+    assert code == 1
+    assert "git is unavailable" in capsys.readouterr().err
+
+
+def test_cli_exposes_no_manifest_digest_override():
+    """The pinned vintage is not a command-line option. The CLI rejects the flag.
+
+    Mutation: add an --expected-manifest-digest option to the CLI.
+    """
+    with pytest.raises(SystemExit) as exit_info:
+        _load_cli().main(
+            ["--archive-dir", "unused", "--expected-manifest-digest", EXPECTED_MANIFEST_DIGEST]
+        )
+    assert exit_info.value.code == 2

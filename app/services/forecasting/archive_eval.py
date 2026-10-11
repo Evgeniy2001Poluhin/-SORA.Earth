@@ -9,14 +9,25 @@ It is close to what was recorded (median |difference| 0.09°C over 23 days of
 comparison), but it is a reconstruction from a fixed vintage, not the recording
 itself.
 
-**What this evaluation does:**
+**What this evaluation does, in the order it does it:**
 
-- Loads gzipped JSON files from the archive directory (weather/<POINT>_<YEAR>.json.gz)
+- Records provenance (M3-A §3): the commit of the declaration, the commit of the
+  code, and the versions of Python, numpy, pandas, scikit-learn and xgboost. A
+  tracked modification to the working tree, a shallow clone, or a commit that
+  cannot be determined refuses the run before any file is read.
+- Reads every weather file once (`weather/<POINT>_<YEAR>.json.gz`): the bytes
+  that are hashed are the bytes that are parsed.
+- Pins the vintage: the manifest digest must equal EXPECTED_MANIFEST_DIGEST.
+- Checks the whole grid before any fit: the 21 declared points times every UTC
+  day of the period, each point-day with at least 19 distinct UTC hours (an
+  absent day counts as zero), no undeclared or missing point, no duplicated
+  (point, hour), no non-finite value, no timestamp off the hour. Anything short
+  of that is refused, not filled, and no model is fitted.
 - Builds the daily target per M3 §3 / Amendment 1.3 (reusing daily_target.daily_observations)
-- Refuses if any point-day falls below the coverage floor or any declared point is missing
-- Evaluates baselines (Naive, SeasonalNaive, MovingAverage, Climatology) and candidates
-  (linear_trend, xgboost_lag) over rolling-origin windows placed at the END of the series
-- Each window trains on ALL days from 2018-01-01 to its origin (expanding)
+- Evaluates baselines (Naive, SeasonalNaive, MovingAverage, Climatology) and the
+  frozen candidates (FROZEN_CANDIDATES, M3-A §8) over rolling-origin windows
+  placed at the END of the series. Each window trains on ALL days from the period
+  start to its origin (expanding)
 - Reports per-point and macro (equal-weight mean across points) MAE, RMSE, MASE, bias
 - Success per M3-A §9: beats_all (macro MAE < every baseline) AND paired bootstrap
   95% CI of (candidate - strongest baseline) entirely below zero
@@ -31,10 +42,15 @@ import gzip
 import hashlib
 import json
 import math
+import platform
 import subprocess
-from datetime import date, datetime, timezone
+import zlib
+from collections import Counter
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta, timezone
+from importlib import metadata
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -48,8 +64,22 @@ from .daily_target import (
 )
 from .evaluation import EvaluationReport, evaluate_rolling_origin
 
+if TYPE_CHECKING:
+    from .challengers import CandidateSpec
+
 ARCHIVE_PERIOD_START = date(2018, 1, 1)
 ARCHIVE_PERIOD_END = date(2026, 10, 10)
+
+#: The pinned vintage (M3-A §3): SHA-256 over the sorted lines
+#: "<relative path>\t<sha256 of the file>" of the 189 weather files. Any other
+#: value is a refusal before any model is fitted. The CLI does not override it.
+EXPECTED_MANIFEST_DIGEST = (
+    "sha256:2d2ad4c1781102c810b8330adae0e6ad08dc99abed4ece91b21010b08a6b9f49"
+)
+
+#: The candidates M3-A §8 freezes, by name, in report order. They are resolved
+#: from challengers.CANDIDATES by name; the list is never "every non-shadow entry".
+FROZEN_CANDIDATES = ("linear_trend", "xgboost_lag")
 
 HORIZONS = {
     7: {"n_windows": 104, "evaluation_period_start": date(2024, 10, 13)},
@@ -58,71 +88,311 @@ HORIZONS = {
 
 RESULT_LABEL = "pseudo-real-time · archive vintage 2026-10-11 · not a real-time claim"
 TARGET_NAME = "openmeteo-historical-forecast:temperature_2m"
-DECLARATION = "docs/M3A_ARCHIVE_DECLARATION.md v1.0"
+DECLARATION = "docs/M3A_ARCHIVE_DECLARATION.md v1.1"
+DECLARATION_PATH = "docs/M3A_ARCHIVE_DECLARATION.md"
+
+#: The repository root, computed from this file's location
+#: (app/services/forecasting/archive_eval.py), never from the process's cwd.
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def load_archive_rows(
+class ProvenanceError(RuntimeError):
+    """The run cannot name exactly what produced it, so it does not run."""
+
+
+def _git(args: Sequence[str], cwd: Optional[Path] = None) -> str:
+    """Run git and return its stdout, or raise ProvenanceError."""
+    where = REPO_ROOT if cwd is None else cwd
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=str(where),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ProvenanceError(f"git is unavailable: {exc}") from exc
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"exit {result.returncode}"
+        raise ProvenanceError(f"git {' '.join(args)} failed in {where}: {detail}")
+    return result.stdout
+
+
+def _library_versions() -> Dict[str, Optional[str]]:
+    """Versions of the libraries the figures depend on. None if not installed."""
+
+    def installed(distribution: str) -> Optional[str]:
+        try:
+            return metadata.version(distribution)
+        except metadata.PackageNotFoundError:
+            return None
+
+    return {
+        "python": platform.python_version(),
+        "numpy": installed("numpy"),
+        "pandas": installed("pandas"),
+        "scikit-learn": installed("scikit-learn"),
+        "xgboost": installed("xgboost"),
+    }
+
+
+def collect_provenance(require_clean_tree: bool = True) -> Dict[str, object]:
+    """The commit SHAs and library versions a report must carry (M3-A §3).
+
+    `declaration_sha` is the last commit that changed the declaration; `code_sha`
+    is HEAD. Raises ProvenanceError if either cannot be determined.
+
+    `require_clean_tree=True` is the official-run mode, and it also refuses a
+    shallow clone: there `git log -- <declaration>` returns HEAD, which is the
+    last commit that changed the declaration only by coincidence. Tests that run
+    in a dirty or shallow checkout pass False and say so.
+    """
+    declaration_sha = _git(["log", "-1", "--format=%H", "--", DECLARATION_PATH]).strip()
+    code_sha = _git(["rev-parse", "HEAD"]).strip()
+    if not declaration_sha:
+        raise ProvenanceError(f"no commit in this checkout changed {DECLARATION_PATH}")
+    if not code_sha:
+        raise ProvenanceError("the code commit (HEAD) could not be read")
+
+    if require_clean_tree:
+        if _git(["rev-parse", "--is-shallow-repository"]).strip() == "true":
+            raise ProvenanceError(
+                "shallow clone: the declaration commit cannot be determined here; "
+                "run from a full clone"
+            )
+        dirty = _git(["status", "--porcelain", "--untracked-files=no"]).strip()
+        if dirty:
+            raise ProvenanceError(
+                "working tree has tracked modifications; commit or discard them "
+                "before an official run:\n" + dirty
+            )
+
+    return {
+        "declaration_sha": declaration_sha,
+        "code_sha": code_sha,
+        "versions": _library_versions(),
+    }
+
+
+def _digest_from_hashes(file_hashes: Sequence[Tuple[str, str]]) -> str:
+    """SHA-256 over sorted lines "<relative path>\\t<sha256 of the file>"."""
+    canonical = "\n".join(f"{path}\t{fhash}" for path, fhash in sorted(file_hashes))
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _point_of(file_path: Path) -> Optional[str]:
+    """The point code in `<POINT>_<YEAR>.json.gz`, or None if the name has no year."""
+    point, sep, year = file_path.name.removesuffix(".json.gz").rpartition("_")
+    if not sep or not point or not year.isdigit():
+        return None
+    return point
+
+
+@dataclass
+class _WeatherRead:
+    """What one pass over the weather files establishes.
+
+    Problems are collected rather than raised, so a refusal can name every one of
+    them at once instead of stopping at the first.
+    """
+
+    digest: str = ""
+    points_in_files: Set[str] = field(default_factory=set)
+    rows: List[Tuple[str, datetime, float]] = field(default_factory=list)
+    unreadable: List[str] = field(default_factory=list)
+    unrecognised: List[str] = field(default_factory=list)
+    unparseable: List[str] = field(default_factory=list)
+    off_hour: List[str] = field(default_factory=list)
+    non_finite: List[str] = field(default_factory=list)
+    duplicates: List[str] = field(default_factory=list)
+
+
+def _read_weather(
     archive_dir: str | Path,
-) -> List[Tuple[str, datetime, float]]:
-    """Load hourly temperature_2m from the weather archive.
+    period_start: date,
+    period_end: date,
+) -> _WeatherRead:
+    """Read every weather file once: hash the bytes, then parse those same bytes.
 
-    Archive layout: `weather/<POINT>_<YEAR>.json.gz`, each a gzipped Open-Meteo
-    JSON response with `hourly.time` (ISO "YYYY-MM-DDTHH:MM", UTC) and
-    `hourly.temperature_2m`.
-
-    POINT codes include hyphens (RU-MOW, RU-SPE). None values are skipped.
-    Rows are restricted to the declared period (2018-01-01..2026-10-10 inclusive).
-
-    Returns:
-        List of (point, event_time as tz-aware UTC datetime, value)
+    `rows` holds the non-null, finite values inside the period. Integrity problems
+    are checked on every timestamp in the files, including those outside the
+    period, because a corrupt file is corrupt wherever its bad line falls.
     """
     archive_path = Path(archive_dir)
     weather_dir = archive_path / "weather"
     if not weather_dir.exists():
         raise ValueError(f"archive weather directory not found: {weather_dir}")
 
-    rows: List[Tuple[str, datetime, float]] = []
+    read = _WeatherRead()
+    file_hashes: List[Tuple[str, str]] = []
+    stamp_counts: Counter = Counter()
 
     for file_path in sorted(weather_dir.glob("*.json.gz")):
-        stem = file_path.stem
-        stem = stem.removesuffix(".json")
-        parts = stem.rsplit("_", 1)
-        if len(parts) != 2:
+        raw = file_path.read_bytes()
+        rel_path = file_path.relative_to(archive_path).as_posix()
+        file_hashes.append((rel_path, hashlib.sha256(raw).hexdigest()))
+
+        point = _point_of(file_path)
+        if point is None:
+            read.unrecognised.append(file_path.name)
             continue
-        point, year_str = parts
+        read.points_in_files.add(point)
 
         try:
-            with gzip.open(file_path, "rt", encoding="utf-8") as f:
-                data = json.load(f)
-        except (gzip.BadGzipFile, json.JSONDecodeError) as exc:
-            raise ValueError(f"failed to read {file_path}: {exc}") from exc
-
-        hourly = data.get("hourly", {})
-        times = hourly.get("time", [])
-        temps = hourly.get("temperature_2m", [])
-
-        if len(times) != len(temps):
-            raise ValueError(
-                f"{file_path}: time and temperature_2m lengths differ "
-                f"({len(times)} vs {len(temps)})"
-            )
+            payload = json.loads(gzip.decompress(raw).decode("utf-8"))
+            times = payload["hourly"]["time"]
+            temps = payload["hourly"]["temperature_2m"]
+            if len(times) != len(temps):
+                raise ValueError(
+                    f"time and temperature_2m lengths differ ({len(times)} vs {len(temps)})"
+                )
+        except (
+            OSError, EOFError, zlib.error, ValueError,
+            TypeError, KeyError, AttributeError,
+        ) as exc:
+            read.unreadable.append(f"{file_path.name}: {exc}")
+            continue
 
         for time_str, temp in zip(times, temps):
-            if temp is None:
-                continue
-
             try:
-                event_time = datetime.fromisoformat(time_str).replace(tzinfo=timezone.utc)
-            except ValueError as exc:
-                raise ValueError(f"{file_path}: invalid timestamp {time_str!r}") from exc
-
-            event_date = event_time.date()
-            if not (ARCHIVE_PERIOD_START <= event_date <= ARCHIVE_PERIOD_END):
+                moment = datetime.fromisoformat(time_str).replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                read.unparseable.append(f"{file_path.name}: {time_str!r}")
                 continue
 
-            rows.append((point, event_time, float(temp)))
+            stamp_counts[(point, int(moment.timestamp()))] += 1
+            if moment.minute or moment.second or moment.microsecond:
+                read.off_hour.append(f"{point} {time_str}")
 
-    return rows
+            if temp is None:
+                continue  # an absent hour, not a value
+            try:
+                value = float(temp)
+            except (TypeError, ValueError):
+                read.non_finite.append(f"{point} {time_str}: {temp!r}")
+                continue
+            if not math.isfinite(value):
+                read.non_finite.append(f"{point} {time_str}: {value}")
+                continue
+
+            if period_start <= moment.date() <= period_end:
+                read.rows.append((point, moment, value))
+
+    duplicated = sorted(
+        (point, epoch, count)
+        for (point, epoch), count in stamp_counts.items()
+        if count > 1
+    )
+    read.duplicates = [
+        f"{point} {datetime.fromtimestamp(epoch, timezone.utc).isoformat()} x{count}"
+        for point, epoch, count in duplicated
+    ]
+    read.digest = _digest_from_hashes(file_hashes)
+    return read
+
+
+def _integrity_refusals(
+    read: _WeatherRead,
+    declared_points: Sequence[str],
+    period_start: date,
+    period_end: date,
+    expected_digest: str,
+) -> Dict[str, object]:
+    """Every reason the run must not fit anything (M3-A §3). Empty means it may.
+
+    The grid is the declared points times every UTC day from period_start to
+    period_end inclusive. A point-day absent from the files counts as zero hours,
+    so an entirely missing year is refused, where a check over the present days
+    would have passed it.
+    """
+    reasons: Dict[str, object] = {}
+
+    if read.digest != expected_digest:
+        reasons["manifest_digest"] = {"expected": expected_digest, "actual": read.digest}
+
+    for key, items in (
+        ("unreadable_files", read.unreadable),
+        ("unrecognised_files", read.unrecognised),
+        ("unparseable_timestamps", read.unparseable),
+        ("off_hour_timestamps", read.off_hour),
+        ("non_finite_values", read.non_finite),
+        ("duplicate_point_hours", read.duplicates),
+    ):
+        if items:
+            reasons[key] = {"count": len(items), "first_few": items[:5]}
+
+    declared = set(declared_points)
+    undeclared = sorted(point for point in read.points_in_files if point not in declared)
+    if undeclared:
+        reasons["undeclared_points"] = undeclared
+    missing = [point for point in declared_points if point not in read.points_in_files]
+    if missing:
+        reasons["missing_declared_points"] = missing
+
+    coverage = coverage_by_day(read.rows)
+    floor = required_hours()
+    grid_days = [
+        period_start + timedelta(days=offset)
+        for offset in range((period_end - period_start).days + 1)
+    ]
+    below = [
+        f"{point} {day.isoformat()}: {coverage.get((point, day), 0)} h"
+        for point in declared_points
+        for day in grid_days
+        if coverage.get((point, day), 0) < floor
+    ]
+    if below:
+        reasons["point_days_below_floor"] = len(below)
+        reasons["first_few_below_floor"] = below[:5]
+
+    observed = sorted({day for _point, day in coverage})
+    first = observed[0] if observed else None
+    last = observed[-1] if observed else None
+    if first != period_start:
+        reasons["first_day"] = {
+            "expected": period_start.isoformat(),
+            "observed": first.isoformat() if first else None,
+        }
+    if last != period_end:
+        reasons["last_day"] = {
+            "expected": period_end.isoformat(),
+            "observed": last.isoformat() if last else None,
+        }
+    return reasons
+
+
+def _resolve_frozen_candidates() -> Tuple[List["CandidateSpec"], List[str]]:
+    """The frozen candidates resolved by name, and the names that are missing.
+
+    An entry added to challengers.CANDIDATES is not evaluated unless
+    FROZEN_CANDIDATES names it (M3-A §8).
+    """
+    from . import challengers
+
+    by_name = {spec.name: spec for spec in challengers.CANDIDATES}
+    missing = [name for name in FROZEN_CANDIDATES if name not in by_name]
+    specs = [by_name[name] for name in FROZEN_CANDIDATES if name in by_name]
+    return specs, missing
+
+
+def load_archive_rows(
+    archive_dir: str | Path,
+    period_start: date = ARCHIVE_PERIOD_START,
+    period_end: date = ARCHIVE_PERIOD_END,
+) -> List[Tuple[str, datetime, float]]:
+    """Hourly temperature_2m from the weather archive, inside the period.
+
+    Archive layout: `weather/<POINT>_<YEAR>.json.gz`, each a gzipped Open-Meteo
+    JSON response with `hourly.time` (ISO "YYYY-MM-DDTHH:MM", UTC) and
+    `hourly.temperature_2m`. POINT codes include hyphens (RU-MOW, RU-SPE). Null
+    values are absent hours. A file that cannot be read contributes no rows here;
+    evaluate_archive refuses such an archive, and this loader does not decide a run.
+
+    Returns:
+        List of (point, event_time as tz-aware UTC datetime, value)
+    """
+    return _read_weather(archive_dir, period_start, period_end).rows
 
 
 def manifest_digest(archive_dir: str | Path) -> str:
@@ -130,22 +400,22 @@ def manifest_digest(archive_dir: str | Path) -> str:
 
     This fingerprints the archive vintage. A fresh download is a new vintage:
     the provider may revise the archive, and results from two vintages are not
-    compared as though they shared one.
+    compared as though they shared one. evaluate_archive does not call this; it
+    takes the digest from the same read that parses the files.
     """
     archive_path = Path(archive_dir)
     weather_dir = archive_path / "weather"
     if not weather_dir.exists():
         raise ValueError(f"archive weather directory not found: {weather_dir}")
 
-    file_hashes: List[Tuple[str, str]] = []
-    for file_path in sorted(weather_dir.glob("*.json.gz")):
-        rel_path = file_path.relative_to(archive_path).as_posix()
-        with open(file_path, "rb") as f:
-            file_hash = hashlib.sha256(f.read()).hexdigest()
-        file_hashes.append((rel_path, file_hash))
-
-    canonical = "\n".join(f"{path}\t{fhash}" for path, fhash in file_hashes)
-    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    file_hashes = [
+        (
+            file_path.relative_to(archive_path).as_posix(),
+            hashlib.sha256(file_path.read_bytes()).hexdigest(),
+        )
+        for file_path in sorted(weather_dir.glob("*.json.gz"))
+    ]
+    return _digest_from_hashes(file_hashes)
 
 
 def _scored_points(
@@ -302,86 +572,99 @@ def evaluate_archive(
     archive_dir: str | Path,
     horizons: Optional[Sequence[int]] = None,
     window_configs: Optional[Dict[int, Dict]] = None,
+    *,
+    expected_manifest_digest: str = EXPECTED_MANIFEST_DIGEST,
+    period_start: date = ARCHIVE_PERIOD_START,
+    period_end: date = ARCHIVE_PERIOD_END,
+    require_clean_tree: bool = True,
 ) -> Dict[str, object]:
     """Run the preregistered M3-A evaluation on the archive.
 
     This is the evaluation logic, testable without network or database. The CLI
-    script is a thin wrapper around it.
+    script is a thin wrapper around it, and calls it with the defaults only.
 
     Args:
         archive_dir: Path to the archive (contains weather/ subdirectory)
         horizons: Which horizons to evaluate (defaults to [7, 30])
         window_configs: Optional custom window configurations (defaults to HORIZONS).
                        Format: {horizon: {"n_windows": int, "evaluation_period_start": date}}
+        expected_manifest_digest: The pinned vintage. Tests pass their synthetic
+                       archive's digest; the CLI uses the constant.
+        period_start, period_end: The grid bounds, inclusive. Tests pass their own;
+                       the CLI uses the declared period.
+        require_clean_tree: Refuse a tracked modification and a shallow clone
+                       (see collect_provenance). Tests run in a dirty tree and pass False.
 
     Returns:
         A deterministic report dict (apart from generated_at timestamp) with:
-        - label, declaration, target, manifest/snapshot digests, git commit
+        - label, declaration, target, provenance (declaration_sha, code_sha, versions)
+        - manifest digest (actual and expected), snapshot digest
         - period, points, day counts
-        - per-horizon: windows, train_size, first test day, per-model metrics
-        - refusal details if entry conditions not met
-        - success verdicts per candidate per horizon
+        - refused=True with refusal_reasons, and no results, if any check fails
+        - otherwise per-horizon results and success verdicts per candidate
+
+    Raises:
+        ProvenanceError: git is unavailable, a commit cannot be determined, or
+            require_clean_tree is set and the run is not from a clean full clone.
     """
     horizons = horizons if horizons is not None else [7, 30]
     window_configs = window_configs if window_configs is not None else HORIZONS
+    if period_end < period_start:
+        raise ValueError(f"period end {period_end} is before period start {period_start}")
 
-    rows = load_archive_rows(archive_dir)
-    observations = daily_observations(rows)
-    coverage = coverage_by_day(rows)
+    provenance = collect_provenance(require_clean_tree=require_clean_tree)
+    frozen_specs, missing_candidates = _resolve_frozen_candidates()
+
+    read = _read_weather(archive_dir, period_start, period_end)
 
     from app.ingesters.openmeteo import REGION_CAPITALS
     declared_points = sorted(code for code, _lat, _lon in REGION_CAPITALS)
+
+    refusals = _integrity_refusals(
+        read, declared_points, period_start, period_end, expected_manifest_digest
+    )
+    if missing_candidates:
+        refusals["missing_frozen_candidates"] = missing_candidates
+
+    observations = daily_observations(read.rows)
+    days_set = sorted({o.period_end for o in observations})
 
     report: Dict[str, object] = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "label": RESULT_LABEL,
         "declaration": DECLARATION,
+        "declaration_sha": provenance["declaration_sha"],
+        "code_sha": provenance["code_sha"],
+        "versions": provenance["versions"],
         "target": TARGET_NAME,
-        "manifest_digest": manifest_digest(archive_dir),
-        "snapshot_digest": snapshot_digest(rows),
-        "git_commit": _git_commit_sha(),
+        "candidates": list(FROZEN_CANDIDATES),
+        "manifest_digest": read.digest,
+        "expected_manifest_digest": expected_manifest_digest,
+        "snapshot_digest": snapshot_digest(read.rows),
         "period": {
-            "start": ARCHIVE_PERIOD_START.isoformat(),
-            "end": ARCHIVE_PERIOD_END.isoformat(),
-            "days": (ARCHIVE_PERIOD_END - ARCHIVE_PERIOD_START).days + 1,
+            "start": period_start.isoformat(),
+            "end": period_end.isoformat(),
+            "days": (period_end - period_start).days + 1,
         },
         "points": {
             "declared": declared_points,
             "count": len(declared_points),
         },
+        "day_count": len(days_set),
     }
 
-    days_set = sorted({o.period_end for o in observations})
-    points_in_data = sorted({o.region for o in observations})
-
-    point_days_below_floor: List[Tuple[str, str]] = []
-    for (point, day), hours in coverage.items():
-        if hours < required_hours():
-            point_days_below_floor.append((point, day.isoformat()))
-
-    missing_points = [p for p in declared_points if p not in points_in_data]
-
-    if days_set:
-        expected_days = (days_set[-1] - days_set[0]).days + 1
-        has_gaps = len(days_set) != expected_days
-    else:
-        has_gaps = False
-
-    refused = bool(point_days_below_floor or missing_points or has_gaps)
-
-    if refused:
+    if refusals:
         report["refused"] = True
-        report["refusal_reasons"] = {
-            "point_days_below_floor": len(point_days_below_floor),
-            "first_few_below_floor": point_days_below_floor[:5],
-            "missing_declared_points": missing_points,
-            "days_not_contiguous": has_gaps,
-        }
-        report["day_count"] = len(days_set)
+        report["refusal_reasons"] = refusals
         return report
 
     report["refused"] = False
-    report["day_count"] = len(days_set)
+
+    # The grid check passed, so every point has a daily value on every day of the
+    # period, and row positions are calendar days. The window arithmetic relies on it.
+    expected_day_count = (period_end - period_start).days + 1
+    if len(days_set) != expected_day_count or days_set[0] != period_start:
+        raise RuntimeError("grid check passed but the daily series is not the grid")
 
     results_by_horizon: Dict[int, Dict] = {}
 
@@ -411,8 +694,7 @@ def evaluate_archive(
 
         baselines = default_baselines(season_length=7, window=7) + [ClimatologyForecast()]
 
-        from .challengers import CANDIDATES
-        candidates_to_run = [c for c in CANDIDATES if c.role != "shadow"]
+        candidates_to_run = frozen_specs
 
         per_point_reports: Dict[str, Dict[str, EvaluationReport]] = {}
         per_point_failures: Dict[str, Dict[str, str]] = {}
@@ -549,19 +831,3 @@ def evaluate_archive(
 
     report["results_by_horizon"] = results_by_horizon
     return report
-
-
-def _git_commit_sha() -> Optional[str]:
-    """The commit SHA of the code that ran, or None if unavailable."""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
-    return None

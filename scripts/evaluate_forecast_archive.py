@@ -21,6 +21,12 @@ Forecast API responses.
 
 Results are deterministic (apart from the `generated_at` timestamp): two runs
 over the same archive produce the same metrics, verdicts, and digests.
+
+The run exits 1, with a message on stderr and no report, if git is unavailable,
+either commit SHA cannot be determined, or the working tree has tracked
+modifications (M3-A §3). A data refusal, such as a wrong manifest digest or a
+missing day, is the report's content: it is printed with `"refused": true`, and
+the exit code is 0.
 """
 from __future__ import annotations
 
@@ -32,7 +38,7 @@ import sys
 # Add repo root to path so imports work when run as a script
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.services.forecasting.archive_eval import evaluate_archive
+from app.services.forecasting.archive_eval import ProvenanceError, evaluate_archive
 
 
 def main(argv=None):
@@ -51,7 +57,12 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
 
-    report = evaluate_archive(args.archive_dir)
+    try:
+        report = evaluate_archive(args.archive_dir)
+    except ProvenanceError as exc:
+        # The run cannot name what produced it, so it does not run. Exit 1 with no report.
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
 
     text_out = json.dumps(report, indent=2, sort_keys=True, default=str)
     print(text_out)
