@@ -33,7 +33,8 @@ class PersistResult:
 
 def persist_environmental_observations(
     signals: List[Signal],
-    source: str
+    source: str,
+    session=None
 ) -> PersistResult:
     """Persist environmental signals with upsert logic.
 
@@ -43,11 +44,17 @@ def persist_environmental_observations(
     Args:
         signals: List of Signal objects to persist
         source: Data source name (e.g., "openaq", "openmeteo")
+        session: Optional SQLAlchemy session to use instead of SessionLocal.
+                 Caller is responsible for commit/rollback/close when provided.
+                 Used by backfill tools that persist to a separate database.
 
     Returns:
         PersistResult with inserted/updated/rejected counts
     """
-    db = SessionLocal()
+    # Use provided session or create a new one
+    db = session if session is not None else SessionLocal()
+    owns_session = session is None
+
     result = PersistResult(
         received=len(signals),
         inserted=0,
@@ -59,7 +66,8 @@ def persist_environmental_observations(
     )
 
     if not signals:
-        db.close()
+        if owns_session:
+            db.close()
         return result
 
     try:
@@ -97,7 +105,8 @@ def persist_environmental_observations(
         )
 
     except Exception as e:
-        db.rollback()
+        if owns_session:
+            db.rollback()
         # Nothing was written. `rejected` is kept -- those signals failed
         # validation before the database was involved and that is still true --
         # but everything describing stored rows is zeroed, because after the
@@ -108,8 +117,12 @@ def persist_environmental_observations(
         result.accepted = 0
         result.errors.append(f"persist_error: {str(e)[:500]}")
         log.exception(f"[persist] {source} failed: {e}")
+        if not owns_session:
+            # Re-raise for caller to handle when they provided the session
+            raise
     finally:
-        db.close()
+        if owns_session:
+            db.close()
 
     return result
 
