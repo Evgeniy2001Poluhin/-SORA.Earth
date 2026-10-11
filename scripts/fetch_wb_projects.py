@@ -451,6 +451,10 @@ def main():
     )
     args = ap.parse_args()
 
+    from app.training_dataset import refuse_active_dataset_output
+    for output in (args.out, args.out + ".tmp", args.out + ".manifest.json"):
+        refuse_active_dataset_output(output, snapshot_root=args.snapshot_root)
+
     global FQ
     if args.sector:
         FQ = f"sector_exact:({args.sector})"

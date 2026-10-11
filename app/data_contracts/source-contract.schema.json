@@ -25,7 +25,7 @@
       "properties": {
         "endpoint": {"type": ["string", "null"], "format": "uri-template"},
         "artifact": {"type": ["string", "null"]},
-        "authentication": {"enum": ["none", "optional_api_key", "not_applicable"]},
+        "authentication": {"enum": ["none", "optional_api_key", "required_admin", "not_applicable"]},
         "cadence": {"type": "string", "minLength": 1}
       }
     },
