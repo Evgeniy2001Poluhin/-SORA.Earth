@@ -148,6 +148,156 @@ def manifest_digest(archive_dir: str | Path) -> str:
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _scored_points(
+    model: str,
+    points: Sequence[str],
+    reports_by_point: Dict[str, Dict[str, EvaluationReport]],
+) -> List[str]:
+    """The declared points on which `model` has a first-pass report."""
+    return [p for p in points if p in reports_by_point and model in reports_by_point[p]]
+
+
+def macro_mae(
+    model: str,
+    points: Sequence[str],
+    reports_by_point: Dict[str, Dict[str, EvaluationReport]],
+) -> Optional[float]:
+    """Equal-weight mean of per-point MAE, or None if no point was scored."""
+    scored = _scored_points(model, points, reports_by_point)
+    if not scored:
+        return None
+    return float(np.mean([reports_by_point[p][model].mean("mae") for p in scored]))
+
+
+def candidate_verdict(
+    candidate: str,
+    baselines: Sequence[str],
+    reports_by_point: Dict[str, Dict[str, EvaluationReport]],
+    points: Sequence[str],
+    n_windows: int,
+    failures_by_point: Optional[Dict[str, Dict[str, str]]] = None,
+    rng_seed: int = 0,
+) -> Dict[str, object]:
+    """Verdict for one candidate at one horizon, per M3-A section 9.
+
+    Pure: it reads the first-pass EvaluationReports and never refits. The
+    bootstrap resamples the per-window MAEs already held in those reports.
+
+    Succeeds only if the candidate's macro MAE is strictly lower than every
+    baseline's (ties lose), and the 95% paired bootstrap interval of
+    (candidate - strongest baseline) per-window macro MAE lies entirely below
+    zero. The interval uses 2000 resamples of windows from default_rng(rng_seed).
+    """
+    failures_by_point = failures_by_point or {}
+    scored = {
+        model: _scored_points(model, points, reports_by_point)
+        for model in [candidate, *baselines]
+    }
+
+    if not scored[candidate]:
+        return {"succeeded": False, "reason": "candidate could not be scored"}
+
+    # If ANY baseline could not be scored for ANY point, verdict is not_comparable
+    missing_baseline_points: List[Tuple[str, str, str]] = []
+    for baseline_name in baselines:
+        for point in points:
+            if point not in scored[baseline_name]:
+                reason = failures_by_point.get(point, {}).get(baseline_name, "unknown")
+                missing_baseline_points.append((baseline_name, point, reason))
+
+    if missing_baseline_points:
+        missing_summary = [f"{bl}/{pt}: {rsn}" for bl, pt, rsn in missing_baseline_points[:5]]
+        return {
+            "succeeded": False,
+            "reason": "not_comparable",
+            "explanation": "not all declared baselines scored for all declared points",
+            "missing_baseline_point_pairs": len(missing_baseline_points),
+            "missing": missing_summary,
+        }
+
+    cand_points = set(scored[candidate])
+    baseline_point_sets = {bl: set(scored[bl]) for bl in baselines}
+    all_compared_models = [candidate] + list(baselines)
+    common_points = cand_points.intersection(*baseline_point_sets.values())
+
+    if len(common_points) < len(points):
+        missing_for_any = []
+        for point in points:
+            for model in all_compared_models:
+                if point not in scored[model]:
+                    reason = failures_by_point.get(point, {}).get(model, "unknown")
+                    missing_for_any.append(f"{point}/{model}: {reason}")
+                    break
+
+        return {
+            "succeeded": False,
+            "reason": "not_comparable",
+            "explanation": "not all declared points scored for all compared models",
+            "missing": missing_for_any[:5],
+            "points_scored": len(common_points),
+            "points_declared": len(points),
+        }
+
+    cand_mae = macro_mae(candidate, points, reports_by_point)
+    baseline_maes = {bl: macro_mae(bl, points, reports_by_point) for bl in baselines}
+    beats_all = all(cand_mae < bl_mae for bl_mae in baseline_maes.values())
+    strongest_baseline = min(baseline_maes, key=baseline_maes.get)
+    strongest_mae = baseline_maes[strongest_baseline]
+
+    window_candidate_maes = []
+    window_strongest_maes = []
+
+    for window_idx in range(n_windows):
+        window_cand_point_maes = []
+        window_bl_point_maes = []
+
+        for point in common_points:
+            cand_rep = reports_by_point[point][candidate]
+            bl_rep = reports_by_point[point][strongest_baseline]
+
+            if window_idx < len(cand_rep.windows):
+                window_cand_point_maes.append(cand_rep.windows[window_idx].mae)
+            if window_idx < len(bl_rep.windows):
+                window_bl_point_maes.append(bl_rep.windows[window_idx].mae)
+
+        assert len(window_cand_point_maes) == len(window_bl_point_maes), (
+            f"window {window_idx}: mismatched point counts "
+            f"({len(window_cand_point_maes)} vs {len(window_bl_point_maes)})"
+        )
+
+        if window_cand_point_maes:
+            window_candidate_maes.append(np.mean(window_cand_point_maes))
+            window_strongest_maes.append(np.mean(window_bl_point_maes))
+
+    if len(window_candidate_maes) < 2:
+        return {
+            "succeeded": False,
+            "beats_all": beats_all,
+            "reason": "not enough windows for bootstrap",
+        }
+
+    diffs = np.array(window_candidate_maes) - np.array(window_strongest_maes)
+    rng = np.random.default_rng(rng_seed)
+    bootstrap_means = []
+    for _ in range(2000):
+        resample = rng.choice(diffs, size=len(diffs), replace=True)
+        bootstrap_means.append(resample.mean())
+
+    ci_lower = float(np.percentile(bootstrap_means, 2.5))
+    ci_upper = float(np.percentile(bootstrap_means, 97.5))
+
+    succeeded = beats_all and ci_upper < 0
+
+    return {
+        "succeeded": succeeded,
+        "beats_all": beats_all,
+        "bootstrap_ci_95": {"lower": ci_lower, "upper": ci_upper},
+        "strongest_baseline": strongest_baseline,
+        "strongest_baseline_mae": strongest_mae,
+        "candidate_mae": cand_mae,
+    }
+
+
 def evaluate_archive(
     archive_dir: str | Path,
     horizons: Optional[Sequence[int]] = None,
@@ -347,13 +497,9 @@ def evaluate_archive(
 
         macro_metrics: Dict[str, Dict] = {}
         for model in all_models:
-            point_values = [
-                per_point_reports[point][model].mean("mae")
-                for point in points_scored_per_model[model]
-            ]
-            if point_values:
+            if points_scored_per_model[model]:
                 macro_metrics[model] = {
-                    "mae": float(np.mean(point_values)),
+                    "mae": macro_mae(model, declared_points, per_point_reports),
                     "rmse": float(np.mean([
                         per_point_reports[point][model].mean("rmse")
                         for point in points_scored_per_model[model]
@@ -372,123 +518,15 @@ def evaluate_archive(
         baseline_names = [b.model_name for b in baselines]
         candidate_verdicts: Dict[str, Dict] = {}
 
-        # Check that every declared baseline can be scored for every declared point
-        missing_baseline_points: List[Tuple[str, str, str]] = []
-        for baseline_name in baseline_names:
-            for point in declared_points:
-                if point not in points_scored_per_model.get(baseline_name, []):
-                    reason = per_point_failures.get(point, {}).get(baseline_name, "unknown")
-                    missing_baseline_points.append((baseline_name, point, reason))
-
         for spec in candidates_to_run:
-            cand_name = spec.name
-
-            if cand_name not in macro_metrics:
-                candidate_verdicts[cand_name] = {
-                    "succeeded": False,
-                    "reason": "candidate could not be scored",
-                }
-                continue
-
-            # If ANY baseline could not be scored for ANY point, verdict is not_comparable
-            if missing_baseline_points:
-                missing_summary = [f"{bl}/{pt}: {rsn}" for bl, pt, rsn in missing_baseline_points[:5]]
-                candidate_verdicts[cand_name] = {
-                    "succeeded": False,
-                    "reason": "not_comparable",
-                    "explanation": "not all declared baselines scored for all declared points",
-                    "missing_baseline_point_pairs": len(missing_baseline_points),
-                    "missing": missing_summary,
-                }
-                continue
-
-            baseline_maes = {
-                bl: macro_metrics[bl]["mae"]
-                for bl in baseline_names
-            }
-
-            cand_points = set(points_scored_per_model[cand_name])
-            baseline_point_sets = {bl: set(points_scored_per_model[bl]) for bl in baseline_names}
-            all_compared_models = [cand_name] + baseline_names
-            common_points = cand_points.intersection(*baseline_point_sets.values())
-
-            if len(common_points) < len(declared_points):
-                missing_for_any = []
-                for point in declared_points:
-                    for model in all_compared_models:
-                        if point not in points_scored_per_model.get(model, []):
-                            reason = per_point_failures.get(point, {}).get(model, "unknown")
-                            missing_for_any.append(f"{point}/{model}: {reason}")
-                            break
-
-                candidate_verdicts[cand_name] = {
-                    "succeeded": False,
-                    "reason": "not_comparable",
-                    "explanation": "not all declared points scored for all compared models",
-                    "missing": missing_for_any[:5],
-                    "points_scored": len(common_points),
-                    "points_declared": len(declared_points),
-                }
-                continue
-
-            cand_mae = macro_metrics[cand_name]["mae"]
-            beats_all = all(cand_mae < bl_mae for bl_mae in baseline_maes.values())
-            strongest_baseline = min(baseline_maes, key=baseline_maes.get)
-            strongest_mae = baseline_maes[strongest_baseline]
-
-            window_candidate_maes = []
-            window_strongest_maes = []
-
-            for window_idx in range(n_windows):
-                window_cand_point_maes = []
-                window_bl_point_maes = []
-
-                for point in common_points:
-                    cand_rep = per_point_reports[point][cand_name]
-                    bl_rep = per_point_reports[point][strongest_baseline]
-
-                    if window_idx < len(cand_rep.windows):
-                        window_cand_point_maes.append(cand_rep.windows[window_idx].mae)
-                    if window_idx < len(bl_rep.windows):
-                        window_bl_point_maes.append(bl_rep.windows[window_idx].mae)
-
-                assert len(window_cand_point_maes) == len(window_bl_point_maes), (
-                    f"window {window_idx}: mismatched point counts "
-                    f"({len(window_cand_point_maes)} vs {len(window_bl_point_maes)})"
-                )
-
-                if window_cand_point_maes:
-                    window_candidate_maes.append(np.mean(window_cand_point_maes))
-                    window_strongest_maes.append(np.mean(window_bl_point_maes))
-
-            if len(window_candidate_maes) < 2:
-                candidate_verdicts[cand_name] = {
-                    "succeeded": False,
-                    "beats_all": beats_all,
-                    "reason": "not enough windows for bootstrap",
-                }
-                continue
-
-            diffs = np.array(window_candidate_maes) - np.array(window_strongest_maes)
-            rng = np.random.default_rng(0)
-            bootstrap_means = []
-            for _ in range(2000):
-                resample = rng.choice(diffs, size=len(diffs), replace=True)
-                bootstrap_means.append(resample.mean())
-
-            ci_lower = float(np.percentile(bootstrap_means, 2.5))
-            ci_upper = float(np.percentile(bootstrap_means, 97.5))
-
-            succeeded = beats_all and ci_upper < 0
-
-            candidate_verdicts[cand_name] = {
-                "succeeded": succeeded,
-                "beats_all": beats_all,
-                "bootstrap_ci_95": {"lower": ci_lower, "upper": ci_upper},
-                "strongest_baseline": strongest_baseline,
-                "strongest_baseline_mae": strongest_mae,
-                "candidate_mae": cand_mae,
-            }
+            candidate_verdicts[spec.name] = candidate_verdict(
+                spec.name,
+                baseline_names,
+                per_point_reports,
+                declared_points,
+                n_windows,
+                failures_by_point=per_point_failures,
+            )
 
         failure_summary = {}
         for model in all_models:

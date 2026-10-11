@@ -28,12 +28,18 @@ from app.services.forecasting.archive_eval import (
     HORIZONS,
     RESULT_LABEL,
     TARGET_NAME,
+    candidate_verdict,
     evaluate_archive,
     load_archive_rows,
     manifest_digest,
 )
-from app.services.forecasting.baselines import ClimatologyForecast
-from app.services.forecasting.evaluation import rolling_origin_windows
+from app.services.forecasting.baselines import ClimatologyForecast, default_baselines
+from app.services.forecasting.evaluation import (
+    EvaluationReport,
+    WindowResult,
+    evaluate_rolling_origin,
+    rolling_origin_windows,
+)
 
 REPO_ROOT = Path(__file__).parent.parent
 
@@ -535,12 +541,12 @@ def _write_complete_archive(archive_dir: Path) -> list[str]:
     return points
 
 
-def _fixture_window_configs() -> dict:
-    """One small window, with its evaluation start derived from the fixture's last day."""
+def _fixture_window_configs(n_windows: int = FIXTURE_WINDOWS) -> dict:
+    """Small window configuration, with its evaluation start derived from the fixture's last day."""
     return {
         FIXTURE_HORIZON: {
-            "n_windows": FIXTURE_WINDOWS,
-            "evaluation_period_start": FIXTURE_END - timedelta(days=FIXTURE_HORIZON * FIXTURE_WINDOWS - 1),
+            "n_windows": n_windows,
+            "evaluation_period_start": FIXTURE_END - timedelta(days=FIXTURE_HORIZON * n_windows - 1),
         }
     }
 
@@ -821,3 +827,136 @@ def test_constants_match_declaration_document():
     target_match = re.search(r"openmeteo-historical-forecast:temperature_2m", text)
     assert target_match, "Target name not found"
     assert TARGET_NAME == "openmeteo-historical-forecast:temperature_2m"
+
+
+# Verdict tests. candidate_verdict reads nothing but the per-window MAE of each
+# first-pass report, so these build EvaluationReports from plain lists of MAEs.
+# Every point carries the same windows, so a model's macro MAE is the mean of
+# its window MAEs, and the chosen numbers fix the expected verdict exactly.
+VERDICT_POINTS = ["AAA", "BBB"]
+
+
+def _fabricated_report(model: str, window_maes) -> EvaluationReport:
+    """An EvaluationReport whose only field the verdict reads is the per-window mae."""
+    return EvaluationReport(
+        model_name=model,
+        horizon=7,
+        windows=[
+            WindowResult(
+                window=index, train_end=0, test_start=0, test_end=0,
+                mae=float(mae), rmse=0.0, mase=0.0, bias=0.0, interval_coverage=None,
+            )
+            for index, mae in enumerate(window_maes)
+        ],
+    )
+
+
+def _verdict_from_fabricated(candidate_maes, baseline_maes: dict) -> dict:
+    reports_by_point = {
+        point: {
+            "fabricated_candidate": _fabricated_report("fabricated_candidate", candidate_maes),
+            **{name: _fabricated_report(name, maes) for name, maes in baseline_maes.items()},
+        }
+        for point in VERDICT_POINTS
+    }
+    return candidate_verdict(
+        "fabricated_candidate",
+        list(baseline_maes),
+        reports_by_point,
+        VERDICT_POINTS,
+        len(candidate_maes),
+    )
+
+
+def test_verdict_tie_with_strongest_baseline_is_not_a_win():
+    """Candidate macro MAE equals the strongest baseline's exactly: beats_all is False.
+
+    Every window of the candidate equals Climatology's, so each difference is zero
+    and the interval is [0, 0]. The tie fails on beats_all alone.
+
+    Mutation l: `<=` instead of `<` in beats_all makes beats_all True here.
+    """
+    verdict = _verdict_from_fabricated(
+        [3.0, 4.0, 5.0],
+        {"Naive": [6.0, 7.0, 8.0], "Climatology": [3.0, 4.0, 5.0]},
+    )
+
+    assert verdict["strongest_baseline"] == "Climatology"
+    assert verdict["candidate_mae"] == verdict["strongest_baseline_mae"]
+    assert verdict["bootstrap_ci_95"]["upper"] == 0.0
+    assert verdict["beats_all"] is False
+    assert verdict["succeeded"] is False
+
+
+def test_beats_every_baseline_but_interval_crossing_zero_is_not_success():
+    """Macro MAE is lower than every baseline, but the per-window differences are mixed:
+    three windows better by 1.0, one worse by 0.5. The 95% interval runs from -1.0 up
+    to a bound above zero, so the candidate beats_all and does not succeed.
+
+    Mutation j: `succeeded = beats_all` ignores the interval and makes succeeded True.
+    """
+    verdict = _verdict_from_fabricated(
+        [4.0, 4.0, 4.0, 5.5],
+        {"Naive": [9.0, 9.0, 9.0, 9.0], "Climatology": [5.0, 5.0, 5.0, 5.0]},
+    )
+
+    assert verdict["candidate_mae"] < verdict["strongest_baseline_mae"]
+    assert verdict["beats_all"] is True
+    assert verdict["bootstrap_ci_95"]["lower"] < 0.0
+    assert verdict["bootstrap_ci_95"]["upper"] >= 0.0
+    assert verdict["succeeded"] is False
+
+
+def test_clear_win_in_every_window_succeeds():
+    """Every window better than the strongest baseline by the same 1.0. The interval
+    is [-1.0, -1.0], entirely below zero, so the candidate succeeds."""
+    verdict = _verdict_from_fabricated(
+        [4.0, 5.0, 6.0, 7.0],
+        {"Naive": [9.0, 10.0, 11.0, 12.0], "Climatology": [5.0, 6.0, 7.0, 8.0]},
+    )
+
+    assert verdict["beats_all"] is True
+    assert verdict["bootstrap_ci_95"]["upper"] < 0.0
+    assert verdict["succeeded"] is True
+
+
+def test_bootstrap_reuses_first_pass_reports_and_never_refits(tmp_path):
+    """Each (model, point) is evaluated once, and the verdict is computed from those
+    reports. evaluate_rolling_origin is wrapped by a counting spy where archive_eval
+    looks it up. The call count must equal (#baselines + #candidates) x #points x
+    #horizons exactly; a second pass for the bootstrap would add calls above that.
+
+    Every candidate must reach the bootstrap, so the count is over computed verdicts
+    and not over refusals or not_comparable results.
+
+    Mutation g: a second evaluate_rolling_origin call per candidate point, whose
+    windows then feed the verdict.
+    """
+    from app.services.forecasting.challengers import CANDIDATES
+
+    archive_dir = tmp_path / "archive"
+    points = _write_complete_archive(archive_dir)
+    assert len(points) == 21
+
+    baselines = default_baselines(season_length=7, window=7) + [ClimatologyForecast()]
+    candidates = [spec for spec in CANDIDATES if spec.role != "shadow"]
+    horizons = [FIXTURE_HORIZON]
+
+    with mock.patch(
+        "app.services.forecasting.archive_eval.evaluate_rolling_origin",
+        wraps=evaluate_rolling_origin,
+    ) as spy:
+        report = evaluate_archive(
+            archive_dir, horizons=horizons, window_configs=_fixture_window_configs(n_windows=2)
+        )
+
+    assert not report.get("refused"), f"Evaluation refused: {report.get('refusal_reasons')}"
+    verdicts = report["results_by_horizon"][FIXTURE_HORIZON]["candidate_verdicts"]
+    assert set(verdicts) == {spec.name for spec in candidates}
+    for name, verdict in verdicts.items():
+        assert "bootstrap_ci_95" in verdict, f"{name} did not reach the bootstrap: {verdict}"
+
+    expected_calls = (len(baselines) + len(candidates)) * len(points) * len(horizons)
+    assert spy.call_count == expected_calls, (
+        f"evaluate_rolling_origin called {spy.call_count} times, expected {expected_calls}"
+    )
