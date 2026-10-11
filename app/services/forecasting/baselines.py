@@ -31,7 +31,8 @@ statement -- it can be checked against realised coverage, and it is the number
 good the forecast is. A baseline makes no claim to be good.
 """
 import math
-from typing import Dict, List, Optional
+from datetime import date as dt_date, timedelta
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -288,6 +289,199 @@ class MovingAverageForecast(_Baseline):
 
     def _reconstruct_kwargs(self) -> Dict:
         return {"window": self.window}
+
+
+class ClimatologyForecast(_Baseline):
+    """Mean of the same calendar week in previous years.
+
+    The forecast for day *d* is the mean of the target over every calendar day
+    within ±3 days of *d*'s month-day, in every earlier year whose matching days
+    all fall on or before the origin (the last training day).
+
+    This is the climatological baseline: for a temperature target, a model that
+    cannot beat the average of the same week in previous years has learned the
+    calendar, not the weather.
+
+    29 February is matched as 28 February in non-leap years. At least two earlier
+    years are required for each forecast point; where there are fewer, that
+    fit/predict raises ValueError to signal the point is not scorable.
+
+    Added for M3-A (docs/M3A_ARCHIVE_DECLARATION.md §7), where nine years of
+    history make it both possible and obligatory. NOT included in default_baselines,
+    so M3 v1's report is unchanged.
+
+    Speed: fit records where every date sits in the series, once. A forecast then
+    looks up its window dates instead of scanning the series for each one, so it
+    costs O(years x 7). The values pooled, and their order, are those the scan
+    produced; tests/test_forecasting_climatology_equivalence.py checks this exactly.
+    """
+
+    def __init__(self, window_days: int = 3):
+        """
+        Args:
+            window_days: how many days on each side of the target day to include
+                        (±3 gives a 7-day window)
+        """
+        if window_days < 0:
+            raise ValueError(f"window_days must be >= 0, got {window_days}")
+        super().__init__(f"Climatology(±{window_days}d)", "1.0")
+        self.window_days = window_days
+        self._dates: Optional[pd.Series] = None
+        # date -> positions in self._dates, ascending. Built once per fit.
+        self._positions: Dict[dt_date, List[int]] = {}
+        # Distinct calendar years in the fitted history, ascending.
+        self._years: List[int] = []
+
+    def _min_observations(self) -> int:
+        # Need enough history to potentially have 2 earlier years
+        # The actual 2-year check happens at predict time
+        return 365
+
+    def fit(self, df: pd.DataFrame, target_col: str, **kwargs) -> None:
+        """Fit stores the dates and values for lookup during prediction."""
+        values = _prepare(df, target_col)
+        needed = self._min_observations()
+        if len(values) < needed:
+            raise ValueError(
+                f"{self.model_name} needs at least {needed} observations, got {len(values)}"
+            )
+
+        # Store dates alongside values for climatology matching
+        frame = df[["ds", target_col]].copy()
+        frame["ds"] = pd.to_datetime(frame["ds"])
+        frame = frame.dropna(subset=[target_col]).sort_values("ds")
+        self._dates = frame["ds"].reset_index(drop=True)
+        self._values = values
+        self._last_date = self._dates.iloc[-1]
+        self._step = _infer_step(df)
+        self._index_dates()
+
+        # For interval estimation, compute one-step errors
+        predicted = self._one_step_predictions(values)
+        errors = values.to_numpy(dtype=float) - predicted
+        errors = errors[~np.isnan(errors)]
+        self._n_errors = int(errors.size)
+        self._sigma = float(np.std(errors, ddof=1)) if errors.size > 1 else 0.0
+
+    def _index_dates(self) -> None:
+        """Record where each date sits in the fitted series.
+
+        Positions for a date are kept ascending, so pooling them yields values in
+        the order a scan over the series would have yielded them.
+        """
+        dates_array = self._dates.dt.date.to_numpy()
+        positions: Dict[dt_date, List[int]] = {}
+        for position, day in enumerate(dates_array):
+            positions.setdefault(day, []).append(position)
+        self._positions = positions
+        self._years = sorted({day.year for day in dates_array})
+
+    def _pool(self, values_array: np.ndarray, target: dt_date, origin: dt_date,
+              before: Optional[int] = None) -> Tuple[List[float], set]:
+        """Pool the observations of the earlier years that qualify for one target day.
+
+        A year Y qualifies if Y is earlier than the target's year and every date of
+        its window is on or before `origin`. The window is anchor-3 .. anchor+3,
+        the anchor being the target's month-day in Y (29 Feb -> 28 Feb). Only
+        positions below `before` count, when given: a one-step prediction must not
+        use the day it is predicting.
+
+        Returns the pooled values, and the years that contributed at least one.
+        """
+        anchor_month, anchor_day = target.month, target.day
+        if anchor_month == 2 and anchor_day == 29:
+            anchor_month, anchor_day = 2, 28
+
+        pooled: List[float] = []
+        contributed: set = set()
+        for year in self._years:
+            if year >= target.year:
+                continue
+            try:
+                anchor = dt_date(year, anchor_month, anchor_day)
+            except ValueError:
+                continue
+
+            # The window crosses year boundaries: 1 Jan pools 29 Dec Y-1 .. 4 Jan Y.
+            window_dates = [anchor + timedelta(days=offset)
+                            for offset in range(-self.window_days, self.window_days + 1)]
+
+            # All 7 dates must be <= origin for this year to qualify
+            if any(d > origin for d in window_dates):
+                continue
+
+            for window_date in window_dates:
+                for position in self._positions.get(window_date, ()):
+                    if before is not None and position >= before:
+                        continue
+                    pooled.append(float(values_array[position]))
+                    contributed.add(year)
+        return pooled, contributed
+
+    def _point_forecast(self, values: pd.Series, horizon: int) -> np.ndarray:
+        """Forecast each future day by averaging matching days from earlier years.
+
+        For each forecast day d, the window is the 7 actual dates anchor−3 … anchor+3
+        where anchor is d's month-day placed in an earlier year Y (with 29 Feb → 28 Feb
+        anchor). This crosses year boundaries naturally: forecasting 1 Jan uses
+        29 Dec Y−1 … 4 Jan Y.
+
+        A year Y qualifies if it is earlier than d's year AND all 7 window dates ≤ origin.
+        """
+        if self._dates is None:
+            raise ValueError("ClimatologyForecast not fitted")
+
+        origin = self._last_date.date()
+        values_array = values.to_numpy(dtype=float)
+        forecasts = []
+
+        for h in range(horizon):
+            forecast_date = (self._last_date + self._step * (h + 1)).date()
+            pooled, contributed = self._pool(values_array, forecast_date, origin)
+
+            if len(contributed) < 2:
+                raise ValueError(
+                    f"Climatology: only {len(contributed)} earlier year(s) found for "
+                    f"{forecast_date.isoformat()}, need at least 2"
+                )
+
+            if not pooled:
+                raise ValueError(
+                    f"Climatology: no values collected for {forecast_date.isoformat()}"
+                )
+
+            forecasts.append(float(np.mean(pooled)))
+
+        return np.array(forecasts)
+
+    def _one_step_predictions(self, values: pd.Series) -> np.ndarray:
+        """One-step-ahead climatology predictions for interval estimation.
+
+        For each point i, predict using climatology from data before i.
+        """
+        if self._dates is None:
+            raise ValueError("ClimatologyForecast not fitted")
+
+        array = values.to_numpy(dtype=float)
+        dates_array = self._dates.dt.date.to_numpy()
+        predicted = np.full_like(array, np.nan)
+
+        min_idx = 365
+        if len(array) < min_idx:
+            return predicted
+
+        for i in range(min_idx, len(array)):
+            # The origin for point i is the day before it.
+            pooled, contributed = self._pool(
+                array, dates_array[i], dates_array[i - 1], before=i,
+            )
+            if len(contributed) >= 2 and pooled:
+                predicted[i] = float(np.mean(pooled))
+
+        return predicted
+
+    def _reconstruct_kwargs(self) -> Dict:
+        return {"window_days": self.window_days}
 
 
 #: What a challenger is compared against by default. Built here rather than at
