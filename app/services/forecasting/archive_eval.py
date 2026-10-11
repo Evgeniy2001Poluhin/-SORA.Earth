@@ -29,8 +29,10 @@ itself.
   placed at the END of the series. Each window trains on ALL days from the period
   start to its origin (expanding)
 - Reports per-point and macro (equal-weight mean across points) MAE, RMSE, MASE, bias
-- Success per M3-A §9: beats_all (macro MAE < every baseline) AND paired bootstrap
-  95% CI of (candidate - strongest baseline) entirely below zero
+- Success per M3-A §9: for EVERY declared baseline, the 98.75th percentile of a
+  circular block bootstrap of the per-window macro MAE difference is below zero
+  (Bonferroni over the family of 4 claims), and the candidate's macro MAE is
+  lower than every baseline's. No strongest baseline is selected.
 
 **This is preregistered:** docs/M3A_ARCHIVE_DECLARATION.md was committed before
 the first run on this data. Every constant, baseline, candidate, window
@@ -62,7 +64,7 @@ from .daily_target import (
     required_hours,
     snapshot_digest,
 )
-from .evaluation import EvaluationReport, evaluate_rolling_origin
+from .evaluation import EvaluationReport, WindowResult, evaluate_rolling_origin
 
 if TYPE_CHECKING:
     from .challengers import CandidateSpec
@@ -85,6 +87,19 @@ HORIZONS = {
     7: {"n_windows": 104, "evaluation_period_start": date(2024, 10, 13)},
     30: {"n_windows": 24, "evaluation_period_start": date(2024, 10, 21)},
 }
+
+#: M3-A §9. The family of claims is FROZEN_CANDIDATES x the declared horizons,
+#: held at FAMILY_ALPHA by Bonferroni. Each claim is tested at PER_CLAIM_ALPHA.
+FAMILY_ALPHA = 0.05
+DECLARED_HORIZONS = tuple(sorted(HORIZONS))
+DECLARED_FAMILY_SIZE = len(FROZEN_CANDIDATES) * len(DECLARED_HORIZONS)
+PER_CLAIM_ALPHA = FAMILY_ALPHA / DECLARED_FAMILY_SIZE
+
+#: M3-A §9, fixed and never tuned.
+BOOTSTRAP_RESAMPLES = 10_000
+BOOTSTRAP_SEED = 0
+#: Below this many windows a failed claim is weak evidence (M3-A §9, power).
+POWER_NOTE_BELOW_WINDOWS = 30
 
 RESULT_LABEL = "pseudo-real-time · archive vintage 2026-10-11 · not a real-time claim"
 TARGET_NAME = "openmeteo-historical-forecast:temperature_2m"
@@ -439,25 +454,161 @@ def macro_mae(
     return float(np.mean([reports_by_point[p][model].mean("mae") for p in scored]))
 
 
+def block_length(n_windows: int) -> int:
+    """L = ceil(n ** (1/3)) (M3-A §9), by integer arithmetic.
+
+    The smallest L with L ** 3 >= n. The floating-point cube root is not used,
+    because it is inexact at perfect cubes: 64 ** (1/3) is 3.9999999999999996,
+    so truncating it gives 3 where the answer is 4.
+    """
+    if n_windows < 1:
+        raise ValueError(f"need at least one window, got {n_windows}")
+    length = 1
+    while length ** 3 < n_windows:
+        length += 1
+    return length
+
+
+def circular_block_resamples(
+    n_windows: int,
+    n_resamples: int = BOOTSTRAP_RESAMPLES,
+    seed: int = BOOTSTRAP_SEED,
+) -> np.ndarray:
+    """Window-index sequences for the circular block bootstrap (M3-A §9).
+
+    Each resample draws ceil(n / L) block starts uniformly from 0..n-1, expands
+    every start into L consecutive window indices that wrap modulo n, concatenates
+    the blocks and keeps the first n. Returns an int array of shape
+    (n_resamples, n_windows). The caller generates it once per horizon and reuses
+    it for every candidate-baseline comparison of that horizon.
+    """
+    length = block_length(n_windows)
+    n_blocks = -(-n_windows // length)
+    rng = np.random.default_rng(seed)
+    starts = rng.integers(0, n_windows, size=(n_resamples, n_blocks))
+    offsets = np.arange(length)
+    indices = (starts[:, :, None] + offsets[None, None, :]) % n_windows
+    return indices.reshape(n_resamples, n_blocks * length)[:, :n_windows]
+
+
+def _window_macro_maes(
+    model: str,
+    points: Sequence[str],
+    reports_by_point: Dict[str, Dict[str, EvaluationReport]],
+    n_windows: int,
+) -> np.ndarray:
+    """Per window, the equal-weight mean over points of the model's window MAE.
+
+    The 21 points stay together inside a window (M3-A §9). Assumes the pairing
+    check has already passed, so window k exists in every scored report.
+    """
+    scored = _scored_points(model, points, reports_by_point)
+    return np.array(
+        [
+            np.mean([reports_by_point[p][model].windows[k].mae for p in scored])
+            for k in range(n_windows)
+        ],
+        dtype=float,
+    )
+
+
+def _window_dates(
+    window: WindowResult, calendar: Sequence[date]
+) -> Optional[Tuple[date, date, date]]:
+    """(train_end, test_start, test_end) of a window as calendar dates.
+
+    WindowResult stores positions. test_end is exclusive there, so the date
+    returned for it is the last day tested. None if a position is off the calendar.
+    """
+    last_test = window.test_end - 1
+    positions = (window.train_end, window.test_start, last_test)
+    if not all(0 <= p < len(calendar) for p in positions):
+        return None
+    return (calendar[window.train_end], calendar[window.test_start], calendar[last_test])
+
+
+def _pairing_problem(
+    candidate: str,
+    baselines: Sequence[str],
+    points: Sequence[str],
+    reports_by_point: Dict[str, Dict[str, EvaluationReport]],
+    n_windows: int,
+    calendar: Sequence[date],
+) -> Optional[str]:
+    """The first way the candidate and baselines fail to pair, or None (M3-A §9).
+
+    Every (model, point) report must hold exactly n_windows windows, every window
+    MAE must be finite, and window k must cover the same dates in every report.
+    The reference for window k is the candidate on the first declared point.
+    """
+    reference: Dict[int, Tuple[Tuple[date, date, date], str]] = {}
+    for model in [candidate, *baselines]:
+        for point in points:
+            report = reports_by_point[point][model]
+            if len(report.windows) != n_windows:
+                return f"{model}/{point}: {len(report.windows)} windows, expected {n_windows}"
+            for k, window in enumerate(report.windows):
+                label = f"{model}/{point} window {k}"
+                if window.window != k:
+                    return f"{label} is labelled {window.window}"
+                if not math.isfinite(window.mae):
+                    return f"{label} has a non-finite MAE ({window.mae})"
+                dates = _window_dates(window, calendar)
+                if dates is None:
+                    return f"{label} lies outside the calendar"
+                if k not in reference:
+                    reference[k] = (dates, label)
+                    continue
+                expected, reference_label = reference[k]
+                if dates != expected:
+                    return (
+                        f"{label} covers {_format_dates(dates)}, but {reference_label} "
+                        f"covers {_format_dates(expected)}"
+                    )
+    return None
+
+
+def _format_dates(dates: Tuple[date, date, date]) -> str:
+    return "(" + ", ".join(day.isoformat() for day in dates) + ")"
+
+
 def candidate_verdict(
     candidate: str,
     baselines: Sequence[str],
     reports_by_point: Dict[str, Dict[str, EvaluationReport]],
     points: Sequence[str],
     n_windows: int,
+    resample_indices: np.ndarray,
+    calendar: Sequence[date],
+    per_claim_alpha: float = PER_CLAIM_ALPHA,
     failures_by_point: Optional[Dict[str, Dict[str, str]]] = None,
-    rng_seed: int = 0,
 ) -> Dict[str, object]:
     """Verdict for one candidate at one horizon, per M3-A section 9.
 
-    Pure: it reads the first-pass EvaluationReports and never refits. The
-    bootstrap resamples the per-window MAEs already held in those reports.
+    Pure: it reads the first-pass EvaluationReports and never refits.
 
-    Succeeds only if the candidate's macro MAE is strictly lower than every
-    baseline's (ties lose), and the 95% paired bootstrap interval of
-    (candidate - strongest baseline) per-window macro MAE lies entirely below
-    zero. The interval uses 2000 resamples of windows from default_rng(rng_seed).
+    A claim succeeds only if, for EVERY baseline b, the one-sided upper bound of
+    the circular-block-bootstrap distribution of mean(d_w) is below zero, where
+    d_w is the candidate's macro MAE minus b's macro MAE in window w, at the
+    per-claim level (98.75th percentile by default). It also requires the
+    candidate's macro MAE to be strictly lower than every baseline's; the bound
+    already implies this, and the check is kept explicit. No strongest baseline
+    is selected. The resamples are generated by the caller, once per horizon.
+
+    Returns not_comparable, with the reason, if the candidate, a baseline or a
+    point is missing, or if the reports do not pair (window count, dates, finite
+    MAE).
     """
+    if not baselines:
+        raise ValueError("a verdict needs at least one baseline")
+    resample_indices = np.asarray(resample_indices)
+    if resample_indices.ndim != 2 or resample_indices.shape[1] != n_windows:
+        raise ValueError(
+            f"resample_indices must be (resamples, {n_windows}), got {resample_indices.shape}"
+        )
+    if not 0.0 < per_claim_alpha < 1.0:
+        raise ValueError(f"per_claim_alpha must be in (0, 1), got {per_claim_alpha}")
+
     failures_by_point = failures_by_point or {}
     scored = {
         model: _scored_points(model, points, reports_by_point)
@@ -508,64 +659,68 @@ def candidate_verdict(
             "points_declared": len(points),
         }
 
-    cand_mae = macro_mae(candidate, points, reports_by_point)
-    baseline_maes = {bl: macro_mae(bl, points, reports_by_point) for bl in baselines}
-    beats_all = all(cand_mae < bl_mae for bl_mae in baseline_maes.values())
-    strongest_baseline = min(baseline_maes, key=baseline_maes.get)
-    strongest_mae = baseline_maes[strongest_baseline]
-
-    window_candidate_maes = []
-    window_strongest_maes = []
-
-    for window_idx in range(n_windows):
-        window_cand_point_maes = []
-        window_bl_point_maes = []
-
-        for point in common_points:
-            cand_rep = reports_by_point[point][candidate]
-            bl_rep = reports_by_point[point][strongest_baseline]
-
-            if window_idx < len(cand_rep.windows):
-                window_cand_point_maes.append(cand_rep.windows[window_idx].mae)
-            if window_idx < len(bl_rep.windows):
-                window_bl_point_maes.append(bl_rep.windows[window_idx].mae)
-
-        assert len(window_cand_point_maes) == len(window_bl_point_maes), (
-            f"window {window_idx}: mismatched point counts "
-            f"({len(window_cand_point_maes)} vs {len(window_bl_point_maes)})"
-        )
-
-        if window_cand_point_maes:
-            window_candidate_maes.append(np.mean(window_cand_point_maes))
-            window_strongest_maes.append(np.mean(window_bl_point_maes))
-
-    if len(window_candidate_maes) < 2:
+    pairing_problem = _pairing_problem(
+        candidate, baselines, points, reports_by_point, n_windows, calendar
+    )
+    if pairing_problem is not None:
         return {
             "succeeded": False,
-            "beats_all": beats_all,
+            "reason": "not_comparable",
+            "explanation": "the reports do not pair window for window",
+            "pairing": pairing_problem,
+        }
+
+    if n_windows < 2:
+        return {
+            "succeeded": False,
             "reason": "not enough windows for bootstrap",
         }
 
-    diffs = np.array(window_candidate_maes) - np.array(window_strongest_maes)
-    rng = np.random.default_rng(rng_seed)
-    bootstrap_means = []
-    for _ in range(2000):
-        resample = rng.choice(diffs, size=len(diffs), replace=True)
-        bootstrap_means.append(resample.mean())
-
-    ci_lower = float(np.percentile(bootstrap_means, 2.5))
-    ci_upper = float(np.percentile(bootstrap_means, 97.5))
-
-    succeeded = beats_all and ci_upper < 0
-
-    return {
-        "succeeded": succeeded,
-        "beats_all": beats_all,
-        "bootstrap_ci_95": {"lower": ci_lower, "upper": ci_upper},
-        "strongest_baseline": strongest_baseline,
-        "strongest_baseline_mae": strongest_mae,
-        "candidate_mae": cand_mae,
+    cand_windows = _window_macro_maes(candidate, points, reports_by_point, n_windows)
+    cand_mae = float(cand_windows.mean())
+    baseline_windows = {
+        bl: _window_macro_maes(bl, points, reports_by_point, n_windows) for bl in baselines
     }
+    baseline_maes = {bl: float(windows.mean()) for bl, windows in baseline_windows.items()}
+    beats_every_baseline = all(cand_mae < mae for mae in baseline_maes.values())
+
+    bound_percentile = round(100.0 * (1.0 - per_claim_alpha), 6)
+    per_baseline: Dict[str, Dict[str, object]] = {}
+    for baseline_name in baselines:
+        diffs = cand_windows - baseline_windows[baseline_name]
+        bootstrap_means = diffs[resample_indices].mean(axis=1)
+        upper = float(np.percentile(bootstrap_means, bound_percentile))
+        per_baseline[baseline_name] = {
+            "mean_difference": float(diffs.mean()),
+            "upper_bound": upper,
+            "upper_bound_percentile": bound_percentile,
+            "passes": bool(upper < 0.0),
+        }
+
+    succeeded = beats_every_baseline and all(
+        entry["passes"] for entry in per_baseline.values()
+    )
+
+    block = block_length(n_windows)
+    verdict: Dict[str, object] = {
+        "succeeded": bool(succeeded),
+        "beats_every_baseline": bool(beats_every_baseline),
+        "per_baseline": per_baseline,
+        "per_claim_alpha": per_claim_alpha,
+        "candidate_mae": cand_mae,
+        "baseline_maes": baseline_maes,
+        "n_windows": n_windows,
+        "block_length": block,
+        "n_blocks": -(-n_windows // block),
+        "resamples": int(resample_indices.shape[0]),
+    }
+    if n_windows < POWER_NOTE_BELOW_WINDOWS:
+        verdict["power_note"] = (
+            f"{n_windows} windows in {-(-n_windows // block)} blocks: "
+            "a failure here is weak evidence that no effect exists"
+        )
+    return verdict
+
 
 
 def evaluate_archive(
@@ -607,7 +762,7 @@ def evaluate_archive(
         ProvenanceError: git is unavailable, a commit cannot be determined, or
             require_clean_tree is set and the run is not from a clean full clone.
     """
-    horizons = horizons if horizons is not None else [7, 30]
+    horizons = list(horizons) if horizons is not None else list(DECLARED_HORIZONS)
     window_configs = window_configs if window_configs is not None else HORIZONS
     if period_end < period_start:
         raise ValueError(f"period end {period_end} is before period start {period_start}")
@@ -651,6 +806,15 @@ def evaluate_archive(
             "count": len(declared_points),
         },
         "day_count": len(days_set),
+        "family": {
+            "alpha": FAMILY_ALPHA,
+            "claims_declared": DECLARED_FAMILY_SIZE,
+            "claims_in_this_run": len(FROZEN_CANDIDATES) * len(horizons),
+            "per_claim_alpha": PER_CLAIM_ALPHA,
+            "horizons_declared": list(DECLARED_HORIZONS),
+            "horizons_run": horizons,
+            "official": horizons == list(DECLARED_HORIZONS),
+        },
     }
 
     if refusals:
@@ -675,6 +839,8 @@ def evaluate_archive(
 
         n_windows = config["n_windows"]
         n_days = len(days_set)
+        # Generated once per horizon, shared by every claim of that horizon (M3-A §9).
+        resample_indices = circular_block_resamples(n_windows)
 
         train_size = n_days - horizon * n_windows
         if train_size < 1:
@@ -807,6 +973,9 @@ def evaluate_archive(
                 per_point_reports,
                 declared_points,
                 n_windows,
+                resample_indices,
+                days_set,
+                per_claim_alpha=PER_CLAIM_ALPHA,
                 failures_by_point=per_point_failures,
             )
 
@@ -826,6 +995,13 @@ def evaluate_archive(
             "per_point_metrics": per_point_metrics,
             "macro_metrics": macro_metrics,
             "candidate_verdicts": candidate_verdicts,
+            "bootstrap": {
+                "scheme": "circular block",
+                "block_length": block_length(n_windows),
+                "n_blocks": -(-n_windows // block_length(n_windows)),
+                "resamples": BOOTSTRAP_RESAMPLES,
+                "seed": BOOTSTRAP_SEED,
+            },
             "failures": failure_summary,
         }
 

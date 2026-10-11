@@ -29,13 +29,19 @@ from app.services.forecasting.archive_eval import (
     ARCHIVE_PERIOD_END,
     ARCHIVE_PERIOD_START,
     DECLARATION,
+    DECLARED_FAMILY_SIZE,
+    DECLARED_HORIZONS,
     EXPECTED_MANIFEST_DIGEST,
+    FAMILY_ALPHA,
     FROZEN_CANDIDATES,
     HORIZONS,
+    PER_CLAIM_ALPHA,
     RESULT_LABEL,
     TARGET_NAME,
     ProvenanceError,
+    block_length,
     candidate_verdict,
+    circular_block_resamples,
     collect_provenance,
     evaluate_archive,
     load_archive_rows,
@@ -814,12 +820,14 @@ def test_end_to_end_report_on_complete_archive(tmp_path):
     assert set(verdicts) == expected_candidates, f"Verdicts: {verdicts}"
 
     for name, verdict in verdicts.items():
-        assert {"beats_all", "succeeded", "bootstrap_ci_95"} <= set(verdict), (
+        assert {"beats_every_baseline", "succeeded", "per_baseline"} <= set(verdict), (
             f"{name} has no complete verdict: {verdict}"
         )
-        interval = verdict["bootstrap_ci_95"]
-        assert {"lower", "upper"} <= set(interval), f"{name} interval: {interval}"
-        assert interval["lower"] <= interval["upper"], f"{name} interval inverted: {interval}"
+        assert set(verdict["per_baseline"]) == set(ALL_BASELINES), f"{name}: {verdict}"
+        for baseline_name, entry in verdict["per_baseline"].items():
+            assert {"mean_difference", "upper_bound", "passes"} <= set(entry), (
+                f"{name} against {baseline_name}: {entry}"
+            )
 
     second = run_evaluation()
     first_comparable = dict(report)
@@ -901,95 +909,374 @@ def test_constants_match_declaration_document():
         assert f"`{name}`" in section_8, f"frozen candidate {name} is not listed in section 8"
 
 
-# Verdict tests. candidate_verdict reads nothing but the per-window MAE of each
-# first-pass report, so these build EvaluationReports from plain lists of MAEs.
-# Every point carries the same windows, so a model's macro MAE is the mean of
-# its window MAEs, and the chosen numbers fix the expected verdict exactly.
+# Verdict tests (M3-A §9). candidate_verdict reads only the window MAEs and the
+# window positions of each first-pass report, so these build EvaluationReports by
+# hand on a synthetic calendar. Every point carries the same windows unless a test
+# says otherwise, so a model's macro MAE is the mean of its window MAEs.
 VERDICT_POINTS = ["AAA", "BBB"]
+VERDICT_HORIZON = 7
+VERDICT_CALENDAR = [date(2018, 1, 1) + timedelta(days=i) for i in range(4000)]
+NAIVE, SEASONAL, MOVING_AVERAGE, CLIMATOLOGY = [
+    baseline.model_name
+    for baseline in [*default_baselines(season_length=7, window=7), ClimatologyForecast()]
+]
+ALL_BASELINES = [NAIVE, SEASONAL, MOVING_AVERAGE, CLIMATOLOGY]
+CANDIDATE_MAE = 10.0
+
+# Per-window differences (candidate minus baseline) over 24 windows, the h=30 size
+# (L = 3, 8 blocks). Each was found against circular_block_resamples(24) so that a
+# premise holds; every test that uses one asserts that premise itself.
+#   mean -0.42, 95th-percentile bound < 0, 98.75th-percentile bound >= 0
+DIFFS_BONFERRONI = np.array([0.83, -1.67, 1.83, -2.67] * 6)
+#   mean -0.20, 98.75th-percentile bound >= 0
+DIFFS_MOVING_AVERAGE = np.array([1.05, -1.45, 2.05, -2.45] * 6)
 
 
-def _fabricated_report(model: str, window_maes) -> EvaluationReport:
-    """An EvaluationReport whose only field the verdict reads is the per-window mae."""
-    return EvaluationReport(
-        model_name=model,
-        horizon=7,
-        windows=[
-            WindowResult(
-                window=index, train_end=0, test_start=0, test_end=0,
-                mae=float(mae), rmse=0.0, mase=0.0, bias=0.0, interval_coverage=None,
-            )
-            for index, mae in enumerate(window_maes)
-        ],
-    )
+def _report(model: str, window_maes, *, horizon: int = VERDICT_HORIZON, shift=None) -> EvaluationReport:
+    """A report with the given window MAEs. Window k covers the same days in every
+    report, unless shift=(k, days) moves that one window's positions by `days`."""
+    windows = []
+    for index, mae in enumerate(window_maes):
+        train_end = 1000 + horizon * index
+        test_start, test_end = train_end, train_end + horizon
+        if shift is not None and shift[0] == index:
+            train_end, test_start, test_end = (p + shift[1] for p in (train_end, test_start, test_end))
+        windows.append(WindowResult(
+            window=index, train_end=train_end, test_start=test_start, test_end=test_end,
+            mae=float(mae), rmse=0.0, mase=0.0, bias=0.0, interval_coverage=None,
+        ))
+    return EvaluationReport(model_name=model, horizon=horizon, windows=windows)
 
 
-def _verdict_from_fabricated(candidate_maes, baseline_maes: dict) -> dict:
-    reports_by_point = {
+def _reports_by_point(candidate_by_point, baseline_maes) -> dict:
+    """reports_by_point for VERDICT_POINTS. Each point's candidate report is given;
+    each baseline's report (name -> window MAEs) is the same on every point."""
+    return {
         point: {
-            "fabricated_candidate": _fabricated_report("fabricated_candidate", candidate_maes),
-            **{name: _fabricated_report(name, maes) for name, maes in baseline_maes.items()},
+            "fabricated_candidate": candidate_by_point[point],
+            **{name: _report(name, maes) for name, maes in baseline_maes.items()},
         }
         for point in VERDICT_POINTS
     }
+
+
+def _verdict(reports_by_point, baselines, n_windows, *, resample_indices=None,
+             per_claim_alpha=PER_CLAIM_ALPHA) -> dict:
+    if resample_indices is None:
+        resample_indices = circular_block_resamples(n_windows)
     return candidate_verdict(
-        "fabricated_candidate",
-        list(baseline_maes),
-        reports_by_point,
-        VERDICT_POINTS,
-        len(candidate_maes),
+        "fabricated_candidate", list(baselines), reports_by_point, VERDICT_POINTS,
+        n_windows, resample_indices, VERDICT_CALENDAR, per_claim_alpha=per_claim_alpha,
     )
 
 
-def test_verdict_tie_with_strongest_baseline_is_not_a_win():
-    """Candidate macro MAE equals the strongest baseline's exactly: beats_all is False.
+def _verdict_from_fabricated(candidate_maes, baseline_maes, **kwargs) -> dict:
+    candidate = {point: _report("fabricated_candidate", candidate_maes) for point in VERDICT_POINTS}
+    return _verdict(
+        _reports_by_point(candidate, baseline_maes), list(baseline_maes), len(candidate_maes), **kwargs
+    )
 
-    Every window of the candidate equals Climatology's, so each difference is zero
-    and the interval is [0, 0]. The tie fails on beats_all alone.
 
-    Mutation l: `<=` instead of `<` in beats_all makes beats_all True here.
-    """
+def _verdict_for_diffs(diffs_by_baseline: dict, **kwargs) -> dict:
+    """A verdict where the candidate's window MAE is CANDIDATE_MAE and each baseline's
+    window MAE is CANDIDATE_MAE minus the given per-window difference."""
+    n_windows = len(next(iter(diffs_by_baseline.values())))
+    candidate = {
+        point: _report("fabricated_candidate", np.full(n_windows, CANDIDATE_MAE))
+        for point in VERDICT_POINTS
+    }
+    baseline_maes = {
+        name: CANDIDATE_MAE - np.asarray(diffs, dtype=float)
+        for name, diffs in diffs_by_baseline.items()
+    }
+    return _verdict(
+        _reports_by_point(candidate, baseline_maes), list(diffs_by_baseline), n_windows, **kwargs
+    )
+
+
+def _bootstrap_upper(diffs, per_claim_alpha: float = PER_CLAIM_ALPHA) -> float:
+    """The one-sided bound of the block bootstrap of mean(diffs), for a premise check."""
+    diffs = np.asarray(diffs, dtype=float)
+    resamples = circular_block_resamples(len(diffs))
+    return float(np.percentile(diffs[resamples].mean(axis=1), 100.0 * (1.0 - per_claim_alpha)))
+
+
+def test_block_length_is_ceil_cube_root_for_both_declared_sizes():
+    """M3-A §9: L = ceil(n ** (1/3)). h=7 has 104 windows, so L = 5; h=30 has 24, so L = 3.
+    64 is an exact cube whose floating-point cube root is 3.9999999999999996, so the
+    integer rule must give 4 where truncation gives 3.
+
+    Mutation a: int(n ** (1/3)) instead of ceil gives 4 for 104, red on the first assert."""
+    assert block_length(104) == 5
+    assert block_length(24) == 3
+    assert block_length(27) == 3
+    assert block_length(28) == 4
+    assert block_length(64) == 4
+
+
+@pytest.mark.parametrize("n_windows", [104, 24])
+def test_resamples_are_circular_blocks_of_the_declared_length(n_windows):
+    """Each resample is ceil(n / L) block starts, each expanded to L consecutive window
+    indices that wrap modulo n, concatenated and truncated to n. The sequences are
+    rebuilt here from their block starts and compared whole. A block that wraps
+    past the last window must occur, so the wrap is exercised and not only allowed.
+
+    Mutation: no modulo (a block cannot wrap) makes the rebuilt sequences differ."""
+    length = block_length(n_windows)
+    resamples = circular_block_resamples(n_windows)
+    assert resamples.shape == (10_000, n_windows)
+    starts = resamples[:, ::length]
+    assert starts.shape[1] == -(-n_windows // length)
+
+    rebuilt = ((starts[:, :, None] + np.arange(length)) % n_windows).reshape(len(resamples), -1)
+    assert np.array_equal(rebuilt[:, :n_windows], resamples)
+
+    within = np.array([i for i in range(n_windows - 1) if (i + 1) % length != 0])
+    assert np.all((resamples[:, within + 1] - resamples[:, within]) % n_windows == 1)
+    wraps = (resamples[:, within] == n_windows - 1) & (resamples[:, within + 1] == 0)
+    assert wraps.any(), "no resample contains a block that wraps past the last window"
+
+
+def test_one_resample_set_per_horizon_is_shared_by_every_claim(tmp_path):
+    """The resampled index sequences are generated once per horizon and the same array
+    is handed to every candidate's verdict. The fixture has one horizon and two
+    candidates, so the generator runs once and both verdicts receive the same object.
+
+    Mutation: generating the sequences inside the claim loop gives two generator calls
+    and two different objects, red on both asserts."""
+    archive_dir = tmp_path / "archive"
+    _write_complete_archive(archive_dir)
+
+    with mock.patch.object(
+        archive_eval, "circular_block_resamples", wraps=circular_block_resamples
+    ) as generator, mock.patch.object(
+        archive_eval, "candidate_verdict", wraps=candidate_verdict
+    ) as verdict_spy:
+        report = _evaluate_fixture(archive_dir, n_windows=2)
+
+    assert not report.get("refused"), f"Evaluation refused: {report.get('refusal_reasons')}"
+    assert generator.call_count == 1
+    shared = [call.args[5] for call in verdict_spy.call_args_list]
+    assert len(shared) == len(FROZEN_CANDIDATES)
+    assert all(array is shared[0] for array in shared)
+
+
+def test_claim_beating_three_baselines_but_not_the_fourth_is_not_success():
+    """Candidate MAE 10.0. Naive, SeasonalNaive and Climatology are beaten on every
+    window. MovingAverage is beaten by 0.20 in the mean, but the candidate's advantage
+    is uneven across windows, so its 98.75th-percentile bound is above zero.
+
+    Climatology is the strongest baseline by macro MAE, and the candidate beats it on
+    every window. A rule that tests only the strongest baseline therefore succeeds.
+    Every-baseline does not.
+
+    A tie or loss against the strongest baseline cannot make this fixture, because the
+    strongest baseline has the lowest MAE of all, so every rule would fail it.
+
+    Mutation: compare only the strongest baseline -> succeeded becomes True, red."""
+    diffs = {
+        NAIVE: np.full(24, -4.0),
+        SEASONAL: np.full(24, -3.0),
+        MOVING_AVERAGE: DIFFS_MOVING_AVERAGE,
+        CLIMATOLOGY: np.full(24, -0.1),
+    }
+    assert all(values.mean() < 0 for values in diffs.values()), "candidate must beat every baseline in the mean"
+    assert _bootstrap_upper(diffs[CLIMATOLOGY]) < 0, "premise: the strongest baseline passes"
+    assert _bootstrap_upper(diffs[MOVING_AVERAGE]) >= 0, "premise: MovingAverage fails"
+    assert max(diffs, key=lambda name: diffs[name].mean()) == CLIMATOLOGY
+
+    verdict = _verdict_for_diffs(diffs)
+
+    assert verdict["beats_every_baseline"] is True
+    assert verdict["per_baseline"][CLIMATOLOGY]["passes"] is True
+    assert verdict["per_baseline"][MOVING_AVERAGE]["passes"] is False
+    assert verdict["succeeded"] is False
+
+
+def test_claim_is_tested_at_98_75_percent_not_95():
+    """Bonferroni over the family of 4 claims: each claim is one-sided at 0.0125, so the
+    bound is the 98.75th percentile. The fixture's 95th-percentile bound is below zero
+    and its 98.75th is not, so a claim tested at 95 would succeed and this one must not.
+
+    Mutation: PER_CLAIM_ALPHA = FAMILY_ALPHA (0.05) makes the bound the 95th percentile,
+    which passes; the constant assertion and succeeded both go red."""
+    assert FAMILY_ALPHA == 0.05
+    assert DECLARED_HORIZONS == (7, 30)
+    assert DECLARED_FAMILY_SIZE == len(FROZEN_CANDIDATES) * len(DECLARED_HORIZONS) == 4
+    assert PER_CLAIM_ALPHA == 0.0125
+
+    diffs = DIFFS_BONFERRONI
+    assert diffs.mean() < 0
+    upper_95 = _bootstrap_upper(diffs, per_claim_alpha=0.05)
+    upper_98_75 = _bootstrap_upper(diffs, per_claim_alpha=0.0125)
+    assert upper_95 < 0 <= upper_98_75, f"premise: 95th {upper_95}, 98.75th {upper_98_75}"
+
+    verdict = _verdict_for_diffs({NAIVE: diffs})
+
+    assert verdict["per_claim_alpha"] == 0.0125
+    assert verdict["per_baseline"][NAIVE]["upper_bound"] == pytest.approx(upper_98_75)
+    assert verdict["per_baseline"][NAIVE]["passes"] is False
+    assert verdict["succeeded"] is False
+
+
+def test_windows_are_paired_by_date_not_by_count():
+    """Four windows everywhere, but the candidate's window 2 on BBB sits one day later
+    than on AAA. The claim is not_comparable, and the reason names the candidate, the
+    point and the window. Control: the unshifted reports pair and get a verdict.
+
+    Mutation: pairing checked by counts only -> a verdict is computed, red."""
+    maes = [4.0, 5.0, 6.0, 7.0]
+    baselines = {NAIVE: [9.0, 10.0, 11.0, 12.0], CLIMATOLOGY: [5.0, 6.0, 7.0, 8.0]}
+
+    control = _verdict(
+        _reports_by_point({p: _report("fabricated_candidate", maes) for p in VERDICT_POINTS}, baselines),
+        [NAIVE, CLIMATOLOGY], 4,
+    )
+    assert control.get("reason") != "not_comparable", f"control refused: {control}"
+
+    shifted = {
+        "AAA": _report("fabricated_candidate", maes),
+        "BBB": _report("fabricated_candidate", maes, shift=(2, 1)),
+    }
+    verdict = _verdict(_reports_by_point(shifted, baselines), [NAIVE, CLIMATOLOGY], 4)
+
+    assert verdict["succeeded"] is False
+    assert verdict.get("reason") == "not_comparable", verdict
+    assert "fabricated_candidate/BBB window 2" in verdict.get("pairing", ""), verdict
+    assert "fabricated_candidate/AAA window 2" in verdict["pairing"]
+
+
+def test_non_finite_window_mae_is_not_comparable():
+    """One window MAE of the candidate on AAA is NaN. The claim is not_comparable,
+    and the reason names that model, point and window, and says it is non-finite.
+    Control: the same reports with a finite value get a verdict.
+
+    Mutation: no finiteness check -> a verdict is computed with NaN, red."""
+    baselines = {NAIVE: [9.0, 10.0, 11.0, 12.0], CLIMATOLOGY: [5.0, 6.0, 7.0, 8.0]}
+
+    control = _verdict(
+        _reports_by_point({p: _report("fabricated_candidate", [4.0, 5.0, 6.0, 7.0]) for p in VERDICT_POINTS}, baselines),
+        [NAIVE, CLIMATOLOGY], 4,
+    )
+    assert control.get("reason") != "not_comparable", f"control refused: {control}"
+
+    poisoned = {
+        "AAA": _report("fabricated_candidate", [4.0, float("nan"), 6.0, 7.0]),
+        "BBB": _report("fabricated_candidate", [4.0, 5.0, 6.0, 7.0]),
+    }
+    verdict = _verdict(_reports_by_point(poisoned, baselines), [NAIVE, CLIMATOLOGY], 4)
+
+    assert verdict["succeeded"] is False
+    assert verdict.get("reason") == "not_comparable", verdict
+    assert "fabricated_candidate/AAA window 1" in verdict.get("pairing", ""), verdict
+    assert "non-finite" in verdict.get("pairing", ""), verdict
+
+
+def test_clear_win_over_every_baseline_succeeds():
+    """The candidate beats each of the four baselines in every window, by 4, 3, 2 and 1.
+    Every bound is below zero, so the claim succeeds."""
+    diffs = {
+        NAIVE: np.full(24, -4.0),
+        SEASONAL: np.full(24, -3.0),
+        MOVING_AVERAGE: np.full(24, -2.0),
+        CLIMATOLOGY: np.full(24, -1.0),
+    }
+    verdict = _verdict_for_diffs(diffs)
+
+    assert verdict["beats_every_baseline"] is True
+    assert verdict["succeeded"] is True
+    for name in ALL_BASELINES:
+        entry = verdict["per_baseline"][name]
+        assert entry["passes"] is True, f"{name}: {entry}"
+        assert entry["upper_bound"] < 0.0, f"{name}: {entry}"
+        assert entry["mean_difference"] == pytest.approx(diffs[name].mean())
+
+
+def test_power_note_below_thirty_windows_and_absent_at_104():
+    """M3-A §9, power: a claim with fewer than 30 windows carries the note. At 24 windows
+    that is 8 blocks. At 104 windows there is no note.
+
+    Mutation: power_note always attached -> the 104-window verdict carries it, red."""
+    short = _verdict_for_diffs({NAIVE: np.full(24, -1.0)})
+    assert short["power_note"] == (
+        "24 windows in 8 blocks: a failure here is weak evidence that no effect exists"
+    )
+
+    long_run = _verdict_for_diffs({NAIVE: np.full(104, -1.0)})
+    assert "power_note" not in long_run
+    assert long_run["n_blocks"] == 21
+    assert long_run["block_length"] == 5
+
+
+def test_tie_with_strongest_baseline_is_not_a_win():
+    """Candidate and Climatology have identical windows, so every difference is zero.
+    The mean difference is zero, the bound is 0.0, and the bound is not below zero.
+    Ties lose on beats_every_baseline and on the strict bound."""
     verdict = _verdict_from_fabricated(
         [3.0, 4.0, 5.0],
-        {"Naive": [6.0, 7.0, 8.0], "Climatology": [3.0, 4.0, 5.0]},
+        {NAIVE: [6.0, 7.0, 8.0], CLIMATOLOGY: [3.0, 4.0, 5.0]},
     )
 
-    assert verdict["strongest_baseline"] == "Climatology"
-    assert verdict["candidate_mae"] == verdict["strongest_baseline_mae"]
-    assert verdict["bootstrap_ci_95"]["upper"] == 0.0
-    assert verdict["beats_all"] is False
+    tie = verdict["per_baseline"][CLIMATOLOGY]
+    assert tie["mean_difference"] == 0.0
+    assert tie["upper_bound"] == 0.0
+    assert tie["passes"] is False
+    assert verdict["beats_every_baseline"] is False
     assert verdict["succeeded"] is False
 
 
-def test_beats_every_baseline_but_interval_crossing_zero_is_not_success():
-    """Macro MAE is lower than every baseline, but the per-window differences are mixed:
-    three windows better by 1.0, one worse by 0.5. The 95% interval runs from -1.0 up
-    to a bound above zero, so the candidate beats_all and does not succeed.
+def test_beats_every_baseline_but_bound_crossing_zero_is_not_success():
+    """The candidate is lower than both baselines in macro MAE, but MovingAverage's
+    per-window advantage is uneven, so its bound is above zero. The claim does not
+    succeed, though one baseline passes.
 
-    Mutation j: `succeeded = beats_all` ignores the interval and makes succeeded True.
-    """
-    verdict = _verdict_from_fabricated(
-        [4.0, 4.0, 4.0, 5.5],
-        {"Naive": [9.0, 9.0, 9.0, 9.0], "Climatology": [5.0, 5.0, 5.0, 5.0]},
-    )
+    Mutation j: succeeded = beats_every_baseline ignores the bounds, red."""
+    diffs = {NAIVE: np.full(24, -4.0), MOVING_AVERAGE: DIFFS_MOVING_AVERAGE}
+    assert _bootstrap_upper(DIFFS_MOVING_AVERAGE) >= 0, "premise"
 
-    assert verdict["candidate_mae"] < verdict["strongest_baseline_mae"]
-    assert verdict["beats_all"] is True
-    assert verdict["bootstrap_ci_95"]["lower"] < 0.0
-    assert verdict["bootstrap_ci_95"]["upper"] >= 0.0
+    verdict = _verdict_for_diffs(diffs)
+
+    assert verdict["beats_every_baseline"] is True
+    assert verdict["per_baseline"][NAIVE]["passes"] is True
+    assert verdict["per_baseline"][MOVING_AVERAGE]["passes"] is False
     assert verdict["succeeded"] is False
 
 
-def test_clear_win_in_every_window_succeeds():
-    """Every window better than the strongest baseline by the same 1.0. The interval
-    is [-1.0, -1.0], entirely below zero, so the candidate succeeds."""
-    verdict = _verdict_from_fabricated(
-        [4.0, 5.0, 6.0, 7.0],
-        {"Naive": [9.0, 10.0, 11.0, 12.0], "Climatology": [5.0, 6.0, 7.0, 8.0]},
-    )
+def test_family_is_declared_horizons_and_bonferroni_alpha(tmp_path):
+    """The family is FROZEN_CANDIDATES x the declared horizons, 2 x 2 = 4. The report
+    stores both that number and the number of claims in the run, so a partial run
+    cannot be read as the family. The default run is official; a fixture run with
+    horizon 2 is not, and still uses the declared family size for its alpha.
 
-    assert verdict["beats_all"] is True
-    assert verdict["bootstrap_ci_95"]["upper"] < 0.0
-    assert verdict["succeeded"] is True
+    The default run is refused here, on purpose: the incomplete archive stops
+    evaluation before any horizon runs, and the family record still appears."""
+    archive_dir = tmp_path / "archive"
+    _write_two_point_archive(archive_dir)
+
+    refused = evaluate_archive(
+        archive_dir,
+        expected_manifest_digest=manifest_digest(archive_dir),
+        require_clean_tree=False,
+    )
+    assert refused["refused"] is True
+    assert refused["family"] == {
+        "alpha": 0.05,
+        "claims_declared": 4,
+        "claims_in_this_run": 4,
+        "per_claim_alpha": 0.0125,
+        "horizons_declared": [7, 30],
+        "horizons_run": [7, 30],
+        "official": True,
+    }
+
+    partial_dir = tmp_path / "complete"
+    _write_complete_archive(partial_dir)
+    partial = _evaluate_fixture(partial_dir, n_windows=2)
+    assert partial["family"]["claims_declared"] == 4
+    assert partial["family"]["claims_in_this_run"] == 2
+    assert partial["family"]["per_claim_alpha"] == 0.0125
+    assert partial["family"]["official"] is False
+
 
 
 def test_bootstrap_reuses_first_pass_reports_and_never_refits(tmp_path):
@@ -1018,7 +1305,7 @@ def test_bootstrap_reuses_first_pass_reports_and_never_refits(tmp_path):
     verdicts = report["results_by_horizon"][FIXTURE_HORIZON]["candidate_verdicts"]
     assert set(verdicts) == set(FROZEN_CANDIDATES)
     for name, verdict in verdicts.items():
-        assert "bootstrap_ci_95" in verdict, f"{name} did not reach the bootstrap: {verdict}"
+        assert "per_baseline" in verdict, f"{name} did not reach the bootstrap: {verdict}"
 
     expected_calls = (len(baselines) + len(FROZEN_CANDIDATES)) * len(points) * len(horizons)
     assert spy.call_count == expected_calls, (
