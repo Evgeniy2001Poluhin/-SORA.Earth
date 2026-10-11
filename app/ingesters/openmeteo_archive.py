@@ -59,6 +59,25 @@ RETRY_BACKOFF_BASE = 2
 RATE_LIMIT_RETRY_WAIT = 60  # Initial wait on HTTP 429
 
 
+def end_of_day(day: datetime) -> datetime:
+    """The last second of the day ``day`` falls on, 23:59:59, same tzinfo.
+
+    Range and chunk ends are inclusive. A bound written as midnight keeps
+    00:00 of its day and drops every later hour, so every end used for
+    filtering goes through this.
+    """
+    return day.replace(hour=23, minute=59, second=59)
+
+
+def _within_range(event_time: datetime, start: Optional[datetime], end: Optional[datetime]) -> bool:
+    """Whether event_time lies in the inclusive range [start, end]. None is unbounded."""
+    if start is not None and event_time < start:
+        return False
+    if end is not None and event_time > end:
+        return False
+    return True
+
+
 def _build_revision_tag(fetch_or_vintage_date: datetime) -> str:
     """Build source_revision tag for archive fetch.
 
@@ -260,9 +279,7 @@ def _parse_weather_response(
                 log.warning(f"[weather_archive] {region_code}: invalid time {time_str}")
                 continue
 
-            if chunk_start and event_time < chunk_start:
-                continue
-            if chunk_end and event_time > chunk_end:
+            if not _within_range(event_time, chunk_start, chunk_end):
                 continue
 
             signals.append(Signal(
@@ -343,9 +360,7 @@ def _parse_air_quality_response(
                 log.warning(f"[air_quality_archive] {region_code}: invalid time {time_str}")
                 continue
 
-            if chunk_start and event_time < chunk_start:
-                continue
-            if chunk_end and event_time > chunk_end:
+            if not _within_range(event_time, chunk_start, chunk_end):
                 continue
 
             signals.append(Signal(
@@ -677,7 +692,7 @@ def fetch_weather_for_point_year(
     else:
         # API fetch for this year
         year_start = max(chunk_start, datetime(year, 1, 1, tzinfo=timezone.utc))
-        year_end = min(chunk_end, datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc))
+        year_end = min(chunk_end, end_of_day(datetime(year, 12, 31, tzinfo=timezone.utc)))
         
         start_str = year_start.strftime("%Y-%m-%d")
         end_str = year_end.strftime("%Y-%m-%d")
@@ -756,7 +771,7 @@ def fetch_air_quality_for_point_year(
     else:
         # API fetch for this year
         year_start = max(chunk_start, datetime(year, 1, 1, tzinfo=timezone.utc))
-        year_end = min(chunk_end, datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc))
+        year_end = min(chunk_end, end_of_day(datetime(year, 12, 31, tzinfo=timezone.utc)))
         
         start_str = year_start.strftime("%Y-%m-%d")
         end_str = year_end.strftime("%Y-%m-%d")

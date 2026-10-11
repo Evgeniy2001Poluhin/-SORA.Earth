@@ -66,6 +66,7 @@ from app.ingesters.openmeteo_archive import (
     fetch_weather_for_point_year,
     fetch_air_quality_for_point_year,
     compute_archive_hash,
+    end_of_day,
     REGION_CAPITALS,
     AIR_QUALITY_ARCHIVE_START,
 )
@@ -159,7 +160,7 @@ def split_into_year_chunks(
 
     while True:
         chunk_start = max(start, datetime(current_year, 1, 1, tzinfo=timezone.utc))
-        year_end = datetime(current_year, 12, 31, tzinfo=timezone.utc)
+        year_end = end_of_day(datetime(current_year, 12, 31, tzinfo=timezone.utc))
         chunk_end = min(end, year_end)
 
         if chunk_start > end:
@@ -272,8 +273,7 @@ def main(argv=None) -> int:
 
     try:
         start_date = parse_date(args.start)
-        end_date = parse_date(args.end)
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+        end_date = end_of_day(parse_date(args.end))
         validate_date_range(start_date, end_date)
     except ValueError as e:
         log.error(str(e))
@@ -352,7 +352,7 @@ def main(argv=None) -> int:
         for region_code, lat, lon in selected_points:
             for year in range(chunk_start.year, chunk_end.year + 1):
                 year_start = max(chunk_start, datetime(year, 1, 1, tzinfo=timezone.utc))
-                year_end = min(chunk_end, datetime(year, 12, 31, tzinfo=timezone.utc))
+                year_end = min(chunk_end, end_of_day(datetime(year, 12, 31, tzinfo=timezone.utc)))
 
                 if year_start > chunk_end or year_end < chunk_start:
                     continue

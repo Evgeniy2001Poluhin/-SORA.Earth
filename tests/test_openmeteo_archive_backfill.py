@@ -20,7 +20,8 @@ import json
 import os
 import pytest
 import tempfile
-from datetime import datetime, timezone
+from collections import defaultdict
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -1398,3 +1399,203 @@ def test_script_runs_as_subprocess_from_repo_root():
     assert "--from-dir" in usage, "Usage must mention --from-dir"
     assert "--vintage" in usage, "Usage must mention --vintage"
     assert "--points" in usage, "Usage must mention --points"
+
+
+# ==============================================================================
+# Range filtering: every hour of the requested range, once per variable
+# ==============================================================================
+
+def _write_full_year_archive(cache_dir: Path, region_code: str, year: int) -> None:
+    """Write weather/<region>_<year>.json.gz holding every hour of the year."""
+    weather_dir = cache_dir / "weather"
+    weather_dir.mkdir(parents=True, exist_ok=True)
+
+    times = []
+    day = date(year, 1, 1)
+    while day.year == year:
+        for hour in range(24):
+            times.append(f"{day.isoformat()}T{hour:02d}:00")
+        day += timedelta(days=1)
+
+    hourly = {"time": times}
+    for var in WEATHER_VARIABLES:
+        hourly[var] = [1.0] * len(times)
+
+    with gzip.open(weather_dir / f"{region_code}_{year}.json.gz", "wt", encoding="utf-8") as f:
+        json.dump({"hourly": hourly}, f)
+
+
+def _hours_between(first_day: str, last_day: str) -> list:
+    """Every whole UTC hour from 00:00 on first_day to 23:00 on last_day, inclusive."""
+    day = date.fromisoformat(first_day)
+    last = date.fromisoformat(last_day)
+    hours = []
+    while day <= last:
+        for hour in range(24):
+            hours.append(datetime(day.year, day.month, day.day, hour, tzinfo=timezone.utc))
+        day += timedelta(days=1)
+    return hours
+
+
+def _record_weather_point_year_signals(monkeypatch) -> list:
+    """Wrap the script's per-point-year fetch; return the list its signals are appended to."""
+    from scripts import backfill_openmeteo_archive as script
+
+    original = script.fetch_weather_for_point_year
+    recorded = []
+
+    def spy(*args, **kwargs):
+        signals, stats = original(*args, **kwargs)
+        recorded.extend(signals)
+        return signals, stats
+
+    monkeypatch.setattr(script, "fetch_weather_for_point_year", spy)
+    return recorded
+
+
+@pytest.mark.parametrize(
+    "start, end, expected_hours",
+    [
+        pytest.param("2020-12-30", "2021-01-02", 4 * 24, id="across-one-new-year"),
+        pytest.param("2020-01-01", "2021-12-31", (366 + 365) * 24, id="two-full-years"),
+    ],
+)
+def test_dry_run_keeps_every_hour_of_the_requested_range(tmp_path, monkeypatch, start, end, expected_hours):
+    """Each variable gets exactly the hours of the range, including 31 December.
+
+    Year chunks used to end at midnight on 31 December, so the chunk filter
+    dropped 01:00-23:00 of that day at every year boundary.
+    """
+    from scripts.backfill_openmeteo_archive import main
+
+    cache_dir = tmp_path / "archive"
+    _write_full_year_archive(cache_dir, "DEU", 2020)
+    _write_full_year_archive(cache_dir, "DEU", 2021)
+    recorded = _record_weather_point_year_signals(monkeypatch)
+
+    exit_code = main([
+        "--database-url", f"sqlite:///{tmp_path / 'unused.db'}",
+        "--start", start,
+        "--end", end,
+        "--kind", "weather",
+        "--dry-run",
+        "--from-dir", str(cache_dir),
+        "--vintage", "2026-10-11",
+        "--points", "DEU",
+    ])
+
+    assert exit_code == 0
+    expected = _hours_between(start, end)
+
+    per_metric = defaultdict(list)
+    for signal in recorded:
+        per_metric[signal.metric].append(signal.observed_at)
+
+    assert len(per_metric) == len(WEATHER_VARIABLES)
+    for metric, times in sorted(per_metric.items()):
+        assert len(times) == expected_hours, f"{metric}: {len(times)} hours, expected {expected_hours}"
+        assert sorted(times) == expected, f"{metric}: hours differ from the requested range"
+
+
+def test_one_month_range_cuts_a_full_year_file_to_that_month(tmp_path, monkeypatch):
+    """A full-year file narrowed to June yields exactly June and nothing outside it."""
+    from scripts.backfill_openmeteo_archive import main
+
+    cache_dir = tmp_path / "archive"
+    _write_full_year_archive(cache_dir, "DEU", 2021)
+    recorded = _record_weather_point_year_signals(monkeypatch)
+
+    exit_code = main([
+        "--database-url", f"sqlite:///{tmp_path / 'unused.db'}",
+        "--start", "2021-06-01",
+        "--end", "2021-06-30",
+        "--kind", "weather",
+        "--dry-run",
+        "--from-dir", str(cache_dir),
+        "--vintage", "2026-10-11",
+        "--points", "DEU",
+    ])
+
+    assert exit_code == 0
+    expected = _hours_between("2021-06-01", "2021-06-30")
+
+    per_metric = defaultdict(list)
+    for signal in recorded:
+        per_metric[signal.metric].append(signal.observed_at)
+
+    assert len(per_metric) == len(WEATHER_VARIABLES)
+    for metric, times in sorted(per_metric.items()):
+        assert len(times) == 30 * 24, f"{metric}: {len(times)} hours, expected {30 * 24}"
+        assert sorted(times) == expected, f"{metric}: rows outside June 2021 or missing June hours"
+
+
+def test_refusal_names_the_app_database_and_never_connects(tmp_path, monkeypatch, caplog):
+    """A --database-url naming the app's own database is refused before any connection is opened."""
+    from scripts.backfill_openmeteo_archive import main
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://sora:app-secret@db.internal:5432/sora_earth")
+    cache_dir = tmp_path / "empty_archive"
+    cache_dir.mkdir()
+
+    with patch("scripts.backfill_openmeteo_archive.create_engine") as create_engine_mock:
+        try:
+            exit_code = main([
+                "--database-url", "postgresql://sora:archive-secret@db.internal:5432/sora_earth",
+                "--start", "2024-01-15",
+                "--end", "2024-01-15",
+                "--kind", "weather",
+                "--from-dir", str(cache_dir),
+                "--vintage", "2026-10-11",
+                "--points", "DEU",
+            ])
+        except SystemExit as refusal:
+            exit_code = refusal.code
+
+    assert create_engine_mock.call_count == 0, "the app database must not be connected to"
+    assert exit_code == 1
+    assert "REFUSED" in caplog.text
+    assert "sora_earth" in caplog.text
+
+
+def test_session_argument_is_the_only_database_written(tmp_path, monkeypatch):
+    """persist_environmental_observations writes to the session it is given, not the app database."""
+    from app.ingesters import persist as persist_module
+    from app.ingesters.persist import persist_environmental_observations
+
+    archive_engine = create_engine(f"sqlite:///{tmp_path / 'archive.db'}")
+    EnvironmentalObservation.__table__.create(bind=archive_engine, checkfirst=True)
+
+    app_engine = create_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    EnvironmentalObservation.__table__.create(bind=app_engine, checkfirst=True)
+    monkeypatch.setattr(persist_module, "SessionLocal", sessionmaker(bind=app_engine))
+
+    signals = [
+        Signal(
+            region_code="DEU",
+            source="openmeteo_archive",
+            metric="temperature",
+            value=15.0 + hour,
+            unit="celsius",
+            observed_at=datetime(2021, 6, 1, hour, tzinfo=timezone.utc),
+            temporal_kind="observed",
+            source_revision="archive-fetched-2026-10-11",
+            metadata={"latitude": 52.52, "longitude": 13.41},
+        )
+        for hour in range(3)
+    ]
+
+    session = sessionmaker(bind=archive_engine)()
+    try:
+        result = persist_environmental_observations(signals, "openmeteo_archive", session=session)
+    finally:
+        session.close()
+
+    assert result.inserted == 3
+
+    with archive_engine.connect() as conn:
+        archive_rows = conn.execute(select(EnvironmentalObservation.id)).fetchall()
+    with app_engine.connect() as conn:
+        app_rows = conn.execute(select(EnvironmentalObservation.id)).fetchall()
+
+    assert len(archive_rows) == 3, "rows must land in the session's database"
+    assert len(app_rows) == 0, "no rows may land in the app database"
