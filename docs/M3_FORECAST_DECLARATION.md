@@ -100,10 +100,12 @@ in the header, and not derived from the data afterwards.
 
 Until this file is merged, accumulation is data and not a milestone.
 
-> **Superseded by Amendments 1.1 and 1.2.** That clock started 2026-08-14 and was
-> voided on 2026-09-02 when the observations were lost. The clock now running
-> started **2026-09-03**, measured, and the rule it was measured by was fixed in
-> advance by Amendment 1.1. The paragraph above is left as declared because the
+> **Superseded by Amendments 1.1, 1.2 and 1.4.** That clock started 2026-08-14
+> and was voided on 2026-09-02 when the observations were lost. Its successor
+> started 2026-09-03 and was voided by the second loss.
+>
+> The clock now running started **2026-10-11** (Amendment 1.4). Both restarts
+> were measured, by the rule Amendment 1.1 fixed in advance. The paragraph above is left as declared because the
 > principle it states -- a start is fixed beforehand, never derived from the data
 > afterwards -- is what made the restart legitimate rather than a choice.
 
