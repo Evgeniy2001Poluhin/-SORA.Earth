@@ -486,6 +486,17 @@ def _complete_payloads() -> dict:
     return payloads
 
 
+def _declared_file(times: list, temps: list) -> dict:
+    """One weather file as the archive writes it: units, zone and offset declared as M3-A
+    §3 assumes them (°C, iso8601, GMT, offset 0), with naive hourly timestamps."""
+    return {
+        "hourly_units": {"time": "iso8601", "temperature_2m": "°C"},
+        "timezone": "GMT",
+        "utc_offset_seconds": 0,
+        "hourly": {"time": times, "temperature_2m": temps},
+    }
+
+
 def _write_payloads(archive_dir: Path, payloads: dict) -> None:
     """Write (times, temperatures) payloads as weather/<POINT>_<YEAR>.json.gz files."""
     weather_dir = archive_dir / "weather"
@@ -493,7 +504,7 @@ def _write_payloads(archive_dir: Path, payloads: dict) -> None:
     for (point, year), (times, temps) in payloads.items():
         file_path = weather_dir / f"{point}_{year}.json.gz"
         with gzip.open(file_path, "wt", encoding="utf-8", compresslevel=1) as f:
-            json.dump({"hourly": {"time": times, "temperature_2m": temps}}, f)
+            json.dump(_declared_file(times, temps), f)
 
 
 def _write_complete_archive(archive_dir: Path) -> list[str]:
@@ -789,7 +800,7 @@ def _write_two_point_archive(archive_dir: Path) -> None:
                     times.append(dt.strftime("%Y-%m-%dT%H:%M"))
                     temps.append(5.0 + index + np.sin(day / 7) * 3 + hour / 24)
 
-            hourly_data = {"hourly": {"time": times, "temperature_2m": temps}}
+            hourly_data = _declared_file(times, temps)
             file_path = weather_dir / f"{point}_{year}.json.gz"
             with gzip.open(file_path, "wt", encoding="utf-8") as f:
                 json.dump(hourly_data, f)
@@ -1593,6 +1604,156 @@ def test_half_past_timestamp_is_refused(tmp_path):
         "first_few": ["DEU 2019-03-05T07:30"],
     }
     assert spy.call_count == 0
+
+
+def _edit_file(archive_dir: Path, point: str, year: int, edit) -> None:
+    """Rewrite one weather file after edit() has changed its JSON, to make a file that
+    declares something other than the archive does."""
+    file_path = archive_dir / "weather" / f"{point}_{year}.json.gz"
+    with gzip.open(file_path, "rt", encoding="utf-8") as f:
+        payload = json.load(f)
+    edit(payload)
+    with gzip.open(file_path, "wt", encoding="utf-8") as f:
+        json.dump(payload, f)
+
+
+def test_fahrenheit_file_is_refused_and_named(tmp_path):
+    """DEU 2019 declares °F. Its values would be read as °C, so the run is refused before
+    any fit, and the refusal names the file, the field and the value found.
+
+    Mutation: drop the hourly_units.temperature_2m check.
+    """
+    archive_dir = tmp_path / "archive"
+    _write_complete_archive(archive_dir)
+    _edit_file(archive_dir, "DEU", 2019, lambda p: p["hourly_units"].update(temperature_2m="°F"))
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    reasons = report["refusal_reasons"]
+    assert set(reasons) == {"undeclared_fields"}, sorted(reasons)
+    assert reasons["undeclared_fields"] == {
+        "count": 1,
+        "first_few": ["DEU_2019.json.gz: hourly_units.temperature_2m = '°F', expected '°C'"],
+    }
+    assert "results_by_horizon" not in report
+    assert spy.call_count == 0, f"{spy.call_count} fits ran on a refused archive"
+
+
+def test_moscow_time_file_is_refused(tmp_path):
+    """RU-MOW 2019 declares Europe/Moscow at offset 10800, with naive timestamps. Read as
+    UTC, every value would sit three hours off, so the file is refused on its zone and
+    its offset, and nothing is fitted.
+
+    Mutation: drop the timezone check.
+    """
+    archive_dir = tmp_path / "archive"
+    _write_complete_archive(archive_dir)
+
+    def declare_moscow(payload):
+        payload["timezone"] = "Europe/Moscow"
+        payload["utc_offset_seconds"] = 10800
+
+    _edit_file(archive_dir, "RU-MOW", 2019, declare_moscow)
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    reasons = report["refusal_reasons"]
+    assert set(reasons) == {"undeclared_fields"}, sorted(reasons)
+    assert reasons["undeclared_fields"] == {
+        "count": 2,
+        "first_few": [
+            "RU-MOW_2019.json.gz: timezone = 'Europe/Moscow', expected 'GMT' or 'UTC'",
+            "RU-MOW_2019.json.gz: utc_offset_seconds = 10800, expected 0",
+        ],
+    }
+    assert spy.call_count == 0, f"{spy.call_count} fits ran on a refused archive"
+
+
+def test_offset_timestamp_is_refused_and_never_read_as_utc(tmp_path):
+    """DEU 2018 declares GMT at offset 0, but its first hour reads "2018-01-01T00:00+03:00".
+    Read as UTC that is the 00:00 UTC hour, which the old parser accepted without a
+    complaint. It is refused as zoned, and it contributes no UTC row.
+
+    Mutation: read a timestamp that carries an offset as UTC.
+    """
+    archive_dir = tmp_path / "archive"
+    _write_complete_archive(archive_dir)
+
+    def offset_first_hour(payload):
+        payload["hourly"]["time"][0] = "2018-01-01T00:00+03:00"
+
+    _edit_file(archive_dir, "DEU", 2018, offset_first_hour)
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    reasons = report["refusal_reasons"]
+    assert set(reasons) == {"zoned_timestamps"}, sorted(reasons)
+    assert reasons["zoned_timestamps"] == {
+        "count": 1,
+        "first_few": ["DEU_2018.json.gz: '2018-01-01T00:00+03:00'"],
+    }
+    utc_hour = datetime(2018, 1, 1, 0, tzinfo=timezone.utc)
+    rows = load_archive_rows(archive_dir, FIXTURE_START, FIXTURE_END)
+    assert not [row for row in rows if row[0] == "DEU" and row[1] == utc_hour]
+    assert spy.call_count == 0, f"{spy.call_count} fits ran on a refused archive"
+
+
+def test_z_suffix_is_refused_and_never_read_as_utc(tmp_path):
+    """DEU 2019 writes "2019-03-05T07:00Z" where the grid has "2019-03-05T07:00". The Z
+    names UTC, but the archive's form is naive, so the timestamp is refused as zoned
+    rather than accepted as the hour it spells.
+
+    Mutation: strip a trailing Z and accept the rest as naive.
+    """
+    archive_dir = tmp_path / "archive"
+    _write_complete_archive(archive_dir)
+
+    def zulu_hour(payload):
+        times = payload["hourly"]["time"]
+        times[times.index("2019-03-05T07:00")] = "2019-03-05T07:00Z"
+
+    _edit_file(archive_dir, "DEU", 2019, zulu_hour)
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    reasons = report["refusal_reasons"]
+    assert set(reasons) == {"zoned_timestamps"}, sorted(reasons)
+    assert reasons["zoned_timestamps"]["first_few"] == ["DEU_2019.json.gz: '2019-03-05T07:00Z'"]
+    assert spy.call_count == 0, f"{spy.call_count} fits ran on a refused archive"
+
+
+def test_file_without_hourly_units_is_refused(tmp_path):
+    """DEU 2019 has no hourly_units at all. A file that does not say it is in °C is not
+    taken to be, so the run is refused, and the refusal names both unit fields as missing.
+
+    Mutation: treat a missing field as declared.
+    """
+    archive_dir = tmp_path / "archive"
+    _write_complete_archive(archive_dir)
+    _edit_file(archive_dir, "DEU", 2019, lambda p: p.pop("hourly_units"))
+
+    with _fit_spy() as spy:
+        report = _evaluate_fixture(archive_dir)
+
+    assert report["refused"] is True
+    reasons = report["refusal_reasons"]
+    assert set(reasons) == {"undeclared_fields"}, sorted(reasons)
+    assert reasons["undeclared_fields"] == {
+        "count": 2,
+        "first_few": [
+            "DEU_2019.json.gz: hourly_units.temperature_2m = missing, expected '°C'",
+            "DEU_2019.json.gz: hourly_units.time = missing, expected 'iso8601'",
+        ],
+    }
+    assert spy.call_count == 0, f"{spy.call_count} fits ran on a refused archive"
 
 
 def test_digest_mismatch_is_refused_before_any_fit(tmp_path):

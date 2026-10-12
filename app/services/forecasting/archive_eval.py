@@ -21,8 +21,10 @@ itself.
 - Checks the whole grid before any fit: the 21 declared points times every UTC
   day of the period, each point-day with at least 19 distinct UTC hours (an
   absent day counts as zero), no undeclared or missing point, no duplicated
-  (point, hour), no non-finite value, no timestamp off the hour. Anything short
-  of that is refused, not filled, and no model is fitted.
+  (point, hour), no non-finite value, no timestamp off the hour or naming an
+  offset or zone, and every file declaring the units and zone it assumes (°C,
+  iso8601, GMT or UTC, offset 0). Anything short of that is refused, not filled,
+  and no model is fitted.
 - Builds the daily target per M3 §3 / Amendment 1.3 (reusing daily_target.daily_observations)
 - Evaluates baselines (Naive, SeasonalNaive, MovingAverage, Climatology) and the
   frozen candidates (FROZEN_CANDIDATES, M3-A §8) over rolling-origin windows
@@ -45,6 +47,7 @@ import hashlib
 import json
 import math
 import platform
+import re
 import subprocess
 import zlib
 from collections import Counter
@@ -204,6 +207,93 @@ def _point_of(file_path: Path) -> Optional[str]:
     return point
 
 
+#: M3-A §3. The only timestamp form the archive may carry: naive, on the hour, read
+#: as UTC. Anything else is refused, never relabelled.
+_NAIVE_ON_THE_HOUR = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:00")
+#: A timestamp that names an offset or a zone: `+03:00`, `-0500`, `Z`, optional seconds.
+_ZONED_STAMP = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?"
+    r"(?:[Zz]|[+-][0-9]{2}(?::?[0-9]{2})?)"
+)
+
+#: M3-A §3. What each weather file must declare, as (path into the JSON, value
+#: assumed). A tuple is a set of accepted strings. Types are strict: a boolean is not
+#: a zero offset, and a missing field is refused like a wrong one.
+_DECLARED_FIELDS = (
+    (("hourly_units", "temperature_2m"), "°C"),
+    (("hourly_units", "time"), "iso8601"),
+    (("timezone",), ("GMT", "UTC")),
+    (("utc_offset_seconds",), 0),
+)
+
+_ABSENT = object()
+
+
+def _lookup(payload: dict, path: Tuple[str, ...]):
+    """The value at `path` in the JSON object, or _ABSENT if any step is missing."""
+    node = payload
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return _ABSENT
+        node = node[key]
+    return node
+
+
+def _declares(value, expected) -> bool:
+    if isinstance(expected, tuple):
+        return isinstance(value, str) and value in expected
+    if isinstance(expected, str):
+        return isinstance(value, str) and value == expected
+    return type(value) in (int, float) and value == expected
+
+
+def _undeclared_fields(file_name: str, payload: dict) -> List[str]:
+    """Each field of one weather file that does not declare what M3-A §3 assumes, named
+    with the file, the field and the value found."""
+    problems = []
+    for path, expected in _DECLARED_FIELDS:
+        value = _lookup(payload, path)
+        if _declares(value, expected):
+            continue
+        shown = "missing" if value is _ABSENT else repr(value)
+        wanted = (
+            " or ".join(repr(item) for item in expected)
+            if isinstance(expected, tuple)
+            else repr(expected)
+        )
+        problems.append(f"{file_name}: {'.'.join(path)} = {shown}, expected {wanted}")
+    return problems
+
+
+def _declared_moment(time_str) -> Tuple[Optional[datetime], str]:
+    """The UTC moment of one timestamp, or the reason it is refused (M3-A §3).
+
+    The accepted form is naive `YYYY-MM-DDTHH:00`, read as UTC. A timestamp that names
+    an offset or a zone is refused as "zoned" and never read as UTC, because that would
+    move it to a different moment. Returns (moment, "") when accepted, otherwise
+    (None, kind) with kind "zoned", "off_hour" or "unparseable".
+    """
+    if not isinstance(time_str, str):
+        return None, "unparseable"
+    if _ZONED_STAMP.fullmatch(time_str):
+        return None, "zoned"
+    if _NAIVE_ON_THE_HOUR.fullmatch(time_str):
+        try:
+            naive = datetime.strptime(time_str, "%Y-%m-%dT%H:%M")
+        except ValueError:
+            return None, "unparseable"
+        return naive.replace(tzinfo=timezone.utc), ""
+    try:
+        parsed = datetime.fromisoformat(time_str)
+    except ValueError:
+        return None, "unparseable"
+    if parsed.tzinfo is not None:
+        return None, "zoned"
+    if parsed.minute or parsed.second or parsed.microsecond:
+        return None, "off_hour"
+    return None, "unparseable"  # naive and on the hour, but not spelt YYYY-MM-DDTHH:00
+
+
 @dataclass
 class _WeatherRead:
     """What one pass over the weather files establishes.
@@ -217,7 +307,9 @@ class _WeatherRead:
     rows: List[Tuple[str, datetime, float]] = field(default_factory=list)
     unreadable: List[str] = field(default_factory=list)
     unrecognised: List[str] = field(default_factory=list)
+    undeclared: List[str] = field(default_factory=list)
     unparseable: List[str] = field(default_factory=list)
+    zoned: List[str] = field(default_factory=list)
     off_hour: List[str] = field(default_factory=list)
     non_finite: List[str] = field(default_factory=list)
     duplicates: List[str] = field(default_factory=list)
@@ -232,7 +324,9 @@ def _read_weather(
 
     `rows` holds the non-null, finite values inside the period. Integrity problems
     are checked on every timestamp in the files, including those outside the
-    period, because a corrupt file is corrupt wherever its bad line falls.
+    period, because a corrupt file is corrupt wherever its bad line falls. A file's
+    declared units and zone are recorded here and refused by _integrity_refusals;
+    its values still reach `rows`, because the loader does not decide a run.
     """
     archive_path = Path(archive_dir)
     weather_dir = archive_path / "weather"
@@ -268,17 +362,21 @@ def _read_weather(
         ) as exc:
             read.unreadable.append(f"{file_path.name}: {exc}")
             continue
+        read.undeclared.extend(_undeclared_fields(file_path.name, payload))
 
         for time_str, temp in zip(times, temps):
-            try:
-                moment = datetime.fromisoformat(time_str).replace(tzinfo=timezone.utc)
-            except (TypeError, ValueError):
+            moment, problem = _declared_moment(time_str)
+            if problem == "zoned":
+                read.zoned.append(f"{file_path.name}: {time_str!r}")
+                continue  # no UTC moment this archive can place, so no row either
+            if problem == "off_hour":
+                read.off_hour.append(f"{point} {time_str}")
+                continue
+            if problem:
                 read.unparseable.append(f"{file_path.name}: {time_str!r}")
                 continue
 
             stamp_counts[(point, int(moment.timestamp()))] += 1
-            if moment.minute or moment.second or moment.microsecond:
-                read.off_hour.append(f"{point} {time_str}")
 
             if temp is None:
                 continue  # an absent hour, not a value
@@ -329,6 +427,8 @@ def _integrity_refusals(
     for key, items in (
         ("unreadable_files", read.unreadable),
         ("unrecognised_files", read.unrecognised),
+        ("undeclared_fields", read.undeclared),
+        ("zoned_timestamps", read.zoned),
         ("unparseable_timestamps", read.unparseable),
         ("off_hour_timestamps", read.off_hour),
         ("non_finite_values", read.non_finite),
@@ -399,10 +499,13 @@ def load_archive_rows(
     """Hourly temperature_2m from the weather archive, inside the period.
 
     Archive layout: `weather/<POINT>_<YEAR>.json.gz`, each a gzipped Open-Meteo
-    JSON response with `hourly.time` (ISO "YYYY-MM-DDTHH:MM", UTC) and
+    JSON response with `hourly.time` (naive "YYYY-MM-DDTHH:00", read as UTC) and
     `hourly.temperature_2m`. POINT codes include hyphens (RU-MOW, RU-SPE). Null
-    values are absent hours. A file that cannot be read contributes no rows here;
-    evaluate_archive refuses such an archive, and this loader does not decide a run.
+    values are absent hours. A timestamp that names an offset or a zone has no row,
+    since it has no UTC moment this archive can place. A file that cannot be read
+    contributes no rows here; a file that declares other units or zone still
+    contributes its rows. evaluate_archive refuses such an archive, and this loader
+    does not decide a run.
 
     Returns:
         List of (point, event_time as tz-aware UTC datetime, value)
