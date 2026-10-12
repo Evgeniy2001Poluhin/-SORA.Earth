@@ -11,7 +11,7 @@ separate claim, and it was not true. Measured 2026-09-19: no Grafana alert or
 panel mentions coverage, `app/prom_metrics.py` declares no coverage gauge, and
 nothing in `app/`, `web/src` or `scripts/` calls the endpoint. An admin endpoint
 nobody calls reports a dip to nobody, and the §7 clock has been running since
-2026-09-03.
+2026-10-11 (amendment 1.4).
 
 What these tests pin is that the published numbers come from the endpoint's own
 function rather than a second copy of its SQL, and that the count is never

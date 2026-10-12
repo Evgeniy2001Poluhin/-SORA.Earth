@@ -914,7 +914,7 @@ docker-compose exec postgres psql -U sora -d sora_earth -c "SELECT started_at, s
 
 # The phase 6 forecast report: the section 7 gate verdict, per-point coverage,
 # and the three baselines scored over identical rolling-origin windows. Prints a
-# refusal with its reasons until the clock reaches 2027-02-24, which is the
+# refusal with its reasons until the clock reaches 2027-04-03, which is the
 # correct output rather than a failure -- it exits 0 either way.
 python scripts/evaluate_forecast.py
 

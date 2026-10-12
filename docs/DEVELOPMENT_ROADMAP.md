@@ -153,8 +153,8 @@ many rows were written before it did.
 
 | Result | Not before | Condition |
 |---|---|---|
-| M3, horizon 7 | **2027-02-24** | 12 admissible windows, no day below 80% coverage |
-| M3, horizon 30 | **2028-02-25** | the same, over 30-day windows |
+| M3, horizon 7 | **2027-04-03** | 12 admissible windows, no day below 80% coverage |
+| M3, horizon 30 | **2028-04-03** | the same, over 30-day windows |
 | Any claim of beating a baseline | after the corresponding backtest | Rolling-origin, CI and regional slices |
 | Crisis warning quality | after an event-labelled benchmark | Real events, negatives and lead time |
 | Specialist assessment | after UAT | 5–10 specialists, 30–50 scenarios |
@@ -165,19 +165,20 @@ They are recomputed from those constants by
 `tests/test_development_roadmap_dates.py` rather than trusted as prose here: if
 a constant moves and this document does not, the suite fails.
 
-**The clock runs from 2026-09-03.** Amendment 1.1 of
-`docs/M3_FORECAST_DECLARATION.md` voided the original one on 2026-09-02, when
-the production server was deleted for non-payment and the accumulated
-observations went with it. Amendment 1.2 restarted it on 2026-09-19 by
-measurement, at the first day on the rebuilt deployment meeting the 80% coverage
-rule: 2026-09-02 covered 4 hours of 24 and fails, 2026-09-03 covered 24 of 24 at
-every one of the 21 points.
+**The clock runs from 2026-10-11.** Amendment 1.4 of
+`docs/M3_FORECAST_DECLARATION.md` voided the start that Amendment 1.2 had set at
+2026-09-03, on 2026-10-12, when the production server was lost a second time
+with the accumulated observations. It restarted the clock by measurement, at the
+first day on the rebuilt deployment meeting the 80% coverage rule: 2026-10-10
+covered 4 hours of 24 and fails, 2026-10-11 covered 24 of 24 at every one of the
+21 points. Amendment 1.1 had voided the original clock on 2026-09-02, when the
+production server was deleted for non-payment.
 
-The outage and rebuild cost **20 days** against the voided clock. What that
-clock implied is recorded in Amendment 1.2 of the declaration and deliberately
-not repeated here: a superseded date left beside a live one in a plan is read as
-a plan, and `tests/test_development_roadmap_dates.py` fails this document for
-naming any future date but the two above.
+The two outages cost **20 days** and then **38 days** against the clocks they
+voided. What those clocks implied is recorded in the amendments of the
+declaration and deliberately not repeated here: a superseded date left beside a
+live one in a plan is read as a plan, and `tests/test_development_roadmap_dates.py`
+fails this document for naming any future date but the two above.
 
 These two are not targets, and no effort brings them closer: they are the
 earliest dates at which evidence could exist. **Every day below 80% coverage
