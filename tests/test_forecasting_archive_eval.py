@@ -897,7 +897,7 @@ def test_constants_match_declaration_document():
     assert TARGET_NAME == "openmeteo-historical-forecast:temperature_2m"
 
     # The declaration this code claims to implement, and the vintage it pins.
-    assert DECLARATION == "docs/M3A_ARCHIVE_DECLARATION.md v1.1"
+    assert DECLARATION == "docs/M3A_ARCHIVE_DECLARATION.md v1.2"
     latest_version = re.findall(r"^\| (\d+\.\d+) \|", text, re.MULTILINE)[-1]
     assert DECLARATION.endswith(f"v{latest_version}"), (
         f"DECLARATION {DECLARATION!r} is not the latest amendment {latest_version}"
