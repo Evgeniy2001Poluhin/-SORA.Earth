@@ -1,8 +1,9 @@
 # M3-A — forecast declaration on the archived series (preregistration)
 
-    version              1.1
+    version              1.2
     declared             2026-10-11
-    amended              2026-10-11 (1.1, before any run, after the co-architect review)
+    amended              2026-10-11 (1.1), 2026-10-12 (1.2) — both before any run,
+                         after the co-architect review
     vintage              Open-Meteo Historical Forecast API, downloaded 2026-10-11
     label                pseudo-real-time (M2 protocol §2.2), never a real-time claim
     relation to M3       a separate run; it neither replaces nor gates
@@ -130,7 +131,22 @@ anything, and reports what it found, if any of these holds:
 - a (point, hour) appears more than once — this archive is hourly, so a
   duplicate is a corrupt input, not something to average away;
 - a value is not finite;
-- a timestamp is not on the hour.
+- a timestamp is not on the hour;
+- a file does not declare exactly what is assumed:
+  - `hourly_units.temperature_2m` = `°C`;
+  - `hourly_units.time` = `iso8601`;
+  - `timezone` = `GMT` or `UTC`;
+  - `utc_offset_seconds` = 0;
+- a timestamp carries an offset or a zone suffix. Timestamps must be naive
+  `YYYY-MM-DDTHH:00` read as UTC. A timestamp that names another offset is
+  refused, never relabelled as UTC — relabelling would shift it to a
+  different moment.
+
+The pinned digest proves the bytes are the downloaded ones. It does not prove
+that those bytes mean degrees Celsius at UTC hours, and that is why these
+checks exist. Measured 2026-10-12 on the file metadata alone, values not read:
+all 189 files declare `°C`, `iso8601`, `GMT` and offset 0, and every timestamp
+is naive and on the hour.
 
 The refusal also keeps row positions equal to calendar days, which is what the
 window arithmetic in `app/services/forecasting/evaluation.py` assumes.
@@ -310,3 +326,4 @@ four claims are reported. No best combination is picked afterwards.
 |---|---|---|
 | 1.0 | 2026-10-11 | Declared before any run on the archive, after the second loss of the live series. |
 | 1.1 | 2026-10-11 | Revised **before any run**, after the co-architect review (GPT): the whole 67 305-point-day grid is checked (a missing year passed the old check); the archive digest is pinned; the declaration and code SHAs and library versions are recorded, and a dirty tree is refused; the candidates are an explicit list; success is a family-wise, intersection–union test against every baseline with a circular block bootstrap; windows are paired by dates; the limits of a modelled series are stated (§3a). |
+| 1.2 | 2026-10-12 | Revised **before any run**, after the co-architect's second review (GPT): units, time zone, UTC offset and naive-UTC timestamps are refused unless exactly as assumed. Until then, a Fahrenheit file, a Moscow-time file, or a `+03:00` timestamp relabelled as UTC would have passed (§3). |

@@ -103,7 +103,7 @@ POWER_NOTE_BELOW_WINDOWS = 30
 
 RESULT_LABEL = "pseudo-real-time · archive vintage 2026-10-11 · not a real-time claim"
 TARGET_NAME = "openmeteo-historical-forecast:temperature_2m"
-DECLARATION = "docs/M3A_ARCHIVE_DECLARATION.md v1.1"
+DECLARATION = "docs/M3A_ARCHIVE_DECLARATION.md v1.2"
 DECLARATION_PATH = "docs/M3A_ARCHIVE_DECLARATION.md"
 
 #: The repository root, computed from this file's location
