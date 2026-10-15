@@ -114,10 +114,17 @@ export default function MonteCarlo(props: Props) {
             <span>{data.max.toFixed(0)}</span>
           </div>
 
-          <div className="mc-legend">
-            <span className="dot in"></span> P10-P90 confidence band
-            <span className="sep">  </span>
-            <span className="dot"></span> tails
+          <div>
+            <div className="mc-legend">
+              <span className="dot in"></span> P10–P90 input-sensitivity band
+              <span className="sep">  </span>
+              <span className="dot"></span> tails
+            </div>
+            {/* The band is percentiles of the score under perturbed inputs.
+                It is not a forecast interval, and it says so on the page. */}
+            <div style={{ marginTop: 6, fontSize: 11, color: "var(--muted)" }}>
+              How the score moves when inputs are perturbed, not a forecast interval.
+            </div>
           </div>
         </>
       )}
