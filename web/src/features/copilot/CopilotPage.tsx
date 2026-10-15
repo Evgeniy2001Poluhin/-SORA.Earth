@@ -249,7 +249,7 @@ export function CopilotPage() {
               <div className="prob-display">
                 <span className="prob-value">{(result.probability * 100).toFixed(0)}</span>
                 <span className="prob-value-suffix">/ 100</span>
-                <div className="prob-value-label">ML Success Probability</div>
+                <div className="prob-value-label">Success probability (your assumption)</div>
               </div>
 
               {result.key_drivers.positive.length > 0 && (

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { calibrationApi } from "@/api/endpoints/calibration";
+import { SUCCESS_PROBABILITY_NOTE } from "./successProbabilityNote";
 import "./uncertainty.css";
 
 interface Props {
@@ -52,14 +53,14 @@ export function UncertaintyCard({ payload }: Props) {
   return (
     <div className="uncertainty-card">
       <div className="uncertainty-head">
-        <div className="eyebrow">Tree vote (RandomForest)</div>
+        <div className="eyebrow">Tree vote (RandomForest) · unvalidated</div>
         <span className="uc-badge" style={{ background: (CONF_COLOR[u.confidence] ?? "#888") + "22", color: CONF_COLOR[u.confidence] ?? "#888", borderColor: CONF_COLOR[u.confidence] ?? "#888" }}>
           {(u.confidence ?? "").toUpperCase()} CONFIDENCE
         </span>
       </div>
 
       <div style={{ padding: "16px 0", fontSize: "14px" }}>
-        <div style={{ fontSize: "28px", fontWeight: "600", color: "var(--text)", marginBottom: "8px" }}>
+        <div title={SUCCESS_PROBABILITY_NOTE} style={{ fontSize: "28px", fontWeight: "600", color: "var(--text)", marginBottom: "8px" }}>
           {meanProb}%
         </div>
         <div style={{ color: "var(--muted)" }}>

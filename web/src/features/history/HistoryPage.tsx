@@ -5,6 +5,7 @@ import { historyApi } from "../../api/endpoints/history";
 import type { HistoryParams } from "../../api/endpoints/history";
 import { errorMessage } from "@/lib/errors";
 import { auth, ApiError } from "@/api/client";
+import { SUCCESS_PROBABILITY_NOTE } from "../evaluate/successProbabilityNote";
 import "./history.css";
 
 const PAGE = 20;
@@ -134,7 +135,7 @@ export default function HistoryPage() {
           <div>Time</div>
           <div>Region</div>
           <div>Score</div>
-          <div>Prob</div>
+          <div title={SUCCESS_PROBABILITY_NOTE}>Prob · unvalidated</div>
           <div>Risk</div>
           <div>Budget</div>
           <div>Months</div>
