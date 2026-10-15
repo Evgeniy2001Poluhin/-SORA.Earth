@@ -36,7 +36,6 @@ import RegionEsgCard, { type RegionEsgCardProps } from "./RegionEsgCard";
 const BASE: RegionEsgCardProps = {
   score: 58.2,
   breakdown: { e_score: 60.0, s_score: 57.1, g_score: 55.4 },
-  confidence: 0.67,
   sourcesUsed: [],
   scoreKind: "structural",
   scoreVintage: "2024",
@@ -48,6 +47,13 @@ const textOf = (props: Partial<RegionEsgCardProps> = {}) =>
       <RegionEsgCard {...BASE} {...props} />
     </MemoryRouter>
   ).container.textContent ?? "";
+
+/** The value cell of the labelled row, so an assertion reads one value and
+ *  not the whole text, where "2" would match almost anything. */
+function rowValue(container: HTMLElement, label: string): string | null {
+  const key = Array.from(container.querySelectorAll("span")).find(s => s.textContent === label);
+  return key?.nextElementSibling?.textContent ?? null;
+}
 
 describe("the region ESG card", () => {
   it("still shows the score itself", () => {
@@ -97,19 +103,32 @@ describe("the region ESG card", () => {
     expect(textOf()).not.toContain("Заглушка");
   });
 
-  it("does not present the source count as a confidence percentage", () => {
-    const text = textOf();
+  it("counts the sources the API lists, with no denominator", () => {
+    // F074. The old row read "2 из 3 ожидаемых": the 3 was the constant in the
+    // backend's confidence formula, not a count of expected sources. The map's
+    // expected set (REQUIRED_METRICS) is not in the API, so no "of M" is shown.
+    const { container } = render(
+      <MemoryRouter>
+        <RegionEsgCard {...BASE} sourcesUsed={["sber_veb_baseline", "rosstat"]} />
+      </MemoryRouter>,
+    );
+    const text = container.textContent ?? "";
 
-    expect(text, "0.67 is len(sources)/3 for every region; as '67%' it reads as certainty")
-      .not.toContain("67%");
-    expect(text).toContain("Источников");
-    expect(text).toContain("2 из 3");
+    expect(text, "a constant denominator must not be shown").not.toContain("из 3");
+    expect(text).not.toContain("67%");
+    expect(rowValue(container, "Источников использовано")).toBe("2");
   });
 
-  it("omits the source count when there is none", () => {
-    const text = textOf({ confidence: null });
+  it("omits the source count when the API lists no sources", () => {
+    // An empty list is no count. It is not inferred from `confidence`, which
+    // the backend computes as min(1, n/3) and so is not a count once n >= 3.
+    const { container } = render(
+      <MemoryRouter>
+        <RegionEsgCard {...BASE} sourcesUsed={[]} />
+      </MemoryRouter>,
+    );
 
-    expect(text).not.toContain("Источников");
+    expect(container.textContent ?? "").not.toContain("Источников использовано");
   });
 
   it("renders a link to the detail page when code is provided", () => {

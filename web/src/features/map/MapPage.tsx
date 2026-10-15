@@ -9,20 +9,10 @@ import { api } from "@/api/client";
 import "./map.css";
 import { useState } from "react";
 import RussiaMapModal from "./RussiaMapModal";
+import CountryTooltipBody from "./CountryTooltipBody";
+import { BAND_COLOR, aggregateScopeOf, byEsgDesc, type MapCountry } from "./countryData";
 
-type Country = {
-  code: string; name: string; lat: number; lon: number; esg: number;
-  band: string; co2_intensity_t_per_capita: number; renewable_share_pct: number;
-};
-type MapData = { total_countries: number; bands: Record<string, string>; countries: Country[] };
-
-const BAND_COLOR: Record<string, string> = {
-  leader:     "#16a34a",
-  advanced:   "#65a30d",
-  developing: "#ca8a04",
-  emerging:   "#ea580c",
-  lagging:    "#dc2626",
-};
+type MapData = { total_countries: number; bands: Record<string, string>; countries: MapCountry[] };
 
 const radiusByEsg = (esg: number) => 3 + (esg / 100) * 4;
 
@@ -40,6 +30,16 @@ export default function MapPage() {
   // `data.countries.filter` and blanked the map.
   if (!data || !Array.isArray(data.countries)) return null;
 
+  // F073: leaders, top-N and average are computed over one kind of source, and
+  // the page says which kind and how many countries that is. See countryData.ts.
+  const scope = aggregateScopeOf(data.countries);
+  const ranked = byEsgDesc(scope.included);
+  const leaders = scope.included.filter(c => c.band === "leader").length;
+  // Averaging an empty list divides by zero, which prints "NaN" rather than failing.
+  const average = ranked.length > 0
+    ? Math.round(ranked.reduce((s, c) => s + c.esg, 0) / ranked.length)
+    : null;
+
   return (
     <div className="map-page">
       <header className="map-header">
@@ -48,17 +48,17 @@ export default function MapPage() {
           <p className="muted">
             {data.total_countries} countries, ESG color-coded, click marker to evaluate
           </p>
+          <p className="map-scope">Leaders, top and average: {scope.label}</p>
         </div>
         <div className="map-stats">
-          <div className="stat"><b>{data.countries.filter(c => c.band === "leader").length}</b><em>leaders</em></div>
+          <div className="stat"><b>{leaders}</b><em>leaders</em></div>
           {/* Separate from the payload guard above and more reachable: an
               empty list is a legitimate answer, and `countries[0].name`
-              took the page down on it. Averaging an empty list divides
-              by zero, which prints "NaN" rather than failing. */}
-          {data.countries.length > 0 && (
+              took the page down on it. */}
+          {ranked.length > 0 && (
             <>
-              <div className="stat"><b>{data.countries[0].name}</b><em>top: {data.countries[0].esg}</em></div>
-              <div className="stat"><b>{Math.round(data.countries.reduce((s,c)=>s+c.esg,0)/data.countries.length)}</b><em>avg ESG</em></div>
+              <div className="stat"><b>{ranked[0].name}</b><em>top: {ranked[0].esg}</em></div>
+              <div className="stat"><b>{average}</b><em>avg ESG</em></div>
             </>
           )}
         </div>
@@ -129,24 +129,7 @@ export default function MapPage() {
               }}
             >
               <Tooltip direction="top" offset={[0, -6]} opacity={1} className="esg-tooltip">
-                <div className="tip">
-                  <div className="tip-name">
-                    <span className="tip-flag" style={{ background: BAND_COLOR[c.band] }} />
-                    {c.name}
-                  </div>
-                  <div className="tip-score">
-                    <div className="tip-score-num">{c.esg}</div>
-                    <div className="tip-score-band">{c.band}</div>
-                  </div>
-                  <div className="tip-bar">
-                    <div className="tip-bar-fill" style={{ width: c.esg + "%", background: BAND_COLOR[c.band] }} />
-                  </div>
-                  <div className="tip-rows">
-                    <div><span>Renewables</span><b>{c.renewable_share_pct}%</b></div>
-                    <div><span>CO2 / capita</span><b>{c.co2_intensity_t_per_capita} t</b></div>
-                  </div>
-                  <div className="tip-cta">click to evaluate →</div>
-                </div>
+                <CountryTooltipBody country={c} />
               </Tooltip>
             </CircleMarker>
           ))}
@@ -155,8 +138,9 @@ export default function MapPage() {
 
       <section className="top-list">
         <h3>Top 10 by ESG</h3>
+        <p className="map-scope">{scope.label}</p>
         <ol>
-          {data.countries.slice(0, 10).map((c, i) => (
+          {ranked.slice(0, 10).map((c, i) => (
             <li
               key={c.code}
               onClick={() => nav("/evaluate?country=" + encodeURIComponent(c.name))}
