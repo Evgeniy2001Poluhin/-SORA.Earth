@@ -18,8 +18,9 @@ What is kept:
     what was received, not of a re-serialisation of it;
   * manifest.json: how each page was requested, its status, size, digest and
     record count, the API-reported total, the sum of records, distinct ids, the
-    distinct IEG as_of_date values, timestamps, the tool's git SHA, and a
-    snapshot digest over every page digest.
+    count of identical records (always zero in a written snapshot), the distinct
+    IEG as_of_date values, timestamps, the tool's git SHA, and a snapshot digest
+    over every page digest.
 
 What makes the run fail (no final directory is created):
 
@@ -28,13 +29,26 @@ What makes the run fail (no final directory is created):
     the pages would mix two states of it;
   * records that do not add up to the reported total at the end. A server that
     silently caps the page size would otherwise leave a gap that looks complete;
+  * a P&O snapshot whose records do not carry distinct ids. The sum check
+    cannot see this: a page that repeats another page keeps the sum equal to the
+    total while other records are missed (see Paging below);
+  * a record identical to an earlier one. IEG legitimately repeats some
+    project_ids, with different records, so an identical record can only come
+    from overlapping pages;
   * a body that is not JSON, or lacks the expected fields;
   * an output directory that already exists and is not empty, or a leftover
     partial directory from an earlier run.
 
-Paging. IEG: top=1000&skip=N. P&O: rows=500&os=N. Each request advances the
-offset by the requested page size; paging stops when the offset reaches the
-total. The P&O total is a string in the API and is read as an integer.
+Paging. IEG: top=1000&skip=N. P&O: rows=500&os=N, with srt=id&order=asc. Each
+request advances the offset by the requested page size; paging stops when the
+offset reaches the total. The P&O total is a string in the API and is read as
+an integer.
+
+The explicit sort is not optional. Without it the P&O default order is not
+stable across pages. The 2026-10-15 run measured 147 records returned twice,
+on adjacent pages, which means 147 other records were missed, and the record
+sum still matched the total. Sorting on id, which is unique, gives the paging
+a total order. The distinct-id check is what refuses a run where that fails.
 
 Fields. The P&O request keeps the API's default field set. Asking for fl=*
 returns about 300 fields per project, and a measured page of 10 projects came
@@ -109,12 +123,14 @@ DATASETS = {
         "records_key": "data",
         "records_are_mapping": False,
         "id_key": "project_id",
+        "ids_unique": False,  # IEG legitimately repeats some project_ids
         "track_as_of_date": True,
     },
     "projects": {
         "description": "World Bank Projects & Operations (search.worldbank.org/api/v2/projects)",
         "base_url": "https://search.worldbank.org/api/v2/projects",
-        "fixed_params": {"format": "json"},
+        # The explicit sort is what makes the paging stable; see the module docstring.
+        "fixed_params": {"format": "json", "srt": "id", "order": "asc"},
         "size_param": "rows",
         "page_size": 500,
         "offset_param": "os",
@@ -122,6 +138,7 @@ DATASETS = {
         "records_key": "projects",
         "records_are_mapping": True,
         "id_key": None,  # the record id is the mapping key
+        "ids_unique": True,
         "track_as_of_date": False,
     },
 }
@@ -197,10 +214,15 @@ def _parse_page(name, body, label):
     as_of = []
     if spec["track_as_of_date"]:
         as_of = sorted({str(r["as_of_date"]) for r in records if r.get("as_of_date") is not None})
+    # Canonical form, so two records are "identical" when their content is, whatever the key order.
+    digests = [
+        hashlib.sha256(json.dumps(r, sort_keys=True).encode("utf-8")).hexdigest() for r in records
+    ]
     return {
         "total": total,
         "count": len(records),
         "ids": ids,
+        "digests": digests,
         "as_of_dates": as_of,
         "first_keys": list(records[0].keys()) if records else [],
     }
@@ -281,6 +303,8 @@ def _collect(name, client, write):
     spec = DATASETS[name]
     pages = []
     seen_ids = set()
+    seen_digests = set()
+    duplicate_records = 0
     as_of = set()
     total = None
     records_sum = 0
@@ -320,6 +344,11 @@ def _collect(name, client, write):
         records_sum += page["count"]
         without_id += sum(1 for i in page["ids"] if i in (None, ""))
         seen_ids.update(str(i) for i in page["ids"] if i not in (None, ""))
+        for digest in page["digests"]:
+            if digest in seen_digests:
+                duplicate_records += 1
+            else:
+                seen_digests.add(digest)
         as_of.update(page["as_of_dates"])
         print(f"{label}: {page['count']} records, {len(body)} bytes", file=sys.stderr)
 
@@ -333,6 +362,19 @@ def _collect(name, client, write):
             f"{name}: the pages hold {records_sum} records but the API reports a total of "
             f"{total}; refusing to write a snapshot with a gap or an overlap"
         )
+    # Checked after the sum: a repeated page keeps the sum right and only shows here.
+    if spec["ids_unique"] and (len(seen_ids) != total or without_id):
+        raise SnapshotError(
+            f"{name}: the pages hold {total} records but {len(seen_ids)} distinct ids "
+            f"({without_id} without an id); the paging was not stable, so records repeated "
+            "or were missed. Refusing to write a snapshot."
+        )
+    # Runs after the id check, so a repeated P&O id is reported as such.
+    if duplicate_records:
+        raise SnapshotError(
+            f"{name}: {duplicate_records} records are identical to an earlier record in this "
+            "snapshot, which can only come from overlapping pages. Refusing to write a snapshot."
+        )
     dataset = {
         "description": spec["description"],
         "base_url": spec["base_url"],
@@ -344,6 +386,7 @@ def _collect(name, client, write):
         "sum_records": records_sum,
         "unique_ids": len(seen_ids),
         "records_without_id": without_id,
+        "duplicate_records": duplicate_records,
         "pages": pages,
     }
     if spec["track_as_of_date"]:

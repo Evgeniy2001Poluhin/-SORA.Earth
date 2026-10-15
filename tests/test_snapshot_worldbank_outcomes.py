@@ -35,6 +35,21 @@ class FakeResponse:
         self.content = content
 
 
+def ieg_record(i, outcome="Satisfactory", project_id=None):
+    """One IEG record as text. Index i gives the default id P(i+1) and an alternating as_of_date."""
+    date = "13-Oct-2026" if i % 2 == 0 else "12-Oct-2026"
+    pid = project_id or "P%06d" % (i + 1)
+    return (
+        '{"project_id":"%s", "as_of_date":"%s", "project_name":"Caf\\u00e9 %d",'
+        ' "outcome":"%s"}' % (pid, date, i, outcome)
+    )
+
+
+def ieg_body(total, records):
+    """Bytes for an IEG page holding the given record texts, with the odd spacing kept."""
+    return ('{ "count" : %d,\n "data" : [%s] }' % (total, ", ".join(records))).encode("utf-8")
+
+
 def body_for(name, total, offset, n=None):
     """Bytes shaped like the real endpoint, deliberately NOT canonical JSON.
 
@@ -44,14 +59,7 @@ def body_for(name, total, offset, n=None):
     if n is None:
         n = max(0, min(snap.DATASETS[name]["page_size"], total - offset))
     if name == "ieg":
-        rows = []
-        for i in range(offset, offset + n):
-            date = "13-Oct-2026" if i % 2 == 0 else "12-Oct-2026"
-            rows.append(
-                '{"project_id":"P%06d", "as_of_date":"%s", "project_name":"Caf\\u00e9 %d",'
-                ' "outcome":"Satisfactory"}' % (i + 1, date, i)
-            )
-        text = '{ "count" : %d,\n "data" : [%s] }' % (total, ", ".join(rows))
+        return ieg_body(total, [ieg_record(i) for i in range(offset, offset + n)])
     else:
         items = []
         for i in range(offset, offset + n):
@@ -253,6 +261,8 @@ def test_manifest_matches_the_files(tmp_path, offline):
     assert ieg["api_total"] == 2500
     assert ieg["unique_ids"] == 2500
     assert ieg["records_without_id"] == 0
+    assert ieg["duplicate_records"] == 0
+    assert manifest["datasets"]["projects"]["duplicate_records"] == 0
     assert ieg["as_of_dates"] == ["12-Oct-2026", "13-Oct-2026"]
     assert "as_of_dates" not in manifest["datasets"]["projects"]
     assert manifest["datasets"]["projects"]["unique_ids"] == 1001
@@ -415,6 +425,68 @@ def test_main_reports_a_refusal_with_exit_code_one(tmp_path, offline, capsys):
     assert snap.main(["--out", str(out), "--only", "ieg"]) == 1
     assert fake.calls == []
     assert "already exists" in capsys.readouterr().err
+
+
+def test_projects_requests_are_sorted_by_id(tmp_path, offline):
+    fake = offline.serve(FakeWorldBank({"projects": 1001}))
+    snap.take_snapshot(tmp_path / "snap", ["projects"])
+
+    assert len(fake.calls) == 3
+    for call in fake.calls:
+        assert call["params"]["srt"] == "id"
+        assert call["params"]["order"] == "asc"
+
+
+def test_projects_repeated_ids_are_refused(tmp_path, offline):
+    """Page 1 repeats page 0 exactly. The total and the record sum both still match."""
+
+    def hook(name, offset, nth):
+        if name == "projects" and offset == PROJECTS_PAGE:
+            return FakeResponse(200, body_for("projects", 1000, 0))
+        return None
+
+    offline.serve(FakeWorldBank({"projects": 1000}, hook=hook))
+    with pytest.raises(
+        SnapshotError,
+        match=r"hold 1000 records but 500 distinct ids .*the paging was not stable",
+    ):
+        snap.take_snapshot(tmp_path / "snap", ["projects"])
+    assert not (tmp_path / "snap").exists()
+
+
+def test_ieg_identical_record_on_two_pages_is_refused(tmp_path, offline):
+    """Page 1 starts with a copy of page 0's last record. Count and sum still match."""
+
+    def hook(name, offset, nth):
+        if name == "ieg" and offset == IEG_PAGE:
+            records = [ieg_record(IEG_PAGE - 1)]
+            records += [ieg_record(i) for i in range(IEG_PAGE, 2 * IEG_PAGE - 1)]
+            return FakeResponse(200, ieg_body(2500, records))
+        return None
+
+    offline.serve(FakeWorldBank({"ieg": 2500}, hook=hook))
+    with pytest.raises(SnapshotError, match="identical to an earlier record"):
+        snap.take_snapshot(tmp_path / "snap", ["ieg"])
+    assert not (tmp_path / "snap").exists()
+
+
+def test_ieg_same_project_id_with_a_different_record_passes(tmp_path, offline):
+    """IEG repeats a project_id legitimately when the records differ."""
+
+    def hook(name, offset, nth):
+        if name == "ieg" and offset == IEG_PAGE:
+            records = [ieg_record(IEG_PAGE, outcome="Unsatisfactory", project_id="P%06d" % IEG_PAGE)]
+            records += [ieg_record(i) for i in range(IEG_PAGE + 1, 2 * IEG_PAGE)]
+            return FakeResponse(200, ieg_body(2500, records))
+        return None
+
+    offline.serve(FakeWorldBank({"ieg": 2500}, hook=hook))
+    manifest = snap.take_snapshot(tmp_path / "snap", ["ieg"])
+
+    ieg = manifest["datasets"]["ieg"]
+    assert ieg["duplicate_records"] == 0
+    assert ieg["sum_records"] == 2500
+    assert ieg["unique_ids"] == 2499, "one project_id appears on two pages"
 
 
 def test_help_runs_as_a_subprocess():
