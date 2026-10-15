@@ -32,12 +32,14 @@ ROADMAP = os.path.join(REPO_ROOT, "docs", "DEVELOPMENT_ROADMAP.md")
 #: evidential date at all. A date quoted against a void clock is not merely
 #: stale, it is unfounded — nothing has started that it could be counted from.
 #:
-#: Amendment 1.2 restarted it by measurement on 2026-09-19. The start is the
-#: first day on the rebuilt deployment meeting §3's coverage rule: 2026-09-02
-#: covered 4 hours of 24 and fails, 2026-09-03 covered 24 of 24 at every one of
-#: the 21 points and is therefore the start. It is not the first day with data
-#: and not the date of the amendment.
-CLOCK_START = date(2026, 9, 3)
+#: Amendment 1.2 restarted it by measurement on 2026-09-19, from 2026-09-03.
+#: Amendment 1.4 voided that start on 2026-10-12, when the production server was
+#: lost a second time, and restarted the clock by the same rule: the first day
+#: on the rebuilt deployment meeting §3's coverage rule. 2026-10-10 covered
+#: 4 hours of 24 and fails; 2026-10-11 covered 24 of 24 at every one of the 21
+#: points and is therefore the start. It is not the first day with data and not
+#: the date of the amendment.
+CLOCK_START = date(2026, 10, 11)
 
 
 def read_roadmap():

@@ -32,7 +32,7 @@ The experiment does not gate the product and has not been promoted. See
 |---|---|---|
 | M1 Data Trust | signed off, production verified | `docs/M1_DATA_TRUST_REPORT.md` |
 | M2 Forecasting | **CLOSED — NEGATIVE RESULT** | `e82d682` |
-| M3 Forecast target | declared; **§7 clock running from 2026-09-03**, restarted by measurement in amendment 1.2 | `10f985f` |
+| M3 Forecast target | declared; **§7 clock running from 2026-10-11**, restarted by measurement in amendment 1.4 (the 2026-09-03 start of amendment 1.2 is void) | `b08a050f` |
 | Phase 1 (env foundation) | all seven exit criteria met | |
 | Product punch-list | empty | |
 
@@ -41,18 +41,21 @@ static snapshots, 1.00 distinct values per region. Against a constant the
 last-value baseline is exact, so a benchmark that ran would have produced
 MAE = 0 — a property of the data wearing the shape of a result about a method.
 
-## 3. The fact that shapes everything until February
+## 3. The fact that shapes everything until April
 
-M3 cannot produce an evidential result before **2027-02-24** (h=7) or
-**2028-02-25** (h=30). The clock was voided on 2026-09-02, when the production
+M3 cannot produce an evidential result before **2027-04-03** (h=7) or
+**2028-04-03** (h=30). The clock was voided on 2026-09-02, when the production
 server was deleted for non-payment and the accumulated observations were lost
-with it; amendment 1.2 restarted it on 2026-09-19 at the first day on the
-rebuilt deployment that meets the coverage rule — 2026-09-03, measured, with
-24 of 24 hours at every one of the 21 points (2026-09-02 had 4 and fails).
+with it; amendment 1.2 restarted it on 2026-09-19 from 2026-09-03. The
+production server was lost a second time by 2026-10-10, and amendment 1.4 voided
+that start on 2026-10-12 and restarted the clock by measurement at 2026-10-11,
+the first day on the rebuilt deployment that meets the coverage rule — 24 of 24
+hours at every one of the 21 points (2026-10-10 had 4 and fails).
 
 The dates come from the gate's own constants —
 `REQUIRED_WINDOWS = 12`, `TRAINING_DAYS = {7: 90, 30: 180}` — and no amount of
-engineering moves them. The outage cost 20 days against the voided clock.
+engineering moves them. The two outages cost 20 days and then 38 days against
+the clocks they voided.
 
 So the question for the next 174 days is not "what feature next". It is: **what
 is worth doing in a window where no forecasting result can be evidential?**

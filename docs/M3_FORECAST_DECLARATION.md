@@ -1,9 +1,9 @@
 # M3 — forecast target declaration (preregistration)
 
-    version              1.3
+    version              1.4
     declared             2026-08-14
-    amended              2026-09-02  (1.1), 2026-09-19  (1.2, 1.3)
-    clock start (§7)     2026-09-03 — measured, see Amendment 1.2
+    amended              2026-09-02  (1.1), 2026-09-19  (1.2, 1.3), 2026-10-12  (1.4)
+    clock start (§7)     2026-10-11 — measured, see Amendment 1.4
     supersedes           nothing
     amendable            only by a numbered version with a date and a reason
 
@@ -100,10 +100,12 @@ in the header, and not derived from the data afterwards.
 
 Until this file is merged, accumulation is data and not a milestone.
 
-> **Superseded by Amendments 1.1 and 1.2.** That clock started 2026-08-14 and was
-> voided on 2026-09-02 when the observations were lost. The clock now running
-> started **2026-09-03**, measured, and the rule it was measured by was fixed in
-> advance by Amendment 1.1. The paragraph above is left as declared because the
+> **Superseded by Amendments 1.1, 1.2 and 1.4.** That clock started 2026-08-14
+> and was voided on 2026-09-02 when the observations were lost. Its successor
+> started 2026-09-03 and was voided by the second loss.
+>
+> The clock now running started **2026-10-11** (Amendment 1.4). Both restarts
+> were measured, by the rule Amendment 1.1 fixed in advance. The paragraph above is left as declared because the
 > principle it states -- a start is fixed beforehand, never derived from the data
 > afterwards -- is what made the restart legitimate rather than a choice.
 
@@ -286,6 +288,73 @@ view, and the safe moment is gone. This is a tightening made in the safe window,
 and the diff may be checked against that claim: nothing but §3's arithmetic and
 the record below is edited.
 
+## Amendment 1.4 — the second loss, and a restart entered by measurement
+
+**Date:** 2026-10-12. **Reason:** a second total loss of the accumulated
+observations.
+
+The production server `77.110.118.93` was gone by 2026-10-10. Its address
+answered nothing, and the SSH host key had changed. The cause is not
+established. `environmental_observations` went with it, and so did every dump
+stored on the same disk.
+
+Off the server only two things survived:
+
+- one copy from 2026-09-03, holding seven hours of data;
+- a local collector's partial record, 2026-09-19..10-09, covering 235 of about
+  870 hours.
+
+Neither restores a continuous series. The hours that passed cannot be
+re-fetched from the live source.
+
+### What this amendment changes, and what it does not
+
+**The clock started 2026-09-03 under Amendment 1.2 is void.** The rule
+Amendment 1.1 fixed in advance applies unchanged: the clock starts at **the
+first day on the restored deployment that meets the coverage rule in §3**,
+read in hours as Amendment 1.3 requires.
+
+The target, point set, horizons, `MIN_COVERAGE`, `REQUIRED_WINDOWS` and
+`TRAINING_DAYS` are untouched. The diff can be checked against that claim:
+nothing but the clock is edited.
+
+The partial record and the 2026-09-03 copy are **not** stitched into the series
+to keep the old clock alive. Bridging a five-week gap with 27% of its hours
+would be a choice made because of the outage. The archived reconstruction is
+not substituted either: it is a separate run under
+`docs/M3A_ARCHIVE_DECLARATION.md`, and it may not stand in for this one.
+
+### Clock start: 2026-10-11, measured
+
+The rebuilt deployment (`109.120.147.12`) began collecting on the evening of
+2026-10-10. Measured 2026-10-12 from that day's 03:30 UTC database dump,
+counting distinct UTC hours of `openmeteo:temperature` per point:
+
+| day | points meeting §3 (≥ 19 of 24 hours) | hours per point |
+|---|---:|---|
+| 2026-10-10 | **0 of 21** | 4 — collection began late in the day |
+| 2026-10-11 | **21 of 21** | 24 at every point |
+
+### Earliest evidential runs
+
+The gate constants are unchanged: `REQUIRED_WINDOWS = 12` and
+`TRAINING_DAYS = {7: 90, 30: 180}`.
+
+| horizon | days | earliest evidential run |
+|---|---:|---|
+| h=7 | 174 | **2027-04-03** |
+| h=30 | 540 | **2028-04-03** |
+
+The voided clock implied 2027-02-24 and 2028-02-25. The second loss costs
+**38 days**, day for day.
+
+### The lesson recorded with it
+
+Both losses had the same shape: no copy of the data was held off the server.
+Since 2026-10-11 a daily copy of the database dump leaves the server for the
+owner's machine. That does not change any rule here. It is recorded so a third
+amendment of this kind is not read as bad luck.
+
 ## 5. What this declaration does not do
 
 - It does not claim M2 demonstrated anything. M2 is closed with a negative
@@ -301,6 +370,7 @@ the record below is edited.
 | 1.1 | 2026-09-02 | Total loss of the accumulated observations: the production server was deleted for non-payment and `environmental_observations` went with it. The §7 clock was voided pending a measured restart. |
 | 1.2 | 2026-09-19 | Collection resumed on the rebuilt deployment, so the clock start Amendment 1.1 deliberately left blank was entered by measurement: **2026-09-03**. |
 | 1.3 | 2026-09-19 | §3 could be read in rows or in hours and the two disagree on production data. Read in hours. A tightening made before any window exists. |
+| 1.4 | 2026-10-12 | Second total loss of the accumulated observations (server 77.110.118.93 gone by 2026-10-10). The 2026-09-03 clock is void, and the restart is entered by measurement under the rule of Amendment 1.1: **2026-10-11**. Nothing but the clock is edited. |
 
 This table read "None. This is version 1.0." until 2026-09-19 -- while Amendment
 1.1 had been in the document since 2026-09-02, and a test asserted that sentence

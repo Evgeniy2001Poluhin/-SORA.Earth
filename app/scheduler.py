@@ -1060,7 +1060,7 @@ def scheduled_observation_coverage():
     docs/WHERE_THE_PROJECT_STANDS.md §3A calls this the highest-value work while
     no forecasting result can be evidential: a day under 80% coverage is a day
     the §7 gate cannot use, so a quiet dip moves the earliest evidential date --
-    and the clock has been running since 2026-09-03.
+    and the clock has been running since 2026-10-11.
 
     The count already existed at `/api/v1/infra/observations/coverage`. What did
     not exist was anyone reading it: measured 2026-09-19, no Grafana alert or

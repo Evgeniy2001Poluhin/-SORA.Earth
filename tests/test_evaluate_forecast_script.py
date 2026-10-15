@@ -59,7 +59,7 @@ def test_it_reports_a_refusal_rather_than_failing_when_there_is_no_history(
         script, monkeypatch, capsys):
     """Today's real output, and the exit code that goes with it.
 
-    The gate refuses until 2027-02-24 and that is the report's content, not an
+    The gate refuses until 2027-04-03 and that is the report's content, not an
     error: a scheduled run must not page anyone for the gate saying what it is
     supposed to say.
     """

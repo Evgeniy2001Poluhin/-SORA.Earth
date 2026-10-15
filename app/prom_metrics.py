@@ -179,7 +179,7 @@ sora_environmental_data_quality_score = Gauge(
 )
 # ── M3 accumulation coverage ──
 #
-# The §7 clock runs from 2026-09-03, and a day below the 80% floor is a day the
+# The §7 clock runs from 2026-10-11, and a day below the 80% floor is a day the
 # gate cannot use -- it moves the earliest evidential date and nothing else says
 # so. `/api/v1/infra/observations/coverage` computes the count;
 # docs/WHERE_THE_PROJECT_STANDS.md §3A records that nothing watched it, which was

@@ -11,9 +11,9 @@ endpoint or job. This is the caller.
     python scripts/evaluate_forecast.py -o report.json   # and to a file
 
 What it prints today is a refusal with its reasons, and that is the correct
-output: the §7 clock restarted on 2026-09-03 and h=7 needs 174 days of history,
-so the earliest evidential run is 2027-02-24. The report fills in as the days
-accumulate; nothing about it has to change when they do.
+output: the §7 clock restarted on 2026-10-11 (Amendment 1.4) and h=7 needs 174
+days of history, so the earliest evidential run is 2027-04-03. The report fills
+in as the days accumulate; nothing about it has to change when they do.
 
 The point set is passed **from the declaration**, not taken from the data. Left
 to the data, §7's "every declared region present" condition is vacuously true --
@@ -119,7 +119,7 @@ def main(argv=None):
 
     # A refusal is not a failure of this script: it is the report's content.
     # Exit 0 either way, so a scheduled run does not page anyone for the gate
-    # saying what it is supposed to say until February.
+    # saying what it is supposed to say until April.
     return 0
 
 
