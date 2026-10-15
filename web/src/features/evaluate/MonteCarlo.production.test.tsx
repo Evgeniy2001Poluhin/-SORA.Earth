@@ -91,6 +91,20 @@ describe("MonteCarlo on the production path", () => {
     expect(screen.getByText("14.7")).toBeInTheDocument();    // p50
   });
 
+  it("names the P10–P90 band as input sensitivity, not a confidence band", () => {
+    // F034. The band is percentiles of the score under perturbed inputs, so
+    // the legend says that and states it is not a forecast interval.
+    const { container } = renderWithQuery(
+      <MonteCarlo data={SERVER_RUN} loading={false} onRun={vi.fn()} />,
+    );
+
+    expect(screen.getByText(/P10–P90 input-sensitivity band/)).toBeInTheDocument();
+    expect(
+      screen.getByText("How the score moves when inputs are perturbed, not a forecast interval."),
+    ).toBeInTheDocument();
+    expect(container.textContent ?? "").not.toContain("confidence band");
+  });
+
   it("a 500 rejects instead of returning a distribution", async () => {
     stubStatus(500);
     await expect(evaluateApi.monteCarlo(REQUEST)).rejects.toThrow(/500/);
