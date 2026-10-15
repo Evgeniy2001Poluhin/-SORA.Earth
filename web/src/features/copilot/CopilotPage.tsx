@@ -20,10 +20,12 @@ interface FormValues {
 
 type PresetKey = "HIGH" | "MODERATE" | "LOW";
 
+// social_impact is on the API scale, 0-10 (app/scales.py). These are the same
+// projects the 0-100 model-scale values described: 85 -> 8.5, 60 -> 6, 30 -> 3.
 const PRESETS: Record<PresetKey, FormValues> = {
-  HIGH:     { probability: 0.87, budget: 2000000, co2_reduction: 8000, social_impact: 85, duration_months: 18, co2_per_dollar: 4.0 },
-  MODERATE: { probability: 0.55, budget: 1500000, co2_reduction: 3000, social_impact: 60, duration_months: 24, co2_per_dollar: 2.0 },
-  LOW:      { probability: 0.22, budget: 5000000, co2_reduction: 800,  social_impact: 30, duration_months: 36, co2_per_dollar: 0.4 },
+  HIGH:     { probability: 0.87, budget: 2000000, co2_reduction: 8000, social_impact: 8.5, duration_months: 18, co2_per_dollar: 4.0 },
+  MODERATE: { probability: 0.55, budget: 1500000, co2_reduction: 3000, social_impact: 6, duration_months: 24, co2_per_dollar: 2.0 },
+  LOW:      { probability: 0.22, budget: 5000000, co2_reduction: 800,  social_impact: 3, duration_months: 36, co2_per_dollar: 0.4 },
 };
 
 const PRESET_KEYS: PresetKey[] = ["HIGH", "MODERATE", "LOW"];
@@ -104,6 +106,8 @@ export function CopilotPage() {
   const { register, handleSubmit, reset, control } = useForm<FormValues>({ defaultValues: PRESETS.HIGH });
   const [result, setResult] = useState<ShownResult | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  // What had arrived when the user pressed Stop; null unless a stream was stopped.
+  const [stoppedText, setStoppedText] = useState<string | null>(null);
   const [activePreset, setActivePreset] = useState<PresetKey | null>("HIGH");
   // useWatch rather than watch(): the value is only read to render a label, and
   // watch() returns a new function result on every render, which the React
@@ -125,6 +129,7 @@ export function CopilotPage() {
         setStreamingText(lastAssistant.content);
         // A saved chat keeps its messages and nothing else: no probability and no
         // model version were stored with them, so neither is shown (F018, F019).
+        setStoppedText(null);
         setResult({
           verdict: { label: "Restored", level: "info" },
           probability: null,
@@ -145,6 +150,7 @@ export function CopilotPage() {
   const newChat = useCallback(() => {
     setCurrentSessionId(null);
     setResult(null);
+    setStoppedText(null);
     setStreamingText("");
     setActivePreset("HIGH");
     reset(PRESETS.HIGH);
@@ -156,7 +162,7 @@ export function CopilotPage() {
       if (currentSessionId) body.session_id = currentSessionId;
       return fromExplain(await copilotApi.explain(body));
     },
-    onMutate: () => setFailure(null),
+    onMutate: () => { setFailure(null); setStoppedText(null); },
     onSuccess: (r) => { setResult(r); if (r.session_id) setCurrentSessionId(r.session_id); setSidebarTick(t=>t+1); toast.success("Explanation generated"); },
     onError: (e: unknown) => {
       // The previous explanation was for other inputs; do not leave it on screen beside the error.
@@ -170,22 +176,28 @@ export function CopilotPage() {
   const applyPreset = (k: PresetKey) => { setActivePreset(k); reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
 
   const runStream = async (v: FormValues) => {
+    // One controller per stream: Stop aborts it, and the request carries its signal.
+    const controller = new AbortController();
+    abortRef.current = controller;
     setStreaming(true);
     setStreamingText("");
+    setStoppedText(null);
     setResult(null);
     setFailure(null);
     setActivePreset(null);
+    let acc = "";
+    let finished = false;
     try {
       const body = requestFor(v, await shapFor(v));
-      let acc = "";
       if (currentSessionId) body.session_id = currentSessionId;
-      for await (const ev of copilotApi.explainStream(body)) {
+      for await (const ev of copilotApi.explainStream(body, { signal: controller.signal })) {
         if (ev.type === "meta") {
           if (ev.session_id) { setCurrentSessionId(ev.session_id); setSidebarTick(t=>t+1); }
         } else if (ev.type === "token") {
           acc += ev.value;
           setStreamingText(acc);
         } else if (ev.type === "done") {
+          finished = true;
           // The stream carries no model version (its meta and done events have none), so none is shown (F021).
           setResult({
             verdict: { label: "Streamed", level: "info" },
@@ -201,11 +213,24 @@ export function CopilotPage() {
           });
         }
       }
-      toast.success("Stream complete");
+      if (controller.signal.aborted && !finished) {
+        // The stream closed after Stop, before done: keep what arrived, marked as incomplete.
+        setStoppedText(acc.trim());
+        toast("Stream stopped");
+      } else {
+        toast.success("Stream complete");
+      }
     } catch (e: unknown) {
-      setFailure(failureText(e));
-      toast.error(e instanceof ExplainUnavailableError ? failureText(e) : "Stream failed: " + errorMessage(e));
+      if (controller.signal.aborted && !finished) {
+        // A fetch aborted by Stop rejects here. That is the user's choice, not a failure.
+        setStoppedText(acc.trim());
+        toast("Stream stopped");
+      } else {
+        setFailure(failureText(e));
+        toast.error(e instanceof ExplainUnavailableError ? failureText(e) : "Stream failed: " + errorMessage(e));
+      }
     } finally {
+      abortRef.current = null;
       setStreaming(false);
     }
   };
@@ -251,7 +276,7 @@ export function CopilotPage() {
           </div>
           <div className="row"><label>Budget (USD)</label><input type="number" {...register("budget", { valueAsNumber: true })} /></div>
           <div className="row"><label>CO2 reduction (t/yr)</label><input type="number" {...register("co2_reduction", { valueAsNumber: true })} /></div>
-          <div className="row"><label>Social impact (0-100)</label><input type="number" {...register("social_impact", { valueAsNumber: true })} /></div>
+          <div className="row"><label>Social impact (0–10)</label><input type="number" min={0} max={10} step={0.5} {...register("social_impact", { valueAsNumber: true })} /></div>
           <div className="row"><label>Duration (months)</label><input type="number" {...register("duration_months", { valueAsNumber: true })} /></div>
           <div className="row"><label>CO2 per dollar</label><input type="number" step="0.1" {...register("co2_per_dollar", { valueAsNumber: true })} /></div>
 
@@ -269,7 +294,7 @@ export function CopilotPage() {
           ) : (
             <>
               <button className="btn-primary" type="button" disabled={streaming}
-                onClick={handleSubmit(runStream)}>
+                onClick={() => handleSubmit(runStream)()}>
                 {streaming ? "Streaming..." : "⡡ Stream AI Explanation"}
               </button>
               {streaming && (
@@ -293,7 +318,13 @@ export function CopilotPage() {
               <div style={{whiteSpace:"normal"}}><MarkdownAnswer content={streamingText} /><span className="cursor-blink">▊</span></div>
             </div>
           )}
-          {!result && !streaming && !failure && (
+          {stoppedText !== null && !streaming && (
+            <div className="copilot-stopped">
+              <MarkdownAnswer content={stoppedText} />
+              <span className="copilot-stopped-marker">(stopped)</span>
+            </div>
+          )}
+          {!result && !streaming && !failure && stoppedText === null && (
             <div className="copilot-empty">
               <div className="copilot-empty-orb" />
               <p>No explanation yet</p>
@@ -408,7 +439,7 @@ export function CopilotPage() {
               )}
 
               <div className="chips-row">
-                <span className="mode-chip">Mode · {result.explanation_mode}</span>
+                <span className="mode-chip">Explanation mode · {result.explanation_mode}</span>
                 <span className="mode-chip">Model · {result.model_version ?? "unknown"}</span>
               </div>
             </>

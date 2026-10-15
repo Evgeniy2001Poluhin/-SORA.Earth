@@ -97,7 +97,33 @@ const source = (score: number) => ({
   excerpt: "A worked example.",
 });
 
-type Route = () => Response;
+/** The explain endpoint as the backend answers it: social_impact must be 0-10
+ *  (app/schemas.py, le=10), and anything above is a 422. */
+function explainLikeBackend(init?: RequestInit): Response {
+  const sent = JSON.parse(String(init?.body ?? "{}")) as { social_impact_score: number };
+  if (!(sent.social_impact_score >= 0 && sent.social_impact_score <= 10)) {
+    return json({ detail: [{ loc: ["body", "social_impact_score"], msg: "Input should be less than or equal to 10" }] }, 422);
+  }
+  return json(EXPLAIN_ANSWER);
+}
+
+/** A stream that sends a little and never finishes. Like a browser fetch, it errors
+ *  its body with AbortError when the request's signal aborts. */
+function hangingStream(init?: RequestInit): Response {
+  const encoder = new TextEncoder();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c;
+      c.enqueue(encoder.encode('data: {"type":"meta","probability":0.87,"rag_query":"q","session_id":"sess-3"}\n\n'));
+      c.enqueue(encoder.encode('data: {"type":"token","value":"Recommended for "}\n\n'));
+    },
+  });
+  init?.signal?.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")));
+  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+type Route = (init?: RequestInit) => Response;
 interface Routes {
   explain?: Route;
   copilot?: Route;
@@ -108,13 +134,13 @@ interface Routes {
 
 /** Answers every request the page makes. Anything else fails the test. */
 function backend(routes: Routes = {}) {
-  const stub = vi.fn(async (input: RequestInfo | URL) => {
+  const stub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.endsWith("/predict/explain")) return (routes.explain ?? (() => json(EXPLAIN_ANSWER)))();
-    if (url.endsWith("/copilot/explain/stream")) return (routes.stream ?? (() => sse(STREAM_EVENTS)))();
-    if (url.endsWith("/copilot/explain")) return (routes.copilot ?? (() => json(ANSWER)))();
-    if (url.endsWith("/copilot/sessions")) return (routes.sessions ?? (() => json({ sessions: [] })))();
-    if (/\/copilot\/sessions\/[^/]+$/.test(url)) return (routes.session ?? (() => json({ detail: "not found" }, 404)))();
+    if (url.endsWith("/predict/explain")) return (routes.explain ?? explainLikeBackend)(init);
+    if (url.endsWith("/copilot/explain/stream")) return (routes.stream ?? (() => sse(STREAM_EVENTS)))(init);
+    if (url.endsWith("/copilot/explain")) return (routes.copilot ?? (() => json(ANSWER)))(init);
+    if (url.endsWith("/copilot/sessions")) return (routes.sessions ?? (() => json({ sessions: [] })))(init);
+    if (/\/copilot\/sessions\/[^/]+$/.test(url)) return (routes.session ?? (() => json({ detail: "not found" }, 404)))(init);
     throw new Error("unexpected request in test: " + url);
   });
   globalThis.fetch = stub as unknown as typeof fetch;
@@ -153,7 +179,7 @@ describe("CopilotPage (production path)", () => {
     expect(callsTo(stub, "/predict/explain")[0].body).toEqual({
       budget_usd: 2000000,
       co2_reduction_tons_per_year: 8000,
-      social_impact_score: 85,
+      social_impact_score: 8.5,
       project_duration_months: 18,
     });
     expect(shapOf(callsTo(stub, "/copilot/explain")[0])).toEqual(SHAP_SENT);
@@ -336,5 +362,71 @@ describe("CopilotPage (production path)", () => {
     await screen.findByText(RECOMMENDATION);
     expect(container.querySelector(".prob-value")?.textContent).toBe("0");
     expect(container.querySelector(".score-chip")?.textContent).toBe("similarity 0.00");
+  });
+
+  // The presets are on the API scale. The explain endpoint rejects the old 0-100
+  // values (85, 60, 30) with a 422, so each preset must now get an explanation.
+  it.each([
+    ["HIGH", 8.5],
+    ["MODERATE", 6],
+    ["LOW", 3],
+  ])("the %s preset sends social impact %s to both endpoints and gets an explanation", async (preset, social) => {
+    const stub = backend();
+    renderPage();
+    await userEvent.click(screen.getByRole("button", { name: preset }));
+    await screen.findByText(RECOMMENDATION);
+
+    expect(callsTo(stub, "/predict/explain")[0].body).toMatchObject({ social_impact_score: social });
+    const copilot = callsTo(stub, "/copilot/explain")[0].body as { features: { social_impact: number }; shap_values: unknown };
+    expect(copilot.features.social_impact).toBe(social);
+    expect(copilot.shap_values).toEqual(SHAP_SENT);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("the social impact field takes 0-10 in steps of 0.5, as the API does", () => {
+    const { container } = renderPage();
+    const input = container.querySelector('input[name="social_impact"]') as HTMLInputElement;
+    expect(screen.getByText("Social impact (0–10)")).toBeInTheDocument();
+    expect(input).toHaveAttribute("min", "0");
+    expect(input).toHaveAttribute("max", "10");
+    expect(input).toHaveAttribute("step", "0.5");
+  });
+
+  // Two chips both reading "Mode" told the user nothing about which was which.
+  it("labels the bottom chip 'Explanation mode', so the top 'Mode' chip is not repeated", async () => {
+    backend();
+    const { container } = renderPage();
+    await generate();
+    await screen.findByText(RECOMMENDATION);
+
+    expect(container.querySelector(".confidence-chip")?.textContent).toBe("Mode · high");
+    const chips = [...container.querySelectorAll(".mode-chip")].map((c) => c.textContent);
+    expect(chips).toEqual(["Explanation mode · smart_template", "Model · unknown"]);
+  });
+
+  // Stop must reach the request. It aborts the stream's signal and ends the streaming
+  // state, keeping what arrived, marked (stopped), and not reported as a failure.
+  it("Stop aborts the stream request, ends streaming, and keeps the partial answer marked (stopped)", async () => {
+    // A holder rather than a let: TypeScript narrows a let that only a callback assigns.
+    const seen: { signal?: AbortSignal } = {};
+    backend({
+      stream: (init) => {
+        seen.signal = init?.signal ?? undefined;
+        return hangingStream(init);
+      },
+    });
+    renderPage();
+    await streamOnce();
+    await screen.findByText(/Recommended for/);
+    expect(seen.signal?.aborted).toBe(false);
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => expect(seen.signal?.aborted).toBe(true));
+    await waitFor(() => expect(screen.queryByText(/Streaming\.\.\./)).toBeNull());
+    expect(screen.getByText("(stopped)")).toBeInTheDocument();
+    expect(screen.getByText(/Recommended for/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
   });
 });

@@ -487,6 +487,20 @@
   font: 400 13px/1.5 var(--f-sans);
 }
 
+/* The partial answer kept when the user stops a stream. */
+.copilot-stopped {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+}
+.copilot-stopped-marker {
+  display: block;
+  margin-top: 10px;
+  font: 500 12px/1.4 var(--f-mono);
+  color: var(--muted);
+}
+
 /* Copilot Stream controls polish */
 .copilot-stream-speed {
   margin-left: 8px;
