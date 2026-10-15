@@ -30,6 +30,7 @@ import { EvaluatePage } from "./EvaluatePage";
 import { isMock } from "@/api/mock";
 import { renderWithQuery } from "@/test/utils";
 import { stubJson, stubStatus } from "@/test/http";
+import { SUCCESS_PROBABILITY_LABEL, SUCCESS_PROBABILITY_NOTE } from "./successProbabilityNote";
 
 const renderPage = () => renderWithQuery(<MemoryRouter><EvaluatePage /></MemoryRouter>);
 const runEvaluation = async () => {
@@ -173,6 +174,59 @@ describe("PDF download escaping (GHSA-jmpv-7wjf-87q9)", () => {
 
     // And opener should be nulled
     expect(mockWindow.opener).toBeNull();
+
+    openSpy.mockRestore();
+  });
+});
+
+describe("the success probability is labelled as an unvalidated estimate", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const answer = {
+    total_score: 61.5,
+    environment_score: 55.5,
+    social_score: 70.5,
+    economic_score: 58.5,
+    risk_level: "Medium",
+    success_probability: 66.5,
+    recommendations: [],
+    region: "EU",
+  };
+
+  it("shows the label, the note, and the hover text beside the number", async () => {
+    stubJson(answer);
+
+    const { container } = renderPage();
+    await runEvaluation();
+
+    await waitFor(() => expect(screen.getByText(SUCCESS_PROBABILITY_LABEL)).toBeInTheDocument(), {
+      timeout: 3000,
+    });
+    expect(screen.getByText(SUCCESS_PROBABILITY_NOTE)).toBeInTheDocument();
+    expect(container.querySelector(".ev-prob")).toHaveAttribute("title", SUCCESS_PROBABILITY_NOTE);
+  });
+
+  it("says the same in the printed report", async () => {
+    const mockWindow = {
+      document: { write: vi.fn(), close: vi.fn() },
+      print: vi.fn(),
+      opener: undefined,
+    };
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(mockWindow as unknown as Window);
+    stubJson(answer);
+
+    renderPage();
+    await runEvaluation();
+    await waitFor(() => expect(screen.getByText(SUCCESS_PROBABILITY_LABEL)).toBeInTheDocument(), {
+      timeout: 3000,
+    });
+    await userEvent.setup().click(screen.getByText(/Download PDF/i));
+
+    expect(openSpy).toHaveBeenCalled();
+    const writtenHtml = mockWindow.document.write.mock.calls[0][0];
+    expect(writtenHtml).toContain("66.5% success probability (unvalidated model estimate)");
 
     openSpy.mockRestore();
   });

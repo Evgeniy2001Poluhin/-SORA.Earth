@@ -8,6 +8,7 @@ import { copilotApi } from "@/api/endpoints/copilot";
 import type { CopilotRequest, CopilotResponse } from "@/api/endpoints/copilot";
 import "./copilot.css";
 import { errorMessage } from "@/lib/errors";
+import { SUCCESS_PROBABILITY_LABEL, SUCCESS_PROBABILITY_NOTE } from "../evaluate/successProbabilityNote";
 
 interface FormValues {
   probability: number;
@@ -249,7 +250,7 @@ export function CopilotPage() {
               <div className="prob-display">
                 <span className="prob-value">{(result.probability * 100).toFixed(0)}</span>
                 <span className="prob-value-suffix">/ 100</span>
-                <div className="prob-value-label">ML Success Probability</div>
+                <div className="prob-value-label" title={SUCCESS_PROBABILITY_NOTE}>{SUCCESS_PROBABILITY_LABEL}</div>
               </div>
 
               {result.key_drivers.positive.length > 0 && (
