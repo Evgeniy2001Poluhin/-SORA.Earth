@@ -8,9 +8,7 @@ Any request that reaches requests.get without a fake installed fails the test.
 """
 import importlib.util
 import json
-import os
 import re
-import stat
 import subprocess
 import sys
 from hashlib import sha256
@@ -422,28 +420,120 @@ def test_manifest_matches_the_files(tmp_path, offline):
     assert manifest["snapshot_digest"] == expected
 
 
-def test_directories_are_fsynced_before_and_after_the_rename(tmp_path, offline, monkeypatch):
+# --- directory durability ---------------------------------------------------------
+#
+# A directory fsync makes only the entries inside that directory durable. The page
+# files live in partial/<dataset>, so each dataset directory is synced as well as
+# partial, and the parents of any directories the run creates above <out> are
+# synced as well as out.parent.
+
+
+def _record_dir_fsyncs(monkeypatch, out):
+    """Replace _fsync_dir with a recorder that logs (path, whether out exists). The real sync still runs."""
+    real = snap._fsync_dir
+    calls = []
+
+    def recording(path):
+        calls.append((Path(path), out.exists()))
+        real(path)
+
+    monkeypatch.setattr(snap, "_fsync_dir", recording)
+    return calls
+
+
+def test_directory_fsyncs_run_in_order_for_both_datasets(tmp_path, offline, monkeypatch):
     out = tmp_path / "snap"
     partial = _partial(out)
-    real_fsync = os.fsync
-    dir_syncs = []
+    calls = _record_dir_fsyncs(monkeypatch, out)
+    offline.serve(FakeWorldBank({"ieg": 2500, "projects": 1001}))
 
-    def recording_fsync(fd):
-        if stat.S_ISDIR(os.fstat(fd).st_mode):
-            dir_syncs.append({
-                "partial_exists": partial.exists(),
-                "out_exists": out.exists(),
-                "is_parent": os.fstat(fd).st_ino == os.stat(out.parent).st_ino,
-            })
-        real_fsync(fd)
+    snap.take_snapshot(out, None)
 
-    monkeypatch.setattr(os, "fsync", recording_fsync)
-    offline.serve(FakeWorldBank({"ieg": 2500}))
+    assert [path for path, _ in calls] == [partial / "ieg", partial / "projects", partial, tmp_path]
+    assert [out_exists for _, out_exists in calls] == [False, False, False, True], (
+        "the final directory must not exist until the rename, and must exist for the last sync"
+    )
+
+
+def test_only_ieg_syncs_its_directory_and_creates_no_projects_directory(tmp_path, offline, monkeypatch):
+    out = tmp_path / "snap"
+    partial = _partial(out)
+    calls = _record_dir_fsyncs(monkeypatch, out)
+    fake = offline.serve(FakeWorldBank({"ieg": 2500, "projects": 1001}))
+
+    assert snap.main(["--out", str(out), "--only", "ieg"]) == 0
+
+    assert {c["name"] for c in fake.calls} == {"ieg"}
+    assert [path for path, _ in calls] == [partial / "ieg", partial, tmp_path]
+    assert not (out / "projects").exists()
+    assert not (partial / "projects").exists()
+
+
+def test_directories_created_above_out_have_their_parents_synced_bottom_up(tmp_path, offline, monkeypatch):
+    existing = tmp_path / "existing"
+    existing.mkdir()
+    out = existing / "new1" / "new2" / "snap"
+    partial = _partial(out)
+    calls = _record_dir_fsyncs(monkeypatch, out)
+    offline.serve(FakeWorldBank({"ieg": 1500}))
+
     snap.take_snapshot(out, ["ieg"])
 
-    assert [s["out_exists"] for s in dir_syncs] == [False, True], "one directory fsync before the rename, one after"
-    assert dir_syncs[0]["partial_exists"] and not dir_syncs[0]["is_parent"]
-    assert not dir_syncs[1]["partial_exists"] and dir_syncs[1]["is_parent"]
+    assert [path for path, _ in calls] == [
+        existing / "new1",           # parent of new2: new2's entry lives here
+        existing,                    # parent of new1: new1's entry lives here
+        partial / "ieg",
+        partial,
+        existing / "new1" / "new2",  # out.parent, after the rename
+    ]
+    assert tmp_path not in [path for path, _ in calls], "an ancestor that already existed was synced"
+    assert (out / "manifest.json").is_file()
+
+
+@pytest.mark.parametrize("failing_target", ["dataset", "partial"])
+def test_an_fsync_failure_before_the_rename_stops_the_run(tmp_path, offline, monkeypatch, capsys, failing_target):
+    out = tmp_path / "snap"
+    partial = _partial(out)
+    target = partial / "ieg" if failing_target == "dataset" else partial
+    real = snap._fsync_dir
+
+    def failing(path):
+        if Path(path) == target:
+            raise OSError("disk I/O error")
+        real(path)
+
+    monkeypatch.setattr(snap, "_fsync_dir", failing)
+    offline.serve(FakeWorldBank({"ieg": 1500}))
+
+    assert snap.main(["--out", str(out), "--only", "ieg"]) == 1
+
+    assert partial.is_dir(), "the partial directory should stay for inspection"
+    assert not out.exists(), "a run that could not flush created the final directory"
+    err = capsys.readouterr().err
+    assert "could not flush" in err and "not durable" in err
+    assert "left in place" in err
+
+
+def test_an_fsync_failure_after_the_rename_is_reported_as_unconfirmed(tmp_path, offline, monkeypatch, capsys):
+    out = tmp_path / "snap"
+    real = snap._fsync_dir
+
+    def failing(path):
+        if Path(path) == tmp_path:  # out.parent
+            raise OSError("disk I/O error")
+        real(path)
+
+    monkeypatch.setattr(snap, "_fsync_dir", failing)
+    offline.serve(FakeWorldBank({"ieg": 1500}))
+
+    assert snap.main(["--out", str(out), "--only", "ieg"]) == 1
+
+    assert (out / "manifest.json").is_file(), "the rename happened, so the snapshot exists"
+    assert not _partial(out).exists()
+    err = capsys.readouterr().err
+    assert str(out) in err
+    assert "durability is unconfirmed" in err
+    assert "left in place" not in err, "a renamed snapshot must not be reported as a leftover partial"
 
 
 def test_main_prints_the_manifest_sha256(tmp_path, offline, capsys):

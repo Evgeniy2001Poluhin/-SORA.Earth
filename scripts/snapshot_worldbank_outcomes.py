@@ -43,7 +43,9 @@ What makes the run fail (no final directory is created):
   * an IEG total larger than the one request IEG is read with (see Paging);
   * a body that is not JSON, or lacks the expected fields;
   * an output directory that already exists and is not empty, or a leftover
-    partial directory from an earlier run.
+    partial directory from an earlier run;
+  * an fsync that fails before the rename. The run is not durable, so it stops
+    and creates no <out>.
 
 Paging. IEG is read in one request, top=50000&skip=0. The publisher documents no
 total order for top and skip, so paging IEG can hide a lost record: a page can
@@ -76,10 +78,16 @@ page. Other 4xx responses are not retried.
 
 Immutability. Everything is written into <out>.partial using exclusive-create
 opens, and the directory is renamed to <out> only after every page and the
-manifest are on disk. The partial directory is fsynced before the rename, and
-the parent directory after it, so the rename survives a crash. A failed run
-leaves <out>.partial in place for inspection and creates no <out>; the next run
-refuses until that directory is removed by hand.
+manifest are on disk. A directory fsync makes the entries in that directory
+durable, and no others. So each dataset directory is synced once its pages are
+written (partial/ieg, partial/projects), then <out>.partial after manifest.json,
+then the rename, then <out>.parent. A directory the run creates above <out> has
+its entry in its parent, so each such parent is synced, bottom-up, before
+anything is written; ancestors that already existed and hold no new entry are
+left alone. A failed run leaves <out>.partial in place for inspection and
+creates no <out>; the next run refuses until that directory is removed by hand.
+An fsync that fails after the rename leaves <out> in place and is reported as an
+unconfirmed snapshot directory. Nothing is deleted automatically.
 
 The manifest's own sha256 is printed on stdout, next to the snapshot digest. It
 is not stored inside the manifest, which cannot contain its own digest.
@@ -491,6 +499,28 @@ def _fsync_dir(path):
         os.close(fd)
 
 
+def _flush_dir(path):
+    """_fsync_dir before the rename. Its OSError is a refusal, reported as one, not a traceback."""
+    try:
+        _fsync_dir(path)
+    except OSError as exc:
+        raise SnapshotError(
+            f"could not flush {path} to disk ({exc}); the snapshot is not durable"
+        ) from exc
+
+
+def _missing_dirs(path):
+    """The directories at path and above it that do not exist yet, deepest first."""
+    missing = []
+    current = path
+    while not current.exists():
+        missing.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    return missing
+
+
 def _refuse_existing(out, partial):
     if out.exists() and (not out.is_dir() or any(out.iterdir())):
         raise SnapshotError(
@@ -516,7 +546,12 @@ def take_snapshot(out, names=None):
 
     started = _utc_now()
     client = _Client()
+    # Each directory this run creates above <out> has its entry in its parent, so
+    # the parents are synced, deepest first, before anything is written.
+    created = _missing_dirs(out.parent)
     out.parent.mkdir(parents=True, exist_ok=True)
+    for new_dir in created:
+        _flush_dir(new_dir.parent)
     partial.mkdir()
     try:
         datasets = {}
@@ -524,6 +559,7 @@ def take_snapshot(out, names=None):
             datasets[name] = _collect(
                 name, client, lambda rel, body: _write_new(partial / rel, body)
             )
+            _flush_dir(partial / name)  # the page entries live in the dataset directory
         manifest = {
             "tool": _tool_info(),
             "started_utc": started,
@@ -534,7 +570,7 @@ def take_snapshot(out, names=None):
         }
         manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
         _write_new(partial / "manifest.json", manifest_bytes)
-        _fsync_dir(partial)  # the directory entries for every file written above
+        _flush_dir(partial)  # the entries for the dataset directories and manifest.json
         if out.exists():
             out.rmdir()  # empty: _refuse_existing allowed nothing else
         os.rename(partial, out)
@@ -544,7 +580,16 @@ def take_snapshot(out, names=None):
             file=sys.stderr,
         )
         raise
-    _fsync_dir(out.parent)  # makes the rename itself durable; outside the try, so a failure is loud
+    # Outside the try: once the rename has happened, <partial> no longer exists and
+    # must not be named as the thing left behind.
+    try:
+        _fsync_dir(out.parent)  # makes the rename itself durable
+    except OSError as exc:
+        raise SnapshotError(
+            f"{out} was written and renamed into place, but fsync of {out.parent} failed "
+            f"({exc}). The snapshot directory exists; its durability is unconfirmed. "
+            "Nothing was deleted."
+        ) from exc
     return manifest
 
 
