@@ -32,17 +32,31 @@ What makes the run fail (no final directory is created):
   * a P&O snapshot whose records do not carry distinct ids. The sum check
     cannot see this: a page that repeats another page keeps the sum equal to the
     total while other records are missed (see Paging below);
-  * a record identical to an earlier one. IEG legitimately repeats some
-    project_ids, with different records, so an identical record can only come
-    from overlapping pages;
+  * a record that breaks its dataset's contract: an IEG record without a
+    non-empty string project_id or as_of_date, or a P&O record whose own id is
+    not a non-empty string equal to its key. Nothing is coerced or repaired;
+  * an IEG snapshot whose records carry more than one as_of_date. That mixes
+    two vintages of the publisher's ratings;
+  * a record identical to an earlier one. The tool cannot tell an overlap
+    between pages from a publisher duplicate, so it refuses both rather than
+    claim which one this is;
+  * an IEG total larger than the one request IEG is read with (see Paging);
   * a body that is not JSON, or lacks the expected fields;
   * an output directory that already exists and is not empty, or a leftover
     partial directory from an earlier run.
 
-Paging. IEG: top=1000&skip=N. P&O: rows=500&os=N, with srt=id&order=asc. Each
-request advances the offset by the requested page size; paging stops when the
-offset reaches the total. The P&O total is a string in the API and is read as
-an integer.
+Paging. IEG is read in one request, top=50000&skip=0. The publisher documents no
+total order for top and skip, so paging IEG can hide a lost record: a page can
+repeat project A with a changed field while project C falls between the pages,
+and no count or hash check sees it. One response is one consistent read. On
+2026-10-15 a single request with top=15000 returned all 12627 records in one
+11 MB response, with the same canonical-record multiset as a 13-page read, and
+as_of_date 13-Oct-2026 on every record. If the reported total ever exceeds one
+request, the run refuses rather than pages.
+
+P&O: rows=500&os=N, with srt=id&order=asc. Each request advances the offset by
+the requested page size; paging stops when the offset reaches the total. The
+P&O total is a string in the API and is read as an integer.
 
 The explicit sort is not optional. Without it the P&O default order is not
 stable across pages. The 2026-10-15 run measured 147 records returned twice,
@@ -62,9 +76,13 @@ page. Other 4xx responses are not retried.
 
 Immutability. Everything is written into <out>.partial using exclusive-create
 opens, and the directory is renamed to <out> only after every page and the
-manifest are on disk. A failed run leaves <out>.partial in place for
-inspection and creates no <out>; the next run refuses until that directory is
-removed by hand.
+manifest are on disk. The partial directory is fsynced before the rename, and
+the parent directory after it, so the rename survives a crash. A failed run
+leaves <out>.partial in place for inspection and creates no <out>; the next run
+refuses until that directory is removed by hand.
+
+The manifest's own sha256 is printed on stdout, next to the snapshot digest. It
+is not stored inside the manifest, which cannot contain its own digest.
 
 Usage (from the repository root):
 
@@ -111,13 +129,47 @@ SNAPSHOT_DIGEST_METHOD = (
 _clock = time.monotonic
 _sleep = time.sleep
 
+def _check_ieg_records(label, records):
+    """The IEG record contract: a usable project_id and as_of_date on every record.
+
+    Nothing is coerced. A number or an object where a string belongs is a refusal.
+    """
+    for index, record in enumerate(records):
+        project_id = record.get("project_id")
+        if not isinstance(project_id, str) or not project_id:
+            raise SnapshotError(
+                f"{label}: record {index} has no usable project_id ({project_id!r}); "
+                "every IEG record must carry a non-empty string project_id"
+            )
+        as_of = record.get("as_of_date")
+        if not isinstance(as_of, str) or not as_of:
+            raise SnapshotError(
+                f"{label}: record {index} ({project_id}) has no usable as_of_date ({as_of!r})"
+            )
+
+
+def _check_projects_records(label, mapping):
+    """The P&O id contract: each record's own id is a non-empty string equal to its outer key.
+
+    Nothing is coerced or repaired. The page and the key are named in the message.
+    """
+    for key, record in mapping.items():
+        inner = record.get("id")
+        if not isinstance(inner, str) or not inner or inner != key:
+            raise SnapshotError(
+                f"{label}: the record under key {key!r} has id {inner!r}; "
+                "a P&O record's id must be a non-empty string equal to its key"
+            )
+
+
 DATASETS = {
     "ieg": {
         "description": "World Bank IEG project performance ratings (datasetId DS00053, resourceId RS00055)",
         "base_url": "https://datacatalogapi.worldbank.org/dexapps/fone/api/apiservice",
         "fixed_params": {"datasetId": "DS00053", "resourceId": "RS00055", "type": "json"},
         "size_param": "top",
-        "page_size": 1000,
+        "page_size": 50000,  # one request; see Paging in the module docstring
+        "one_request": True,
         "offset_param": "skip",
         "total_key": "count",
         "records_key": "data",
@@ -125,6 +177,7 @@ DATASETS = {
         "id_key": "project_id",
         "ids_unique": False,  # IEG legitimately repeats some project_ids
         "track_as_of_date": True,
+        "record_contract": _check_ieg_records,
     },
     "projects": {
         "description": "World Bank Projects & Operations (search.worldbank.org/api/v2/projects)",
@@ -139,7 +192,9 @@ DATASETS = {
         "records_are_mapping": True,
         "id_key": None,  # the record id is the mapping key
         "ids_unique": True,
+        "one_request": False,
         "track_as_of_date": False,
+        "record_contract": _check_projects_records,
     },
 }
 
@@ -210,10 +265,11 @@ def _parse_page(name, body, label):
         ids = [r.get(spec["id_key"]) if isinstance(r, dict) else None for r in records]
     if not all(isinstance(r, dict) for r in records):
         raise SnapshotError(f"{label}: a record is not a JSON object")
+    spec["record_contract"](label, container)
 
     as_of = []
     if spec["track_as_of_date"]:
-        as_of = sorted({str(r["as_of_date"]) for r in records if r.get("as_of_date") is not None})
+        as_of = sorted({r["as_of_date"] for r in records})  # validated: non-empty strings
     # Canonical form, so two records are "identical" when their content is, whatever the key order.
     digests = [
         hashlib.sha256(json.dumps(r, sort_keys=True).encode("utf-8")).hexdigest() for r in records
@@ -318,6 +374,13 @@ def _collect(name, client, write):
                 raise SnapshotError(
                     f"{label}: the API reports a total of {page['total']}; nothing to snapshot"
                 )
+            if spec["one_request"] and page["total"] > spec["page_size"]:
+                raise SnapshotError(
+                    f"{label}: the API reports {page['total']} records, more than the one request "
+                    f"of {spec['page_size']} that {name} is read with. The publisher documents no "
+                    f"total order for {spec['offset_param']}, so paging {name} could hide a lost "
+                    "record. Refusing rather than paging."
+                )
             total = page["total"]
         elif page["total"] != total:
             raise SnapshotError(
@@ -373,7 +436,14 @@ def _collect(name, client, write):
     if duplicate_records:
         raise SnapshotError(
             f"{name}: {duplicate_records} records are identical to an earlier record in this "
-            "snapshot, which can only come from overlapping pages. Refusing to write a snapshot."
+            "snapshot. The tool cannot tell an overlap between pages from a publisher duplicate, "
+            "so it refuses both. Refusing to write a snapshot."
+        )
+    if spec["track_as_of_date"] and len(as_of) > 1:
+        raise SnapshotError(
+            f"{name}: the records carry {len(as_of)} distinct as_of_date values "
+            f"({', '.join(sorted(as_of))}); the snapshot mixes vintages of the publisher's "
+            "ratings. Refusing to write a snapshot."
         )
     dataset = {
         "description": spec["description"],
@@ -410,6 +480,15 @@ def _write_new(path, body):
         fh.write(body)
         fh.flush()
         os.fsync(fh.fileno())
+
+
+def _fsync_dir(path):
+    """Flush a directory's entries to disk. An OSError propagates: a run that cannot do this is not durable."""
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def _refuse_existing(out, partial):
@@ -455,6 +534,7 @@ def take_snapshot(out, names=None):
         }
         manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
         _write_new(partial / "manifest.json", manifest_bytes)
+        _fsync_dir(partial)  # the directory entries for every file written above
         if out.exists():
             out.rmdir()  # empty: _refuse_existing allowed nothing else
         os.rename(partial, out)
@@ -464,6 +544,7 @@ def take_snapshot(out, names=None):
             file=sys.stderr,
         )
         raise
+    _fsync_dir(out.parent)  # makes the rename itself durable; outside the try, so a failure is loud
     return manifest
 
 
@@ -500,8 +581,10 @@ def main(argv=None):
     except SnapshotError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    manifest_sha = hashlib.sha256((Path(args.out) / "manifest.json").read_bytes()).hexdigest()
     print(f"snapshot written: {args.out}")
     print(f"snapshot digest: {manifest['snapshot_digest']}")
+    print(f"manifest sha256: {manifest_sha}")
     return 0
 
 

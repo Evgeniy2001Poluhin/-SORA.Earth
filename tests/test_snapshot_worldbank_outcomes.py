@@ -8,7 +8,9 @@ Any request that reaches requests.get without a fake installed fails the test.
 """
 import importlib.util
 import json
+import os
 import re
+import stat
 import subprocess
 import sys
 from hashlib import sha256
@@ -25,7 +27,6 @@ snap = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(snap)
 
 SnapshotError = snap.SnapshotError
-IEG_PAGE = snap.DATASETS["ieg"]["page_size"]
 PROJECTS_PAGE = snap.DATASETS["projects"]["page_size"]
 
 
@@ -35,18 +36,17 @@ class FakeResponse:
         self.content = content
 
 
-def ieg_record(i, outcome="Satisfactory", project_id=None):
-    """One IEG record as text. Index i gives the default id P(i+1) and an alternating as_of_date."""
-    date = "13-Oct-2026" if i % 2 == 0 else "12-Oct-2026"
+def ieg_record(i, outcome="Satisfactory", project_id=None, as_of="13-Oct-2026"):
+    """One IEG record as text. Index i gives the default id P(i+1)."""
     pid = project_id or "P%06d" % (i + 1)
     return (
         '{"project_id":"%s", "as_of_date":"%s", "project_name":"Caf\\u00e9 %d",'
-        ' "outcome":"%s"}' % (pid, date, i, outcome)
+        ' "outcome":"%s"}' % (pid, as_of, i, outcome)
     )
 
 
 def ieg_body(total, records):
-    """Bytes for an IEG page holding the given record texts, with the odd spacing kept."""
+    """Bytes for an IEG response holding the given record texts, with the odd spacing kept."""
     return ('{ "count" : %d,\n "data" : [%s] }' % (total, ", ".join(records))).encode("utf-8")
 
 
@@ -137,17 +137,138 @@ def _partial(out):
     return out.with_name(out.name + ".partial")
 
 
-def test_ieg_paging_stops_exactly_at_count(tmp_path, offline):
+# --- IEG is read in one request --------------------------------------------------
+
+
+def test_ieg_is_read_in_one_request(tmp_path, offline):
     fake = offline.serve(FakeWorldBank({"ieg": 2500}))
     manifest = snap.take_snapshot(tmp_path / "snap", ["ieg"])
 
-    offsets = [c["offset"] for c in fake.calls]
-    assert offsets == [0, IEG_PAGE, 2 * IEG_PAGE], "a request beyond the count was made"
-    assert manifest["datasets"]["ieg"]["sum_records"] == 2500
-    assert [c["params"] for c in fake.calls][0] == {
+    assert len(fake.calls) == 1, "IEG was paged"
+    assert fake.calls[0]["params"] == {
         "datasetId": "DS00053", "resourceId": "RS00055", "type": "json",
-        "top": 1000, "skip": 0,
+        "top": 50000, "skip": 0,
     }
+    ieg = manifest["datasets"]["ieg"]
+    assert ieg["sum_records"] == ieg["api_total"] == 2500
+    assert [page["records"] for page in ieg["pages"]] == [2500]
+
+
+def test_ieg_total_above_one_request_is_refused(tmp_path, offline):
+    offline.monkeypatch.setitem(snap.DATASETS["ieg"], "page_size", 1000)
+    fake = offline.serve(FakeWorldBank({"ieg": 2500}))
+
+    with pytest.raises(SnapshotError, match="more than the one request of 1000"):
+        snap.take_snapshot(tmp_path / "snap", ["ieg"])
+    assert len(fake.calls) == 1, "IEG went on to page after the refusal"
+    assert not (tmp_path / "snap").exists()
+
+
+# --- IEG record contract ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", [
+    '{"as_of_date":"13-Oct-2026","outcome":"Satisfactory"}',
+    '{"project_id":"","as_of_date":"13-Oct-2026"}',
+    '{"project_id":12345,"as_of_date":"13-Oct-2026"}',
+    '{"project_id":{"value":"P000002"},"as_of_date":"13-Oct-2026"}',
+], ids=["missing", "empty", "number", "object"])
+def test_ieg_record_without_a_usable_project_id_is_refused(tmp_path, offline, bad):
+    def hook(name, offset, nth):
+        return FakeResponse(200, ieg_body(2, [ieg_record(0), bad])) if name == "ieg" else None
+
+    offline.serve(FakeWorldBank({"ieg": 2}, hook=hook))
+    with pytest.raises(SnapshotError, match=r"ieg page 0 \(skip=0\): record 1 has no usable project_id"):
+        snap.take_snapshot(tmp_path / "snap", ["ieg"])
+
+
+@pytest.mark.parametrize("bad", [
+    '{"project_id":"P000002","outcome":"Satisfactory"}',
+    '{"project_id":"P000002","as_of_date":""}',
+], ids=["missing", "empty"])
+def test_ieg_record_without_an_as_of_date_is_refused(tmp_path, offline, bad):
+    def hook(name, offset, nth):
+        return FakeResponse(200, ieg_body(2, [ieg_record(0), bad])) if name == "ieg" else None
+
+    offline.serve(FakeWorldBank({"ieg": 2}, hook=hook))
+    with pytest.raises(SnapshotError, match=r"record 1 \(P000002\) has no usable as_of_date"):
+        snap.take_snapshot(tmp_path / "snap", ["ieg"])
+
+
+def test_ieg_two_as_of_dates_are_refused(tmp_path, offline):
+    """One record carries a later as_of_date. Count, sum and ids all still match."""
+    records = [ieg_record(i) for i in range(2499)] + [ieg_record(2499, as_of="14-Oct-2026")]
+
+    def hook(name, offset, nth):
+        return FakeResponse(200, ieg_body(2500, records)) if name == "ieg" else None
+
+    offline.serve(FakeWorldBank({"ieg": 2500}, hook=hook))
+    with pytest.raises(SnapshotError, match="2 distinct as_of_date values .*mixes vintages"):
+        snap.take_snapshot(tmp_path / "snap", ["ieg"])
+    assert not (tmp_path / "snap").exists()
+
+
+def test_ieg_identical_record_is_refused(tmp_path, offline):
+    """The last record is a copy of the first. Count and sum still match."""
+    records = [ieg_record(i) for i in range(2499)] + [ieg_record(0)]
+
+    def hook(name, offset, nth):
+        return FakeResponse(200, ieg_body(2500, records)) if name == "ieg" else None
+
+    offline.serve(FakeWorldBank({"ieg": 2500}, hook=hook))
+    with pytest.raises(SnapshotError, match="identical to an earlier record"):
+        snap.take_snapshot(tmp_path / "snap", ["ieg"])
+    assert not (tmp_path / "snap").exists()
+
+
+def test_ieg_same_project_id_with_a_different_record_passes(tmp_path, offline):
+    """IEG repeats a project_id legitimately when the records differ."""
+    records = [ieg_record(i) for i in range(2499)] + [ieg_record(999, outcome="Unsatisfactory")]
+
+    def hook(name, offset, nth):
+        return FakeResponse(200, ieg_body(2500, records)) if name == "ieg" else None
+
+    offline.serve(FakeWorldBank({"ieg": 2500}, hook=hook))
+    manifest = snap.take_snapshot(tmp_path / "snap", ["ieg"])
+
+    ieg = manifest["datasets"]["ieg"]
+    assert ieg["duplicate_records"] == 0
+    assert ieg["sum_records"] == 2500
+    assert ieg["unique_ids"] == 2499, "one project_id appears on two records"
+
+
+# --- P&O id contract -------------------------------------------------------------
+
+
+def test_pno_record_without_an_inner_id_is_refused(tmp_path, offline):
+    body = b'{"total":"1000","projects":{"P000001":{"status":"Active"}}}'
+
+    def hook(name, offset, nth):
+        return FakeResponse(200, body) if name == "projects" else None
+
+    offline.serve(FakeWorldBank({"projects": 1000}, hook=hook))
+    with pytest.raises(
+        SnapshotError,
+        match=r"projects page 0 \(os=0\): the record under key 'P000001' has id None",
+    ):
+        snap.take_snapshot(tmp_path / "snap", ["projects"])
+
+
+def test_pno_inner_id_not_equal_to_its_key_is_refused(tmp_path, offline):
+    body = b'{"total":"1000","projects":{"P000001":{"id":"P000002","status":"Active"}}}'
+
+    def hook(name, offset, nth):
+        return FakeResponse(200, body) if name == "projects" else None
+
+    offline.serve(FakeWorldBank({"projects": 1000}, hook=hook))
+    with pytest.raises(
+        SnapshotError,
+        match=r"projects page 0 \(os=0\): the record under key 'P000001' has id 'P000002'",
+    ):
+        snap.take_snapshot(tmp_path / "snap", ["projects"])
+
+
+# --- P&O paging and the id checks ------------------------------------------------
 
 
 @pytest.mark.parametrize("total, expected_offsets", [
@@ -163,35 +284,62 @@ def test_projects_paging_stops_exactly_at_total(tmp_path, offline, total, expect
     assert all("fl" not in c["params"] for c in fake.calls)
 
 
-def test_empty_page_before_total_is_refused(tmp_path, offline):
+def test_projects_requests_are_sorted_by_id(tmp_path, offline):
+    fake = offline.serve(FakeWorldBank({"projects": 1001}))
+    snap.take_snapshot(tmp_path / "snap", ["projects"])
+
+    assert len(fake.calls) == 3
+    for call in fake.calls:
+        assert call["params"]["srt"] == "id"
+        assert call["params"]["order"] == "asc"
+
+
+def test_projects_repeated_ids_are_refused(tmp_path, offline):
+    """Page 1 repeats page 0 exactly. The total and the record sum both still match."""
+
     def hook(name, offset, nth):
-        if offset == IEG_PAGE:
-            return FakeResponse(200, body_for("ieg", 2500, offset, n=0))
+        if name == "projects" and offset == PROJECTS_PAGE:
+            return FakeResponse(200, body_for("projects", 1000, 0))
         return None
 
-    fake = offline.serve(FakeWorldBank({"ieg": 2500}, hook=hook))
-    with pytest.raises(SnapshotError, match="empty page before the reported total of 2500"):
-        snap.take_snapshot(tmp_path / "snap", ["ieg"])
+    offline.serve(FakeWorldBank({"projects": 1000}, hook=hook))
+    with pytest.raises(
+        SnapshotError,
+        match=r"hold 1000 records but 500 distinct ids .*the paging was not stable",
+    ):
+        snap.take_snapshot(tmp_path / "snap", ["projects"])
+    assert not (tmp_path / "snap").exists()
 
-    assert [c["offset"] for c in fake.calls] == [0, IEG_PAGE], "paging went on past the empty page"
+
+def test_empty_page_before_total_is_refused(tmp_path, offline):
+    def hook(name, offset, nth):
+        if name == "projects" and offset == PROJECTS_PAGE:
+            return FakeResponse(200, body_for("projects", 1000, offset, n=0))
+        return None
+
+    fake = offline.serve(FakeWorldBank({"projects": 1000}, hook=hook))
+    with pytest.raises(SnapshotError, match="empty page before the reported total of 1000"):
+        snap.take_snapshot(tmp_path / "snap", ["projects"])
+
+    assert [c["offset"] for c in fake.calls] == [0, PROJECTS_PAGE], "paging went on past the empty page"
 
 
 def test_changed_total_is_refused(tmp_path, offline):
     def hook(name, offset, nth):
-        if offset == IEG_PAGE:
-            return FakeResponse(200, body_for("ieg", 2501, offset))
+        if name == "projects" and offset == PROJECTS_PAGE:
+            return FakeResponse(200, body_for("projects", 1002, offset))
         return None
 
-    offline.serve(FakeWorldBank({"ieg": 2500}, hook=hook))
-    with pytest.raises(SnapshotError, match="total changed from 2500 to 2501"):
-        snap.take_snapshot(tmp_path / "snap", ["ieg"])
+    offline.serve(FakeWorldBank({"projects": 1001}, hook=hook))
+    with pytest.raises(SnapshotError, match="total changed from 1001 to 1002"):
+        snap.take_snapshot(tmp_path / "snap", ["projects"])
     assert not (tmp_path / "snap").exists()
 
 
 def test_pages_that_do_not_add_up_are_refused(tmp_path, offline):
     def hook(name, offset, nth):
-        if offset == 0:
-            return FakeResponse(200, body_for("ieg", 2500, 0, n=900))
+        if name == "ieg":
+            return FakeResponse(200, ieg_body(2500, [ieg_record(i) for i in range(2400)]))
         return None
 
     offline.serve(FakeWorldBank({"ieg": 2500}, hook=hook))
@@ -214,6 +362,9 @@ def test_misshapen_responses_are_refused(tmp_path, offline, body, reason):
     offline.serve(FakeWorldBank({"ieg": 2500}, hook=hook))
     with pytest.raises(SnapshotError, match=re.escape(reason)):
         snap.take_snapshot(tmp_path / "snap", ["ieg"])
+
+
+# --- what is saved, and the manifest ---------------------------------------------
 
 
 def test_raw_bytes_are_saved_unchanged(tmp_path, offline):
@@ -263,12 +414,51 @@ def test_manifest_matches_the_files(tmp_path, offline):
     assert ieg["records_without_id"] == 0
     assert ieg["duplicate_records"] == 0
     assert manifest["datasets"]["projects"]["duplicate_records"] == 0
-    assert ieg["as_of_dates"] == ["12-Oct-2026", "13-Oct-2026"]
+    assert ieg["as_of_dates"] == ["13-Oct-2026"]
     assert "as_of_dates" not in manifest["datasets"]["projects"]
     assert manifest["datasets"]["projects"]["unique_ids"] == 1001
 
     expected = sha256("".join(line + "\n" for line in sorted(lines)).encode("utf-8")).hexdigest()
     assert manifest["snapshot_digest"] == expected
+
+
+def test_directories_are_fsynced_before_and_after_the_rename(tmp_path, offline, monkeypatch):
+    out = tmp_path / "snap"
+    partial = _partial(out)
+    real_fsync = os.fsync
+    dir_syncs = []
+
+    def recording_fsync(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            dir_syncs.append({
+                "partial_exists": partial.exists(),
+                "out_exists": out.exists(),
+                "is_parent": os.fstat(fd).st_ino == os.stat(out.parent).st_ino,
+            })
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    offline.serve(FakeWorldBank({"ieg": 2500}))
+    snap.take_snapshot(out, ["ieg"])
+
+    assert [s["out_exists"] for s in dir_syncs] == [False, True], "one directory fsync before the rename, one after"
+    assert dir_syncs[0]["partial_exists"] and not dir_syncs[0]["is_parent"]
+    assert not dir_syncs[1]["partial_exists"] and dir_syncs[1]["is_parent"]
+
+
+def test_main_prints_the_manifest_sha256(tmp_path, offline, capsys):
+    out = tmp_path / "snap"
+    offline.serve(FakeWorldBank({"ieg": 2500}))
+
+    assert snap.main(["--out", str(out), "--only", "ieg"]) == 0
+
+    expected = sha256((out / "manifest.json").read_bytes()).hexdigest()
+    printed = capsys.readouterr().out.splitlines()
+    assert f"manifest sha256: {expected}" in printed
+    assert any(line.startswith("snapshot digest: ") for line in printed)
+
+
+# --- retries, pacing, refusals, and the CLI --------------------------------------
 
 
 def test_existing_non_empty_out_is_refused(tmp_path, offline):
@@ -381,9 +571,9 @@ def test_requests_are_at_least_one_second_apart(tmp_path, offline):
     offline.monkeypatch.setattr(snap, "MIN_INTERVAL_S", 1.0)
     offline.monkeypatch.setattr(snap, "_clock", lambda: now[0])
     offline.monkeypatch.setattr(snap, "_sleep", lambda s: now.__setitem__(0, now[0] + s))
-    fake = offline.serve(FakeWorldBank({"ieg": 2500}, clock=lambda: now[0]))
+    fake = offline.serve(FakeWorldBank({"projects": 1001}, clock=lambda: now[0]))
 
-    snap.take_snapshot(tmp_path / "snap", ["ieg"])
+    snap.take_snapshot(tmp_path / "snap", ["projects"])
 
     starts = [c["at"] for c in fake.calls]
     assert len(starts) == 3
@@ -399,7 +589,7 @@ def test_dry_run_writes_nothing_and_fetches_page_zero_only(tmp_path, offline, ca
     assert [(c["name"], c["offset"]) for c in fake.calls] == [("ieg", 0), ("projects", 0)]
     assert not out.exists() and not _partial(out).exists()
     text = capsys.readouterr().out
-    assert "ieg: API total 2500; page 0 holds 1000 records" in text
+    assert "ieg: API total 2500; page 0 holds 2500 records" in text
     assert "ieg: first record keys: project_id, as_of_date, project_name, outcome" in text
     assert "projects: API total 1001; page 0 holds 500 records" in text
     assert "dry run: nothing written" in text
@@ -425,68 +615,6 @@ def test_main_reports_a_refusal_with_exit_code_one(tmp_path, offline, capsys):
     assert snap.main(["--out", str(out), "--only", "ieg"]) == 1
     assert fake.calls == []
     assert "already exists" in capsys.readouterr().err
-
-
-def test_projects_requests_are_sorted_by_id(tmp_path, offline):
-    fake = offline.serve(FakeWorldBank({"projects": 1001}))
-    snap.take_snapshot(tmp_path / "snap", ["projects"])
-
-    assert len(fake.calls) == 3
-    for call in fake.calls:
-        assert call["params"]["srt"] == "id"
-        assert call["params"]["order"] == "asc"
-
-
-def test_projects_repeated_ids_are_refused(tmp_path, offline):
-    """Page 1 repeats page 0 exactly. The total and the record sum both still match."""
-
-    def hook(name, offset, nth):
-        if name == "projects" and offset == PROJECTS_PAGE:
-            return FakeResponse(200, body_for("projects", 1000, 0))
-        return None
-
-    offline.serve(FakeWorldBank({"projects": 1000}, hook=hook))
-    with pytest.raises(
-        SnapshotError,
-        match=r"hold 1000 records but 500 distinct ids .*the paging was not stable",
-    ):
-        snap.take_snapshot(tmp_path / "snap", ["projects"])
-    assert not (tmp_path / "snap").exists()
-
-
-def test_ieg_identical_record_on_two_pages_is_refused(tmp_path, offline):
-    """Page 1 starts with a copy of page 0's last record. Count and sum still match."""
-
-    def hook(name, offset, nth):
-        if name == "ieg" and offset == IEG_PAGE:
-            records = [ieg_record(IEG_PAGE - 1)]
-            records += [ieg_record(i) for i in range(IEG_PAGE, 2 * IEG_PAGE - 1)]
-            return FakeResponse(200, ieg_body(2500, records))
-        return None
-
-    offline.serve(FakeWorldBank({"ieg": 2500}, hook=hook))
-    with pytest.raises(SnapshotError, match="identical to an earlier record"):
-        snap.take_snapshot(tmp_path / "snap", ["ieg"])
-    assert not (tmp_path / "snap").exists()
-
-
-def test_ieg_same_project_id_with_a_different_record_passes(tmp_path, offline):
-    """IEG repeats a project_id legitimately when the records differ."""
-
-    def hook(name, offset, nth):
-        if name == "ieg" and offset == IEG_PAGE:
-            records = [ieg_record(IEG_PAGE, outcome="Unsatisfactory", project_id="P%06d" % IEG_PAGE)]
-            records += [ieg_record(i) for i in range(IEG_PAGE + 1, 2 * IEG_PAGE)]
-            return FakeResponse(200, ieg_body(2500, records))
-        return None
-
-    offline.serve(FakeWorldBank({"ieg": 2500}, hook=hook))
-    manifest = snap.take_snapshot(tmp_path / "snap", ["ieg"])
-
-    ieg = manifest["datasets"]["ieg"]
-    assert ieg["duplicate_records"] == 0
-    assert ieg["sum_records"] == 2500
-    assert ieg["unique_ids"] == 2499, "one project_id appears on two pages"
 
 
 def test_help_runs_as_a_subprocess():
