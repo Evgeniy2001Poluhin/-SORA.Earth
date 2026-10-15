@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import OnboardingTour from "./OnboardingTour";
 import { useTheme } from "./theme-context";
 import { ModelBadge } from "../components/ModelBadge";
@@ -10,6 +10,23 @@ const NAV = [ { to:"/", label:"Home" }, { to:"/evaluate", label:"Evaluate" }, { 
 export function Shell() {
   const { theme, toggle } = useTheme();
   const [tour, setTour] = useState(0);
+  const navRef = useRef<HTMLElement>(null);
+  const { pathname } = useLocation();
+
+  // Bring the active link inside the nav's own scroll box, on load and on each
+  // route change. scrollLeft is set directly: scrollIntoView would also scroll
+  // ancestors such as .shell, which is overflow-x: hidden. Nothing moves when
+  // the link is already visible.
+  useEffect(() => {
+    const nav = navRef.current;
+    const active = nav?.querySelector<HTMLElement>("a.active");
+    if (!nav || !active) return;
+    const left = active.offsetLeft;
+    const right = left + active.offsetWidth;
+    if (left < nav.scrollLeft) nav.scrollLeft = left;
+    else if (right > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = right - nav.clientWidth;
+  }, [pathname]);
+
   return (
     <div className="shell">
       <header className="shell-top">
@@ -22,7 +39,7 @@ export function Shell() {
           </svg>
           <span className="display" style={{fontSize:20}}>SORA<span style={{color:"var(--planet)"}}>.</span>earth</span>
         </div>
-        <nav className="shell-nav">
+        <nav className="shell-nav" ref={navRef}>
           {NAV.map(n => <NavLink key={n.to} to={n.to} end data-tour={n.to.replace("/","")||"home"} className={({isActive})=>isActive?"active":""}>{n.label}</NavLink>)}
         </nav>
         <div className="shell-right" style={{display:"flex",alignItems:"center",gap:10}}>
