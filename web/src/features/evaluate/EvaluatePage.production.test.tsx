@@ -19,6 +19,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { QueryClient } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 
 vi.mock("@/api/mock", async (importOriginal) => {
@@ -229,5 +230,139 @@ describe("the success probability is labelled as an unvalidated estimate", () =>
     expect(writtenHtml).toContain("66.5% success probability (unvalidated model estimate)");
 
     openSpy.mockRestore();
+  });
+});
+
+/* -- the hero's Models and Status come from GET /api/v1/health, and nothing else -- */
+
+const HEALTH_URL = "/api/v1/health";
+const jsonResponse = (payload: unknown, status = 200) =>
+  new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } });
+
+const HEALTHY = {
+  status: "healthy",
+  model_provenance: { source: "seed", model_version: "20260712_200332" },
+  checks: {
+    models: { status: "healthy", loaded: true, neural_network_loaded: false, xgboost_loaded: true },
+  },
+};
+
+/**
+ * Answers GET /api/v1/health with `answer()` and every other call with `{}`, so
+ * the hero is judged on the health answer alone. A fresh Response per call,
+ * since a body can be read once. Same transport shape as stubJson and stubStatus
+ * in @/test/http, routed by URL.
+ */
+function stubHealth(answer: () => Response) {
+  const stub = vi.fn(async (input: RequestInfo | URL) =>
+    String(input) === HEALTH_URL ? answer() : jsonResponse({}),
+  );
+  globalThis.fetch = stub as unknown as typeof fetch;
+  return stub;
+}
+
+/** The whole hero, which must exist: a missing hero would make a negative match pass. */
+function heroText(container: HTMLElement): string {
+  const hero = container.querySelector(".ev-hero");
+  if (!hero) throw new Error("no .ev-hero on the page");
+  return hero.textContent ?? "";
+}
+
+/** The value beside a hero label ("Models", "Status"), read from the DOM. */
+function heroValue(container: HTMLElement, label: string): string {
+  const row = Array.from(container.querySelectorAll(".ev-hero-row")).find(
+    (r) => r.querySelector(".k")?.textContent === label,
+  );
+  if (!row) throw new Error(`no "${label}" row in the hero`);
+  return row.querySelector(".v")?.textContent ?? "";
+}
+
+/**
+ * Waits until the health call has been made and has settled. Waiting for the
+ * request alone is not enough: "Unknown" is also what the hero shows before any
+ * answer arrives, so a check made too early would pass for the wrong reason.
+ */
+async function settleHealth(stub: ReturnType<typeof stubHealth>, queryClient: QueryClient) {
+  await waitFor(() => expect(stub).toHaveBeenCalledWith(HEALTH_URL, expect.anything()));
+  await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+}
+
+describe("the hero reports the health answer, and nothing it was not given", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("names the loaded models and says Operational for a healthy service", async () => {
+    // The neural network is not loaded in production, so MLP must not appear.
+    const stub = stubHealth(() => jsonResponse(HEALTHY));
+    const { container, queryClient } = renderPage();
+    await settleHealth(stub, queryClient);
+
+    expect(heroValue(container, "Models")).toBe("RandomForest · XGBoost");
+    expect(heroValue(container, "Status")).toBe("Operational");
+  });
+
+  it("names MLP only when the service reports the network loaded", async () => {
+    const stub = stubHealth(() =>
+      jsonResponse({
+        ...HEALTHY,
+        checks: { models: { loaded: true, xgboost_loaded: true, neural_network_loaded: true } },
+      }),
+    );
+    const { container, queryClient } = renderPage();
+    await settleHealth(stub, queryClient);
+
+    expect(heroValue(container, "Models")).toBe("RandomForest · XGBoost · MLP");
+  });
+
+  it("shows unknown, not Operational and not a default list, for an empty 200", async () => {
+    const stub = stubHealth(() => jsonResponse({}));
+    const { container, queryClient } = renderPage();
+    await settleHealth(stub, queryClient);
+
+    expect(heroValue(container, "Models")).toBe("unknown");
+    expect(heroValue(container, "Status")).toBe("Unknown");
+    expect(heroText(container)).not.toMatch(/MLP|Operational/);
+  });
+
+  it("shows unknown, not a default list, when the models block reports no flags", async () => {
+    // The models object is present, but says nothing about which models are loaded.
+    const stub = stubHealth(() =>
+      jsonResponse({ status: "healthy", checks: { models: { status: "healthy" } } }),
+    );
+    const { container, queryClient } = renderPage();
+    await settleHealth(stub, queryClient);
+
+    expect(heroValue(container, "Models")).toBe("unknown");
+    expect(heroValue(container, "Status")).toBe("Operational");
+    expect(heroText(container)).not.toMatch(/MLP|RandomForest|XGBoost/);
+  });
+
+  it("shows unknown when the health request fails", async () => {
+    const stub = stubHealth(() => new Response("upstream said no", { status: 503 }));
+    const { container, queryClient } = renderPage();
+    await settleHealth(stub, queryClient);
+
+    expect(heroValue(container, "Models")).toBe("unknown");
+    expect(heroValue(container, "Status")).toBe("Unknown");
+    expect(heroText(container)).not.toMatch(/MLP|Operational/);
+  });
+
+  it("shows Degraded for a status other than healthy", async () => {
+    const stub = stubHealth(() => jsonResponse({ ...HEALTHY, status: "degraded" }));
+    const { container, queryClient } = renderPage();
+    await settleHealth(stub, queryClient);
+
+    expect(heroValue(container, "Status")).toBe("Degraded");
+    expect(heroText(container)).not.toMatch(/Operational/);
+  });
+
+  it("has no AUC and none of the invented figures in the hero", async () => {
+    const stub = stubHealth(() => jsonResponse(HEALTHY));
+    const { container, queryClient } = renderPage();
+    await settleHealth(stub, queryClient);
+
+    expect(heroText(container)).not.toMatch(/AUC/);
+    expect(heroText(container)).not.toMatch(/0\.82|0\.98/);
   });
 });
