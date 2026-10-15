@@ -13,7 +13,7 @@ import { healthApi } from "@/api/endpoints/health";
 import type { EvaluateRequest, EvaluateResponse, ExplainResponse, RiskLevel } from "@/api/types";
 import { UncertaintyCard } from "./UncertaintyCard";
 import { SUCCESS_PROBABILITY_LABEL, SUCCESS_PROBABILITY_NOTE } from "./successProbabilityNote";
-import { healthStatusOf, loadedModelsOf, type HealthStatus } from "./serviceHealth";
+import { serviceSnapshotOf, type HealthStatus } from "./serviceHealth";
 import { fmtNum, fmtMoney, clamp } from "@/lib/format";
 import "./evaluate.css";
 import { errorMessage } from "@/lib/errors";
@@ -105,11 +105,17 @@ export function EvaluatePage() {
   const score = useCountUp(result?.total_score ?? 0);
   const prob  = useCountUp(result?.success_probability ?? 0);
   // The hero's Models and Status are the service's own answer, not constants.
-  // While the call is pending, or after it fails, there is no answer, so both
-  // read "unknown" rather than a healthy default (#236).
-  const health = useQuery({ queryKey:["service-health"], queryFn: healthApi.get });
-  const healthStatus = healthStatusOf(health.data);
-  const modelList = loadedModelsOf(health.data);
+  // While the call is pending, or after the latest attempt fails, there is no
+  // answer, so both read "unknown" rather than a healthy default (#236). The
+  // query is asked again every 60 s while the page is visible, so an open tab
+  // does not keep showing an answer from long ago.
+  const health = useQuery({
+    queryKey: ["service-health"],
+    queryFn: healthApi.get,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+  });
+  const service = serviceSnapshotOf({ data: health.data, isError: health.isError });
   const countryList = useMemo(()=> countries ? Object.keys(countries).sort() : [], [countries]);
   const setField = <K extends keyof EvaluateRequest>(k:K, v:EvaluateRequest[K]) => setForm(s=>({...s,[k]:v}));
   const applyPreset = (id:string) => { const p=PRESETS.find(x=>x.id===id); if(!p) return; setForm(p.body); setActivePreset(id); };
@@ -158,7 +164,7 @@ export function EvaluatePage() {
         <tr><td class="k">Economic</td><td>${escapeHtml(result?.economic_score?.toFixed(1))}</td></tr>
       </table>
       <h3>Recommendations</h3><ul>${rows}</ul>
-      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${escapeHtml(new Date().toISOString())} · ML Scoring Engine · models: ${escapeHtml(modelList)}</div>
+      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${escapeHtml(new Date().toISOString())} · ML Scoring Engine · models reported by the service at export: ${escapeHtml(service.models)}</div>
       </body></html>`);
     w.document.close(); setTimeout(()=>w.print(), 300);
   };
@@ -178,8 +184,8 @@ export function EvaluatePage() {
         </div>
         <div className="ev-hero-meta">
           <Row k="Unit"   v={<><span style={{color:"var(--planet)"}}>◆</span> ML Scoring Engine</>}/>
-          <Row k="Models" v={modelList}/>
-          <Row k="Status" v={<HealthPill status={healthStatus}/>}/>
+          <Row k="Models" v={service.models}/>
+          <Row k="Status" v={<HealthPill status={service.status}/>}/>
         </div>
       </section>
 

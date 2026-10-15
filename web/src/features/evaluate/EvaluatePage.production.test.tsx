@@ -383,9 +383,13 @@ const SCORED = {
 /**
  * Runs an evaluation with the given health answer, presses Download PDF, and
  * returns the HTML the page wrote to the print window. Same mechanism as the PDF
- * escaping test above.
+ * escaping test above. `afterFirstAnswer`, when given, runs once the first health
+ * answer has settled, to change what the service answers next.
  */
-async function printedReportWith(health: () => Response): Promise<string> {
+async function printedReportWith(
+  health: () => Response,
+  afterFirstAnswer?: (queryClient: QueryClient) => Promise<void>,
+): Promise<string> {
   const mockWindow = {
     document: { write: vi.fn(), close: vi.fn() },
     print: vi.fn(),
@@ -396,6 +400,7 @@ async function printedReportWith(health: () => Response): Promise<string> {
 
   const { queryClient } = renderPage();
   await settleHealth(stub, queryClient);
+  if (afterFirstAnswer) await afterFirstAnswer(queryClient);
   await runEvaluation();
   await waitFor(() => expect(screen.getByText("Medium risk")).toBeInTheDocument(), {
     timeout: 3000,
@@ -415,14 +420,119 @@ describe("the printed report names the models the service reports", () => {
   it("names the loaded models, and not MLP, when the network is not loaded", async () => {
     const html = await printedReportWith(() => jsonResponse(HEALTHY));
 
-    expect(html).toContain("models: RandomForest · XGBoost");
+    expect(html).toContain("models reported by the service at export: RandomForest · XGBoost");
     expect(html).not.toContain("MLP");
   });
 
   it("says unknown when the health request fails", async () => {
     const html = await printedReportWith(() => new Response("upstream said no", { status: 503 }));
 
-    expect(html).toContain("models: unknown");
+    expect(html).toContain("models reported by the service at export: unknown");
     expect(html).not.toContain("MLP");
+  });
+
+  it("says unknown after a refetch fails, even though the last good answer is still cached", async () => {
+    let answer: () => Response = () => jsonResponse(HEALTHY);
+    const html = await printedReportWith(
+      () => answer(),
+      async (queryClient) => {
+        answer = () => new Response("upstream said no", { status: 503 });
+        await queryClient.invalidateQueries({ queryKey: ["service-health"] });
+        await waitFor(() => expect(queryClient.getQueryState(["service-health"])?.status).toBe("error"));
+      },
+    );
+
+    expect(html).toContain("models reported by the service at export: unknown");
+    expect(html).not.toContain("RandomForest");
+    expect(html).not.toContain("MLP");
+  });
+});
+
+/* -- a failed refetch is not answered with the last good answer -- */
+
+describe("a failed health refetch does not keep the last good answer", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("reads Unknown after the refetch fails, and Operational again once it recovers", async () => {
+    let answer: () => Response = () => jsonResponse(HEALTHY);
+    const stub = stubHealth(() => answer());
+    const { container, queryClient } = renderPage();
+    await settleHealth(stub, queryClient);
+
+    expect(heroValue(container, "Status")).toBe("Operational");
+    expect(heroValue(container, "Models")).toBe("RandomForest · XGBoost");
+
+    // The service stops answering. The last good answer is still in the cache.
+    answer = () => new Response("upstream said no", { status: 503 });
+    await queryClient.invalidateQueries({ queryKey: ["service-health"] });
+    await waitFor(() => expect(queryClient.getQueryState(["service-health"])?.status).toBe("error"));
+
+    expect(heroValue(container, "Status")).toBe("Unknown");
+    expect(heroValue(container, "Models")).toBe("unknown");
+    expect(heroText(container)).not.toMatch(/Operational|RandomForest|XGBoost|MLP/);
+
+    // The service answers healthy again, and a later successful answer is trusted.
+    answer = () => jsonResponse(HEALTHY);
+    await queryClient.invalidateQueries({ queryKey: ["service-health"] });
+    await waitFor(() => expect(heroValue(container, "Status")).toBe("Operational"));
+    expect(heroValue(container, "Models")).toBe("RandomForest · XGBoost");
+  });
+});
+
+/* -- a partial models block names what it states, and never claims none loaded for what it does not -- */
+
+describe("a partial models block is not reported as none loaded", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ["only loaded, false", { loaded: false }, "unknown"],
+    ["only xgboost_loaded, false", { xgboost_loaded: false }, "unknown"],
+    ["only neural_network_loaded, false", { neural_network_loaded: false }, "unknown"],
+    ["loaded true, the other two missing", { loaded: true }, "RandomForest · others unknown"],
+    ["only xgboost_loaded, true", { xgboost_loaded: true }, "XGBoost · others unknown"],
+    ["only neural_network_loaded, true", { neural_network_loaded: true }, "MLP · others unknown"],
+    [
+      "loaded true, xgboost null, neural false",
+      { loaded: true, xgboost_loaded: null, neural_network_loaded: false },
+      "RandomForest · others unknown",
+    ],
+    ["loaded as the string \"true\"", { loaded: "true" }, "unknown"],
+    [
+      "all three false",
+      { loaded: false, xgboost_loaded: false, neural_network_loaded: false },
+      "none loaded",
+    ],
+    [
+      "all three true",
+      { loaded: true, xgboost_loaded: true, neural_network_loaded: true },
+      "RandomForest · XGBoost · MLP",
+    ],
+  ])("when the models block says %s", async (_case, models, expected) => {
+    const stub = stubHealth(() => jsonResponse({ status: "healthy", checks: { models } }));
+    const { container, queryClient } = renderPage();
+    await settleHealth(stub, queryClient);
+
+    expect(heroValue(container, "Models")).toBe(expected);
+  });
+});
+
+/* -- an empty status is unknown, not degraded -- */
+
+describe("an empty status is unknown, not degraded", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([[""], ["  "]])("reads Unknown for the status %j", async (status) => {
+    const stub = stubHealth(() => jsonResponse({ ...HEALTHY, status }));
+    const { container, queryClient } = renderPage();
+    await settleHealth(stub, queryClient);
+
+    expect(heroValue(container, "Status")).toBe("Unknown");
+    expect(heroText(container)).not.toMatch(/Degraded|Operational/);
   });
 });
