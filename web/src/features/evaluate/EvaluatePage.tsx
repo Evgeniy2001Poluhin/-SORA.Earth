@@ -158,7 +158,7 @@ export function EvaluatePage() {
         <tr><td class="k">Economic</td><td>${escapeHtml(result?.economic_score?.toFixed(1))}</td></tr>
       </table>
       <h3>Recommendations</h3><ul>${rows}</ul>
-      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${escapeHtml(new Date().toISOString())} · ML Scoring Engine · RF·MLP·Stacking</div>
+      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${escapeHtml(new Date().toISOString())} · ML Scoring Engine · models: ${escapeHtml(modelList)}</div>
       </body></html>`);
     w.document.close(); setTimeout(()=>w.print(), 300);
   };

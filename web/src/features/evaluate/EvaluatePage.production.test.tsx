@@ -248,14 +248,14 @@ const HEALTHY = {
 };
 
 /**
- * Answers GET /api/v1/health with `answer()` and every other call with `{}`, so
- * the hero is judged on the health answer alone. A fresh Response per call,
- * since a body can be read once. Same transport shape as stubJson and stubStatus
- * in @/test/http, routed by URL.
+ * Answers GET /api/v1/health with `answer()` and every other call with
+ * `otherAnswer` (an empty object by default), so the hero is judged on the health
+ * answer alone. A fresh Response per call, since a body can be read once. Same
+ * transport shape as stubJson and stubStatus in @/test/http, routed by URL.
  */
-function stubHealth(answer: () => Response) {
+function stubHealth(answer: () => Response, otherAnswer: unknown = {}) {
   const stub = vi.fn(async (input: RequestInfo | URL) =>
-    String(input) === HEALTH_URL ? answer() : jsonResponse({}),
+    String(input) === HEALTH_URL ? answer() : jsonResponse(otherAnswer),
   );
   globalThis.fetch = stub as unknown as typeof fetch;
   return stub;
@@ -364,5 +364,65 @@ describe("the hero reports the health answer, and nothing it was not given", () 
 
     expect(heroText(container)).not.toMatch(/AUC/);
     expect(heroText(container)).not.toMatch(/0\.82|0\.98/);
+  });
+});
+
+/* -- the printed report names the models the service reports, not a fixed list -- */
+
+const SCORED = {
+  total_score: 61.5,
+  environment_score: 55.5,
+  social_score: 70.5,
+  economic_score: 58.5,
+  risk_level: "Medium",
+  success_probability: 66.5,
+  recommendations: [],
+  region: "EU",
+};
+
+/**
+ * Runs an evaluation with the given health answer, presses Download PDF, and
+ * returns the HTML the page wrote to the print window. Same mechanism as the PDF
+ * escaping test above.
+ */
+async function printedReportWith(health: () => Response): Promise<string> {
+  const mockWindow = {
+    document: { write: vi.fn(), close: vi.fn() },
+    print: vi.fn(),
+    opener: undefined,
+  };
+  const openSpy = vi.spyOn(window, "open").mockReturnValue(mockWindow as unknown as Window);
+  const stub = stubHealth(health, SCORED);
+
+  const { queryClient } = renderPage();
+  await settleHealth(stub, queryClient);
+  await runEvaluation();
+  await waitFor(() => expect(screen.getByText("Medium risk")).toBeInTheDocument(), {
+    timeout: 3000,
+  });
+  await userEvent.setup().click(screen.getByText(/Download PDF/i));
+
+  expect(openSpy).toHaveBeenCalled();
+  openSpy.mockRestore();
+  return mockWindow.document.write.mock.calls[0][0] as string;
+}
+
+describe("the printed report names the models the service reports", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("names the loaded models, and not MLP, when the network is not loaded", async () => {
+    const html = await printedReportWith(() => jsonResponse(HEALTHY));
+
+    expect(html).toContain("models: RandomForest · XGBoost");
+    expect(html).not.toContain("MLP");
+  });
+
+  it("says unknown when the health request fails", async () => {
+    const html = await printedReportWith(() => new Response("upstream said no", { status: 503 }));
+
+    expect(html).toContain("models: unknown");
+    expect(html).not.toContain("MLP");
   });
 });
