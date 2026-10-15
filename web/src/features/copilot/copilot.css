@@ -474,6 +474,18 @@
 .sentinel-icon { font-size: 14px; }
 .sentinel-label { font-weight: 700; }
 .sentinel-meta { opacity: 0.75; font-weight: 500; }
+.sentinel-note { margin-top: 8px; font: 400 12px/1.4 var(--f-sans); color: var(--faint); }
+
+/* Shown in place of an explanation when its SHAP values could not be read. */
+.copilot-failure {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 80, 80, 0.4);
+  background: rgba(255, 80, 80, 0.1);
+  color: #FF7070;
+  font: 400 13px/1.5 var(--f-sans);
+}
 
 /* Copilot Stream controls polish */
 .copilot-stream-speed {
