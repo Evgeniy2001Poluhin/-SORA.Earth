@@ -6,7 +6,7 @@
 .hist-reset, .hist-export { background:transparent; border:1px solid var(--line-2); color:var(--muted); border-radius:6px; padding:6px 12px; font-size:12px; cursor:pointer; text-decoration:none; }
 .hist-export { color:var(--text); }
 .hist-table { border:1px solid var(--line-2); border-radius:8px; overflow:hidden; background:var(--bg-1); }
-.hist-row { display:grid; grid-template-columns:130px 1fr 70px 60px 70px 110px 70px; gap:12px; align-items:center; padding:10px 14px; background:transparent; border:0; border-bottom:1px solid var(--line-2); color:var(--text); cursor:pointer; text-align:left; font:inherit; font-size:13px; width:100%; }
+.hist-row { display:grid; grid-template-columns:130px 1fr 70px 100px 70px 110px 70px; gap:12px; align-items:center; padding:10px 14px; background:transparent; border:0; border-bottom:1px solid var(--line-2); color:var(--text); cursor:pointer; text-align:left; font:inherit; font-size:13px; width:100%; }
 .hist-row:last-child { border-bottom:0; }
 .hist-head { color:var(--muted); font-size:11px; letter-spacing:.06em; text-transform:uppercase; cursor:default; }
 .hist-item:hover { background:var(--bg-3); }

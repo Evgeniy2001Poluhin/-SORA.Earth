@@ -32,7 +32,7 @@ type ForecastResponse = {
 const MODELS = ["ensemble", "prophet", "lstm", "linear"] as const;
 const METRICS = [
   { value: "score", label: "ESG Score" },
-  { value: "prob", label: "Success Prob" },
+  { value: "prob", label: "Success Prob · unvalidated" },
   { value: "co2_reduction", label: "CO₂ Reduction" },
 ] as const;
 

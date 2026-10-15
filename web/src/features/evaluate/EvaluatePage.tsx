@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { evaluateApi } from "@/api/endpoints/evaluate";
 import type { EvaluateRequest, EvaluateResponse, ExplainResponse, RiskLevel } from "@/api/types";
 import { UncertaintyCard } from "./UncertaintyCard";
+import { SUCCESS_PROBABILITY_LABEL, SUCCESS_PROBABILITY_NOTE } from "./successProbabilityNote";
 import { fmtNum, fmtMoney, clamp } from "@/lib/format";
 import "./evaluate.css";
 import { errorMessage } from "@/lib/errors";
@@ -130,7 +131,7 @@ export function EvaluatePage() {
       <h1>${escapeHtml(form.project_name)}</h1>
       <span class="badge">${escapeHtml(result?.risk_level)} risk</span>
       <div class="score">${escapeHtml(result?.total_score?.toFixed(1))}</div>
-      <div class="muted">/ 100 · ESG Score · ${escapeHtml(result?.success_probability?.toFixed(1))}% success probability</div>
+      <div class="muted">/ 100 · ESG Score · ${escapeHtml(result?.success_probability?.toFixed(1))}% success probability (unvalidated model estimate)</div>
       <table>
         <tr><td class="k">Country</td><td>${escapeHtml(form.country)}</td></tr>
         <tr><td class="k">Budget (USD)</td><td>${escapeHtml(form.budget_usd.toLocaleString())}</td></tr>
@@ -249,9 +250,10 @@ export function EvaluatePage() {
                     <div className="ev-score tabular">{fmtNum(score,1)}</div>
                     <div className="ev-score-sub">/ 100 · ESG SCORE</div>
                   </div>
-                  <div className="ev-prob">
+                  <div className="ev-prob" title={SUCCESS_PROBABILITY_NOTE}>
                     <div className="big tabular">{fmtNum(prob,1)}%</div>
-                    <div className="lbl">ML success probability</div>
+                    <div className="lbl">{SUCCESS_PROBABILITY_LABEL}</div>
+                    <div className="ev-prob-note muted">{SUCCESS_PROBABILITY_NOTE}</div>
                   </div>
                   <button className="ev-pdf" onClick={downloadPDF} disabled={!result}>
                     <span className="dot"/>Download PDF

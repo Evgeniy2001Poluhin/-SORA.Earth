@@ -13,6 +13,7 @@ vi.mock("@/api/mock", async (importOriginal) => {
 import { UncertaintyCard } from "./UncertaintyCard";
 import { calibrationApi } from "@/api/endpoints/calibration";
 import { renderWithQuery } from "@/test/utils";
+import { SUCCESS_PROBABILITY_NOTE } from "./successProbabilityNote";
 
 const PAYLOAD = {
   budget_usd: 150000,
@@ -40,5 +41,12 @@ describe("UncertaintyCard in mock mode", () => {
     await waitFor(() => expect(screen.getByText(/trees vote for success/)).toBeInTheDocument(), { timeout: 3000 });
     // The mean probability is shown as a percentage.
     expect(screen.getByText(/72\.3%/)).toBeInTheDocument();
+  });
+
+  it("marks the probability as unvalidated, with the note on the number", async () => {
+    renderWithQuery(<UncertaintyCard payload={PAYLOAD} />);
+
+    await waitFor(() => expect(screen.getByText(/Tree vote \(RandomForest\) · unvalidated/)).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getByText(/72\.3%/)).toHaveAttribute("title", SUCCESS_PROBABILITY_NOTE);
   });
 });

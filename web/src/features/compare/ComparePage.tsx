@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { evaluateApi } from "@/api/endpoints/evaluate";
 import type { EvaluateRequest, EvaluateResponse, EvaluateProjectRequest } from "@/api/types";
+import { SUCCESS_PROBABILITY_NOTE } from "../evaluate/successProbabilityNote";
 import "./compare.css";
 
 const PRESETS: { id: string; label: string; body: EvaluateRequest }[] = [
@@ -59,7 +60,7 @@ function ResultCard(props: { side: Side; result: EvaluateResponse | undefined; l
         <div className="cmp-score tabular">{r.total_score.toFixed(1)}</div>
         <span className={"cmp-risk " + tone}>{r.risk_level} risk</span>
       </div>
-      <div className="cmp-score-sub">/ 100 · ESG SCORE · success {r.success_probability.toFixed(1)}%</div>
+      <div className="cmp-score-sub">/ 100 · ESG SCORE · <span title={SUCCESS_PROBABILITY_NOTE}>success {r.success_probability.toFixed(1)}% · unvalidated</span></div>
       <Bar label="Environment" v={r.environment_score} tone="env" />
       <Bar label="Social"      v={r.social_score}      tone="soc" />
       <Bar label="Economic"    v={r.economic_score}    tone="eco" />
