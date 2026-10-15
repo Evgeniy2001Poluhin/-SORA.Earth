@@ -10,6 +10,7 @@ import {
   byEsgDesc,
   measuredPhysicalOf,
   sourceKindOf,
+  sourceLabelOf,
   type MapCountry,
 } from "./countryData";
 
@@ -21,14 +22,45 @@ const LIVE = (name: string, esg: number, band = "developing") =>
   country({ name, esg, band, esg_source: "world_bank_live" });
 const STATIC = (name: string, esg: number, band = "leader") =>
   country({ name, esg, band, esg_source: "hardcoded" });
+const STATIC_BENCHMARK = (name: string, esg: number, band = "advanced") =>
+  country({ name, esg, band, esg_source: "static_benchmark" });
 
 describe("sourceKindOf", () => {
-  it("maps the two tokens the backend sends, and nothing else to a known kind", () => {
+  it("classifies the three tokens the backend sends, and nothing else as known", () => {
     expect(sourceKindOf("world_bank_live")).toBe("live");
     expect(sourceKindOf("hardcoded")).toBe("static");
+    expect(sourceKindOf("static_benchmark")).toBe("static");
     expect(sourceKindOf(undefined)).toBe("unknown");
     expect(sourceKindOf(null)).toBe("unknown");
     expect(sourceKindOf("mock")).toBe("unknown");
+  });
+});
+
+describe("sourceLabelOf", () => {
+  const MEANINGS = {
+    world_bank_live: "Score computed from a fresh live-cache entry.",
+    static_benchmark: "Live cache empty or stale. Score from BENCHMARKS.",
+    hardcoded: "No external data. Score is the COUNTRIES profile.",
+  };
+
+  it("shows the backend's meaning for the token when it sends one", () => {
+    expect(sourceLabelOf("static_benchmark", MEANINGS)).toBe("Live cache empty or stale. Score from BENCHMARKS.");
+    expect(sourceLabelOf("hardcoded", MEANINGS)).toBe("No external data. Score is the COUNTRIES profile.");
+  });
+
+  it("falls back to the raw token when there is no meaning for it", () => {
+    expect(sourceLabelOf("static_benchmark")).toBe("static_benchmark");
+    expect(sourceLabelOf("hardcoded", {})).toBe("hardcoded");
+    expect(sourceLabelOf("mock", MEANINGS)).toBe("mock");
+  });
+
+  it("does not read an inherited property as a meaning", () => {
+    expect(sourceLabelOf("constructor", MEANINGS)).toBe("constructor");
+  });
+
+  it("says unknown when there is no token", () => {
+    expect(sourceLabelOf(undefined, MEANINGS)).toBe("unknown");
+    expect(sourceLabelOf(null)).toBe("unknown");
   });
 });
 
@@ -85,6 +117,29 @@ describe("aggregateScopeOf", () => {
 
   it("uses every country, and says so, when all of them are static", () => {
     const s = aggregateScopeOf([STATIC("Iceland", 86), STATIC("Japan", 77)]);
+    expect(s.included).toHaveLength(2);
+    expect(s.label).toBe("static reference values only: N = 2 countries");
+  });
+
+  it("with all three kinds present, uses only world_bank_live and counts N over it", () => {
+    // Before static_benchmark was a known kind, this payload was "mixed or
+    // unlabelled": the static_benchmark country was unknown to the page.
+    const countries = [
+      STATIC("Iceland", 86),
+      LIVE("Sweden", 81.5, "leader"),
+      STATIC_BENCHMARK("Japan", 77),
+      LIVE("Chile", 62.5),
+    ];
+    const s = aggregateScopeOf(countries);
+
+    expect(s.included.map((c) => c.name)).toEqual(["Sweden", "Chile"]);
+    expect(s.total).toBe(4);
+    expect(s.label).toBe("live source only (world_bank_live): N = 2 of 4 countries");
+    expect(s.label).not.toContain("mixed");
+  });
+
+  it("with static_benchmark and hardcoded only, says static and counts every country", () => {
+    const s = aggregateScopeOf([STATIC_BENCHMARK("Japan", 77), STATIC("Iceland", 86)]);
     expect(s.included).toHaveLength(2);
     expect(s.label).toBe("static reference values only: N = 2 countries");
   });

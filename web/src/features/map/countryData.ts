@@ -1,10 +1,12 @@
 /**
  * Provenance rules for the global ESG map (F070-F073).
  *
- * `/api/v1/map/countries` tags each country with `esg_source`.
- * `world_bank_live` is the value the backend derived from World Bank data.
- * `hardcoded` is the static reference profile in app/api/map_data.py (COUNTRIES),
- * used when the backend has no data for the country.
+ * `/api/v1/map/countries` tags each country with `esg_source`, and sends
+ * `esg_source_meanings` describing each token.
+ * `world_bank_live`: a fresh live-cache entry.
+ * `static_benchmark`: the BENCHMARKS row, when the live cache is empty or stale.
+ * `hardcoded`: the COUNTRIES profile, when there is no external data.
+ * The two static kinds are classified alike; see STATIC_SOURCES.
  *
  * Two rules follow, and the page depends on both:
  *
@@ -17,10 +19,9 @@
  *    page states which kind and how many countries it used. A static profile is
  *    not ranked against a live score as if they were the same kind of number.
  *
- * The backend's `world_bank_live` token is taken at face value. The backend also
- * emits it when the value came from BENCHMARKS, because `get_merged_country_data`
- * falls back to the static benchmark when the live cache has no valid entry. So
- * "live" here means what the backend labels live; this page cannot verify it.
+ * The `world_bank_live` token is taken at face value. The backend now sends it only
+ * for a fresh live-cache entry, but an older backend also labelled benchmark-only
+ * scores with it, and this page cannot tell the two apart.
  */
 
 export interface MapCountry {
@@ -43,27 +44,35 @@ export const BAND_COLOR: Record<string, string> = {
   lagging:    "#dc2626",
 };
 
+/** A score from a fresh live-cache entry. */
 export const LIVE_SOURCE = "world_bank_live";
-export const STATIC_SOURCE = "hardcoded";
+
+/** Both static kinds: the score comes from a table in the source tree, not from
+ *  live data. `static_benchmark` is the BENCHMARKS row used when the live cache is
+ *  empty or stale; `hardcoded` is the COUNTRIES profile used with no external data.
+ *  Before the backend split them, the first was labelled live. */
+export const STATIC_SOURCES: ReadonlySet<string> = new Set(["hardcoded", "static_benchmark"]);
 
 export type SourceKind = "live" | "static" | "unknown";
 
 export function sourceKindOf(source: string | null | undefined): SourceKind {
   if (source === LIVE_SOURCE) return "live";
-  if (source === STATIC_SOURCE) return "static";
+  if (source != null && STATIC_SOURCES.has(source)) return "static";
   return "unknown";
 }
 
-/** The text the country tooltip shows after "source:". */
-export function sourceLabelOf(source: string | null | undefined): string {
-  switch (sourceKindOf(source)) {
-    case "live":
-      return LIVE_SOURCE;
-    case "static":
-      return "static reference value";
-    default:
-      return source ? source : "unknown";
+/** The text the country tooltip shows after "source:": the backend's meaning for
+ *  the token when the response carries one, otherwise the raw token, or "unknown"
+ *  when there is no token at all. */
+export function sourceLabelOf(
+  source: string | null | undefined,
+  meanings?: Readonly<Record<string, string>> | null,
+): string {
+  if (source && meanings && Object.prototype.hasOwnProperty.call(meanings, source)) {
+    const meaning = meanings[source];
+    if (typeof meaning === "string" && meaning.trim() !== "") return meaning;
   }
+  return source ? source : "unknown";
 }
 
 export interface MeasuredPhysical {

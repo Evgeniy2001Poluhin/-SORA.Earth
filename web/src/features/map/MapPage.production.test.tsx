@@ -113,6 +113,11 @@ const CHILE_LIVE_NO_PHYSICAL = {
   name: "Chile", esg: 62.5, band: "developing", code: "CL", lat: -33, lon: -70,
   esg_source: "world_bank_live", renewable_share_pct: null, co2_intensity_t_per_capita: null,
 };
+// A BENCHMARKS score: the backend used to label it world_bank_live.
+const JAPAN_BENCHMARK = {
+  name: "Japan", esg: 77, band: "advanced", code: "JP", lat: 36, lon: 138,
+  esg_source: "static_benchmark", renewable_share_pct: null, co2_intensity_t_per_capita: null,
+};
 
 describe("MapPage sources (F070-F073)", () => {
   beforeEach(() => {
@@ -146,6 +151,35 @@ describe("MapPage sources (F070-F073)", () => {
     for (const line of lines) {
       expect(line).toContain("live source only (world_bank_live): N = 2 of 3 countries");
     }
+  });
+
+  it("with all three kinds on the page, uses only world_bank_live and counts N over it", async () => {
+    // Before static_benchmark was a known kind, Japan made this page say "mixed
+    // or unlabelled sources" and averaged all four countries together.
+    stubJson({
+      total_countries: 4,
+      bands: {},
+      esg_source_meanings: {
+        world_bank_live: "Score computed from a fresh live-cache entry (under 24h old).",
+        static_benchmark: "Live cache empty or stale. Score computed from the static BENCHMARKS row.",
+        hardcoded: "No external data for this country. Score is the hand-entered COUNTRIES profile.",
+      },
+      countries: [ICELAND_STATIC, SWEDEN_LIVE, JAPAN_BENCHMARK, CHILE_LIVE_NO_PHYSICAL],
+    });
+
+    const { container } = render();
+    await waitFor(() => expect(topNames(container).length).toBeGreaterThan(0), { timeout: 3000 });
+
+    expect(topNames(container)).toEqual(["Sweden", "Chile"]);
+    expect(statValue(container, "avg ESG"), "(81.5 + 62.5) / 2, without Iceland or Japan").toBe("72");
+    expect(statValue(container, "leaders"), "Iceland is static, so the only live leader is Sweden").toBe("1");
+    const lines = scopeLines(container);
+    expect(lines).toHaveLength(2);
+    for (const line of lines) {
+      expect(line).toContain("live source only (world_bank_live): N = 2 of 4 countries");
+    }
+    expect(container.textContent ?? "").not.toContain("mixed");
+    expect(container.textContent ?? "").not.toContain("Japan");
   });
 
   it("says so, and uses every country, when all of them are static reference values", async () => {

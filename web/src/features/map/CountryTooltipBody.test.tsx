@@ -32,8 +32,22 @@ const UNLABELLED: MapCountry = {
   renewable_share_pct: 50, co2_intensity_t_per_capita: 2,
 };
 
-function renderBody(country: MapCountry) {
-  return render(<CountryTooltipBody country={country} />);
+// The score from the BENCHMARKS table, with the formula-like values a static
+// profile could carry: the page must not show them either.
+const STATIC_BENCHMARK_COUNTRY: MapCountry = {
+  code: "JP", name: "Japan", lat: 36, lon: 138, esg: 77, band: "advanced",
+  esg_source: "static_benchmark", renewable_share_pct: 73.2, co2_intensity_t_per_capita: 6.1,
+};
+
+// As /map/countries sends them in esg_source_meanings.
+const MEANINGS: Record<string, string> = {
+  world_bank_live: "Score computed from a fresh live-cache entry (under 24h old).",
+  static_benchmark: "Live cache empty or stale. Score computed from the static BENCHMARKS row.",
+  hardcoded: "No external data for this country. Score is the hand-entered COUNTRIES profile.",
+};
+
+function renderBody(country: MapCountry, meanings?: Record<string, string> | null) {
+  return render(<CountryTooltipBody country={country} meanings={meanings} />);
 }
 
 describe("the country tooltip", () => {
@@ -79,18 +93,45 @@ describe("the country tooltip", () => {
     expect((text.match(/no data/g) ?? []).length).toBe(2);
   });
 
-  it("names the source, and calls a static value a static reference value", () => {
-    expect(renderBody(ICELAND_STATIC).container.textContent).toContain(
-      "source: static reference value",
-    );
+  it("shows the backend's meaning in the source line when it sends one", () => {
+    const hardcoded = renderBody(ICELAND_STATIC, MEANINGS).container.textContent ?? "";
+    const benchmark = renderBody(STATIC_BENCHMARK_COUNTRY, MEANINGS).container.textContent ?? "";
+    const live = renderBody(SWEDEN_LIVE, MEANINGS).container.textContent ?? "";
+
+    expect(hardcoded).toContain("source: No external data for this country.");
+    expect(benchmark).toContain("source: Live cache empty or stale.");
+    expect(live).toContain("source: Score computed from a fresh live-cache entry");
+    expect(hardcoded, "the raw token is replaced by the meaning").not.toContain("source: hardcoded");
+  });
+
+  it("falls back to the raw token when the response carries no meanings", () => {
+    expect(renderBody(ICELAND_STATIC).container.textContent).toContain("source: hardcoded");
+    expect(renderBody(STATIC_BENCHMARK_COUNTRY, null).container.textContent)
+      .toContain("source: static_benchmark");
     expect(renderBody(SWEDEN_LIVE).container.textContent).toContain("source: world_bank_live");
   });
 
-  it("does not style a static reference value like a live one", () => {
-    const staticEl = renderBody(ICELAND_STATIC).container.querySelector(".tip-source");
-    const liveEl = renderBody(SWEDEN_LIVE).container.querySelector(".tip-source");
+  it("falls back to the raw token for a token the meanings do not list", () => {
+    const text = renderBody(STATIC_BENCHMARK_COUNTRY, { hardcoded: MEANINGS.hardcoded }).container.textContent ?? "";
+    expect(text).toContain("source: static_benchmark");
+  });
 
-    expect(staticEl?.classList.contains("tip-source-static")).toBe(true);
-    expect(liveEl?.classList.contains("tip-source-static")).toBe(false);
+  it("styles both static kinds as static, and the live kind as live", () => {
+    const sourceClass = (c: MapCountry, m: Record<string, string> | null) =>
+      renderBody(c, m).container.querySelector(".tip-source");
+
+    for (const meanings of [MEANINGS, null]) {
+      expect(sourceClass(ICELAND_STATIC, meanings)?.classList.contains("tip-source-static")).toBe(true);
+      expect(sourceClass(STATIC_BENCHMARK_COUNTRY, meanings)?.classList.contains("tip-source-static")).toBe(true);
+      expect(sourceClass(SWEDEN_LIVE, meanings)?.classList.contains("tip-source-static")).toBe(false);
+    }
+  });
+
+  it("shows no data for a static_benchmark country's physical values, as for hardcoded", () => {
+    const text = renderBody(STATIC_BENCHMARK_COUNTRY, MEANINGS).container.textContent ?? "";
+
+    expect((text.match(/no data/g) ?? []).length).toBe(2);
+    expect(text, "73.2 is a benchmark figure, not a live measurement").not.toContain("73.2%");
+    expect(text).not.toContain("6.1 t");
   });
 });

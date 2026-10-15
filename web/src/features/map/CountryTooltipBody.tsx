@@ -7,7 +7,14 @@
  */
 import { BAND_COLOR, measuredPhysicalOf, sourceKindOf, sourceLabelOf, type MapCountry } from "./countryData";
 
-export default function CountryTooltipBody({ country: c }: { country: MapCountry }) {
+export default function CountryTooltipBody({
+  country: c,
+  meanings,
+}: {
+  country: MapCountry;
+  /** `esg_source_meanings` from the response, when it sent one. */
+  meanings?: Readonly<Record<string, string>> | null;
+}) {
   const physical = measuredPhysicalOf(c);
   const isStatic = sourceKindOf(c.esg_source) === "static";
   const renew = physical.renewable_share_pct;
@@ -37,7 +44,7 @@ export default function CountryTooltipBody({ country: c }: { country: MapCountry
         </div>
       </div>
       <div className={isStatic ? "tip-source tip-source-static" : "tip-source"}>
-        source: {sourceLabelOf(c.esg_source)}
+        source: {sourceLabelOf(c.esg_source, meanings)}
       </div>
       <div className="tip-cta">click to evaluate →</div>
     </div>

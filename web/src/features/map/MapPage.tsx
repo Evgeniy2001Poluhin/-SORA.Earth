@@ -12,7 +12,13 @@ import RussiaMapModal from "./RussiaMapModal";
 import CountryTooltipBody from "./CountryTooltipBody";
 import { BAND_COLOR, aggregateScopeOf, byEsgDesc, type MapCountry } from "./countryData";
 
-type MapData = { total_countries: number; bands: Record<string, string>; countries: MapCountry[] };
+type MapData = {
+  total_countries: number;
+  bands: Record<string, string>;
+  /** Token -> meaning for each `esg_source`. Absent from older backends. */
+  esg_source_meanings?: Record<string, string>;
+  countries: MapCountry[];
+};
 
 const radiusByEsg = (esg: number) => 3 + (esg / 100) * 4;
 
@@ -129,7 +135,7 @@ export default function MapPage() {
               }}
             >
               <Tooltip direction="top" offset={[0, -6]} opacity={1} className="esg-tooltip">
-                <CountryTooltipBody country={c} />
+                <CountryTooltipBody country={c} meanings={data.esg_source_meanings} />
               </Tooltip>
             </CircleMarker>
           ))}
