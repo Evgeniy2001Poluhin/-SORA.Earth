@@ -131,7 +131,7 @@ export function DriftPage() {
       <div className="eyebrow" style={{ marginBottom: 8 }}>MLOps · Model Monitoring</div>
       <h1 className="display" style={{ fontSize: 36, margin: "0 0 8px" }}>Feature Drift</h1>
       <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 28 }}>
-        Real-time KS-style drift detection{measuredFeatures != null ? ` across ${measuredFeatures} model features` : ""}. Auto-refresh every 5s.
+        Real-time mean-shift check (z-score){measuredFeatures != null ? ` across ${measuredFeatures} model features` : ""}. Auto-refresh every 5s.
       </p>
 
       {/* LSTM Progress Widget */}
