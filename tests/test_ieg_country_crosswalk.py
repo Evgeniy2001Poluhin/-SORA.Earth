@@ -326,6 +326,8 @@ def test_normalization_collapses_every_whitespace_kind_and_keeps_words():
 def test_normalization_applies_nfkc_and_casefold_but_keeps_accents_and_punctuation():
     assert cw.norm("Ｒｅpublic of Angola") == "republic of angola"
     assert cw.norm("São Tomé, Principe") == "são tomé, principe"
+    # casefold, not lower: sharp s folds to "ss"
+    assert cw.norm("Straße") == cw.norm("STRASSE") == "strasse"
 
 
 def test_afghanistan_spacing_variants_resolve_to_the_same_country(tmp_path):
@@ -841,6 +843,13 @@ def test_an_alias_whose_target_is_not_a_registry_country_is_refused(tmp_path):
     rows = [alias_row("Yugoslavia, Socialist Federal", "Socialist Federal Republic of Yugoslavia", "YU", "YUG",
                       "Serbia and Montenegro", "registry_name_and_code", ext="yes")]
     with pytest.raises(cw.SourceError, match="not a registry country"):
+        run(_with_aliases(tmp_path, rows), tmp_path / "out")
+
+
+def test_an_alias_whose_wb_identity_disagrees_with_the_registry_is_refused(tmp_path):
+    rows = [alias_row("Socialist Republic of Viet Nam", "Socialist Republic of Vietnam", "VN", "KOR", "Viet Nam",
+                      "space_insensitive_equal")]
+    with pytest.raises(cw.SourceError, match="WB id or registry name"):
         run(_with_aliases(tmp_path, rows), tmp_path / "out")
 
 
