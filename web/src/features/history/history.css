@@ -5,8 +5,13 @@
 .hist-pills { display:flex; gap:4px; }
 .hist-reset, .hist-export { background:transparent; border:1px solid var(--line-2); color:var(--muted); border-radius:6px; padding:6px 12px; font-size:12px; cursor:pointer; text-decoration:none; }
 .hist-export { color:var(--text); }
-.hist-table { border:1px solid var(--line-2); border-radius:8px; overflow:hidden; background:var(--bg-1); }
-.hist-row { display:grid; grid-template-columns:130px 1fr 70px 100px 70px 110px 70px; gap:12px; align-items:center; padding:10px 14px; background:transparent; border:0; border-bottom:1px solid var(--line-2); color:var(--text); cursor:pointer; text-align:left; font:inherit; font-size:13px; width:100%; }
+/* overflow:hidden cut a phone's table after Score, so Prob, Risk, Budget and
+   Months could not be reached at all; the table now scrolls sideways instead.
+   Every row gets the same 760px floor: six fixed columns, gaps and padding take
+   650px and Region gets the rest. A per-row max-content would size each row
+   by its own Region text, and the columns would stop lining up. */
+.hist-table { border:1px solid var(--line-2); border-radius:8px; overflow-x:auto; background:var(--bg-1); }
+.hist-row { display:grid; grid-template-columns:130px 1fr 70px 100px 70px 110px 70px; gap:12px; align-items:center; padding:10px 14px; background:transparent; border:0; border-bottom:1px solid var(--line-2); color:var(--text); cursor:pointer; text-align:left; font:inherit; font-size:13px; width:100%; min-width:760px; }
 .hist-row:last-child { border-bottom:0; }
 .hist-head { color:var(--muted); font-size:11px; letter-spacing:.06em; text-transform:uppercase; cursor:default; }
 .hist-item:hover { background:var(--bg-3); }

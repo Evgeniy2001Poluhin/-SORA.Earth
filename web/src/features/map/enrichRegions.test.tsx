@@ -162,3 +162,24 @@ describe("cardPropsOf carries code for the detail page link", () => {
     expect(props.code).toBe("RU-AST");
   });
 });
+
+describe("population precedence (F076)", () => {
+  // Moscow is in the static list with a population; the API item is keyed onto it.
+  const STATIC_MOW = RUSSIA_REGIONS.find((r) => r.code === "RU-MOW")!.population;
+  const moscow = (item: Region) => enrichRegions([{ ...item, code: "RU-MOW" }]).find((r) => r.code === "RU-MOW")!;
+
+  it("takes a population the API sends over the static value", () => {
+    expect(STATIC_MOW).not.toBe(13500000);
+    expect(moscow({ ...RU_AST_API, population: 13500000 }).population).toBe(13500000);
+  });
+
+  it("keeps the static value when the API sends no population", () => {
+    expect(moscow({ ...RU_AST_API, population: 0 }).population).toBe(STATIC_MOW);
+  });
+
+  it("keeps the static value for a mock row, whose population is a placeholder", () => {
+    // The mock rows carry their own hardcoded populations (`score_kind: "mock"`).
+    // Those are not a source, so they must not replace the static one.
+    expect(moscow({ ...RU_AST_API, population: 13010112, score_kind: "mock" }).population).toBe(STATIC_MOW);
+  });
+});

@@ -8,7 +8,7 @@
  */
 import { Link } from "react-router-dom";
 import { ScoreKindNote, StaleNote } from "./ProvenanceNotes";
-import { sourcesCountText } from "./regionProvenance";
+import { sourcesUsedCount } from "./regionProvenance";
 
 export type RegionEsgBreakdown = {
   e_score?: number | null;
@@ -19,8 +19,7 @@ export type RegionEsgBreakdown = {
 export type RegionEsgCardProps = {
   score: number;
   breakdown?: RegionEsgBreakdown | null;
-  /** `len(distinct source names) / 3` in the aggregator — see below. */
-  confidence?: number | null;
+  /** The source names the score stands on. Its count is shown; no denominator is. */
   sourcesUsed?: string[] | null;
   /** The aggregator's own `SCORE_KIND`, carried with the score. */
   scoreKind?: string | null;
@@ -47,8 +46,9 @@ function Row({ k, v, color }: { k: string; v: string; color?: string }) {
 }
 
 export default function RegionEsgCard({
-  score, breakdown, confidence, sourcesUsed, scoreKind, scoreVintage, updatedAt, staleSince, code,
+  score, breakdown, sourcesUsed, scoreKind, scoreVintage, updatedAt, staleSince, code,
 }: RegionEsgCardProps) {
+  const sourceCount = sourcesUsedCount(sourcesUsed);
   return (
     <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #1a1d20" }}>
       <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 2, textTransform: "uppercase", letterSpacing: 0.5 }}>
@@ -67,8 +67,8 @@ export default function RegionEsgCard({
         </>
       )}
 
-      {confidence != null && (
-        <Row k="Источников" v={sourcesCountText(confidence)} />
+      {sourceCount != null && (
+        <Row k="Источников использовано" v={String(sourceCount)} />
       )}
 
       {sourcesUsed && sourcesUsed.length > 0 && (
