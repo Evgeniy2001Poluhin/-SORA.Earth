@@ -161,6 +161,39 @@ def _load_from_sqlalchemy():
         })
     return regions
 
+def _sources_by_region() -> dict:
+    """Sources behind each region's score, from the observations that feed it.
+
+    The view answers `sources_used` with a literal empty array and the table keeps
+    only a count, so the names come from the aggregator's own rule (see
+    esg_aggregator.sources_behind_scores). Any failure returns {}, which leaves the
+    field empty: "not known" here, not "no sources".
+    """
+    db = None
+    try:
+        from app.database import SessionLocal
+        from app.services.esg_aggregator import sources_behind_scores
+        db = SessionLocal()
+        return sources_behind_scores(db)
+    except Exception as e:
+        log.warning(f"[map_russia] sources read failed: {e}")
+        return {}
+    finally:
+        if db is not None:
+            db.close()
+
+
+def _sources_of_inputs(inputs) -> list:
+    """Sources of a region's six inputs when all six are present, else [].
+
+    The same rule as esg_aggregator.sources_behind_scores, applied to the inputs
+    region_detail has already read for this region.
+    """
+    if not inputs or any(inp["missing"] for inp in inputs):
+        return []
+    return sorted({inp["source"] for inp in inputs})
+
+
 @router.get("/russia")
 async def russia_regions():
     regions = await _load_from_db()
@@ -171,6 +204,10 @@ async def russia_regions():
     if not regions:
         regions = _MOCK
         source = "mock-esg-v1-fallback"
+    else:
+        derived = await asyncio.to_thread(_sources_by_region)
+        for r in regions:
+            r["sources_used"] = derived.get(r["code"], [])
     return {
         "regions": regions,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -250,7 +287,7 @@ async def region_detail(region_code: str):
         "region": meta,
         "esg": esg,
         "confidence": float(snap["confidence"]) if snap and snap["confidence"] is not None else None,
-        "sources_used": list(snap["sources_used"]) if snap and snap["sources_used"] else [],
+        "sources_used": _sources_of_inputs(inputs) if snap else [],
         "sources_missing": list(snap["sources_missing"]) if snap and snap["sources_missing"] else [],
         "model_version": snap["model_version"] if snap else None,
         "computed_at": snap["computed_at"].isoformat() if snap and snap["computed_at"] else None,
