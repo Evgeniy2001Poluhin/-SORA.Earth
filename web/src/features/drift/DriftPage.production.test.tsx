@@ -761,3 +761,74 @@ describe("DriftPage when the server says nothing was measured", () => {
     await waitFor(() => expect(kpi(container, "Baseline")).toBe("500 samples / 4 feats"));
   });
 });
+
+/**
+ * Which test each block says it runs (F056).
+ *
+ * The page's verdict comes from `/api/v1/mlops/drift`, which runs a z-score
+ * mean-shift check (app/drift_detection.py, `_baseline_drift_check`). The
+ * subtitle called it "KS-style". The Kolmogorov-Smirnov test is the separate
+ * `/api/v1/model/drift` block further down (app/api/drift.py, `scipy.stats.ks_2samp`),
+ * and that block is labelled KS correctly.
+ */
+describe("DriftPage names the test each block actually runs (F056)", () => {
+  const urlOf = (input: RequestInfo | URL) =>
+    typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+
+  const MEASURED = {
+    status: "drift_detected", timestamp: "2026-09-06T00:00:00Z", observations: 417,
+    drift_detected: true, drift_score: 0.61, drifted_features: ["budget", "co2_reduction"],
+    features: {
+      budget:        { baseline_mean: 150000, baseline_std: 40000, current_mean: 274000, z_score: 3.1, drift: true,  drift_level: "HIGH",   severity: "high" },
+      co2_reduction: { baseline_mean: 340,    baseline_std: 90,    current_mean: 556,    z_score: 2.4, drift: true,  drift_level: "MEDIUM", severity: "medium" },
+      social_impact: { baseline_mean: 7.8,    baseline_std: 1.1,   current_mean: 8.02,   z_score: 0.2, drift: false, drift_level: "LOW",    severity: "low" },
+    },
+    recent_alerts: [],
+  };
+
+  /** Each endpoint answers with its own shape, so the page's blocks all load. */
+  const routeAll = () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = urlOf(input);
+      let body: unknown;
+      if (url.includes("/mlops/drift/baseline")) body = { exists: true, n_samples: 500, feature_count: 4 };
+      else if (url.includes("/mlops/drift")) body = MEASURED;
+      else if (url.includes("/model/drift/mlflow-history")) body = { status: "ok", events: [], count: 0, reason_code: null };
+      else if (url.includes("/model/drift")) body = { status: "ok", drift_detected: false, window: 50, observations: 50, reason_code: null, features: {} };
+      else return new Response("not part of this test", { status: 503 });
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch);
+  };
+
+  const kpi = (container: HTMLElement, label: string): string | null => {
+    const lbl = Array.from(container.querySelectorAll(".kpi-lbl")).find((el) => el.textContent === label);
+    return lbl?.parentElement?.querySelector(".kpi-val")?.textContent ?? null;
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("does not call the main verdict KS-style", async () => {
+    routeAll();
+    const { container } = renderWithQuery(<DriftPage />);
+    await waitFor(() => expect(kpi(container, "Drift score")).toBe("61%"), { timeout: 3000 });
+
+    const subtitle = Array.from(container.querySelectorAll("p"))
+      .find((p) => (p.textContent ?? "").includes("model features"));
+    expect(subtitle, "the page subtitle").toBeTruthy();
+    expect(subtitle!.textContent).not.toMatch(/KS/);
+    expect(subtitle!.textContent).toContain("z-score");
+  });
+
+  it("still names the Kolmogorov-Smirnov test on the block that runs it", async () => {
+    // The other half: the KS block's label is accurate and must stay.
+    routeAll();
+    const { container } = renderWithQuery(<DriftPage />);
+    await waitFor(() => expect(kpi(container, "Drift score")).toBe("61%"), { timeout: 3000 });
+
+    const heading = Array.from(container.querySelectorAll(".eyebrow"))
+      .find((n) => (n.textContent ?? "").startsWith("Kolmogorov-Smirnov"));
+    expect(heading, "the KS block heading").toBeTruthy();
+  });
+});

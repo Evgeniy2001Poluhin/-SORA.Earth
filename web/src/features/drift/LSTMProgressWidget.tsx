@@ -61,8 +61,12 @@ export function LSTMProgressWidget() {
     return null;
   }
 
-  const { active, samples, threshold, days_remaining, next_activation_date, models_active, weights } = data;
+  const { active, samples, threshold, days_remaining, models_active, weights } = data;
   const progress_pct = (samples / threshold) * 100;
+  // A weight the server did not send is unknown, not 0%: zero is a claim that
+  // the model was given no share of the ensemble.
+  const share = (v: unknown): string =>
+    typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(0)}%` : "unknown";
 
   return (
     <div className={`lstm-progress-widget ${active ? "ready" : "pending"}`}>
@@ -85,15 +89,15 @@ export function LSTMProgressWidget() {
         </span>
       </div>
 
+      {/* A conditional estimate, not a date. The server's figure assumes one
+          sample a day (app/api/forecast.py, get_lstm_status), so the widget says
+          that and gives no calendar date for it to be read as a forecast. */}
       {!active && days_remaining > 0 && (
         <div className="countdown">
-          <span className="countdown-label">Estimated ready in:</span>
+          <span className="countdown-label">Conditional estimate, at about one sample a day:</span>
           <span className="countdown-value">
-            {days_remaining === 0 ? "Today" : `${days_remaining} days`}
+            about {days_remaining} {days_remaining === 1 ? "day" : "days"}
           </span>
-          {next_activation_date && (
-            <span className="countdown-date">({next_activation_date})</span>
-          )}
         </div>
       )}
 
@@ -106,14 +110,14 @@ export function LSTMProgressWidget() {
                 a sibling's value is the mistake #236 was about. */}
             <strong>Active models:</strong> {(models_active ?? []).join(", ") || "—"}
             <br />
-            <strong>Weights:</strong> LSTM {((weights?.lstm ?? 0) * 100).toFixed(0)}%, Prophet {((weights?.prophet ?? 0) * 100).toFixed(0)}%
+            <strong>Weights:</strong> LSTM {share(weights?.lstm)}, Prophet {share(weights?.prophet)}
           </div>
         </div>
       )}
 
       <div className="widget-footer">
         <span className="info-text">
-          LSTM requires {threshold}+ samples for accurate sequential forecasting
+          {threshold} samples needed before the LSTM is trained into the ensemble
         </span>
       </div>
     </div>
