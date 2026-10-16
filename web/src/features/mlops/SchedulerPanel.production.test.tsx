@@ -104,15 +104,17 @@ describe("SchedulerPanel when the scheduler container cannot be reached", () => 
     useAuth.setState({ user: { username: "admin", role: "admin" } });
   });
 
-  it("does not say the scheduler is disabled when it does not know", async () => {
+  it("does not say the scheduler is disabled or idle when it does not know", async () => {
     stubStatus(UNREACHABLE);
     renderPanel();
 
-    // Resolved, not merely rendered: before the answer arrives every KPI shows
-    // its fallback, so "UNKNOWN" is the signal that the query has settled.
-    await waitFor(() => expect(kpi("Status")).toBe("UNKNOWN"));
-    expect(kpi("Enabled")).not.toBe("NO");
+    // Waits for the status query to leave LOADING, and not for UNKNOWN. Waiting
+    // for UNKNOWN would make the IDLE check below true by construction. Enabled
+    // reads "—" on origin/main too, so only the Status tile separates the versions.
+    await waitFor(() => expect(kpi("Status")).not.toBe("LOADING"));
     expect(kpi("Enabled")).toBe("—");
+    expect(kpi("Enabled")).not.toBe("NO");
+    expect(kpi("Status")).not.toBe("IDLE");
   });
 
   it("does not report zero runs when the count could not be read", async () => {

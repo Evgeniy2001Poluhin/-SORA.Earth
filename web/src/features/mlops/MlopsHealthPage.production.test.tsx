@@ -10,7 +10,7 @@
  */
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 
 vi.mock("@/api/mock", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/mock")>();
@@ -45,6 +45,10 @@ import { MlopsHealthPage } from "./MlopsHealthPage";
 import { isMock } from "@/api/mock";
 import { renderWithQuery } from "@/test/utils";
 import { SUCCESS_PROBABILITY_NOTE } from "../evaluate/successProbabilityNote";
+
+/** The words the page must show under the training-time metrics, exactly. */
+const TRAINING_NOTE =
+  "Training-time evaluation on a held-out split of the training data. The label is an administrative proxy (a project closed after its scheduled end), not an independently verified outcome, so these scores measure agreement with that proxy.";
 
 const META = {
   retrained_at: "20260712_200332",
@@ -213,7 +217,8 @@ describe("performance metrics when the backend omits some of them", () => {
         "Training-time evaluation on a held-out test set of 3414 samples (training set: 13656).",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText(SUCCESS_PROBABILITY_NOTE)).toBeInTheDocument();
+    expect(screen.getByText(TRAINING_NOTE)).toBeInTheDocument();
+    expect(screen.queryByText(SUCCESS_PROBABILITY_NOTE)).toBeNull();
   });
 
   it("says the split size was not reported when it is missing", async () => {
@@ -332,6 +337,81 @@ describe("model artifacts", () => {
 
     expect(screen.getByText("Model artifacts · 2")).toBeInTheDocument();
     expect(screen.getByText("model.pkl")).toBeInTheDocument();
+  });
+});
+
+/** One finished retrain, as the status endpoint sends it in retrain_history. */
+const RUN = {
+  started_at: "2026-05-07T15:11:32Z",
+  finished_at: "2026-05-07T15:17:52Z",
+  duration_sec: 380,
+  status: "success",
+  trigger_source: "scheduled",
+  model_version: "v9",
+  metrics: null,
+};
+
+/** The section whose heading text is `heading`, so a check reads only that block. */
+function sectionOf(heading: string): HTMLElement {
+  const section = screen.getByText(heading).closest<HTMLElement>(".mlops-section");
+  if (!section) throw new Error(`no section headed "${heading}"`);
+  return section;
+}
+
+/** The Dur cell (third column) of the history row for `version`. */
+function durationCell(version: string): string {
+  const row = screen.getByText(version).parentElement;
+  return (row?.children[2].textContent ?? "").trim();
+}
+
+describe("retrain history when the backend omits it", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    chart.data = [];
+  });
+
+  it("shows the history count as unknown, not zero, when the list is missing", async () => {
+    stubMlops(full({ status: without(STATUS, "retrain_history") }));
+    renderPage();
+    await loaded();
+
+    expect(screen.getByText("Retrain history · —")).toBeInTheDocument();
+    expect(screen.queryByText("Retrain history · 0")).toBeNull();
+    expect(within(sectionOf("Retrain history · —")).getByText("unavailable")).toBeInTheDocument();
+  });
+
+  it("keeps a real empty list as a count of zero, with no unavailable", async () => {
+    stubMlops(full({ status: { ...STATUS, retrain_history: [] } }));
+    renderPage();
+    await loaded();
+
+    expect(screen.getByText("Retrain history · 0")).toBeInTheDocument();
+    expect(within(sectionOf("Retrain history · 0")).queryByText("unavailable")).toBeNull();
+  });
+
+  it("counts and lists the runs it was sent", async () => {
+    stubMlops(full({ status: { ...STATUS, retrain_history: [RUN] } }));
+    renderPage();
+    await loaded();
+
+    expect(screen.getByText("Retrain history · 1")).toBeInTheDocument();
+    expect(durationCell("v9")).toBe("380.0s");
+  });
+
+  it("shows a real zero duration as 0.0s, not a dash", async () => {
+    stubMlops(full({ status: { ...STATUS, retrain_history: [{ ...RUN, duration_sec: 0 }] } }));
+    renderPage();
+    await loaded();
+
+    expect(durationCell("v9")).toBe("0.0s");
+  });
+
+  it("shows an absent duration as a dash", async () => {
+    stubMlops(full({ status: { ...STATUS, retrain_history: [{ ...RUN, duration_sec: null }] } }));
+    renderPage();
+    await loaded();
+
+    expect(durationCell("v9")).toBe("—");
   });
 });
 

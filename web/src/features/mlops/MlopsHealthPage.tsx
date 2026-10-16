@@ -4,7 +4,7 @@ import { FeatureImportancePanel } from "./FeatureImportancePanel";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { mlopsApi } from "@/api/endpoints/mlops";
-import { SUCCESS_PROBABILITY_NOTE } from "../evaluate/successProbabilityNote";
+import { TRAINING_METRICS_NOTE } from "../evaluate/successProbabilityNote";
 import "./mlops.css";
 
 export function MlopsHealthPage() {
@@ -27,6 +27,11 @@ export function MlopsHealthPage() {
   const numOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const show = (v: number | null, digits?: number): string =>
     v == null ? "—" : digits === undefined ? String(v) : v.toFixed(digits);
+  // A real 0 is "0.0s"; only an absent or non-finite duration is a dash.
+  const fmtDuration = (v: unknown): string => {
+    const n = numOrNull(v);
+    return n == null ? "—" : n.toFixed(1) + "s";
+  };
 
   const ds = health?.drift_status;
   // "No baseline" and "insufficient data" are unmeasured, so they are neutral,
@@ -59,7 +64,10 @@ export function MlopsHealthPage() {
       : `Training-time evaluation on a held-out test set of ${testSamples} samples (training set: ${trainSamples ?? "not reported"}).`;
 
   const models = Array.isArray(metrics?.models_available) ? metrics.models_available : null;
-  const hist = (status?.retrain_history || []).slice().reverse();
+  // A history list the backend did not send is unknown, not an empty history.
+  const rh = status?.retrain_history;
+  const historyList = Array.isArray(rh) ? rh : null;
+  const hist = (historyList ?? []).slice().reverse();
 
   return (
     <div className="card-body" style={{ padding: 32 }}>
@@ -119,20 +127,22 @@ export function MlopsHealthPage() {
           ))}
         </p>
         <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>{splitLine}</p>
-        <p style={{ color: "var(--faint)", fontSize: 12, marginTop: 4 }}>{SUCCESS_PROBABILITY_NOTE}</p>
+        <p style={{ color: "var(--faint)", fontSize: 12, marginTop: 4 }}>{TRAINING_METRICS_NOTE}</p>
       </div>
 
       <div className="mlops-section">
-        <div className="eyebrow" style={{ marginBottom: 12 }}>Retrain history · {hist.length}</div>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>Retrain history · {historyList === null ? "—" : hist.length}</div>
         <div className="mlops-table">
           <div className="mlops-row mlops-head">
             <div>Version</div><div>Trigger</div><div className="tabular">Dur</div><div className="tabular">Acc</div><div className="tabular">F1</div><div className="tabular">AUC</div><div>Status</div>
           </div>
-          {hist.map((r) => (
+          {historyList === null ? (
+            <div className="mlops-row"><div style={{ color: "var(--muted)", fontSize: 12 }}>unavailable</div></div>
+          ) : hist.map((r) => (
             <div key={r.model_version || r.started_at} className="mlops-row">
               <div className="mono" style={{ fontSize: 11 }}>{r.model_version || "—"}</div>
               <div style={{ color: "var(--muted)", fontSize: 12 }}>{r.trigger_source || "—"}</div>
-              <div className="tabular">{r.duration_sec ? r.duration_sec.toFixed(1) + "s" : "—"}</div>
+              <div className="tabular">{fmtDuration(r.duration_sec)}</div>
               <div className="tabular">{r.metrics?.accuracy?.toFixed(3) ?? "—"}</div>
               <div className="tabular">{r.metrics?.f1_score?.toFixed(3) ?? "—"}</div>
               <div className="tabular">{r.metrics?.roc_auc?.toFixed(3) ?? "—"}</div>
