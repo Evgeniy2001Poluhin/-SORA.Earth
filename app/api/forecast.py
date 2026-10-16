@@ -479,13 +479,17 @@ async def get_lstm_status(db: Session = Depends(_get_db)):
     """Get LSTM activation status and progress towards threshold.
 
     Returns:
-        - active: bool - Whether LSTM is currently active in ensemble
-        - samples: int - Current number of unique days in dataset
+        - active: bool - Eligible by row count (samples >= threshold). It does
+          not say whether the fitted ensemble includes the LSTM; see
+          lstm_in_ensemble for that.
+        - samples: int - Rows in the forecast series
         - threshold: int - Required samples for LSTM activation
         - days_remaining: int - Days until threshold (if not active)
         - next_activation_date: str - Estimated date when LSTM will activate
-        - models_active: list - Currently active models in ensemble
-        - weights: dict - Current ensemble weights
+        - models_active: list - Models in the fitted ensemble ([] if the fit failed)
+        - weights: dict - Weights of the fitted ensemble ({} if the fit failed)
+        - lstm_in_ensemble: bool | None - Whether the fitted ensemble includes
+          the LSTM; None if the fit failed
     """
     from datetime import datetime, timedelta
     from app.services.forecasting.ensemble import LSTM_MIN_ROWS
@@ -528,14 +532,26 @@ async def get_lstm_status(db: Session = Depends(_get_db)):
         # Get current ensemble weights by simulating fit
         from app.services.forecasting.ensemble import EnsembleForecaster
         ensemble = EnsembleForecaster()
+        reason_code = None
         try:
             ensemble.fit(df, "y")
             weights = ensemble.weights
             models_active = [name.title() for name, model in ensemble._active_models]
+            lstm_in_ensemble = any(name == "lstm" for name, _model in ensemble._active_models)
         except Exception as e:
             log.warning(f"Could not fit ensemble for status check: {e}")
-            weights = {"lstm": 0.0, "prophet": 0.9, "linear": 0.1}
-            models_active = ["Prophet", "LinearTrend"]
+            # Nothing was fitted, so nothing is reported as measured: no weights
+            # and no active models. The row-count facts above were still
+            # measured and are returned unchanged.
+            weights = {}
+            models_active = []
+            lstm_in_ensemble = None
+            reason_code = "ensemble_fit_failed"
+
+        if reason_code is None:
+            message = "LSTM active" if lstm_active else f"Need {days_remaining} more days of data"
+        else:
+            message = "Ensemble could not be fitted, so no weights or active models are reported."
 
         # Export metrics to Prometheus
         from app.prom_metrics import (
@@ -556,10 +572,11 @@ async def get_lstm_status(db: Session = Depends(_get_db)):
             next_activation_date=next_activation_date,
             models_active=models_active,
             weights=weights,
+            lstm_in_ensemble=lstm_in_ensemble,
             unique_days_raw=unique_days,
             last_evaluation_date=last_date.isoformat(),
-            message="LSTM active" if lstm_active else f"Need {days_remaining} more days of data",
-            reason_code=None,
+            message=message,
+            reason_code=reason_code,
         )
     except Exception as e:
         # 503 rather than a 200 saying `active: false`. That was a verdict
