@@ -145,8 +145,10 @@ sora_forecast_mape      = Gauge("sora_forecast_mape_current", "Current forecast 
 # a sample count by the number of workers that happened to look.
 sora_forecast_samples_total   = Gauge("sora_forecast_samples_total",   "Total evaluation samples available for LSTM",
                                       multiprocess_mode="mostrecent")
-sora_forecast_lstm_active     = Gauge("sora_forecast_lstm_active",     "LSTM model active status (1=active, 0=inactive)",
+sora_forecast_lstm_active     = Gauge("sora_forecast_lstm_active",     "LSTM fitted membership (1=present, 0=absent, NaN=unknown)",
                                       multiprocess_mode="mostrecent")
+# No fit has been observed at worker startup. Zero would assert exclusion.
+sora_forecast_lstm_active.set(float("nan"))
 sora_forecast_days_remaining  = Gauge("sora_forecast_days_remaining",  "Days until LSTM activation threshold",
                                       multiprocess_mode="mostrecent")
 

@@ -28,7 +28,7 @@ KEYS = {
 }
 # The 200 body only. On the 503 branch nothing was fitted, so there is no
 # `lstm_in_ensemble` to report, and it is absent rather than null.
-OK_KEYS = KEYS | {"lstm_in_ensemble"}
+OK_KEYS = KEYS | {"lstm_in_ensemble", "observed_samples", "eligible_for_training", "observations_remaining"}
 
 
 @pytest.fixture(autouse=True)
@@ -300,6 +300,7 @@ def test_openapi_declares_both_branches_and_pins_active(client):
     for model in ("LstmStatusOk", "LstmStatusUnavailable"):
         assert KEYS <= set(components[model]["properties"]), model
 
-    assert "lstm_in_ensemble" in components["LstmStatusOk"]["properties"]
+    assert OK_KEYS <= set(components["LstmStatusOk"]["properties"])
+    assert {"observed_samples", "eligible_for_training", "observations_remaining"} <= set(components["LstmStatusOk"]["required"])
     assert components["LstmStatusOk"]["properties"]["active"].get("type") == "boolean"
     assert components["LstmStatusUnavailable"]["properties"]["active"].get("type") == "null"
