@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { useParams, Link } from "react-router-dom";
 import "./region-detail.css";
 import { ScoreKindNote, StaleNote } from "@/features/map/ProvenanceNotes";
-import { sourcesCountText } from "@/features/map/regionProvenance";
+import { detailSourcesText } from "@/features/map/regionProvenance";
 
 type Input = {
   source: string;
@@ -152,7 +152,7 @@ export default function RegionDetail() {
         <div className="rd-card">
           <div className="label">Источников</div>
           <div className="value" style={{ fontSize: 24 }}>
-            {data.confidence != null ? sourcesCountText(data.confidence) : "-"}
+            {detailSourcesText(data.inputs, data.sources_used) ?? "-"}
           </div>
         </div>
         {(data.sources_used.length > 0 || data.sources_missing.length > 0) && (

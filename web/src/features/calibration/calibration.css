@@ -12,6 +12,8 @@
 .model-meta-row { display: grid; grid-template-columns: 16px 160px 1fr 1fr; gap: 12px; align-items: center; font-size: 12px; }
 .model-dot { width: 12px; height: 12px; border-radius: 3px; }
 .muted { color: var(--muted); }
+.calib-unvalidated { margin-left: 8px; font-size: 11px; font-weight: 500; letter-spacing: .04em; color: #F5C84B; vertical-align: middle; }
+.calib-kpi-note { margin-top: 6px; font-size: 11px; color: var(--muted); }
 .placeholder { color: var(--muted); padding: 60px 0; text-align: center; font-size: 13px; }
 @media (max-width: 900px) { .calib-form { grid-template-columns: 1fr 1fr; } }
 
@@ -20,6 +22,7 @@
 .brier-panel { margin-top: 32px; padding: 20px; background: var(--bg-1); border-radius: 12px; border: 1px solid var(--line-2); }
 .brier-head h2 { margin: 0 0 4px; font-size: 1.25rem; color: var(--text); }
 .brier-head .muted { margin: 0 0 16px; color: var(--muted); font-size: 0.875rem; }
+.brier-demo-note { margin: 0 0 12px; padding: 8px 12px; border-left: 3px solid #F5C84B; background: rgba(245,200,75,0.10); border-radius: 0 6px 6px 0; color: var(--text); font-size: 0.875rem; }
 .scn-row { display: flex; gap: 8px; margin-bottom: 16px; }
 .scn-row button { padding: 8px 16px; background: var(--line-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 6px; cursor: pointer; font-size: 0.875rem; }
 .scn-row button:hover:not(:disabled) { background: var(--line-2); }

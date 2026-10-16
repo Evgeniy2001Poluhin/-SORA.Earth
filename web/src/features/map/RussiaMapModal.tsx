@@ -53,9 +53,13 @@ export default function RussiaMapModal({
     });
   };
 
+  // F075: no population total in the header. The static populations carry no
+  // source or reference year anywhere in the code, and a sum of them reads as
+  // current. Per-region populations (side panel, tooltip) are still shown; they
+  // have the same gap and are not yet labelled.
   const stats = useMemo(() => {
     const v = enrichedRegions.filter(r => activeFD.has(r.district));
-    return { count: v.length, pop: v.reduce((s, r) => s + r.population, 0) };
+    return { count: v.length };
   }, [activeFD, enrichedRegions]);
 
   if (!open) return null;
@@ -105,7 +109,7 @@ export default function RussiaMapModal({
               Карта России
             </div>
             <div style={{ fontSize: 12, opacity: 0.6, color: "#cfcfcf" }}>
-              {stats.count} субъектов - {(stats.pop / 1e6).toFixed(1)}M чел.
+              {stats.count} субъектов
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
