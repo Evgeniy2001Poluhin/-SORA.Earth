@@ -581,14 +581,8 @@ def get_scheduler_status():
                 # Retrains, not the rows they wrote (#199 contract point 10).
                 # This loop writes two rows per cycle itself -- the training and
                 # the decision -- so a row count here reported its own work at
-                # double.
-                try:
-                    from app.database import SessionLocal, count_physical_runs
-                    db = SessionLocal()
-                    status["retrain_history_count"] = count_physical_runs(db)
-                    db.close()
-                except Exception:
-                    status["retrain_history_count"] = 0
+                # double. A count that cannot be read is None, not 0.
+                status["retrain_history_count"] = _physical_runs_or_none()
 
                 status["source"] = "scheduler_container"
                 return status

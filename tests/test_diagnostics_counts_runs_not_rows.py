@@ -261,3 +261,72 @@ def test_the_scheduler_status_counts_runs_too(tmp_path, monkeypatch):
     assert status["retrain_history_count"] == 2, (
         "four rows, two physical runs; the scheduler is counting rows"
     )
+
+
+def _scheduler_status_over_redis(tmp_path, monkeypatch, *, seeded_runs=0, count_raises=False):
+    """The Redis branch of `get_scheduler_status`, driven as the test above drives it.
+
+    `count_raises` replaces `count_physical_runs` itself, so the branch's failure
+    path runs for real. The branch imports it at call time, so patching the
+    attribute on `app.database` reaches it.
+    """
+    import json
+
+    from sqlalchemy import create_engine as _create_engine
+    from sqlalchemy.orm import sessionmaker as _sessionmaker
+
+    import app.database as database
+    from app import scheduler as scheduler_module
+
+    engine = _create_engine(f"sqlite:///{tmp_path/'sched.db'}")
+    Base.metadata.create_all(engine)
+    Session = _sessionmaker(bind=engine)
+    monkeypatch.setattr(database, "SessionLocal", Session)
+
+    seed = Session()
+    for i in range(seeded_runs):
+        _run_of_two_successes(seed, f"run-{i}", started=datetime.utcnow())
+    seed.close()
+
+    if count_raises:
+        def _unreadable(db, status=None, since=None):
+            raise RuntimeError("the run count cannot be read")
+        monkeypatch.setattr(database, "count_physical_runs", _unreadable)
+
+    class _Redis:
+        @staticmethod
+        def get(_key):
+            return json.dumps({"running": True, "jobs": []})
+
+    monkeypatch.setattr("app.redis_cache.REDIS_AVAILABLE", True)
+    monkeypatch.setattr("app.redis_cache.redis_client", _Redis())
+
+    status = scheduler_module.get_scheduler_status()
+
+    assert status["source"] == "scheduler_container", (
+        "the Redis branch must be the one under test"
+    )
+    return status
+
+
+def test_a_run_count_that_cannot_be_read_is_none_not_zero(tmp_path, monkeypatch):
+    """The Redis branch wrote a literal `0` when the count raised.
+
+    That reads as "the closed loop has never run", about a count nobody took.
+    The other branches of the same function report None for an unreadable count.
+    """
+    status = _scheduler_status_over_redis(tmp_path, monkeypatch, count_raises=True)
+
+    assert status["retrain_history_count"] is None, (
+        f"a count that raised was reported as {status['retrain_history_count']!r}; "
+        "an unreadable count is not a measured zero"
+    )
+
+
+def test_a_successful_count_of_zero_is_still_zero(tmp_path, monkeypatch):
+    """The other side of the same branch: an empty table is a real zero."""
+    status = _scheduler_status_over_redis(tmp_path, monkeypatch, seeded_runs=0)
+
+    assert status["retrain_history_count"] == 0, (
+        f"an empty table reported {status['retrain_history_count']!r}, not 0"
+    )
