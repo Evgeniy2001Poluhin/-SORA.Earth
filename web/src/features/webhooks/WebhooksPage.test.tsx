@@ -53,13 +53,15 @@ describe("WebhooksPage with TanStack Query", () => {
     expect(screen.getByText("No deliveries yet")).toBeInTheDocument();
   });
 
-  it("keeps the empty state instead of crashing when a request fails", async () => {
+  it("does not present a failed request as an empty list", async () => {
     stubFetch(() => {
       throw new Error("network down");
     });
     renderWithQuery(<WebhooksPage />);
 
-    await waitFor(() => expect(screen.getByText("No subscriptions yet")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText(/unavailable/)).toHaveLength(2));
+    expect(screen.queryByText("No subscriptions yet")).not.toBeInTheDocument();
+    expect(screen.queryByText("No deliveries yet")).not.toBeInTheDocument();
   });
 
   it("issues one request per query key and does not refetch in a loop", async () => {
@@ -100,10 +102,11 @@ describe("WebhooksPage with TanStack Query", () => {
       stubFetch(() => ({ ok: false, status: 400, body: { detail: "bad request" } }));
       renderWithQuery(<WebhooksPage />);
 
-      await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getAllByText(/unavailable/)).toHaveLength(2));
       // subs.map on an object threw and took the whole page down with it.
       expect(errors.filter((e) => e.includes("is not a function"))).toEqual([]);
-      expect(screen.getByText("No subscriptions yet")).toBeInTheDocument();
+      // A refused list is not an empty one.
+      expect(screen.queryByText("No subscriptions yet")).not.toBeInTheDocument();
     } finally {
       spy.mockRestore();
     }
@@ -200,9 +203,10 @@ describe("WebhooksPage with TanStack Query", () => {
     stubFetch(() => ({ ok: false, status: 401, body: { detail: "Unauthorized" } }));
     renderWithQuery(<WebhooksPage />);
 
-    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText(/unavailable/)).toHaveLength(2));
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toContain("Could not load webhooks: Sign in to view webhook subscriptions");
-    expect(screen.queryByText("No subscriptions yet")).toBeInTheDocument();
+    expect(screen.queryByText("No subscriptions yet")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/unavailable/)).toHaveLength(2);
   });
 });
