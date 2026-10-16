@@ -5,6 +5,7 @@ import {
   Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { api } from "@/api/client";
+import { historySpan, lastObservationLabel } from "./forecastLabels";
 
 /** Model-specific extras returned alongside a forecast; see app/services/forecasting. */
 type ForecastMetadata = {
@@ -139,7 +140,7 @@ export default function ForecastComparePage() {
           <h1>Forecast Model Comparison</h1>
           <p className="muted">
             Compare {MODELS.length} models side-by-side
-            {queries[0].data && <> · {queries[0].data.history.length}d history · {horizon}d projection</>}
+            {queries[0].data && <> · {historySpan(queries[0].data.history)} · {horizon}d projection</>}
           </p>
         </div>
       </header>
@@ -217,7 +218,7 @@ export default function ForecastComparePage() {
                   x={lastHistoryDate}
                   stroke="#555"
                   strokeDasharray="4 4"
-                  label={{ value: "now", fill: "#777", fontSize: 10 }}
+                  label={{ value: lastObservationLabel(lastHistoryDate), fill: "#777", fontSize: 10 }}
                 />
               )}
 
@@ -367,8 +368,11 @@ export default function ForecastComparePage() {
           </div>
           {Object.values(currentMetrics).some(m => m.r2_score != null && m.r2_score < 0) && (
             <p style={{ marginTop: 12, fontSize: 11, color: "#888", fontStyle: "italic" }}>
-              ⚠️ Negative R² indicates insufficient test data{currentMetrics.ensemble?.test_samples != null ? ` (${currentMetrics.ensemble.test_samples} samples)` : ""}.
-              Performance metrics will stabilize with 30+ test samples (~60 days of data).
+              {`⚠️ Negative R² means the model did worse than predicting the mean of its test data.${
+                currentMetrics.ensemble?.test_samples != null
+                  ? ` The ensemble's test set has ${currentMetrics.ensemble.test_samples} samples.`
+                  : ""
+              } A small test set is one possible reason, not an established one.`}
             </p>
           )}
         </div>
