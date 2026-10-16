@@ -28,7 +28,7 @@ vi.mock("@/api/mock", async (importOriginal) => {
 
 import ForecastComparePage from "./ForecastComparePage";
 import { isMock } from "@/api/mock";
-import { renderWithQuery } from "@/test/utils";
+import { renderWithQuery, stubChartLayout } from "@/test/utils";
 
 const FORECAST = {
   history: [1, 2, 3].map((i) => ({ ds: `2026-09-0${i}`, y: 60 + i })),
@@ -107,6 +107,50 @@ describe("ForecastComparePage metrics table", () => {
     serve({ score: { ensemble: { ...VALIDATED, r2_score: -0.4 } } });
     const { container } = renderWithQuery(<ForecastComparePage />);
     await waitFor(() => expect(container.textContent).toContain("Negative R²"));
-    expect(container.textContent).toContain("(6 samples)");
+    expect(container.textContent).toContain("ensemble's test set has 6 samples");
+  });
+});
+
+describe("ForecastComparePage: what the numbers and labels claim", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    stubChartLayout();
+  });
+
+  // F063: the header says calendar days with dates, not "3d history".
+  it("says how many calendar days the history spans, with both dates", async () => {
+    serve({});
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(container.textContent).toContain("calendar days"));
+    expect(container.textContent).toContain("3 calendar days, 2026-09-01 → 2026-09-03");
+    expect(container.textContent).not.toContain("3d history");
+  });
+
+  // F065: the marker is the last history date, labelled with that date.
+  it("labels the last-history marker with its date, not as now", async () => {
+    serve({});
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(container.textContent).toContain("last observation 2026-09-03"));
+    expect(container.textContent).not.toMatch(/\bnow\b/);
+  });
+
+  // F068: negative R² means worse than the test-set mean; a small test set is a
+  // possible reason, not the established one.
+  it("says a negative R² means worse than predicting the mean, not insufficient data", async () => {
+    serve({ score: { prophet: { ...VALIDATED, r2_score: -0.4 } } });
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(container.textContent).toContain("Negative R²"));
+    expect(container.textContent).toContain("did worse than predicting the mean of its test data");
+    expect(container.textContent).not.toContain("insufficient test data");
+  });
+
+  // F069: no promise about when the metrics will settle.
+  it("makes no promise about when the metrics will stabilise", async () => {
+    serve({ score: { prophet: { ...VALIDATED, r2_score: -0.4 } } });
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(container.textContent).toContain("Negative R²"));
+    expect(container.textContent).not.toMatch(/stabili[sz]e/);
+    expect(container.textContent).not.toContain("30+");
+    expect(container.textContent).not.toContain("60 days");
   });
 });
