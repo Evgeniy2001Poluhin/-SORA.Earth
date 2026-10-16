@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { explainApi } from "@/api/endpoints/explain";
-import type { ExplainLocalRequest, ExplainLocalResponse } from "@/api/types";
+import type { ExplainLocalContribution, ExplainLocalRequest, ExplainLocalResponse } from "@/api/types";
 import "./explain.css";
 import { errorMessage } from "@/lib/errors";
 
@@ -21,6 +21,10 @@ const PRESETS: Record<PresetKey, FormValues> = {
   BIG:  { budget: 500000, co2_reduction: 1000, social_impact: 9, duration_months: 36 },
 };
 const PRESET_KEYS: PresetKey[] = ["WEAK", "MED", "BIG"];
+
+/** The SHAP value, or null when the server sent none: a missing value is unknown, never 0. */
+const shapOf = (c: ExplainLocalContribution): number | null =>
+  typeof c.shap_value === "number" && Number.isFinite(c.shap_value) ? c.shap_value : null;
 
 export function ExplainPage() {
   const { register, handleSubmit, reset } = useForm<FormValues>({
@@ -53,14 +57,14 @@ export function ExplainPage() {
   const applyPreset = (k: PresetKey) => { reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
 
   const contribs = json?.top_contributions ?? [];
-  const maxAbs = Math.max(1e-9, ...contribs.map((c) => Math.abs(c.shap_value)));
+  const maxAbs = Math.max(1e-9, ...contribs.map((c) => Math.abs(shapOf(c) ?? 0)));
 
   return (
     <div className="card-body" style={{ padding: 32 }}>
       <div className="eyebrow" style={{ marginBottom: 8 }}>Explainability / SHAP Lab</div>
       <h1 className="display" style={{ fontSize: 36, margin: "0 0 8px" }}>Why this prediction?</h1>
       <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 28 }}>
-        Server-rendered SHAP waterfall, disk-cached by sha1(payload). First call ~500ms, repeats ~14ms.
+        Server-rendered SHAP waterfall for the four inputs below.
       </p>
 
       <div className="explain-presets">
@@ -68,8 +72,11 @@ export function ExplainPage() {
           <button key={k} type="button" className="preset-btn" onClick={() => applyPreset(k)}>{k}</button>
         ))}
         {elapsed !== null && (
-          <span className="elapsed-pill">
-            {elapsed.toFixed(0)}ms {elapsed < 100 ? "cached" : "cold"}
+          <span
+            className="elapsed-pill"
+            title="Wall-clock time for both requests in this browser. The server does not report whether it answered from a cache."
+          >
+            {elapsed.toFixed(0)} ms
           </span>
         )}
       </div>
@@ -104,16 +111,18 @@ export function ExplainPage() {
           ) : (
             <div className="contrib-list">
               {contribs.slice(0, 10).map((c) => {
-                const pct = (Math.abs(c.shap_value) / maxAbs) * 100;
-                const positive = c.shap_value >= 0;
+                const shap = shapOf(c);
+                const pct = shap === null ? 0 : (Math.abs(shap) / maxAbs) * 100;
+                const color = shap === null ? "var(--muted)" : shap >= 0 ? "#2FE0A6" : "#EF4444";
+                const text = shap === null ? "—" : (shap > 0 ? "+" : "") + shap.toFixed(3);
                 return (
                   <div key={c.feature} className="contrib-row">
                     <div className="mono contrib-name">{c.feature}</div>
                     <div className="contrib-bar-wrap">
-                      <div className="contrib-bar" style={{ width: pct + "%", background: positive ? "#2FE0A6" : "#EF4444" }} />
+                      <div className="contrib-bar" style={{ width: pct + "%", background: color }} />
                     </div>
-                    <div className="tabular contrib-val" style={{ color: positive ? "#2FE0A6" : "#EF4444" }}>
-                      {(positive ? "+" : "") + (c.shap_value ?? 0).toFixed(3)}
+                    <div className="tabular contrib-val" style={{ color }}>
+                      {text}
                     </div>
                   </div>
                 );
