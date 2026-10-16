@@ -193,7 +193,7 @@ def test_a_duplicate_id_is_refused(tmp_path):
 
 def test_an_html_page_is_refused_by_content_type(tmp_path):
     out = tmp_path / "countries"
-    with pytest.raises(reg.SourceRefused, match="is not JSON"):
+    with pytest.raises(reg.SourceRefused, match="content type"):
         reg.build(out, transport=FakeTransport(ok(b"<html>maintenance</html>", "text/html")), sleep=no_sleep)
     assert not out.exists()
 
@@ -371,6 +371,35 @@ def test_an_existing_nonempty_destination_is_refused_and_untouched(tmp_path):
         reg.build(out, transport=transport, sleep=no_sleep)
     assert keep.read_text(encoding="utf-8") == "earlier run"
     assert transport.calls == []
+
+
+def test_a_write_that_does_not_read_back_is_refused_before_the_rename(tmp_path, monkeypatch):
+    out = tmp_path / "countries"
+    real = reg._write_exclusive
+
+    def corrupt(path, data):
+        real(path, data + b"x")  # the bytes on disk are not the bytes built
+
+    monkeypatch.setattr(reg, "_write_exclusive", corrupt)
+    with pytest.raises(reg.OutputFailed, match="does not read back"):
+        reg.build(out, transport=FakeTransport(ok()), sleep=no_sleep)
+    assert not out.exists()
+
+
+def test_the_body_reader_refuses_a_body_over_the_size_cap(monkeypatch):
+    class Chunked:
+        def __init__(self, data):
+            self.data = data
+            self.pos = 0
+
+        def read(self, n):
+            chunk = self.data[self.pos:self.pos + n]
+            self.pos += n
+            return chunk
+
+    monkeypatch.setattr(reg, "MAX_BYTES", 16)
+    with pytest.raises(reg.OversizeError, match="exceeds"):
+        reg._read_capped(Chunked(b"x" * 100))
 
 
 def test_a_leftover_partial_is_refused_and_kept(tmp_path):
