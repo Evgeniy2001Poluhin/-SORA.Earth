@@ -13,6 +13,15 @@ interface Props {
 
 const LS_KEY = "copilot.sidebar.collapsed";
 
+/** The request succeeded but the body had no `sessions` list. That is a failed
+ *  read, not an empty history (F078): "No chats yet" would be a false answer. */
+class SessionsUnreadableError extends Error {
+  constructor() {
+    super("sessions response carried no sessions array");
+    this.name = "SessionsUnreadableError";
+  }
+}
+
 export function SessionsSidebar({ currentId, onSelect, onNew, tick = 0, refreshToken = 0 }: Props) {
   const qc = useQueryClient();
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -30,7 +39,11 @@ export function SessionsSidebar({ currentId, onSelect, onNew, tick = 0, refreshT
   // Session list is server state; tick/refreshToken are cache-busting inputs.
   const query = useQuery({
     queryKey: ["copilot-sessions", tick, refreshToken],
-    queryFn: async () => (await copilotApi.listSessions()).sessions ?? [],
+    queryFn: async () => {
+      const body = await copilotApi.listSessions();
+      if (!body || !Array.isArray(body.sessions)) throw new SessionsUnreadableError();
+      return body.sessions;
+    },
   });
   const sessions = query.data ?? [];
   const loading = query.isPending;
@@ -93,6 +106,8 @@ export function SessionsSidebar({ currentId, onSelect, onNew, tick = 0, refreshT
           <div className="sessions-empty">
             {query.error instanceof ApiError && query.error.status === 401
               ? "Sign in to see your chats"
+              : query.error instanceof SessionsUnreadableError
+              ? "Could not read sessions"
               : "Could not load chats"}
           </div>
         ) : sessions.length === 0 ? (

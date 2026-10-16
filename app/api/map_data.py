@@ -1,8 +1,32 @@
 from fastapi import APIRouter, HTTPException
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 import math
 
 router = APIRouter(tags=["map"])
+
+# What `esg_source` says about where a country's score came from. Served as
+# `esg_source_meanings` by /map/countries, so a client can read the tokens
+# without this file.
+ESG_SOURCE_LIVE = "world_bank_live"      # fresh live-cache entry
+ESG_SOURCE_STATIC = "static_benchmark"   # cache empty or stale: BENCHMARKS
+ESG_SOURCE_HARDCODED = "hardcoded"       # no external data: COUNTRIES profile
+ESG_SOURCE_MEANINGS = {
+    ESG_SOURCE_LIVE: "Score computed from a fresh live-cache entry (under 24h old). "
+                     "Its hdi, co2 and gov_effectiveness inputs come from BENCHMARKS.",
+    ESG_SOURCE_STATIC: "Live cache empty or stale. Score computed from the static BENCHMARKS row "
+                       "in app/country_benchmarks.py.",
+    ESG_SOURCE_HARDCODED: "No external data for this country. Score is the hand-entered COUNTRIES "
+                          "profile in app/api/map_data.py.",
+}
+
+# The source tags app/external_data.py writes per indicator that are measurements.
+# "benchmark" and "global_avg" are static figures, not measurements.
+LIVE_INDICATOR_SOURCES = frozenset({"world_bank", "oecd"})
+
+
+def _unmeasured() -> Dict[str, Any]:
+    """Physical fields when no live measurement exists: null, never derived."""
+    return {"co2_intensity_t_per_capita": None, "renewable_share_pct": None}
 
 # 32 country profiles (lat, lon, base ESG profile)
 # Coords are country centroids; scores derived deterministically
@@ -51,15 +75,37 @@ def _band(esg: int) -> str:
 
 
 _NAME_MAP={"United States":"USA","United Kingdom":"UK","South Korea":"Korea","Czech Republic":"Czechia"}
-def _live_esg(name: str, fallback: int):
+def _measured(ind: Dict[str, Any], sources: Dict[str, str], key: str):
+    """The value of one indicator, only if the live cache says a live source published it."""
+    if sources.get(key) in LIVE_INDICATOR_SOURCES:
+        return ind.get(key)
+    return None
+
+
+def _live_esg(name: str, fallback: int) -> Tuple[int, Dict[str, Any], str]:
+    """Score one country. Returns (score, extra, esg_source).
+
+    esg_source says where the score's inputs came from:
+      ESG_SOURCE_LIVE       the live cache held a fresh entry for the country
+      ESG_SOURCE_STATIC     the cache was empty or stale: BENCHMARKS supplied the inputs
+      ESG_SOURCE_HARDCODED  no external data: the COUNTRIES profile score is returned
+
+    `extra` always carries renewable_share_pct and co2_intensity_t_per_capita. Each
+    is the measured value when a live source published it, otherwise None. Neither
+    is ever derived from the score.
+    """
     name=_NAME_MAP.get(name,name)
     try:
         from app.external_data import get_merged_country_data
         d = get_merged_country_data(name)
         if not d:
-            return fallback, {}, "hardcoded"
+            return fallback, _unmeasured(), ESG_SOURCE_HARDCODED
         live = d.get("live", {}) or {}
         ind = live.get("indicators", {}) or {}
+        sources = live.get("indicator_sources", {}) or {}
+        # Score inputs. Where the cache has no value these fall back to BENCHMARKS
+        # and then to defaults, exactly as before; the reported physical fields below
+        # do not use those fallbacks.
         co2 = ind.get("co2_per_capita", d.get("co2_per_capita", 5.0))
         renew = ind.get("renewable_share", d.get("renewable_share", 20.0))
         gini = ind.get("gini_index", d.get("gini_index", 35.0))
@@ -74,22 +120,35 @@ def _live_esg(name: str, fallback: int):
         soc = 0.7*hdi*100 + 0.3*max(0,(60-gini)/40*100)
         g = (gov+2.5)/5*100
         total = round(0.4*e + 0.35*soc + 0.25*g)
-        return total, {"co2_intensity_t_per_capita": round(co2,1), "renewable_share_pct": round(renew,1), "hdi": round(hdi,3), "gini_index": round(gini,1), "gov_effectiveness": round(gov,2), "esg_breakdown": {"E": round(e), "S": round(soc), "G": round(g)}}, "world_bank_live"
+        m_renew = _measured(ind, sources, "renewable_share")
+        m_co2 = _measured(ind, sources, "co2_per_capita")
+        extra = {
+            "co2_intensity_t_per_capita": round(m_co2, 1) if m_co2 is not None else None,
+            "renewable_share_pct": round(m_renew, 1) if m_renew is not None else None,
+            "hdi": round(hdi,3),
+            "gini_index": round(gini,1),
+            "gov_effectiveness": round(gov,2),
+            "esg_breakdown": {"E": round(e), "S": round(soc), "G": round(g)},
+        }
+        source = ESG_SOURCE_LIVE if live else ESG_SOURCE_STATIC
+        return total, extra, source
     except Exception:
-        return fallback, {}, "hardcoded"
+        return fallback, _unmeasured(), ESG_SOURCE_HARDCODED
 
 
 @router.get("/map/countries")
 def map_countries():
+    """Every country's score, with `esg_source` naming where it came from.
+
+    `esg_source` is one of the tokens in `esg_source_meanings`. The physical fields
+    `renewable_share_pct` and `co2_intensity_t_per_capita` are measured values or
+    null; nothing in this response is derived from the ESG score.
+    """
     items = []
     for c in COUNTRIES:
-        live_score, extra, src = _live_esg(c["name"], c["esg"])
-        item = {**c, "esg": live_score, "esg_source": src, "band": _band(live_score)}
-        if extra:
-            item.update(extra)
-        else:
-            item["co2_intensity_t_per_capita"] = round(20.0 - live_score * 0.18, 2)
-            item["renewable_share_pct"] = min(round(live_score * 0.95, 1), 95.0)
+        score, extra, src = _live_esg(c["name"], c["esg"])
+        item = {**c, "esg": score, "esg_source": src, "band": _band(score)}
+        item.update(extra)
         items.append(item)
     items.sort(key=lambda x: -x["esg"])
     return {
@@ -101,20 +160,28 @@ def map_countries():
             "emerging": "50-59",
             "lagging": "< 50",
         },
+        "esg_source_meanings": ESG_SOURCE_MEANINGS,
         "countries": items,
     }
 
 @router.get("/map/countries/{code}")
 def country_detail(code: str):
+    """One country's reference profile.
+
+    Its `esg` is the hand-entered COUNTRIES score (esg_source "hardcoded"), which can
+    differ from the score /map/countries computes for the same country from live or
+    benchmark data. The physical fields and the two ESG-derived fields are null:
+    nothing measures them, and they were formulas of the score.
+    """
     code = code.upper()
     for c in COUNTRIES:
         if c["code"] == code:
             return {
                 **c,
+                "esg_source": ESG_SOURCE_HARDCODED,
                 "band": _band(c["esg"]),
-                "co2_intensity_t_per_capita": round(20.0 - c["esg"] * 0.18, 2),
-                "renewable_share_pct": min(round(c["esg"] * 0.95, 1), 95.0),
-                "csrd_alignment": round(c["esg"] * 0.92, 1),
-                "audit_ready_share_pct": round(max(0.0, c["esg"] - 30) * 1.4, 1),
+                **_unmeasured(),
+                "csrd_alignment": None,
+                "audit_ready_share_pct": None,
             }
     raise HTTPException(status_code=404, detail=f"Country {code} not found")
