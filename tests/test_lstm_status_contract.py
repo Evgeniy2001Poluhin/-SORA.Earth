@@ -31,6 +31,16 @@ KEYS = {
 OK_KEYS = KEYS | {"lstm_in_ensemble"}
 
 
+@pytest.fixture(autouse=True)
+def _forget_the_last_fit():
+    """The endpoint remembers its last fit per process. A test must not inherit
+    another test's outcome for the same series -- these tests reuse one series
+    shape with different fake fits."""
+    forecast_module._lstm_fit_cache.clear()
+    yield
+    forecast_module._lstm_fit_cache.clear()
+
+
 class FakeResult:
     """What `fetchone()` on the aggregate query returns."""
 
