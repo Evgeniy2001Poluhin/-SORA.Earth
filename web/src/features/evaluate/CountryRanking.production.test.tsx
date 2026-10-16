@@ -129,3 +129,30 @@ describe("CountryRanking on the production path", () => {
     expect(document.body.textContent ?? "").not.toMatch(/\d+\.\d/);
   });
 });
+
+describe("CountryRanking's loading state on the production path", () => {
+  it("states no country count while the request is in flight", () => {
+    // The old text was "Running 27 evaluations...": a number typed into the
+    // string, not one the server had sent. Nothing about the count is known
+    // until the response arrives, so the loading text carries no digits.
+    const { container } = renderWithQuery(
+      <CountryRanking data={undefined} loading={true} currentCountry="Germany" onPickCountry={vi.fn()} />,
+    );
+
+    expect(screen.getByText("Scoring countries...")).toBeInTheDocument();
+    expect(container.textContent ?? "").not.toMatch(/\d/);
+  });
+
+  it("a real score still renders once the server has answered", async () => {
+    stubJson(SERVER_RANKING);
+    const data = await evaluateApi.ranking(REQUEST);
+
+    renderWithQuery(
+      <CountryRanking data={data} loading={false} currentCountry="Narnia" onPickCountry={vi.fn()} />,
+    );
+
+    expect(screen.queryByText("Scoring countries...")).not.toBeInTheDocument();
+    expect(screen.getByText("11.5")).toBeInTheDocument();
+    expect(screen.getByText("10.3")).toBeInTheDocument();
+  });
+});
