@@ -400,13 +400,18 @@ def test_codes_map_to_the_world_bank_groups():
 def test_each_row_has_the_locator_of_its_cell_and_its_rule():
     rows = rows_of(oghist(STANDARD))
     row = row_for(rows, "ARG", 1991)
-    assert row[8] == f"{SHEET}!E{7 + 2}"  # ARG is the third country row, data starts at row 7
-    assert row[9] == oh.RULE_GROUP
+    assert row[9] == f"{SHEET}!E{7 + 2}"  # ARG is the third country row, data starts at row 7
+    assert row[10] == oh.RULE_GROUP
 
 
-def test_a_missing_early_fy_gives_no_row_and_counts_as_unknown():
+def test_a_missing_early_fy_gives_a_row_of_its_own_with_an_unknown_kind_and_no_group():
     rows, qa, _notes, _parsing = derive(oghist(STANDARD))
-    assert [r for r in rows if r[0] == "ALB"] == [row_for(rows, "ALB", 1991)]
+    dotdot = row_for(rows, "ALB", 1989)
+    blank = row_for(rows, "ALB", 1990)
+    assert dotdot[7] == "" and dotdot[8] == "dotdot" and dotdot[10] == "OGHIST-R4-UNKNOWN-DOTDOT"
+    assert blank[7] == "" and blank[8] == "blank" and blank[10] == "OGHIST-R5-UNKNOWN-BLANK"
+    assert dotdot[5] == "1988-07-01" and dotdot[6] == "1989-07-01"
+    assert dotdot[9] == f"{SHEET}!C8" and blank[9] == f"{SHEET}!D8"
     assert qa["counts"]["unknown_dotdot"] == 1
     assert qa["counts"]["unknown_blank"] == 1
 
@@ -445,14 +450,14 @@ def test_the_yemen_footnote_value_is_kept_as_lmc_and_routed_to_review():
     rows, qa, _notes, _parsing = derive(oghist(
         [("YEM", "Yemen, Rep.", ["LM*", "LM*", "LM"])], footnotes=[footnote]))
     row = row_for(rows, "YEM", 1989)
-    assert row[7] == "LMC" and row[9] == oh.RULE_STAR
+    assert row[7] == "LMC" and row[10] == oh.RULE_STAR
     assert qa["review_for_B"]["footnoted_values"] == [f"{SHEET}!C7", f"{SHEET}!D7"]
     assert qa["counts"]["footnoted_values"] == 2
 
 
 def test_a_former_entity_keeps_its_code_and_is_routed_to_review():
     rows, qa, _notes, _parsing = derive(oghist([("YUG", "Serbia and Montenegro (former)", ["LM", "LM", "LM"])]))
-    assert row_for(rows, "YUG", 1989)[9] == oh.RULE_FORMER
+    assert row_for(rows, "YUG", 1989)[10] == oh.RULE_FORMER
     assert [e["code"] for e in qa["review_for_B"]["former_entities"]] == ["YUG"]
 
 
@@ -496,17 +501,19 @@ def test_unsorted_rows_give_identical_normalized_output_and_locators_that_still_
     rows_a, qa_a, _notes_a, _ = derive(oghist(STANDARD))
     body_b = oghist(list(reversed(STANDARD)))
     rows_b, qa_b, _notes_b, _ = derive(body_b)
-    without_locator = lambda rows: [r[:8] + r[9:] for r in rows]  # noqa: E731
+    without_locator = lambda rows: [r[:9] + r[10:] for r in rows]  # noqa: E731
     assert without_locator(rows_a) == without_locator(rows_b)
     assert qa_a == qa_b
     assert [r[0] for r in rows_b] == sorted(r[0] for r in rows_b), "sorted by code, then fiscal year"
 
     sheet = oh.Workbook(body_b).sheet(SHEET)
     for row in rows_b:
-        ref = row[8].split("!", 1)[1]
+        ref = row[9].split("!", 1)[1]
         column_letters, row_number = oh._CELL_REF.fullmatch(ref).groups()
         cell = sheet.cell(int(row_number), oh._column_index(column_letters))
-        assert cell is not None and cell.text in ("H", "L", "LM", "UM", "LM*"), ref
+        text = "" if cell is None else cell.text
+        allowed = {"": ("H", "L", "LM", "UM", "LM*"), "dotdot": ("..",), "blank": ("",)}[row[8]]
+        assert text in allowed, ref
         assert sheet.cell(int(row_number), 1).text == row[0], ref
         header_column = oh._column_index(column_letters)
         assert sheet.cell(5, header_column).text == f"FY{int(row[4]) % 100:02d}", ref
@@ -518,7 +525,7 @@ def test_the_income_csv_has_exactly_the_documented_columns():
     header = next(csv.reader(io.StringIO(text)))
     assert header == [
         "wb_code", "code_system", "iso3", "country_name", "effective_fy", "effective_start",
-        "effective_end", "income_group", "raw_cell_locator", "rule_id",
+        "effective_end", "income_group", "unknown_kind", "raw_cell_locator", "rule_id",
     ]
     assert all(r[1] == "WB" and r[2] == "" for r in rows)
 
@@ -931,6 +938,233 @@ def test_the_real_transport_is_never_reached_by_these_tests(tmp_path):
     # The autouse guard fails this test if the real opener is used. Calling it directly proves the guard holds.
     with pytest.raises(AssertionError, match="network path"):
         oh.urllib.request.build_opener()
+
+
+# --- row-level unknowns (schema 2) ------------------------------------------------------
+
+
+def test_an_unknown_blank_cell_gets_its_own_row_with_no_group():
+    body = oghist([("AAA", "Alpha", ["", "L", "L"])])
+    rows, qa, _notes, _parsing = derive(body)
+    row = row_for(rows, "AAA", 1989)
+    assert row[7] == "" and row[8] == "blank" and row[10] == "OGHIST-R5-UNKNOWN-BLANK"
+    assert row[5] == "1988-07-01" and row[6] == "1989-07-01" and row[9] == f"{SHEET}!C7"
+    assert qa["counts"]["unknown_by_kind"] == {"blank": 1, "dotdot": 0}
+
+
+def test_every_country_and_fiscal_year_cell_has_exactly_one_row():
+    rows, qa, _notes, _parsing = derive(oghist(STANDARD))
+    assert len(rows) == len(STANDARD) * 3 == qa["coverage"]["cells"] == qa["coverage"]["rows_out"]
+    assert len({(r[0], r[4]) for r in rows}) == len(rows)
+
+
+def test_known_rows_have_an_empty_kind_and_unknown_rows_never_carry_a_group():
+    rows, _qa, _notes, _parsing = derive(oghist(STANDARD))
+    for r in rows:
+        if r[8] == "":
+            assert r[7] in ("LIC", "LMC", "UMC", "HIC") and r[10] not in ("OGHIST-R4-UNKNOWN-DOTDOT", "OGHIST-R5-UNKNOWN-BLANK")
+        elif r[8] == "dotdot":
+            assert r[7] == "" and r[10] == "OGHIST-R4-UNKNOWN-DOTDOT"
+        else:
+            assert r[8] == "blank" and r[7] == "" and r[10] == "OGHIST-R5-UNKNOWN-BLANK"
+
+
+def test_unknown_rows_point_at_their_cell_and_keep_the_fiscal_year_interval():
+    body = oghist(STANDARD)
+    rows = rows_of(body)
+    sheet = oh.Workbook(body).sheet(SHEET)
+    for r in rows:
+        assert oh.fiscal_year_of(date.fromisoformat(r[5])) == int(r[4])
+        assert oh.fiscal_year_of(date.fromisoformat(r[6]) - timedelta(days=1)) == int(r[4])
+        if r[8] == "":
+            continue
+        column_letters, row_number = oh._CELL_REF.fullmatch(r[9].split("!", 1)[1]).groups()
+        cell = sheet.cell(int(row_number), oh._column_index(column_letters))
+        text = "" if cell is None else cell.text
+        assert text == ("..", "")[r[8] == "blank"], r[9]
+
+
+def test_qa_counts_the_unknown_rows_by_kind_and_names_schema_2():
+    _rows, qa, _notes, _parsing = derive(oghist(STANDARD))
+    assert qa["schema_version"] == "2"
+    assert qa["counts"]["unknown_by_kind"] == {"blank": 1, "dotdot": 1}
+    assert qa["coverage"]["known_rows"] == 7 and qa["coverage"]["unknown_rows"] == 2
+    assert qa["coverage"]["rows_out"] == 9
+
+
+# --- the offline run: from saved bytes, no network, pinned --------------------------------
+
+
+def make_source(tmp_path, body=None):
+    """A network run into tmp_path/src, returning the paths an offline run needs."""
+    body = oghist(STANDARD) if body is None else body
+    out, _sha, _transport = build_net(tmp_path, body, out_name="src")
+    return {
+        "out": out,
+        "raw": out / "raw" / NAME,
+        "page": out / PAGE_FILE,
+        "fetch": out / "fetch.json",
+        "manifest": out / "manifest.json",
+        "expect": hashlib.sha256(body).hexdigest(),
+        "body": body,
+    }
+
+
+def from_raw(tmp_path, src, out_name="r2", **overrides):
+    kwargs = {
+        "raw_path": src["raw"], "page_path": src["page"], "fetch_path": src["fetch"],
+        "expect_raw_sha256": src["expect"], "source_manifest_path": src["manifest"],
+    }
+    kwargs.update(overrides)
+    return oh.build_from_raw(tmp_path / out_name, **kwargs)
+
+
+def test_from_raw_copies_the_raw_and_page_bytes_and_records_the_source(tmp_path):
+    src = make_source(tmp_path)
+    from_raw(tmp_path, src)
+    out = tmp_path / "r2"
+    assert (out / "raw" / NAME).read_bytes() == src["body"]
+    assert (out / PAGE_FILE).read_bytes() == GOOD_PAGE_HTML
+    assert (out / "fetch.json").read_bytes() == src["fetch"].read_bytes()
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["mode"] == "from_raw"
+    assert manifest["derived_from"]["manifest_sha256"] == hashlib.sha256(src["manifest"].read_bytes()).hexdigest()
+    fetch = json.loads(src["fetch"].read_text(encoding="utf-8"))
+    assert manifest["derived_from"]["fetch_json"]["fetched_at_utc"] == fetch["fetched_at_utc"]
+    own = {key: value for key, value in manifest.items() if key != "derived_from"}
+    assert "fetched_at_utc" not in json.dumps(own) and "at_utc" not in json.dumps(own), "no fetch timestamp of its own"
+
+
+def test_two_from_raw_runs_give_byte_identical_outputs(tmp_path):
+    src = make_source(tmp_path)
+    sha_a = from_raw(tmp_path, src, "r2a")
+    sha_b = from_raw(tmp_path, src, "r2b")
+    assert sha_a == sha_b
+    names_a = sorted(p.relative_to(tmp_path / "r2a").as_posix() for p in (tmp_path / "r2a").rglob("*") if p.is_file())
+    names_b = sorted(p.relative_to(tmp_path / "r2b").as_posix() for p in (tmp_path / "r2b").rglob("*") if p.is_file())
+    assert names_a == names_b and names_a
+    for name in names_a:
+        assert (tmp_path / "r2a" / name).read_bytes() == (tmp_path / "r2b" / name).read_bytes(), name
+
+
+def test_from_raw_refuses_a_raw_sha_that_is_not_the_expected_one(tmp_path):
+    src = make_source(tmp_path)
+    with pytest.raises(oh.PinRefused, match="not the expected"):
+        from_raw(tmp_path, src, expect_raw_sha256="0" * 64)
+    assert not (tmp_path / "r2").exists() and not (tmp_path / "r2.partial").exists()
+
+
+def test_from_raw_refuses_raw_bytes_changed_after_the_network_run(tmp_path):
+    src = make_source(tmp_path)
+    src["raw"].write_bytes(src["raw"].read_bytes() + b"x")
+    with pytest.raises(oh.PinRefused, match="not the expected"):
+        from_raw(tmp_path, src)
+    assert not (tmp_path / "r2").exists()
+
+
+def test_from_raw_requires_a_lowercase_hex_expected_sha(tmp_path):
+    src = make_source(tmp_path)
+    with pytest.raises(oh.PinRefused, match="64 lowercase hex"):
+        from_raw(tmp_path, src, expect_raw_sha256="A" * 64)
+
+
+def test_from_raw_refuses_a_page_whose_sha_is_not_the_one_fetch_json_records(tmp_path):
+    src = make_source(tmp_path)
+    src["page"].write_bytes(src["page"].read_bytes() + b"\n")
+    with pytest.raises(oh.PinRefused, match="source page's sha256"):
+        from_raw(tmp_path, src)
+    assert not (tmp_path / "r2").exists() and not (tmp_path / "r2.partial").exists()
+
+
+def test_from_raw_refuses_a_source_manifest_that_describes_other_bytes(tmp_path):
+    src = make_source(tmp_path)
+    manifest = json.loads(src["manifest"].read_text(encoding="utf-8"))
+    manifest["raw"]["sha256"] = "1" * 64
+    src["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(oh.PinRefused, match="different raw sha256"):
+        from_raw(tmp_path, src)
+    assert not (tmp_path / "r2").exists()
+
+
+def test_from_raw_makes_no_connection_attempt(tmp_path, monkeypatch):
+    src = make_source(tmp_path)
+    attempts = []
+
+    def count_and_refuse(*args, **kwargs):
+        attempts.append(args)
+        raise OSError("the test refuses every connection attempt")
+
+    monkeypatch.setattr(oh.http.client.HTTPConnection, "connect", count_and_refuse)
+    monkeypatch.setattr(oh.http.client.HTTPSConnection, "connect", count_and_refuse)
+    monkeypatch.setattr(oh, "_open_over_network", count_and_refuse)
+    from_raw(tmp_path, src)
+    assert attempts == [], "the offline run made no connection attempt"
+
+
+def test_a_connection_attempt_inside_the_offline_run_fails_the_run(tmp_path, monkeypatch):
+    src = make_source(tmp_path)
+    real_publish = oh._publish_run
+
+    def attempt_then_publish(*args, **kwargs):
+        oh.urllib.request.urlopen("https://example.invalid/")  # refused by the guard in this file
+        return real_publish(*args, **kwargs)
+
+    monkeypatch.setattr(oh, "_publish_run", attempt_then_publish)
+    with pytest.raises(AssertionError, match="network path"):
+        from_raw(tmp_path, src)
+    assert not (tmp_path / "r2").exists()
+
+
+def test_a_licence_note_is_copied_into_inputs_and_recorded_by_the_operator(tmp_path):
+    src = make_source(tmp_path)
+    note = tmp_path / "licence-note.json"
+    note.write_text(json.dumps({"licence": "Creative Commons Attribution 4.0", "dataset_id": "0037712"},
+                               sort_keys=True), encoding="utf-8")
+    from_raw(tmp_path, src, licence_note_path=note)
+    out = tmp_path / "r2"
+    assert (out / "inputs" / "licence-note.json").read_bytes() == note.read_bytes()
+    licence = json.loads((out / "manifest.json").read_text(encoding="utf-8"))["source"]["licence"]
+    assert licence["recorded_by"] == "operator" and licence["verified_by_tool"] is False
+    assert licence["sha256"] == hashlib.sha256(note.read_bytes()).hexdigest()
+    assert licence["note"]["licence"] == "Creative Commons Attribution 4.0"
+    assert "recorded by the operator" in (out / "income_schema_notes.md").read_text(encoding="utf-8")
+
+
+def test_without_a_licence_note_the_manifest_says_it_is_not_verified(tmp_path):
+    src = make_source(tmp_path)
+    from_raw(tmp_path, src)
+    out = tmp_path / "r2"
+    assert not (out / "inputs").exists()
+    licence = json.loads((out / "manifest.json").read_text(encoding="utf-8"))["source"]["licence"]
+    assert licence["recorded_by"] is None and "not verified by this tool" in licence["status"]
+
+
+def test_a_licence_note_that_is_not_a_json_object_is_refused(tmp_path):
+    src = make_source(tmp_path)
+    note = tmp_path / "licence-note.json"
+    note.write_text("[1, 2]", encoding="utf-8")
+    with pytest.raises(oh.OutputRefused, match="JSON object"):
+        from_raw(tmp_path, src, licence_note_path=note)
+    assert not (tmp_path / "r2").exists()
+
+
+def test_main_offline_run_prints_the_manifest_sha(tmp_path, capsys):
+    src = make_source(tmp_path)
+    code = oh.main([
+        "--from-raw", str(src["raw"]), "--source-page", str(src["page"]), "--fetch-json", str(src["fetch"]),
+        "--expect-raw-sha256", src["expect"], "--source-manifest", str(src["manifest"]),
+        "--out", str(tmp_path / "r2"),
+    ])
+    assert code == 0
+    expected = hashlib.sha256((tmp_path / "r2" / "manifest.json").read_bytes()).hexdigest()
+    assert f"manifest sha256: {expected}" in capsys.readouterr().out.splitlines()
+
+
+def test_main_offline_run_needs_every_pin_and_refuses_the_network_options(tmp_path):
+    with pytest.raises(SystemExit):
+        oh.main(["--from-raw", str(tmp_path / "x.xlsx"), "--out", str(tmp_path / "r2")])
+    with pytest.raises(SystemExit):
+        oh.main(["--from-raw", str(tmp_path / "x.xlsx"), "--page-url", PAGE, "--out", str(tmp_path / "r2")])
 
 
 def test_no_network_import_in_this_file():

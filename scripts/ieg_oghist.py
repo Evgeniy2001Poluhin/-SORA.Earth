@@ -15,6 +15,12 @@ One run makes two GET requests: the source page (kept as evidence), then the
 workbook (at most three attempts each). The source page must link the workbook's
 URL, or the run is refused before the workbook is requested.
 
+Offline run (--from-raw): derives the same output from saved bytes. It makes no
+network connection, and it refuses unless the raw workbook has the required
+sha256, the source page and fetch.json agree with it, and the source output's
+manifest describes the same bytes. Its manifest has mode from_raw and no
+timestamp of its own; the source's fetch record is copied under derived_from.
+
 Output: a new directory. Nothing is overwritten and nothing is deleted.
     raw/<original workbook name>   the bytes as received
     source-page/<page file>        the source page as received
@@ -23,6 +29,7 @@ Output: a new directory. Nothing is overwritten and nothing is deleted.
     income_history.csv             normalized table
     income_schema_notes.md         sheet names, header and notes rows, quoted
     qa.json                        counts; no project data
+    inputs/licence-note.json       the operator's licence note, if one was given
     manifest.json                  source, hashes, tool identity, rules
 
 Exit status: 0 published; 1 refused or failed before the rename, so no final
@@ -53,7 +60,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 TOOL_PATH = "scripts/ieg_oghist.py"
 
 MAX_BYTES = 20 * 1024 * 1024  # size cap on the response body
@@ -115,6 +122,10 @@ class LayoutRefused(SourceRefused):
 
 class OutputRefused(ToolError):
     """The destination cannot be used. Nothing was written."""
+
+
+class PinRefused(ToolError):
+    """An offline input does not match its expected sha256, or does not agree with the others. Nothing was written."""
 
 
 class DurabilityUnconfirmed(ToolError):
@@ -609,6 +620,7 @@ INCOME_COLUMNS = (
     "effective_start",
     "effective_end",
     "income_group",
+    "unknown_kind",
     "raw_cell_locator",
     "rule_id",
 )
@@ -636,10 +648,16 @@ CATEGORY_NAME_BY_CODE = {
 RULE_GROUP = "OGHIST-R1-GROUP"
 RULE_FORMER = "OGHIST-R3-FORMER-ENTITY"
 RULE_STAR = "OGHIST-R2-FOOTNOTE-STAR"
+RULE_UNKNOWN_DOTDOT = "OGHIST-R4-UNKNOWN-DOTDOT"
+RULE_UNKNOWN_BLANK = "OGHIST-R5-UNKNOWN-BLANK"
+UNKNOWN_DOTDOT = "dotdot"
+UNKNOWN_BLANK = "blank"
 RULES = (
     (RULE_GROUP, "L, LM, UM, H in the country rows map to LIC, LMC, UMC, HIC. The fiscal year comes from row 5, checked against row 6 by the convention derived from the Parameters sheet."),
     (RULE_STAR, "LM* is the file's footnoted value for Yemen, Rep. The footnote (quoted in the notes) says that at the time there were two entities, Yemen, PDR (L) and Yemen, Arab Rep. (LM), and that combined they would have been LM. The value is kept as LMC and routed to review. This tool does not decide the predecessor and successor boundary."),
     (RULE_FORMER, "The entity's name carries '(former)'. Its code and group are kept as the file states them, with the entity's own boundary. A successor is not assigned. Routed to review."),
+    (RULE_UNKNOWN_DOTDOT, "The cell holds '..': the file states no income group for this country and fiscal year. The row keeps its interval and cell locator, has an empty income_group, and has unknown_kind 'dotdot'. Nothing is inferred or filled from another year."),
+    (RULE_UNKNOWN_BLANK, "The cell is empty: the file states no income group for this country and fiscal year. The row keeps its interval and cell locator, has an empty income_group, and has unknown_kind 'blank'. Nothing is inferred or filled from another year."),
 )
 _ENTITY_CODE = re.compile(r"[A-Z]{3}[a-z]?")
 _FY_HEADER = re.compile(r"FY([0-9]{2})")
@@ -805,7 +823,12 @@ def _entities(sheet, last_column):
     return [by_code[code] for code in sorted(by_code)], dropped
 
 
-def derive_income(workbook, record):
+def _income_row(code, name, fy, start, end, group, kind, locator, rule):
+    """One row in INCOME_COLUMNS order. A known row has a group and an empty kind; an unknown row the reverse."""
+    return [code, "WB", "", name, str(fy), start.isoformat(), end.isoformat(), group, kind, locator, rule]
+
+
+def derive_income(workbook, record, licence=None):
     """Return (income_rows, qa, notes_text, parsing). Refuses anything it cannot read exactly as written."""
     if EXPECTED_SHEET not in workbook.sheet_names():
         raise LayoutRefused(f"the workbook has no sheet {EXPECTED_SHEET!r}; sheets: {workbook.sheet_names()}")
@@ -824,7 +847,7 @@ def derive_income(workbook, record):
     by_fy = {fy: {"LIC": 0, "LMC": 0, "UMC": 0, "HIC": 0, "unknown_blank": 0, "unknown_dotdot": 0, "footnoted": 0}
              for _c, fy, _cal, _lbl in fy_cols}
     by_group = {g: 0 for g in GROUP_BY_CODE.values()}
-    rule_counts = {RULE_GROUP: 0, RULE_STAR: 0, RULE_FORMER: 0}
+    rule_counts = {RULE_GROUP: 0, RULE_STAR: 0, RULE_FORMER: 0, RULE_UNKNOWN_DOTDOT: 0, RULE_UNKNOWN_BLANK: 0}
     former = []
     star_refs = []
     unknown_blank = unknown_dotdot = cells_read = 0
@@ -836,13 +859,18 @@ def derive_income(workbook, record):
             cells_read += 1
             text = _text_at(sheet, row, column)
             locator = f"{EXPECTED_SHEET}!{_col_letter(column)}{row}"
+            start, end = fy_interval(fy)
             if text == "":
                 unknown_blank += 1
                 by_fy[fy]["unknown_blank"] += 1
+                rows.append(_income_row(code, name, fy, start, end, "", UNKNOWN_BLANK, locator, RULE_UNKNOWN_BLANK))
+                rule_counts[RULE_UNKNOWN_BLANK] += 1
                 continue
             if text == DOTDOT:
                 unknown_dotdot += 1
                 by_fy[fy]["unknown_dotdot"] += 1
+                rows.append(_income_row(code, name, fy, start, end, "", UNKNOWN_DOTDOT, locator, RULE_UNKNOWN_DOTDOT))
+                rule_counts[RULE_UNKNOWN_DOTDOT] += 1
                 continue
             if text == STAR_CODE:
                 if not star_noted:
@@ -855,14 +883,13 @@ def derive_income(workbook, record):
                 rule = RULE_FORMER if is_former else RULE_GROUP
             else:
                 raise SourceRefused(f"{locator}: {text!r} is not a documented income code; refused")
-            start, end = fy_interval(fy)
-            rows.append([code, "WB", "", name, str(fy), start.isoformat(), end.isoformat(), group, locator, rule])
+            rows.append(_income_row(code, name, fy, start, end, group, "", locator, rule))
             by_fy[fy][group] += 1
             by_group[group] += 1
             rule_counts[rule] += 1
 
     total_cells = len(entities) * len(fy_cols)
-    if cells_read != total_cells or len(rows) + unknown_blank + unknown_dotdot != total_cells:
+    if cells_read != total_cells or len(rows) != total_cells or sum(by_group.values()) + unknown_blank + unknown_dotdot != total_cells:
         raise SourceRefused("cell accounting failed: cells read and rows written do not add up; nothing was written")
     rows.sort(key=lambda row: (row[0], int(row[4])))
     codes_with_rows = {row[0] for row in rows}
@@ -879,6 +906,8 @@ def derive_income(workbook, record):
             "last_fiscal_year": fys[-1],
             "cells": total_cells,
             "rows_out": len(rows),
+            "known_rows": sum(by_group.values()),
+            "unknown_rows": unknown_blank + unknown_dotdot,
             "unknown_cells": unknown_blank + unknown_dotdot,
         },
         "counts": {
@@ -886,6 +915,7 @@ def derive_income(workbook, record):
             "rows_by_rule": dict(sorted(rule_counts.items())),
             "unknown_blank": unknown_blank,
             "unknown_dotdot": unknown_dotdot,
+            "unknown_by_kind": {UNKNOWN_BLANK: unknown_blank, UNKNOWN_DOTDOT: unknown_dotdot},
             "footnoted_values": len(star_refs),
             "former_entity_codes": len(former),
             "codes_with_no_rows": entities_without_rows,
@@ -916,7 +946,7 @@ def derive_income(workbook, record):
         "sheets_not_read": [name for name in workbook.sheet_names() if name not in (PARAMETERS_SHEET, EXPECTED_SHEET)],
         "hidden_sheets": sorted(workbook.hidden_sheets()),
     }
-    notes_text = _notes_text(record, workbook, sheet, fy_cols, lag, params, footnotes, qa, parsing, former)
+    notes_text = _notes_text(record, workbook, sheet, fy_cols, lag, params, footnotes, qa, parsing, former, licence)
     return rows, qa, notes_text, parsing
 
 
@@ -928,9 +958,21 @@ def _publication_note(footnotes):
     raise LayoutRefused("the workbook has no note that the classifications are set on 1 July of each fiscal year")
 
 
-def _notes_text(record, workbook, sheet, fy_cols, lag, params, footnotes, qa, parsing, former):
+def _notes_text(record, workbook, sheet, fy_cols, lag, params, footnotes, qa, parsing, former, licence=None):
     def q(text):
         return "`" + text.replace("`", "'") + "`"
+
+    if licence is not None and licence.get("recorded_by") == "operator":
+        licence_text = (
+            "recorded by the operator, not verified by this tool: "
+            f"{q(json.dumps(licence['note'], ensure_ascii=False, sort_keys=True))} "
+            f"(file `{LICENCE_FILE}`, sha256 `{licence['sha256']}`)."
+        )
+    else:
+        licence_text = (
+            "not stated on the source page, which refers only to the website's terms of use. "
+            "Not verified by this tool."
+        )
 
     note_row, note_text = _publication_note(footnotes)
 
@@ -952,8 +994,7 @@ def _notes_text(record, workbook, sheet, fy_cols, lag, params, footnotes, qa, pa
         f"`{record['page']['sha256']}`, HTTP {record['page']['http_status']}, fetched (UTC) "
         f"{record['page']['fetched_at_utc']}. It was fetched by this run, one GET before the workbook GET, and it links "
         "the resource URL.",
-        f"- Licence: not stated on the source page, which refers only to the website's terms of use. Not verified "
-        "by this tool.",
+        f"- Licence: {licence_text}",
         "",
         "## Sheets",
         "",
@@ -1005,7 +1046,8 @@ def _notes_text(record, workbook, sheet, fy_cols, lag, params, footnotes, qa, pa
     for code, group in GROUP_BY_CODE.items():
         lines.append(f"- {q(code)} = {q(CATEGORY_NAME_BY_CODE[code])} in the Parameters sheet, written as {group}.")
     lines += [
-        f"- {q('..')} means unknown: no row is written for it. A blank cell is unknown the same way.",
+        f"- {q('..')} means unknown: the row is written with an empty income_group and unknown_kind {q('dotdot')}. "
+        f"An empty cell is unknown the same way, with unknown_kind {q('blank')}.",
         f"- {q(STAR_CODE)} is a footnoted value; see the footnote below.",
         "",
         "## Footnotes, quoted",
@@ -1025,9 +1067,9 @@ def _notes_text(record, workbook, sheet, fy_cols, lag, params, footnotes, qa, pa
         "",
         f"- Country codes: {qa['coverage']['country_codes']}; fiscal years: {qa['coverage']['fiscal_years']} "
         f"(FY{qa['coverage']['first_fiscal_year']} to FY{qa['coverage']['last_fiscal_year']}).",
-        f"- Cells: {qa['coverage']['cells']}; rows written: {qa['coverage']['rows_out']}; unknown: "
-        f"{qa['coverage']['unknown_cells']} ({qa['counts']['unknown_blank']} blank, "
-        f"{qa['counts']['unknown_dotdot']} {q('..')}).",
+        f"- Cells: {qa['coverage']['cells']}; rows written: {qa['coverage']['rows_out']}, one per cell. "
+        f"Known income group: {qa['coverage']['known_rows']}. Unknown: {qa['coverage']['unknown_rows']} "
+        f"({qa['counts']['unknown_by_kind']['blank']} blank, {qa['counts']['unknown_by_kind']['dotdot']} {q('..')}).",
         "",
         "## Rules",
         "",
@@ -1039,65 +1081,95 @@ def _notes_text(record, workbook, sheet, fy_cols, lag, params, footnotes, qa, pa
 
 
 
-def build(out, *, url, page_url, transport=None, sleep=None):
-    """Build the output directory. Return the sha256 of its manifest.json.
+SOURCE_PAGE_DIR = "source-page"
+INPUTS_DIR = "inputs"
+LICENCE_FILE = "inputs/licence-note.json"
+NOT_VERIFIED_LICENCE = {
+    "recorded_by": None,
+    "verified_by_tool": False,
+    "status": "not stated on the source page and not verified by this tool",
+}
+_FULL_HEX = re.compile(r"[0-9a-f]{64}")
+_PAGE_FILE = re.compile(r"source-page/[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+_FETCH_KEYS = (
+    "page", "page_url", "resource_url", "final_url", "redirects", "http_status", "content_type",
+    "content_length_header", "content_disposition", "etag", "last_modified", "name", "name_source",
+    "bytes", "sha256", "fetched_at_utc", "attempts",
+)
+_PAGE_KEYS = ("url", "file", "bytes", "sha256", "http_status", "content_type", "links_resource", "searched_for")
+# Only these page fields go into the manifest: it carries no timestamps. The fetch times stay in fetch.json.
+_MANIFEST_PAGE_KEYS = _PAGE_KEYS
 
-    The source page is fetched first, and the workbook is requested only if the page is
-    HTML that links the workbook's URL. Nothing is written until both bodies are in hand.
-    Once the .partial directory exists, a refusal leaves it in place with what was written
-    so far, and deletes nothing.
+
+def _read_licence_note(path):
+    """The operator's licence note, copied byte-identically. The tool does not check the licence itself."""
+    body = Path(path).read_bytes()
+    try:
+        note = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise OutputRefused("the licence note is not UTF-8 JSON") from None
+    if not isinstance(note, dict) or not note:
+        raise OutputRefused("the licence note must be a non-empty JSON object")
+    return {"bytes": body, "note": note, "sha256": _sha256(body)}
+
+
+def _licence_block(licence):
+    """The manifest's source.licence: the operator's note when one was given, otherwise 'not verified'."""
+    if licence is None:
+        return dict(NOT_VERIFIED_LICENCE)
+    return {
+        "recorded_by": "operator",
+        "verified_by_tool": False,
+        "file": LICENCE_FILE,
+        "sha256": licence["sha256"],
+        "bytes": len(licence["bytes"]),
+        "note": licence["note"],
+    }
+
+
+def _publish_run(out, *, mode, body, name, record, page_file, page_bytes, fetch_bytes, licence=None,
+                 derived_from=None):
+    """Write the output through a .partial, check it, fsync it, and rename it into place. Return the manifest sha256.
+
+    The derived files come from the raw bytes alone. Nothing here reads the clock, so the
+    derived files of two runs over the same bytes are identical.
     """
-    out = Path(out)
-    transport = _open_over_network if transport is None else transport
-    sleep = time.sleep if sleep is None else sleep
-    _check_destination(out)
-    _check_https(page_url, "the page URL")
-
-    page_resp, page_attempts = fetch(page_url, transport=transport, sleep=sleep)
-    _check_page(page_resp, page_url, url)
-    page_file = f"source-page/{_page_file_name(page_url)}"
-    page_record = _page_record(
-        page_url=page_url, resource_url=url, resp=page_resp, attempts=page_attempts, body=page_resp.body,
-        file_rel=page_file, fetched_at=page_attempts[-1]["at_utc"],
-    )
-
-    resp, attempts = fetch(url, transport=transport, sleep=sleep)
-    body = resp.body
-    name, name_source = raw_name(resp, url)
-    record = _fetch_record(
-        page_url=page_url, requested_url=url, resp=resp, attempts=attempts, body=body,
-        name=name, name_source=name_source, fetched_at=attempts[-1]["at_utc"],
-    )
-    record["page"] = page_record
-
     partial = out.with_name(out.name + PARTIAL_SUFFIX)
     try:
         os.mkdir(partial)
     except FileExistsError:
         raise OutputRefused(f"{partial} exists; an earlier run did not finish, and it is not removed automatically") from None
     (partial / RAW_DIR).mkdir()
-    (partial / "source-page").mkdir()
+    (partial / SOURCE_PAGE_DIR).mkdir()
     raw_rel = f"{RAW_DIR}/{name}"
-    fetch_bytes = _json_bytes(record)
-    written = {page_file: page_resp.body, raw_rel: body, OUT_FETCH: fetch_bytes}
+    written = {page_file: page_bytes, raw_rel: body, OUT_FETCH: fetch_bytes}
+    if licence is not None:
+        (partial / INPUTS_DIR).mkdir()
+        written[LICENCE_FILE] = licence["bytes"]
     for rel in (page_file, raw_rel, OUT_FETCH):
         _write_exclusive(partial / rel, written[rel])
+    if licence is not None:
+        _write_exclusive(partial / LICENCE_FILE, written[LICENCE_FILE])
 
+    licence_block = _licence_block(licence)
     workbook = Workbook(body)
-    income_rows, qa, notes_text, parsing = derive_income(workbook, record)
-
+    income_rows, qa, notes_text, parsing = derive_income(workbook, record, licence=licence_block)
     derived = {
         OUT_INCOME: _csv_bytes(INCOME_COLUMNS, income_rows),
         OUT_QA: _json_bytes(qa),
         OUT_NOTES: notes_text.encode("utf-8"),
     }
+    page = record["page"]
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "dataset": "world_bank_historical_income_classification",
+        "mode": mode,
         "tool": _tool_identity(),
         "python": platform.python_version(),
+        "derived_from": derived_from,
         "source": {
             "page_url": record["page_url"],
+            "page": {key: page[key] for key in _MANIFEST_PAGE_KEYS},
             "resource_url": record["resource_url"],
             "final_url": record["final_url"],
             "redirects": record["redirects"],
@@ -1106,18 +1178,16 @@ def build(out, *, url, page_url, transport=None, sleep=None):
             "content_length_header": record["content_length_header"],
             "etag": record["etag"],
             "last_modified": record["last_modified"],
-            "fetched_at_utc": record["fetched_at_utc"],
             "fetch_record": OUT_FETCH,
             "fetch_record_sha256": _sha256(fetch_bytes),
-            "page": page_record,
-            "licence": "not stated on the source page and not verified by this tool",
+            "licence": licence_block,
         },
         "raw": {"file": raw_rel, "sha256": _sha256(body), "bytes": len(body)},
         "parsing": parsing,
         "coverage": qa["coverage"],
         "outputs": {
-            name: {"bytes": len(data), "sha256": _sha256(data)}
-            for name, data in sorted({**derived, OUT_FETCH: fetch_bytes, raw_rel: body, page_file: page_resp.body}.items())
+            name_: {"bytes": len(data), "sha256": _sha256(data)}
+            for name_, data in sorted({**derived, **written}.items())
         },
         "schema": {"income_groups": list(GROUPS), "income_columns": list(INCOME_COLUMNS)},
     }
@@ -1140,14 +1210,154 @@ def build(out, *, url, page_url, transport=None, sleep=None):
     return _sha256(manifest_bytes)
 
 
+def build(out, *, url, page_url, transport=None, sleep=None, licence_note_path=None):
+    """Network run: fetch the source page, then the workbook, and publish. Return the manifest sha256.
+
+    The page is requested first, and the workbook only if the page is HTML that links the
+    workbook's URL. A licence note, if given, is read before any request is made.
+    """
+    out = Path(out)
+    transport = _open_over_network if transport is None else transport
+    sleep = time.sleep if sleep is None else sleep
+    _check_destination(out)
+    _check_https(page_url, "the page URL")
+    licence = _read_licence_note(licence_note_path) if licence_note_path is not None else None
+
+    page_resp, page_attempts = fetch(page_url, transport=transport, sleep=sleep)
+    _check_page(page_resp, page_url, url)
+    page_file = f"{SOURCE_PAGE_DIR}/{_page_file_name(page_url)}"
+    page_record = _page_record(
+        page_url=page_url, resource_url=url, resp=page_resp, attempts=page_attempts, body=page_resp.body,
+        file_rel=page_file, fetched_at=page_attempts[-1]["at_utc"],
+    )
+
+    resp, attempts = fetch(url, transport=transport, sleep=sleep)
+    body = resp.body
+    name, name_source = raw_name(resp, url)
+    record = _fetch_record(
+        page_url=page_url, requested_url=url, resp=resp, attempts=attempts, body=body,
+        name=name, name_source=name_source, fetched_at=attempts[-1]["at_utc"],
+    )
+    record["page"] = page_record
+    return _publish_run(
+        out, mode="network", body=body, name=name, record=record, page_file=page_file,
+        page_bytes=page_resp.body, fetch_bytes=_json_bytes(record), licence=licence,
+    )
+
+
+def _load_fetch_record(body):
+    """Parse fetch.json and check the fields this tool reads. Refused with PinRefused otherwise."""
+    try:
+        record = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise PinRefused("fetch.json is not UTF-8 JSON") from None
+    if not isinstance(record, dict) or any(key not in record for key in _FETCH_KEYS):
+        raise PinRefused("fetch.json lacks the fields this tool reads")
+    page = record["page"]
+    if not isinstance(page, dict) or any(key not in page for key in _PAGE_KEYS):
+        raise PinRefused("fetch.json lacks the source page record")
+    if not isinstance(record["name"], str) or not _SAFE_NAME.fullmatch(record["name"]):
+        raise PinRefused("fetch.json's workbook name is not a plain file name")
+    if not isinstance(page["file"], str) or not _PAGE_FILE.fullmatch(page["file"]):
+        raise PinRefused("fetch.json's source page name is not source-page/<plain name>")
+    return record
+
+
+def _check_source_manifest(manifest_bytes, *, raw_sha, fetch_bytes, page_sha):
+    """The source output's manifest must describe the same raw bytes, fetch.json and source page."""
+    try:
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+        recorded_raw = manifest["raw"]["sha256"]
+        recorded_fetch = manifest["source"]["fetch_record_sha256"]
+        recorded_page = manifest["source"]["page"]["sha256"]
+    except (UnicodeDecodeError, ValueError, KeyError, TypeError):
+        raise PinRefused("the source manifest lacks the fields this tool reads") from None
+    if recorded_raw != raw_sha:
+        raise PinRefused("the source manifest records a different raw sha256")
+    if recorded_fetch != _sha256(fetch_bytes):
+        raise PinRefused("the source manifest records a different fetch.json")
+    if recorded_page != page_sha:
+        raise PinRefused("the source manifest records a different source page")
+
+
+def build_from_raw(out, *, raw_path, page_path, fetch_path, expect_raw_sha256, source_manifest_path,
+                   licence_note_path=None):
+    """Offline run: derive the output from saved bytes, with no network connection. Return the manifest sha256.
+
+    Every check runs before anything is written. The raw workbook must have the expected
+    sha256. The source page and fetch.json must have the sha256 that fetch.json records,
+    and the source output's manifest must describe the same bytes.
+    """
+    out = Path(out)
+    _check_destination(out)
+    if not isinstance(expect_raw_sha256, str) or not _FULL_HEX.fullmatch(expect_raw_sha256):
+        raise PinRefused("the expected raw sha256 must be 64 lowercase hex digits")
+    body = Path(raw_path).read_bytes()
+    if _sha256(body) != expect_raw_sha256:
+        raise PinRefused(f"the raw workbook's sha256 is {_sha256(body)}, not the expected {expect_raw_sha256}")
+    fetch_bytes = Path(fetch_path).read_bytes()
+    record = _load_fetch_record(fetch_bytes)
+    if record["sha256"] != expect_raw_sha256 or record["bytes"] != len(body):
+        raise PinRefused("fetch.json does not describe these raw bytes")
+    page_bytes = Path(page_path).read_bytes()
+    page = record["page"]
+    if _sha256(page_bytes) != page["sha256"] or len(page_bytes) != page["bytes"]:
+        raise PinRefused(f"the source page's sha256 is {_sha256(page_bytes)}, not the one fetch.json records")
+    manifest_bytes = Path(source_manifest_path).read_bytes()
+    _check_source_manifest(manifest_bytes, raw_sha=expect_raw_sha256, fetch_bytes=fetch_bytes, page_sha=page["sha256"])
+    licence = _read_licence_note(licence_note_path) if licence_note_path is not None else None
+    derived_from = {
+        "manifest_file": "manifest.json",
+        "manifest_sha256": _sha256(manifest_bytes),
+        "fetch_json_sha256": _sha256(fetch_bytes),
+        "fetch_json": record,
+    }
+    return _publish_run(
+        out, mode="from_raw", body=body, name=record["name"], record=record, page_file=page["file"],
+        page_bytes=page_bytes, fetch_bytes=fetch_bytes, licence=licence, derived_from=derived_from,
+    )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="World Bank historical income classification: snapshot and lookup.")
-    parser.add_argument("--url", required=True, help="the resource URL, fetched over https")
-    parser.add_argument("--page-url", required=True, help="the official page that links the resource")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--url", help="network run: the resource URL, fetched over https")
+    source.add_argument("--from-raw", type=Path, metavar="RAW_XLSX",
+                        help="offline run: derive from saved bytes; no network connection")
+    parser.add_argument("--page-url", help="network run: the official page that links the resource")
+    parser.add_argument("--source-page", type=Path, metavar="PAGE_HTML", help="offline run: the saved source page")
+    parser.add_argument("--fetch-json", type=Path, help="offline run: the fetch.json of the source output")
+    parser.add_argument("--expect-raw-sha256", metavar="HEX", help="offline run: the required sha256 of the raw workbook")
+    parser.add_argument("--source-manifest", type=Path, help="offline run: the manifest.json of the source output")
+    parser.add_argument("--licence-note", type=Path, help="a JSON object recorded by the operator; copied into inputs/")
     parser.add_argument("--out", required=True, type=Path, help="new output directory; must not exist")
     args = parser.parse_args(argv)
+    offline_options = {
+        "--source-page": args.source_page, "--fetch-json": args.fetch_json,
+        "--expect-raw-sha256": args.expect_raw_sha256, "--source-manifest": args.source_manifest,
+    }
     try:
-        sha = build(args.out, url=args.url, page_url=args.page_url)
+        if args.url is not None:
+            if args.page_url is None:
+                parser.error("--url needs --page-url")
+            if any(value is not None for value in offline_options.values()):
+                parser.error("the network run takes no offline options")
+            sha = build(args.out, url=args.url, page_url=args.page_url, licence_note_path=args.licence_note)
+        else:
+            if args.page_url is not None:
+                parser.error("the offline run takes no --page-url")
+            missing = [flag for flag, value in offline_options.items() if value is None]
+            if missing:
+                parser.error(f"the offline run needs {', '.join(missing)}")
+            sha = build_from_raw(
+                args.out,
+                raw_path=args.from_raw,
+                page_path=args.source_page,
+                fetch_path=args.fetch_json,
+                expect_raw_sha256=args.expect_raw_sha256,
+                source_manifest_path=args.source_manifest,
+                licence_note_path=args.licence_note,
+            )
     except DurabilityUnconfirmed as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 3
