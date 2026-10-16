@@ -27,13 +27,13 @@ const STEPS: Step[] = [
     target: '[data-tour="evaluate"]',
     disableBeacon: true,
     title: "Evaluate projects",
-    content: "Score any ESG project: success probability, CO2 impact, social and economic scores.",
+    content: "Score a project from the figures you enter: a rule-based ESG score with its breakdown, plus an unvalidated ML success estimate.",
   },
   {
     target: '[data-tour="copilot"]',
     disableBeacon: true,
     title: "AI Co-Pilot",
-    content: "Ask questions in natural language — RAG-grounded answers with source citations.",
+    content: "Why this prediction? Enter a project's figures to see its drivers, risks and the knowledge excerpts retrieved for it.",
   },
   {
     target: '[data-tour="map"]',
@@ -45,7 +45,7 @@ const STEPS: Step[] = [
     target: '[data-tour="status"]',
     disableBeacon: true,
     title: "System status",
-    content: "Live service health for all components. You are all set.",
+    content: "Checks of the API, models, database and external data, as the service reports them. You are all set.",
   },
 ];
 
