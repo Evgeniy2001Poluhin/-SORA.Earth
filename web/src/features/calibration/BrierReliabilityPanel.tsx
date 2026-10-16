@@ -3,14 +3,32 @@ import { calibrationQualityApi, type ReliabilityResult } from "@/api/endpoints/c
 import { ReliabilityChart } from "./ReliabilityChart";
 import { toast } from "sonner";
 
+// A small seeded generator (mulberry32). The panel's disclaimer calls its data
+// a fixed illustrative dataset, so every click on a scenario must send the same
+// arrays. With Math.random each click drew a new dataset, and the numbers moved
+// on every press while the page said they were fixed.
+const SYNTHETIC_SEED = 20261016;
+
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function generateSynthetic(n = 80, miscalibration = 0.0) {
+  const rand = mulberry32(SYNTHETIC_SEED);
   const probs: number[] = [];
   const labels: number[] = [];
   for (let i = 0; i < n; i++) {
-    const p = Math.random();
+    const p = rand();
     probs.push(p);
-    const trueP = Math.max(0, Math.min(1, p + (Math.random() - 0.5) * 2 * miscalibration));
-    labels.push(Math.random() < trueP ? 1 : 0);
+    const trueP = Math.max(0, Math.min(1, p + (rand() - 0.5) * 2 * miscalibration));
+    labels.push(rand() < trueP ? 1 : 0);
   }
   return { probs, labels };
 }
@@ -28,7 +46,7 @@ export function BrierReliabilityPanel() {
     try {
       const r = await calibrationQualityApi.reliability({ ...ds, n_bins: 10 });
       setData(r);
-      toast.success(`Computed: Brier=${r.brier.toFixed(3)}, ECE=${r.ece.toFixed(3)}`);
+      toast.success(`Synthetic demo: Brier=${r.brier.toFixed(3)}, ECE=${r.ece.toFixed(3)}`);
     } catch (e: unknown) {
       toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -39,7 +57,8 @@ export function BrierReliabilityPanel() {
   return (
     <section className="brier-panel">
       <header className="brier-head">
-        <h2>Calibration quality</h2>
+        <h2>Synthetic demonstration: how Brier and ECE work</h2>
+        <p className="brier-demo-note">These numbers come from a fixed illustrative dataset, not from the deployed model's predictions or any real outcomes.</p>
         <p className="muted">Brier score · ECE · Murphy decomposition · Reliability diagram</p>
       </header>
 

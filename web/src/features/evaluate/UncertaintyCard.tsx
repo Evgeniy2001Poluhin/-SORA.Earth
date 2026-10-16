@@ -55,7 +55,7 @@ export function UncertaintyCard({ payload }: Props) {
       <div className="uncertainty-head">
         <div className="eyebrow">Tree vote (RandomForest) · unvalidated</div>
         <span className="uc-badge" style={{ background: (CONF_COLOR[u.confidence] ?? "#888") + "22", color: CONF_COLOR[u.confidence] ?? "#888", borderColor: CONF_COLOR[u.confidence] ?? "#888" }}>
-          {(u.confidence ?? "").toUpperCase()} CONFIDENCE
+          {(u.confidence ?? "").toUpperCase()} TREE AGREEMENT
         </span>
       </div>
 

@@ -20,6 +20,15 @@ export function enrichRegions(
     if (!a) return r;
     return {
       ...r,
+      // Population precedence (F076). A population the API sends replaces the
+      // static RUSSIA_REGIONS value when both exist. A `score_kind: "mock"` row is
+      // the hardcoded fallback, and its population is a placeholder rather than a
+      // source, so the static value stays for it. The backend reads `population`
+      // from the same russia_regions.ts file for database rows, so today the two
+      // agree there; the rule changes a value only once the API carries its own.
+      population: a.score_kind !== "mock" && Number.isFinite(a.population) && a.population > 0
+        ? a.population
+        : r.population,
       esgScore: a.esg?.score ?? r.esgScore,
       esgBreakdown: a.esg,
       confidence: a.confidence,
@@ -47,7 +56,6 @@ export function cardPropsOf(region: EnrichedRussianRegion): RegionEsgCardProps {
   return {
     score: Number(region.esgScore),
     breakdown: region.esgBreakdown,
-    confidence: region.confidence,
     sourcesUsed: region.sourcesUsed,
     scoreKind: region.scoreKind,
     scoreVintage: region.scoreVintage,
