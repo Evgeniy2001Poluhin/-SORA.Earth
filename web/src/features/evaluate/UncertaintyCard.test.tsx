@@ -49,4 +49,13 @@ describe("UncertaintyCard in mock mode", () => {
     await waitFor(() => expect(screen.getByText(/Tree vote \(RandomForest\) · unvalidated/)).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByText(/72\.3%/)).toHaveAttribute("title", SUCCESS_PROBABILITY_NOTE);
   });
+
+  it("labels the badge as tree agreement, not a confidence level", async () => {
+    // The canned payload's confidence is "high"; the badge must read as the
+    // spread of tree votes (F033), not as an accuracy or confidence claim.
+    const { container } = renderWithQuery(<UncertaintyCard payload={PAYLOAD} />);
+
+    await waitFor(() => expect(screen.getByText("HIGH TREE AGREEMENT")).toBeInTheDocument(), { timeout: 3000 });
+    expect(container.textContent ?? "").not.toMatch(/CONFIDENCE/);
+  });
 });
