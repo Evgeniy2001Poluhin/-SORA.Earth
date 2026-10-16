@@ -997,6 +997,27 @@ def test_a_failure_before_the_rename_publishes_nothing_and_keeps_the_partial(tmp
     assert (tmp_path / "out.partial" / cw.OUT_ROWS).exists()
 
 
+def test_a_write_that_does_not_read_back_is_refused_before_the_rename(tmp_path, monkeypatch):
+    world = make_world(tmp_path / "w", [ieg_rec("P-RB", "Republic of Angola")])
+    real = cw._write_exclusive
+
+    def corrupt(path, data):
+        real(path, data + b"x")  # the bytes on disk are not the bytes built
+
+    monkeypatch.setattr(cw, "_write_exclusive", corrupt)
+    with pytest.raises(cw.OutputFailed, match="does not read back"):
+        run(world, tmp_path / "out")
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_regional_name_with_a_regional_code_is_excluded_by_the_name(tmp_path):
+    regional = DEFAULT_REGIONAL + (regional_row("pno_code", "6L", "Latin America", "region", "REG-07"),)
+    out, _ = one(tmp_path, [ieg_rec("P-LAC", "Latin America and Caribbean")],
+                 [pno_rec("P-LAC", ["6L"], ["Latin America"])], regional=regional)
+    row = row_of(out, "P-LAC")
+    assert row["status"] == "excluded_regional" and row["reason"] == "regional_name"
+
+
 def test_a_failed_parent_fsync_reports_durability_unconfirmed_with_exit_three(tmp_path, monkeypatch, capsys):
     world = make_world(tmp_path / "w", [ieg_rec("P-FS", "Republic of Angola")])
     real = cw._fsync_dir
