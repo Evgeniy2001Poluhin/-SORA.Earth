@@ -1,4 +1,6 @@
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { TooltipRenderProps } from "react-joyride";
+import { cardWidthFor } from "./tourPlacement";
 
 const ICONS: Record<number, React.ReactNode> = {
   0: <path d="M3 12h18M12 3v18M5 6c4 3 10 3 14 0M5 18c4-3 10-3 14 0" />,
@@ -18,9 +20,39 @@ const Svg = ({ d }: { d: React.ReactNode }) => (
 export default function TourTooltip({
   index, size, step, backProps, primaryProps, skipProps, tooltipProps, isLastStep,
 }: TooltipRenderProps) {
+  const cardRef = useRef<HTMLElement | null>(null);
+
+  // The card is as wide as the screen allows, leaving CARD_MARGIN each side.
+  const [viewportWidth, setViewportWidth] = useState(() => document.documentElement.clientWidth);
+  useEffect(() => {
+    const onResize = () => setViewportWidth(document.documentElement.clientWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // Joyride keeps Tab inside the tour through the same scroll path the tour now
+  // turns off, so keep it inside the card here.
+  const keepTabInCard = (event: KeyboardEvent<HTMLDivElement>) => {
+    const card = cardRef.current;
+    if (event.key !== "Tab" || !card) return;
+    const buttons = card.querySelectorAll<HTMLElement>("button");
+    if (buttons.length === 0) return;
+    const first = buttons[0];
+    const last = buttons[buttons.length - 1];
+    const active = document.activeElement;
+    const outside = !(active instanceof Node && card.contains(active));
+    if (event.shiftKey && (outside || active === first)) {
+      event.preventDefault();
+      last.focus({ preventScroll: true });
+    } else if (!event.shiftKey && (outside || active === last)) {
+      event.preventDefault();
+      first.focus({ preventScroll: true });
+    }
+  };
+
   const pct = ((index + 1) / size) * 100;
   const card: React.CSSProperties = {
-    width: 412,
+    width: cardWidthFor(viewportWidth),
     background: "#0a120f",
     border: "1px solid rgba(255,255,255,0.10)",
     borderRadius: 2,
@@ -36,13 +68,31 @@ export default function TourTooltip({
     width: 30, height: 30, display: "grid", placeItems: "center",
     border: "1px solid #15B887", color: "#15B887",
   };
+  // Skip is a 40px target. The negative margins keep the header the size it was.
+  const skip: React.CSSProperties = {
+    background: "none", border: "none", color: "#5d706a", fontSize: 17, cursor: "pointer",
+    lineHeight: 1, width: 40, height: 40, padding: 0, display: "grid", placeItems: "center",
+    margin: "-12px -15px -12px 0",
+  };
   const next: React.CSSProperties = {
     background: "#15B887", color: "#04130d", fontWeight: 700, fontSize: 12,
     letterSpacing: "0.08em", textTransform: "uppercase", border: "none",
-    borderRadius: 0, padding: "11px 22px", cursor: "pointer",
+    borderRadius: 0, padding: "11px 22px", cursor: "pointer", minHeight: 40,
+  };
+  const back: React.CSSProperties = {
+    background: "none", border: "none", color: "#9fb4ac", fontSize: 11.5, fontWeight: 600,
+    letterSpacing: "0.08em", textTransform: "uppercase", cursor: "pointer", minHeight: 40,
   };
   return (
-    <div {...tooltipProps} style={card}>
+    <div
+      {...tooltipProps}
+      ref={(el) => {
+        cardRef.current = el;
+        tooltipProps.ref(el);
+      }}
+      onKeyDown={keepTabInCard}
+      style={card}
+    >
       <div style={{ height: 2, background: "rgba(255,255,255,0.07)" }}>
         <div style={{ height: 2, width: pct + "%", background: "#15B887", transition: "width .3s" }} />
       </div>
@@ -53,7 +103,7 @@ export default function TourTooltip({
             {String(index + 1).padStart(2, "0")} / {String(size).padStart(2, "0")}
           </span>
         </div>
-        <button {...skipProps} style={{ background: "none", border: "none", color: "#5d706a", fontSize: 17, cursor: "pointer", lineHeight: 1 }}>&times;</button>
+        <button {...skipProps} style={skip}>&times;</button>
       </div>
       <div style={{ padding: "22px 24px 10px" }}>
         {step.title && (
@@ -61,15 +111,17 @@ export default function TourTooltip({
         )}
         <div style={{ fontSize: 13.5, lineHeight: 1.65, color: "#9fb4ac" }}>{step.content}</div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 24px 20px", marginTop: 8 }}>
+      {/* The footer wraps only when the buttons would not fit beside the dots,
+          which happens on the narrowest phones with the longest last label. */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: 12, padding: "16px 24px 20px", marginTop: 8 }}>
         <div style={{ display: "flex", gap: 5 }}>
           {Array.from({ length: size }).map((_, i) => (
             <span key={i} style={{ width: i === index ? 20 : 7, height: 3, transition: "all .3s", background: i === index ? "#15B887" : "rgba(255,255,255,0.16)" }} />
           ))}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, marginLeft: "auto" }}>
           {index > 0 && (
-            <button {...backProps} style={{ background: "none", border: "none", color: "#9fb4ac", fontSize: 11.5, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", cursor: "pointer" }}>Back</button>
+            <button {...backProps} style={back}>Back</button>
           )}
           <button {...primaryProps} style={next}>{isLastStep ? "Get started" : "Next"}</button>
         </div>
