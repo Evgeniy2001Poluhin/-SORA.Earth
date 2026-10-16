@@ -423,6 +423,25 @@ def required_inputs_for_region(db, region_id: str) -> list[dict]:
     return result
 
 
+def sources_behind_scores(db) -> dict[str, list[str]]:
+    """Sources behind each region's score, for readers of region_esg_scores.
+
+    region_esg_scores keeps only `sources_count`, and the regional_esg_snapshot
+    view answers `sources_used` with a literal empty array, so the names are not
+    stored where a reader can get them. They are recoverable from the observations
+    the score is computed from, by the rule _compute_one applies: a region is
+    scored only when all six required inputs are present, and its sources are the
+    sources of those six. A region without a complete set is absent from the
+    result, which means "not known", not "no sources".
+    """
+    metrics_by_region, _newest, _examined, _vintage = _latest_by_region(db)
+    return {
+        region_id: sorted({entry[1] for entry in metrics.values()})
+        for region_id, metrics in metrics_by_region.items()
+        if not _missing_metrics(metrics)
+    }
+
+
 def _get(metrics, key):
     t = metrics.get(key)
     return t[0] if t else None
