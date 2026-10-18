@@ -12,6 +12,8 @@ import { evaluateApi } from "@/api/endpoints/evaluate";
 import type { EvaluateRequest, EvaluateResponse, ExplainResponse, RiskLevel } from "@/api/types";
 import { UncertaintyCard } from "./UncertaintyCard";
 import { SUCCESS_PROBABILITY_LABEL, SUCCESS_PROBABILITY_NOTE } from "./successProbabilityNote";
+import { useServiceSnapshot } from "./useServiceHealth";
+import { HealthPill } from "./HealthPill";
 import { fmtNum, fmtMoney, clamp } from "@/lib/format";
 import "./evaluate.css";
 import { errorMessage } from "@/lib/errors";
@@ -95,6 +97,11 @@ export function EvaluatePage() {
     rawExplain && Array.isArray(rawExplain.explanation) ? rawExplain : undefined;
   const score = useCountUp(result?.total_score ?? 0);
   const prob  = useCountUp(result?.success_probability ?? 0);
+  // The hero's Models and Status are the service's own answer, not constants.
+  // While the call is pending, or after the latest attempt fails, there is no
+  // answer, so both read "unknown" rather than a healthy default (#236). The
+  // query is shared with the header pill (useServiceHealth.ts).
+  const service = useServiceSnapshot();
   const countryList = useMemo(()=> countries ? Object.keys(countries).sort() : [], [countries]);
   const setField = <K extends keyof EvaluateRequest>(k:K, v:EvaluateRequest[K]) => setForm(s=>({...s,[k]:v}));
   const applyPreset = (id:string) => { const p=PRESETS.find(x=>x.id===id); if(!p) return; setForm(p.body); setActivePreset(id); };
@@ -143,7 +150,7 @@ export function EvaluatePage() {
         <tr><td class="k">Economic</td><td>${escapeHtml(result?.economic_score?.toFixed(1))}</td></tr>
       </table>
       <h3>Recommendations</h3><ul>${rows}</ul>
-      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${escapeHtml(new Date().toISOString())} · ML Scoring Engine · RF·MLP·Stacking</div>
+      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${escapeHtml(new Date().toISOString())} · Formula score + experimental ML estimate · models reported by the service at export: ${escapeHtml(service.models)}</div>
       </body></html>`);
     w.document.close(); setTimeout(()=>w.print(), 300);
   };
@@ -154,18 +161,17 @@ export function EvaluatePage() {
         <div>
           <div className="eyebrow" style={{display:"inline-flex",alignItems:"center",gap:10,color:"var(--planet)",marginBottom:18}}>
             <span style={{width:6,height:6,borderRadius:"50%",background:"var(--planet)",boxShadow:"0 0 0 4px rgba(47,224,166,.18)"}}/>
-            ML Scoring · Calibrated ESG Models
+            Formula score · Experimental ML estimate
           </div>
           <h1 className="display" style={{fontSize:"clamp(36px,5vw,66px)",lineHeight:.98,margin:"0 0 20px"}}>
-            Evaluate an <em style={{fontStyle:"italic",color:"var(--planet)"}}>ESG</em> project with<br/>planetary precision.
+            Evaluate an <em style={{fontStyle:"italic",color:"var(--planet)"}}>ESG</em> project<br/>from the figures you enter.
           </h1>
-          <p style={{color:"var(--muted)",maxWidth:"54ch"}}>Score, compare and simulate environment, social and economic impact with explainable ML — powered by SHAP, country-level benchmarks and a closed-loop retraining pipeline.</p>
+          <p style={{color:"var(--muted)",maxWidth:"54ch"}}>A fixed formula scores environment, social and economic factors against country benchmarks. An experimental ML estimate with SHAP explanations sits beside it; it was learned from an administrative proxy, not verified outcomes.</p>
         </div>
         <div className="ev-hero-meta">
-          <Row k="Unit"   v={<><span style={{color:"var(--planet)"}}>◆</span> ML Scoring Engine</>}/>
-          <Row k="Models" v="RF · MLP · Stacking"/>
-          <Row k="AUC"    v={<span className="tabular">0.82 prod · 0.98 cv</span>}/>
-          <Row k="Status" v={<span className="status-pill">Operational</span>}/>
+          <Row k="Unit"   v={<><span style={{color:"var(--planet)"}}>◆</span> Formula score + experimental ML estimate</>}/>
+          <Row k="Models" v={service.models}/>
+          <Row k="Status" v={<HealthPill status={service.status}/>}/>
         </div>
       </section>
 
