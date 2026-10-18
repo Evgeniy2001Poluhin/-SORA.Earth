@@ -154,3 +154,51 @@ describe("ForecastComparePage: what the numbers and labels claim", () => {
     expect(container.textContent).not.toContain("60 days");
   });
 });
+
+describe("ForecastComparePage: the bands are nominal intervals, not confidence intervals", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    stubChartLayout();
+  });
+
+  // The Forecast page labels its single band with BAND_LABEL, the words #461
+  // established as all the response supports. This page's legend called three
+  // bands "Ensemble CI", "Prophet CI" and "LSTM CI", and its toggle said
+  // "Show confidence intervals". Neither word is backed by a coverage figure.
+  const NOMINAL = "nominal 90% interval (model-based, coverage not validated)";
+  const legend = (c: HTMLElement) =>
+    Array.from(c.querySelectorAll(".recharts-legend-item-text")).map((el) => el.textContent ?? "");
+
+  it("names each band in the legend with the Forecast page's wording", async () => {
+    serve({});
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(legend(container)).toContain(`Ensemble: ${NOMINAL}`));
+    expect(legend(container)).toContain(`Prophet: ${NOMINAL}`);
+    expect(legend(container)).toContain(`LSTM: ${NOMINAL}`);
+  });
+
+  it("does not call any band a CI in the legend", async () => {
+    serve({});
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(legend(container).length).toBeGreaterThan(0));
+    expect(legend(container).join("\n")).not.toMatch(/\bCI\b/);
+    expect(container.textContent).not.toMatch(/confidence interval/i);
+  });
+
+  it("words the band toggle as a nominal interval, not a confidence interval", async () => {
+    serve({});
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(legend(container).length).toBeGreaterThan(0));
+    const toggle = container.querySelector('input[type="checkbox"]')?.closest("label");
+    expect(toggle?.textContent).toContain(NOMINAL);
+    expect(toggle?.textContent).not.toMatch(/confidence/i);
+  });
+
+  // Control: the series that are values, not bands, keep their plain names.
+  it("still names the history and the three forecasts in the legend", async () => {
+    serve({});
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(legend(container)).toContain("History"));
+    expect(legend(container)).toEqual(expect.arrayContaining(["History", "Ensemble", "Prophet", "LSTM"]));
+  });
+});
