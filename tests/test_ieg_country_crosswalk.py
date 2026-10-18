@@ -1456,7 +1456,7 @@ def test_the_remap_counts_agree_with_the_rows_and_the_totals_add_up(tmp_path):
         converted = sum(1 for r in eligible if r["remap_raw_code"] == code and r["status"] == "resolved_by_remap")
         assert entry["converted_rows"] == converted, code
     assert sum(qa["status_counts"].values()) == qa["counts"]["ieg_records_in"] == len(rows)
-    assert qa["schema_version"] == "2" and manifest_of(out)["rule_version"] == "2"
+    assert qa["schema_version"] == "2" and manifest_of(out)["rule_version"] == "3"
 
 
 def test_the_raw_cells_are_json_encoded_and_the_manifest_says_so(tmp_path):
@@ -1535,6 +1535,109 @@ def test_an_approval_that_misses_an_ieg_locator_is_refused(tmp_path):
     pins = _pins(world, approval_manifest_sha256=sha(man_bytes), approval_rows_sha256=sha(body))
     with pytest.raises(cw.SourceError, match="do not name the same locators"):
         run(world, tmp_path / "out", pins=pins)
+
+
+PARTIAL_PATH = REPO_ROOT / "scripts" / "ieg_remap_partial_names_v1.csv"
+
+
+def test_the_committed_partial_name_list_has_its_declared_shape_and_entries():
+    with open(PARTIAL_PATH, encoding="utf-8", newline="") as fh:
+        assert tuple(next(csv.reader(fh))) == cw.PARTIAL_COLUMNS
+    rows = _read_path(PARTIAL_PATH)
+    assert {(r["raw_code"], r["normalized_name"]) for r in rows} == {("GZ", "gaza"), ("GZ", "gaza strip")}
+    assert all(cw.norm(r["normalized_name"]) == r["normalized_name"] for r in rows)
+    assert all(cw.PARTIAL_FORBIDDEN_FRAGMENT not in r["normalized_name"] for r in rows)
+    assert len({r["rule_id"] for r in rows}) == len(rows) and {r["status"] for r in rows} == {"proposed"}
+
+
+def test_gaza_alone_is_quarantined_as_a_partial_territory_name(tmp_path):
+    ieg = [ieg_rec("P-GZ1", "Gaza"), ieg_rec("P-GZ2", "  GAZA  ")]
+    pno = [pno_rec("P-GZ1", ["GZ"], ["West Bank and Gaza"]), pno_rec("P-GZ2", ["GZ"], ["West Bank and Gaza"])]
+    out, _ = one(tmp_path, ieg, pno)
+    for pid in ("P-GZ1", "P-GZ2"):
+        row = row_of(out, pid)
+        assert row["status"] == "quarantine" and row["reason"] == "gz_partial_territory_name", pid
+        assert row["remap_outcome"] == "quarantine_partial_territory_name" and row["remap_witness"] == "partial_territory_name"
+        assert row["wb_code"] == "" and row["iso2"] == "" and row["rule_id"] == "CW-06", pid
+    assert qa_of(out)["reason_counts"]["quarantine:gz_partial_territory_name"] == 2
+
+
+def test_gaza_strip_is_quarantined_as_a_partial_territory_name(tmp_path):
+    out, _ = one(tmp_path, [ieg_rec("P-GS", "Gaza Strip")],
+                 [pno_rec("P-GS", ["GZ"], ["West Bank and Gaza"])])
+    row = row_of(out, "P-GS")
+    assert row["status"] == "quarantine" and row["reason"] == "gz_partial_territory_name"
+    assert row["wb_code"] == ""
+
+
+def test_west_bank_and_gaza_converts_to_palestine(tmp_path):
+    out, _ = one(tmp_path, [ieg_rec("P-WBG", "West Bank and Gaza")],
+                 [pno_rec("P-WBG", ["GZ"], ["West Bank and Gaza"])])
+    row = row_of(out, "P-WBG")
+    assert row["status"] == "resolved_by_remap" and row["reason"] == ""
+    assert (row["wb_code"], row["iso2"], row["remap_witness"]) == ("PSE", "PS", "agree")
+
+
+def test_an_absent_name_on_a_gz_code_still_converts_unchanged(tmp_path):
+    out, _ = one(tmp_path, [ieg_rec("P-GAB", "Palestinian Territories")],
+                 [pno_rec("P-GAB", ["GZ"], ["West Bank and Gaza"])])
+    row = row_of(out, "P-GAB")
+    assert row["status"] == "resolved_by_remap" and (row["wb_code"], row["remap_witness"]) == ("PSE", "absent")
+
+
+def _partial_world(tmp_path, rows):
+    world = make_world(tmp_path / "w", [ieg_rec("P-PN", "Republic of Angola")])
+    path = tmp_path / "partial.csv"
+    _write_table(path, cw.PARTIAL_COLUMNS, rows)
+    return world, path
+
+
+def _partial(code, text, rule="PNAME-T", reason="synthetic", status="proposed"):
+    return {"raw_code": code, "normalized_name": text, "rule_id": rule, "reason": reason, "status": status}
+
+
+def test_a_west_bank_name_is_never_quarantined_as_partial_even_if_the_list_held_it(tmp_path, monkeypatch):
+    real = cw._load_partial_names
+
+    def listed_anyway(path, remap, registry):
+        _names, sha_value, rows = real(PARTIAL_PATH, remap, registry)
+        return frozenset({("GZ", "gaza"), ("GZ", "west bank and gaza")}), sha_value, rows
+
+    monkeypatch.setattr(cw, "_load_partial_names", listed_anyway)
+    out, _ = one(tmp_path, [ieg_rec("P-WBL", "West Bank and Gaza")],
+                 [pno_rec("P-WBL", ["GZ"], ["West Bank and Gaza"])])
+    row = row_of(out, "P-WBL")
+    assert row["status"] == "resolved_by_remap" and row["wb_code"] == "PSE"
+
+
+def test_a_partial_name_that_names_the_west_bank_is_refused(tmp_path):
+    world, path = _partial_world(tmp_path, [_partial("GZ", "west bank")])
+    with pytest.raises(cw.SourceError, match="names the West Bank"):
+        run(world, tmp_path / "out", partial_names_path=path)
+
+
+def test_a_partial_name_for_a_code_that_is_not_converted_is_refused(tmp_path):
+    world, path = _partial_world(tmp_path, [_partial("YU", "yugoslavia")])
+    with pytest.raises(cw.SourceError, match="not a convert row"):
+        run(world, tmp_path / "out", partial_names_path=path)
+
+
+def test_a_partial_name_that_is_not_normalized_is_refused(tmp_path):
+    world, path = _partial_world(tmp_path, [_partial("GZ", "Gaza")])
+    with pytest.raises(cw.SourceError, match="normal form"):
+        run(world, tmp_path / "out", partial_names_path=path)
+
+
+def test_a_partial_name_that_is_a_registry_country_name_is_refused(tmp_path):
+    world, path = _partial_world(tmp_path, [_partial("GZ", "serbia")])
+    with pytest.raises(cw.SourceError, match="registry country name"):
+        run(world, tmp_path / "out", partial_names_path=path)
+
+
+def test_a_repeated_partial_name_is_refused(tmp_path):
+    world, path = _partial_world(tmp_path, [_partial("GZ", "gaza", rule="P1"), _partial("GZ", "gaza", rule="P2")])
+    with pytest.raises(cw.SourceError, match="repeats a name"):
+        run(world, tmp_path / "out", partial_names_path=path)
 
 
 def test_an_approval_quarantined_upstream_is_unknown_even_when_it_carries_a_fy(tmp_path):
