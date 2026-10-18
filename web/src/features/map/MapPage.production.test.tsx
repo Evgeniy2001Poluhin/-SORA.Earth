@@ -96,6 +96,78 @@ const topRows = (container: HTMLElement) =>
 const scopeLines = (container: HTMLElement) =>
   Array.from(container.querySelectorAll(".map-scope")).map((p) => p.textContent ?? "");
 
+/** The pinned-data facts the backend sends beside the countries (C8 part 3). */
+const PINNED = {
+  table_available: true,
+  snapshot_date: "2026-10-18",
+  earliest_expiry: "2027-01-01",
+  expiry_notice_days: 60,
+};
+const SCORED_ONE = {
+  total_countries: 1, bands: {},
+  countries: [{
+    name: "Sweden", esg: 81.5, band: "leader", code: "SE", lat: 60, lon: 15,
+    esg_status: "ok", esg_source: "pinned_table", missing_inputs: [],
+  }],
+};
+
+describe("MapPage pinned data (C8 part 3)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the snapshot date and the earliest expiry", async () => {
+    stubJson({ ...SCORED_ONE, ...PINNED, days_to_earliest_expiry: 74, expiry_notice: false });
+
+    const { container } = render();
+    await waitFor(() => expect(container.textContent ?? "").toContain("Pinned data"), { timeout: 3000 });
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("snapshot 2026-10-18");
+    expect(text).toContain("the earliest input expires 2027-01-01");
+  });
+
+  it("shows no expiry notice more than 60 days out", async () => {
+    stubJson({ ...SCORED_ONE, ...PINNED, days_to_earliest_expiry: 74, expiry_notice: false });
+
+    const { container } = render();
+    await waitFor(() => expect(container.textContent ?? "").toContain("Pinned data"), { timeout: 3000 });
+
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("shows a notice with the date and the days left within 60 days", async () => {
+    stubJson({ ...SCORED_ONE, ...PINNED, days_to_earliest_expiry: 30, expiry_notice: true });
+
+    const { container } = render();
+    await waitFor(() => expect(container.querySelector('[role="alert"]')).not.toBeNull(), { timeout: 3000 });
+
+    expect(container.querySelector('[role="alert"]')?.textContent ?? "")
+      .toContain("The pinned data expires on 2027-01-01, in 30 days.");
+  });
+
+  it("says the data has expired once the date has passed", async () => {
+    stubJson({ ...SCORED_ONE, ...PINNED, days_to_earliest_expiry: -2, expiry_notice: true });
+
+    const { container } = render();
+    await waitFor(() => expect(container.querySelector('[role="alert"]')).not.toBeNull(), { timeout: 3000 });
+
+    expect(container.querySelector('[role="alert"]')?.textContent ?? "").toContain("expired on 2027-01-01");
+  });
+
+  it("says no pinned data is loaded, and gives no snapshot, when the table is unavailable", async () => {
+    stubJson({
+      ...SCORED_ONE, table_available: false, table_unavailable_reason: "manifest.json is not the manifest pinned",
+      snapshot_date: null, earliest_expiry: null, days_to_earliest_expiry: null, expiry_notice: false,
+    });
+
+    const { container } = render();
+    await waitFor(() => expect(container.textContent ?? "").toContain("No pinned data is loaded"), { timeout: 3000 });
+
+    expect(container.textContent ?? "").not.toContain("snapshot");
+  });
+});
+
 // Shapes as /map/countries sends them (C8).
 const ICELAND_INCOMPLETE = {
   name: "Iceland", esg: null, band: null, code: "IS", lat: 65, lon: -19,
@@ -142,7 +214,8 @@ describe("MapPage scores (C8)", () => {
     await waitFor(() => expect(topNames(container).length).toBeGreaterThan(0), { timeout: 3000 });
 
     expect(container.textContent ?? "").toContain("N = 2 of 3 countries have a score");
-    const lines = scopeLines(container);
+    // Only the lines that state N: the pinned-data line is also a scope line now (C8 part 3).
+    const lines = scopeLines(container).filter((line) => line.includes("N = "));
     expect(lines).toHaveLength(2);
     for (const line of lines) {
       expect(line).toContain("N = 2 of 3 countries (2 ok); 1 incomplete, excluded");

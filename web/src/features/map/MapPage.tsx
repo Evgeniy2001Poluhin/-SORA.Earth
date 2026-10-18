@@ -11,7 +11,7 @@ import { useState } from "react";
 import RussiaMapModal from "./RussiaMapModal";
 import CountryTooltipBody from "./CountryTooltipBody";
 import {
-  BAND_COLOR, NEUTRAL_COLOR, aggregateScopeOf, byEsgDesc, meanScore, scoreOf,
+  BAND_COLOR, NEUTRAL_COLOR, aggregateScopeOf, byEsgDesc, expiryNoticeText, meanScore, scoreOf,
   type MapCountry,
 } from "./countryData";
 
@@ -20,6 +20,16 @@ type MapData = {
   bands: Record<string, string>;
   /** Token -> meaning for each `esg_source`. Absent from older backends. */
   esg_source_meanings?: Record<string, string>;
+  /** False when the pinned table is not loaded: every country is then incomplete. */
+  table_available?: boolean;
+  table_unavailable_reason?: string | null;
+  /** The snapshot the scores come from (ISO date). */
+  snapshot_date?: string | null;
+  /** The first day any pinned value is too old (ISO date). */
+  earliest_expiry?: string | null;
+  days_to_earliest_expiry?: number | null;
+  /** True when the earliest expiry is within `expiry_notice_days`, or has passed. */
+  expiry_notice?: boolean;
   countries: MapCountry[];
 };
 
@@ -46,6 +56,9 @@ export default function MapPage() {
   const ranked = byEsgDesc(scope.included);
   const leaders = scope.included.filter(c => c.band === "leader").length;
   const average = meanScore(scope.included);
+  const expiryNotice = data.table_available === false
+    ? null
+    : expiryNoticeText(data.earliest_expiry, data.days_to_earliest_expiry, data.expiry_notice);
 
   return (
     <div className="map-page">
@@ -56,6 +69,20 @@ export default function MapPage() {
             N = {scope.included.length} of {scope.total} countries have a score. Click a marker to evaluate.
           </p>
           <p className="map-scope">Leaders, top and average: {scope.label}</p>
+          {data.table_available === false ? (
+            <p className="map-scope map-expiry-notice" role="alert">
+              No pinned data is loaded ({data.table_unavailable_reason ?? "unknown reason"}).
+              Every country is incomplete until the table is restored.
+            </p>
+          ) : (
+            <p className="map-scope">
+              Pinned data: snapshot {data.snapshot_date ?? "unknown"}; the earliest input expires{" "}
+              {data.earliest_expiry ?? "unknown"}.
+            </p>
+          )}
+          {expiryNotice !== null && (
+            <p className="map-scope map-expiry-notice" role="alert">{expiryNotice}</p>
+          )}
         </div>
         <div className="map-stats">
           <div className="stat"><b>{leaders}</b><em>leaders</em></div>

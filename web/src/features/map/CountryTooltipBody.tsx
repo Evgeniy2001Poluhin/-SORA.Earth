@@ -9,8 +9,8 @@
  * shows a number in place of the score.
  */
 import {
-  BAND_COLOR, INPUT_LABELS, INPUT_ORDER, NEUTRAL_COLOR, describeInput, measuredPhysicalOf, scoreOf,
-  sourceLabelOf, type MapCountry,
+  BAND_COLOR, INPUT_LABELS, INPUT_ORDER, NEUTRAL_COLOR, describeInput, measuredPhysicalOf, reasonSentence,
+  scoreOf, sourceLabelOf, type MapCountry,
 } from "./countryData";
 
 export default function CountryTooltipBody({
@@ -27,6 +27,13 @@ export default function CountryTooltipBody({
   const co2 = physical.co2_intensity_t_per_capita;
   const color = score === null || !c.band ? NEUTRAL_COLOR : BAND_COLOR[c.band] ?? NEUTRAL_COLOR;
   const missing = (c.missing_inputs ?? []).map((k) => INPUT_LABELS[k] ?? k);
+  // Each missing input's reason, in the order the response names them. An input with no reason
+  // shows its label. An older backend sends no reasons at all; then the plain list is shown.
+  const reasonMap = c.input_reasons ?? null;
+  const reasons = (c.missing_inputs ?? []).map((k) => {
+    const r = reasonMap?.[k];
+    return r ? reasonSentence(k, r) : INPUT_LABELS[k] ?? k;
+  });
 
   return (
     <div className="tip">
@@ -41,9 +48,17 @@ export default function CountryTooltipBody({
             <div className="tip-score-num">incomplete</div>
             <div className="tip-score-band">no score</div>
           </div>
-          <div className="tip-missing">
-            Missing: {missing.length > 0 ? missing.join(", ") : "inputs not stated"}
-          </div>
+          {reasonMap !== null ? (
+            <ul className="tip-missing tip-reasons">
+              {reasons.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          ) : (
+            <div className="tip-missing">
+              Missing: {missing.length > 0 ? missing.join(", ") : "inputs not stated"}
+            </div>
+          )}
         </>
       ) : (
         <>

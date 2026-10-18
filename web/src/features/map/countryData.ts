@@ -25,9 +25,23 @@ export interface InputProvenance {
   unit: string | null;
   year: string;
   age_years: number;
+  /** The most the input may be old, in years, at the date the score was computed. */
+  max_age_years?: number;
+  /** The first day this value is too old (ISO date). */
+  expires_at?: string;
   source: string;
   release: string | null;
   fetched_at: string | null;
+}
+
+/** Why a required input is missing. `code` is what the rules branch on; `text` is the sentence. */
+export interface InputReason {
+  code: string;
+  text?: string;
+  year?: string;
+  age_years?: number;
+  max_age_years?: number;
+  expires_at?: string;
 }
 
 export interface MapCountry {
@@ -44,6 +58,10 @@ export interface MapCountry {
   /** Each qualifying input, keyed by input name. */
   inputs?: Partial<Record<string, InputProvenance>> | null;
   input_notes?: Record<string, string> | null;
+  /** Why each missing input is missing, keyed by input name. */
+  input_reasons?: Partial<Record<string, InputReason>> | null;
+  snapshot_date?: string | null;
+  earliest_expiry?: string | null;
   co2_intensity_t_per_capita?: number | null;
   renewable_share_pct?: number | null;
 }
@@ -94,15 +112,45 @@ const DECIMALS: Record<string, number> = {
   renewable_share: 1, co2_per_capita: 1, gini_index: 1, gov_effectiveness: 2, hdi: 3,
 };
 
-/** One scored input as a tooltip line: its value and unit, its year, and its source. */
+/** One scored input as a tooltip line: its value and unit, its year, its source, and when it expires. */
 export function describeInput(key: string, p: InputProvenance): { label: string; text: string } {
   const decimals = DECIMALS[key] ?? 2;
   const value = Number.isFinite(p.value) ? p.value.toFixed(decimals) : "no value";
   const unit = p.unit ? ` ${p.unit}` : "";
+  const expiry = p.expires_at ? `, usable until ${p.expires_at}` : "";
   return {
     label: INPUT_LABELS[key] ?? key,
-    text: `${value}${unit}, ${p.year}, ${p.source}`,
+    text: `${value}${unit}, ${p.year}, ${p.source}${expiry}`,
   };
+}
+
+/** Why one input is missing, as a sentence a reader can act on. Distinguishes "no observation"
+ *  from "observation too old", which need different fixes: the first is a gap in the source,
+ *  the second a snapshot that must be refreshed. */
+export function reasonSentence(key: string, reason: InputReason): string {
+  const label = INPUT_LABELS[key] ?? key;
+  if (reason.code === "no_observation") {
+    return `${label}: no observation in the pinned source`;
+  }
+  if (reason.code === "too_old" && reason.year !== undefined) {
+    return `${label}: observation too old (${reason.year}, ${reason.age_years} years old; `
+      + `the limit is ${reason.max_age_years} years)`;
+  }
+  return `${label}: ${reason.text ?? reason.code}`;
+}
+
+/** The notice for the map: when the pinned data expires, and what that means. Null when there
+ *  is nothing to say. `days` is negative once the expiry has passed. */
+export function expiryNoticeText(earliest: string | null | undefined, days: number | null | undefined,
+  notice: boolean | null | undefined): string | null {
+  if (!notice || !earliest || days == null) return null;
+  if (days < 0) {
+    return `The pinned data expired on ${earliest}. Every country that needs an expired input is incomplete. `
+      + "A newer snapshot must be pinned before scores return.";
+  }
+  const when = days === 0 ? "today" : `in ${days} days`;
+  return `The pinned data expires on ${earliest}, ${when}. Scores that need an expired input go incomplete then. `
+    + "A newer snapshot must be pinned before that date.";
 }
 
 /** The text the country tooltip shows after "source:": the backend's meaning for

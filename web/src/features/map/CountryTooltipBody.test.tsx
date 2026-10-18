@@ -16,6 +16,7 @@ import type { InputProvenance, MapCountry } from "./countryData";
 const SWEDEN_INPUTS: Partial<Record<string, InputProvenance>> = {
   renewable_share: {
     value: 60.1, unit: "% (of total final energy consumption)", year: "2021", age_years: 5,
+    max_age_years: 5, expires_at: "2027-01-01",
     source: "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
     release: "World Bank lastupdated 2026-10-08", fetched_at: "2026-10-18T13:07:20Z",
   },
@@ -128,5 +129,40 @@ describe("the country tooltip", () => {
   it("names missing inputs by their human label", () => {
     const text = renderBody({ ...ICELAND_INCOMPLETE, missing_inputs: ["hdi"] }).container.textContent ?? "";
     expect(text).toContain("Missing: human development index");
+  });
+
+  it("gives the reason for each missing input, and tells no observation from observation too old", () => {
+    const country: MapCountry = {
+      ...ICELAND_INCOMPLETE,
+      missing_inputs: ["gini_index", "hdi"],
+      input_reasons: {
+        gini_index: { code: "no_observation", text: "no observation in the pinned table" },
+        hdi: { code: "too_old", year: "2023", age_years: 4, max_age_years: 3, expires_at: "2027-01-01" },
+      },
+    };
+    const items = Array.from(renderBody(country, MEANINGS).container.querySelectorAll(".tip-reasons li"))
+      .map((li) => li.textContent ?? "");
+
+    expect(items).toEqual([
+      "Gini index: no observation in the pinned source",
+      "human development index: observation too old (2023, 4 years old; the limit is 3 years)",
+    ]);
+  });
+
+  it("shows an input with no reason by its label, beside the reasons that exist", () => {
+    const country: MapCountry = {
+      ...ICELAND_INCOMPLETE,
+      missing_inputs: ["gini_index", "hdi"],
+      input_reasons: { gini_index: { code: "no_observation" } },
+    };
+    const text = renderBody(country, MEANINGS).container.textContent ?? "";
+
+    expect(text).toContain("Gini index: no observation in the pinned source");
+    expect(text).toContain("human development index");
+  });
+
+  it("shows the scored input's expiry in its line", () => {
+    const text = renderBody(SWEDEN_OK, MEANINGS).container.textContent ?? "";
+    expect(text).toContain("usable until");
   });
 });
