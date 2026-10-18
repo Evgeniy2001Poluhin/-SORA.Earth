@@ -543,7 +543,13 @@ describe("an empty status is unknown, not degraded", () => {
 const HERO_HEADLINE = "Evaluate an ESG projectfrom the figures you enter.";
 const HERO_PARAGRAPH =
   "A fixed formula scores environment, social and economic factors against country benchmarks. An experimental ML estimate with SHAP explanations sits beside it; it was learned from an administrative proxy, not verified outcomes.";
-const DROPPED_CLAIMS = ["Calibrated ESG Models", "planetary precision", "closed-loop retraining"];
+const DROPPED_CLAIMS = [
+  "Calibrated ESG Models",
+  "planetary precision",
+  "closed-loop retraining",
+  "ML Scoring Engine",
+];
+const UNIT_TEXT = "Formula score + experimental ML estimate";
 
 describe("the Evaluate hero says what the score is", () => {
   beforeEach(() => {
@@ -567,6 +573,22 @@ describe("the Evaluate hero says what the score is", () => {
     await settleHealth(stub, queryClient);
 
     expect(heroText(container)).toContain("Formula score · Experimental ML estimate");
+  });
+
+  it("names the Unit as the formula plus the estimate, not an ML engine", async () => {
+    const stub = stubHealth(() => jsonResponse(HEALTHY));
+    const { container, queryClient } = renderPage();
+    await settleHealth(stub, queryClient);
+
+    expect(heroValue(container, "Unit")).toBe(`◆ ${UNIT_TEXT}`);
+    expect(container.textContent ?? "").not.toContain("ML Scoring Engine");
+  });
+
+  it("does not call the printed report footer an ML scoring engine", async () => {
+    const html = await printedReportWith(() => jsonResponse(HEALTHY));
+
+    expect(html).toContain(`· ${UNIT_TEXT} ·`);
+    expect(html).not.toContain("ML Scoring Engine");
   });
 
   it("drops the claims the data does not back, anywhere on the page", async () => {

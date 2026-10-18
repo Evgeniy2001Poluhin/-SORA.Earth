@@ -150,7 +150,7 @@ export function EvaluatePage() {
         <tr><td class="k">Economic</td><td>${escapeHtml(result?.economic_score?.toFixed(1))}</td></tr>
       </table>
       <h3>Recommendations</h3><ul>${rows}</ul>
-      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${escapeHtml(new Date().toISOString())} · ML Scoring Engine · models reported by the service at export: ${escapeHtml(service.models)}</div>
+      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${escapeHtml(new Date().toISOString())} · Formula score + experimental ML estimate · models reported by the service at export: ${escapeHtml(service.models)}</div>
       </body></html>`);
     w.document.close(); setTimeout(()=>w.print(), 300);
   };
@@ -169,7 +169,7 @@ export function EvaluatePage() {
           <p style={{color:"var(--muted)",maxWidth:"54ch"}}>A fixed formula scores environment, social and economic factors against country benchmarks. An experimental ML estimate with SHAP explanations sits beside it; it was learned from an administrative proxy, not verified outcomes.</p>
         </div>
         <div className="ev-hero-meta">
-          <Row k="Unit"   v={<><span style={{color:"var(--planet)"}}>◆</span> ML Scoring Engine</>}/>
+          <Row k="Unit"   v={<><span style={{color:"var(--planet)"}}>◆</span> Formula score + experimental ML estimate</>}/>
           <Row k="Models" v={service.models}/>
           <Row k="Status" v={<HealthPill status={service.status}/>}/>
         </div>
