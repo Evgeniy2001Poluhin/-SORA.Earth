@@ -536,3 +536,47 @@ describe("an empty status is unknown, not degraded", () => {
     expect(heroText(container)).not.toMatch(/Degraded|Operational/);
   });
 });
+
+/* -- the hero says what the score is, and nothing it cannot back (audit F006-F008) -- */
+
+// <br/> adds no text, so the two halves of the headline meet in textContent.
+const HERO_HEADLINE = "Evaluate an ESG projectfrom the figures you enter.";
+const HERO_PARAGRAPH =
+  "A fixed formula scores environment, social and economic factors against country benchmarks. An experimental ML estimate with SHAP explanations sits beside it; it was learned from an administrative proxy, not verified outcomes.";
+const DROPPED_CLAIMS = ["Calibrated ESG Models", "planetary precision", "closed-loop retraining"];
+
+describe("the Evaluate hero says what the score is", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("states the headline and the paragraph exactly", async () => {
+    const stub = stubHealth(() => jsonResponse(HEALTHY));
+    const { container, queryClient } = renderPage();
+    await settleHealth(stub, queryClient);
+
+    const heading = container.querySelector(".ev-hero h1");
+    expect(heading?.textContent).toBe(HERO_HEADLINE);
+    expect(heading?.querySelector("em")?.textContent).toBe("ESG");
+    expect(screen.getByText(HERO_PARAGRAPH)).toBeInTheDocument();
+  });
+
+  it("labels the eyebrow as a formula with an experimental estimate, not calibration", async () => {
+    const stub = stubHealth(() => jsonResponse(HEALTHY));
+    const { container, queryClient } = renderPage();
+    await settleHealth(stub, queryClient);
+
+    expect(heroText(container)).toContain("Formula score · Experimental ML estimate");
+  });
+
+  it("drops the claims the data does not back, anywhere on the page", async () => {
+    const stub = stubHealth(() => jsonResponse(HEALTHY));
+    const { container, queryClient } = renderPage();
+    await settleHealth(stub, queryClient);
+
+    for (const claim of DROPPED_CLAIMS) {
+      expect(heroText(container)).not.toContain(claim);
+      expect(container.textContent ?? "").not.toContain(claim);
+    }
+  });
+});

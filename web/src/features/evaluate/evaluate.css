@@ -47,19 +47,6 @@
 .ev-badge.med{background:rgba(241,193,89,.08);border:1px solid rgba(241,193,89,.3);color:var(--sun)}
 .ev-badge.high{background:rgba(255,138,110,.08);border:1px solid rgba(255,138,110,.3);color:var(--coral)}
 
-/* Health pill, for the states that are not Operational. The base .status-pill
-   is green, and must not stay green without a healthy answer behind it. The
-   light theme in base.css forces the pill with !important, so the light rules
-   below repeat that with a higher specificity. */
-.status-pill.is-degraded{background:rgba(241,193,89,.08);border-color:rgba(241,193,89,.3);color:var(--sun)}
-.status-pill.is-degraded::before{background:var(--sun);box-shadow:0 0 0 4px rgba(241,193,89,.18)}
-.status-pill.is-unknown{background:transparent;border-color:var(--line-2);color:var(--muted)}
-.status-pill.is-unknown::before{background:var(--faint);box-shadow:none;animation:none}
-:root[data-theme="light"] .status-pill.is-degraded{background:rgba(160,105,30,.12)!important;border-color:rgba(160,105,30,.36)!important;color:var(--sun)!important}
-:root[data-theme="light"] .status-pill.is-degraded::before{background:var(--sun)!important}
-:root[data-theme="light"] .status-pill.is-unknown{background:transparent!important;border-color:var(--line-2)!important;color:var(--muted)!important}
-:root[data-theme="light"] .status-pill.is-unknown::before{background:var(--faint)!important;box-shadow:none!important;animation:none!important}
-
 .ev-score-row{display:grid;grid-template-columns:1fr auto;gap:24px;align-items:end;
   padding-bottom:22px;border-bottom:1px solid var(--line);margin-bottom:22px}
 .ev-score{font-family:var(--f-display);font-size:clamp(72px,8vw,120px);line-height:.9;letter-spacing:-.035em;
