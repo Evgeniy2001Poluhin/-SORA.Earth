@@ -61,11 +61,11 @@ export function HomePage() {
           </motion.div>
           <motion.h1 className="display" initial={{opacity:0,y:14}} animate={{opacity:1,y:0}} transition={{delay:.05,duration:.6,ease:[.16,1,.3,1]}}
             style={{fontSize:"clamp(40px,5.6vw,76px)",lineHeight:.98}}>
-            Planetary-scale <em style={{fontStyle:"italic",color:"var(--planet)"}}>ESG</em> intelligence,<br/>explainable down to the feature.
+            <em style={{fontStyle:"italic",color:"var(--planet)"}}>ESG</em> screening for<br/>sustainability projects.
           </motion.h1>
           <motion.p initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{delay:.15,duration:.6,ease:[.16,1,.3,1]}}
             style={{color:"var(--muted)",maxWidth:"58ch",fontSize:16,lineHeight:1.6}}>
-            Score sustainability projects across countries with a closed-loop MLOps pipeline: drift detection, automated retraining, SHAP explanations and AI Teammate oversight.
+            A fixed formula scores the figures you enter against country benchmarks. Beside it sits an experimental ML success estimate with SHAP explanations. The model learned from an administrative proxy, not from verified project outcomes; it is checked daily for drift, and a retrained model replaces it only after passing a quality gate.
           </motion.p>
           <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{delay:.25,duration:.6,ease:[.16,1,.3,1]}}
             style={{display:"flex",gap:12,marginTop:26}}>
@@ -79,8 +79,8 @@ export function HomePage() {
         <div className="eyebrow">HOW IT WORKS</div>
         <div className="how-grid">
           <div className="how-step"><span className="how-num">01</span><h3>Submit</h3><p>Project name, country, budget, CO₂, social score, duration. Six fields, no spreadsheets.</p></div>
-          <div className="how-step"><span className="how-num">02</span><h3>Score</h3><p>A RandomForest model returns ESG total + env/soc/eco breakdown, success probability and risk level.</p></div>
-          <div className="how-step"><span className="how-num">03</span><h3>Compare</h3><p>Run two projects side-by-side. See the gap on every axis. Decide with nrs, not narratives.</p></div>
+          <div className="how-step"><span className="how-num">02</span><h3>Score</h3><p>A fixed formula returns the ESG total and its env/soc/eco breakdown. A RandomForest adds a success probability, unvalidated; the risk level combines the two.</p></div>
+          <div className="how-step"><span className="how-num">03</span><h3>Compare</h3><p>Run two projects side by side and see the gap on every axis. The scores are screening indices, not measured outcomes.</p></div>
         </div>
       </section>
       <section className="home-cta">

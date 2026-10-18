@@ -98,4 +98,27 @@ describe("OnboardingTour", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^Next/ }));
     await waitFor(() => expect(floater()?.style.position).toBe("absolute"));
   }, SLOW);
+
+  it("walks all five steps by Next, and each step shows its own text", async () => {
+    // Every target on screen, as in the test above, so no step is re-placed.
+    navBox = { left: 88, top: 85, width: 82, height: 40 };
+    renderTour();
+    const contents = [
+      "AI platform for ESG project evaluation. Quick 60-second tour of the key features.",
+      "Score a project from the figures you enter: a rule-based ESG score with its breakdown, plus an unvalidated ML success estimate.",
+      "Why this prediction? Enter a project's figures to see its drivers, risks and the knowledge excerpts retrieved for it.",
+      "Explore ESG scores by country on an interactive map.",
+      "Checks of the API, models, database and external data, as the service reports them. You are all set.",
+    ];
+    for (const [i, content] of contents.entries()) {
+      await waitFor(() => expect(screen.getByText(content)).toBeInTheDocument(), { timeout: 5_000 });
+      const text = document.body.textContent ?? "";
+      expect(text).not.toContain("natural language");
+      expect(text).not.toContain("for all components");
+      expect(text).not.toContain("Score any ESG project");
+      if (i < contents.length - 1) {
+        fireEvent.click(await screen.findByRole("button", { name: /^Next/ }, { timeout: 5_000 }));
+      }
+    }
+  }, SLOW);
 });
