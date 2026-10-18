@@ -1,8 +1,14 @@
 # M0 EXECUTION PLAN — SORA.Earth Maximum
 
+> **HISTORICAL EXECUTION PLAN.** This was the 2026-07-24 plan, not the current
+> work queue. Use `docs/DEVELOPMENT_ROADMAP.md` for current sequencing and
+> `docs/maximum/M0_GAP_REGISTER.md` for the preserved M0 evidence ledger. The
+> original estimates and command sequence below are retained as history and
+> must not be treated as authorization for production changes.
+
 **Created:** 2026-07-24  
 **Target:** Baseline Lock before M1 Data Trust  
-**Status:** Ready for Execution
+**Status:** HISTORICAL — superseded as an execution queue
 
 ---
 
