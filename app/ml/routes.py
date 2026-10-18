@@ -110,10 +110,17 @@ def predict(req: PredictRequest):
 @router.get("/model/version")
 def model_version():
     try:
+        # get_version() is None when no bundle is loaded (SORA_OFFLINE, or the
+        # loader declined). str(None) used to answer the string "None" with 200.
+        version = get_version()
+        if version is None:
+            raise HTTPException(
+                status_code=503,
+                detail="no model bundle loaded")
         return {
             "name": "esg-success-predictor",
             "alias": get_alias(),
-            "version": str(get_version()),
+            "version": str(version),
         }
     except MlflowException as e:
         # get_version() -> get_model() -> registry_loader._load() looks up
@@ -144,7 +151,12 @@ def model_version():
 def model_reload():
     try:
         reload_model()
-        return {"status": "reloaded", "version": str(get_version())}
+        version = get_version()
+        if version is None:
+            raise HTTPException(
+                status_code=503,
+                detail="no model bundle loaded")
+        return {"status": "reloaded", "version": str(version)}
     except MlflowException as e:
         logger.warning("model/reload: no registered model for the configured "
                         "alias yet: %s", e)

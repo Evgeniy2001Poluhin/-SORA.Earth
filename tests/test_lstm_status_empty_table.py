@@ -14,11 +14,21 @@ rather than through a real database, so this does not depend on (or
 disturb) whatever other tests have left in the shared test database's
 `evaluations` table.
 """
-import asyncio
 from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _forget_the_last_fit():
+    """The endpoint remembers its last fit per process; start each test without one."""
+    from app.api import forecast
+
+    forecast._lstm_fit_cache.clear()
+    yield
+    forecast._lstm_fit_cache.clear()
 
 
 def _call_lstm_status(last_date):
@@ -40,8 +50,9 @@ def _call_lstm_status(last_date):
     mock_db = MagicMock()
     mock_db.execute.return_value.fetchone.return_value = (0, last_date)
 
+    # A plain function since the handler moved off the event loop: call it directly.
     with patch("app.api.forecast._query_time_series", return_value=pd.DataFrame()):
-        returned = asyncio.run(get_lstm_status(db=mock_db))
+        returned = get_lstm_status(db=mock_db)
 
     if isinstance(returned, JSONResponse):
         return returned.status_code, json.loads(returned.body)
