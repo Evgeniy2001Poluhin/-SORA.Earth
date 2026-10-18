@@ -17,6 +17,22 @@ const PARAMS: Array<{ key: SweepKey; label: string; min: number; max: number; st
   { key:"social_impact_score",           label:"Social (1-10)",  min:1,     max:10,     step:1,     fmt:(v:number)=>`${v}/10` },
 ];
 
+/** A finite number, and nothing a missing field would have been coerced into. */
+const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+const signed = (d: number, body: string) => (d > 0 ? "+" : d < 0 ? "-" : "") + body;
+
+/**
+ * The three perturbations /what-if computes, keyed as the response keys them.
+ * Each row's amount is formatted from the change the server applied (see the
+ * tornado memo below), never from a percentage written into this table.
+ */
+const TORNADO_ROWS = [
+  { key: "budget",        name: "Budget", amount: (d: number) => signed(d, "$" + Math.round(Math.abs(d)).toLocaleString("en-US")) },
+  { key: "co2_reduction", name: "CO2",    amount: (d: number) => signed(d, Math.abs(d) + " t/yr") },
+  { key: "social_impact", name: "Social", amount: (d: number) => signed(d, String(Math.abs(d))) },
+] as const;
+
 export function WhatIf({ form, lastRun }: Props) {
   const wi = useMutation({ mutationFn: evaluateApi.whatIf });
   const base = lastRun || form;
@@ -54,12 +70,15 @@ export function WhatIf({ form, lastRun }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[budget, co2, social, duration, country]);
 
-  // Sweep: 12 points across param range
+  // Sweep: 12 points across the param range. The same 12 values are the X-axis
+  // ticks, and the axis is numeric: recharts places a ReferenceDot only at a
+  // position the axis has, and on a category axis that is just the ticks, so a
+  // baseline that is not exactly one of them was never drawn.
+  const sweepXs = Array.from({ length: 12 }, (_, i) => param.min + ((param.max - param.min) * i) / 11);
   const runSweep = async () => {
     setSweepLoading(true);
     const points: Array<{x:number; total:number}> = [];
-    const xs: number[] = [];
-    for (let i=0; i<=11; i++) xs.push(param.min + (param.max-param.min)*i/11);
+    const xs = sweepXs;
     if (!country || ![budget, co2, social, duration].every(Number.isFinite)) {
       setSweepLoading(false);
       return;
@@ -84,24 +103,42 @@ export function WhatIf({ form, lastRun }: Props) {
 
   const tornado = useMemo(()=>{
     const v = wi.data?.variations; if(!v) return [];
-    const rows = [
-      { key:"Budget +20%",  delta: v.budget?.score_change,        abs: Math.abs(v.budget?.score_change ?? 0) },
-      { key:"CO2 +20%",     delta: v.co2_reduction?.score_change, abs: Math.abs(v.co2_reduction?.score_change ?? 0) },
-      { key:"Social +1",    delta: v.social_impact?.score_change, abs: Math.abs(v.social_impact?.score_change ?? 0) },
-    ];
+    // The label states the change the server applied: its `new_value` against
+    // the value this request sent (`wi.variables`). A label written in advance
+    // ("+20%", "+1") described what the code was meant to do, and the server
+    // does something else (CO2 is +20 t/yr, and social is clamped at 10).
+    const sent = wi.variables;
+    const rows = TORNADO_ROWS.map(row => {
+      const variation = v[row.key];
+      const before = sent?.[row.key];
+      const after = variation?.new_value;
+      const change = isNum(before) && isNum(after) ? after - before : null;
+      const delta = variation?.score_change;
+      return {
+        key: row.key,
+        label: change === null ? row.name : `${row.name} ${row.amount(change)}`,
+        delta,
+        abs: Math.abs(isNum(delta) ? delta : 0),
+      };
+    });
     // "Every parameter changes the score by exactly zero" is a claim, not an
     // empty state (#236). `{variations:{}}` from the server used to draw all
     // three bars reading +0.00 — a sensitivity result nobody computed. Rows
     // the server did not answer for are dropped, and if none survive the
     // caller shows "Run an evaluation first" instead.
-    const answered = rows.filter(r => typeof r.delta === "number");
+    const answered = rows.filter(r => isNum(r.delta));
     return answered
       .map(r => ({ ...r, delta: r.delta as number }))
       .sort((a,b)=>b.abs-a.abs);
-  },[wi.data]);
+  },[wi.data, wi.variables]);
 
   const maxAbs = Math.max(0.5, ...tornado.map(t=>t.abs));
-  const currentX = base?.[paramKey] ?? param.min;
+  // The baseline dot is the base form's own score at the base form's own value.
+  // With no scored run behind `base` there is no baseline, so no dot: the old
+  // `?? 50` drew one at 50 as if it were the score, and `?? param.min` placed
+  // it at an x the form never had.
+  const baseX = base?.[paramKey];
+  const baseScore = base?.total_score;
 
   return (
     <div className="card-body">
@@ -115,7 +152,7 @@ export function WhatIf({ form, lastRun }: Props) {
       <div className="wi-tornado">
         {tornado.map(t => (
           <div key={t.key} className="wi-row">
-            <div className="wi-lbl mono">{t.key}</div>
+            <div className="wi-lbl mono">{t.label}</div>
             <div className="wi-track">
               <div className={"wi-bar "+(t.delta>=0?"pos":"neg")}
                    style={{width:`${(t.abs/maxAbs)*100}%`}}/>
@@ -145,14 +182,16 @@ export function WhatIf({ form, lastRun }: Props) {
           <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
             <LineChart data={sweepData} margin={{top:8,right:16,left:0,bottom:8}}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--line)"/>
-              <XAxis dataKey="x" tickFormatter={param.fmt} stroke="#666" fontSize={11}/>
+              <XAxis dataKey="x" type="number" domain={[param.min, param.max]} ticks={sweepXs} tickFormatter={param.fmt} stroke="#666" fontSize={11}/>
               <YAxis domain={[0,100]} stroke="#666" fontSize={11}/>
               <Tooltip
                 contentStyle={{background:"var(--bg-1)",border:"1px solid var(--line-2)",borderRadius:8,fontSize:12}}
                 formatter={(v: unknown)=>[`${Number(v).toFixed(1)}`,"Total"]}
                 labelFormatter={(v: unknown)=>`${param.label}: ${param.fmt(Number(v))}`}/>
               <Line type="monotone" dataKey="total" stroke="#2FE0A6" strokeWidth={2} dot={{r:3,fill:"#2FE0A6"}} animationDuration={400}/>
-              <ReferenceDot x={currentX} y={base?.total_score ?? 50} r={6} fill="#fff" stroke="#2FE0A6" strokeWidth={2}/>
+              {isNum(baseX) && isNum(baseScore) && (
+                <ReferenceDot x={baseX} y={baseScore} r={6} fill="#fff" stroke="#2FE0A6" strokeWidth={2}/>
+              )}
             </LineChart>
           </ResponsiveContainer>
         </div>

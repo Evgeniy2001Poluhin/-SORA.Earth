@@ -103,6 +103,8 @@ describe("WhatIf rendering in mock mode", () => {
 
     expect(screen.getByText("What-If Sensitivity")).toBeInTheDocument();
     // The mock previously returned {scenarios}, which this view never reads.
-    await waitFor(() => expect(screen.getByText(/Budget \+20%/)).toBeInTheDocument(), { timeout: 3000 });
+    // The mock applies budget x1.2 (150000 -> 180000) and the label states that
+    // change from the response, not a percentage written into the view.
+    await waitFor(() => expect(screen.getByText(/Budget \+\$30,000/)).toBeInTheDocument(), { timeout: 3000 });
   });
 });
