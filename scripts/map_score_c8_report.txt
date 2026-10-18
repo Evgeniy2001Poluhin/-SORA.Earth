@@ -1,7 +1,8 @@
-# C8 part 2: map score, origin/main against this branch (offline, AS_OF 2026-10-19)
+# C8 part 2 and 3: map score, old commit against this branch (offline, AS_OF 2026-10-19)
 
-Old = origin/main app/api/map_data.py, empty live cache (its offline state).
-New = this branch: pinned table data/map_inputs/2026-10-18, ages at the date above.
+Old = app/api/map_data.py at e4009ec8ca8c6b25ab3616983c3736b63a22b594 (origin/main when this was generated), empty live cache.
+New = working tree on branch map-score-sourced, based on 8dd44879;
+      pinned table data/map_inputs/2026-10-18 (manifest sha256 5d133d3bf441092b...), ages at the date above.
 Each row: old score and label, then the new score or null, status, missing inputs with reasons,
 and the year of each input the new score used (ren = renewables share, co2 = CO2 per capita,
 gini, gov = government effectiveness, hdi).
@@ -54,6 +55,8 @@ gini, gov = government effectiveness, hdi).
 - all scored countries, absolute change, median 5.0, max 15
 - countries the old code scored from a default constant: 11
 - by old label: hardcoded 10, static_benchmark 23
+- pinned table: snapshot 2026-10-18, earliest input expires 2027-01-01
+- on 2027-01-01 (first day too old): ok 0, incomplete 33, countries with a too_old reason for renewables or HDI 33
 
 ## Korea
 

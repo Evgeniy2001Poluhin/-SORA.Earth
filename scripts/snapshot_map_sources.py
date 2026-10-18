@@ -84,6 +84,34 @@ Usage (from the repository root):
 
 --probe fetches the metadata of the candidate codes, the first page of each
 series, and the UNDP link list. It writes nothing.
+
+Monthly publication check (manual; nothing refreshes the data automatically)
+
+The map's inputs expire. data/map_inputs/<date>/ is the only table the map reads,
+and each value is refused once it is older than its limit (app/map_inputs.py,
+MAX_AGE_YEARS). The owner runs this check once a month:
+
+  1. Look at the World Bank "lastupdated" stamp for the five series and the UNDP
+     HDR release page. Note the newest observation year each of them now has
+     for the 33 countries.
+  2. If no series has a newer observation year than the pinned table's own
+     latest years, stop. Nothing is gained by a new snapshot. Scores then go
+     null as their values expire, and that is the correct outcome.
+  3. Only if an observation year has advanced, re-snapshot into a NEW dated
+     directory with this script, build with scripts/build_map_inputs.py into a
+     fresh directory, and check the table's hash against the manifest.
+  4. Pin the new manifest: put its sha256 in PINNED_MANIFEST_SHA256 in
+     app/map_inputs.py, and point TABLE_DIR at the new directory. That commit is
+     the only way new data reaches the map.
+
+Re-snapshotting the same observation years does not extend validity. A value's
+expiry is set by its observation year, not by the day it was fetched, so a new
+snapshot that still ends at 2023 for HDI expires on the same date as the old one.
+Only a newer observation year moves an expiry.
+
+If no source has published new data by an expiry date, the scores that need the
+expired input stay null after it, and the map says so. That is the intended
+behaviour. Do not relax a maximum age to keep a country scored.
 """
 import argparse
 import csv

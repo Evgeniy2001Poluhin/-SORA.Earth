@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Reproducible before/after comparison for the map score (Council decision C8, part 2).
 
-"Old" is origin/main's app/api/map_data.py, read with `git show` and loaded in
-memory. It scores from the live cache when that cache holds a fresh value and from
-BENCHMARKS or the hand-entered COUNTRIES profile otherwise.
+"Old" is app/api/map_data.py at OLD_SHA, a fixed commit, read with `git show` and
+loaded in memory. It is not origin/main: main moves, and a report that moves with it
+cannot be reproduced. OLD_SHA was origin/main's head when the report was regenerated,
+and the report header prints it. It scores from the live cache when that cache holds a
+fresh value and from BENCHMARKS or the hand-entered COUNTRIES profile otherwise.
 
 "New" is this working tree's app/api/map_data.py. It scores from the pinned table
 in data/map_inputs (verified against its manifest), with each input's age measured
@@ -43,20 +45,28 @@ from app.country_benchmarks import BENCHMARKS  # noqa: E402
 # The date the new score's ages are measured at. Fixed here so the report is reproducible.
 AS_OF = date(2026, 10, 19)
 
+# The old side: origin/main's head when this report was regenerated. Fixed, so the
+# comparison does not move when main does. Update it deliberately, and say so in the commit.
+OLD_SHA = "e4009ec8ca8c6b25ab3616983c3736b63a22b594"
+
 OLD_DEFAULTS = {"co2_per_capita": 5.0, "renewable_share": 20.0, "gini_index": 35.0,
                 "gov_effectiveness": 0.0, "hdi": 0.7}
 INPUT_SHORT = {"renewable_share": "ren", "co2_per_capita": "co2", "gini_index": "gini",
                "gov_effectiveness": "gov", "hdi": "hdi"}
 
 
+def git_out(*args):
+    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
+
+
 def load_old():
-    """origin/main's map_data.py, as it was before this change."""
+    """app/api/map_data.py at OLD_SHA, as it was before this change."""
     source = subprocess.run(
-        ["git", "show", "origin/main:app/api/map_data.py"],
+        ["git", "show", f"{OLD_SHA}:app/api/map_data.py"],
         cwd=ROOT, capture_output=True, text=True, check=True,
     ).stdout
     module = types.ModuleType("old_map_data")
-    module.__file__ = "origin/main:app/api/map_data.py"
+    module.__file__ = f"{OLD_SHA}:app/api/map_data.py"
     exec(compile(source, module.__file__, "exec"), module.__dict__)
     return module
 
@@ -170,9 +180,11 @@ def scenario_rows(populate):
 
 def main():
     rows = comparison_rows()
-    print("# C8 part 2: map score, origin/main against this branch (offline, AS_OF %s)\n" % AS_OF.isoformat())
-    print("Old = origin/main app/api/map_data.py, empty live cache (its offline state).")
-    print("New = this branch: pinned table data/map_inputs/2026-10-18, ages at the date above.")
+    print("# C8 part 2 and 3: map score, old commit against this branch (offline, AS_OF %s)\n" % AS_OF.isoformat())
+    print(f"Old = app/api/map_data.py at {OLD_SHA} (origin/main when this was generated), empty live cache.")
+    print(f"New = working tree on branch map-score-sourced, based on {git_out('rev-parse', '--short', 'HEAD')};")
+    print("      pinned table data/map_inputs/2026-10-18 (manifest sha256 "
+          f"{map_inputs.PINNED_MANIFEST_SHA256[:16]}...), ages at the date above.")
     print("Each row: old score and label, then the new score or null, status, missing inputs with reasons,")
     print("and the year of each input the new score used (ren = renewables share, co2 = CO2 per capita,")
     print("gini, gov = government effectiveness, hdi).\n")
@@ -208,6 +220,15 @@ def main():
     print(f"- by old label: " + ", ".join(
         f"{label} {sum(1 for r in rows if r['old_label'] == label)}"
         for label in sorted({r['old_label'] for r in rows})))
+
+    table = map_inputs.current_table_state().table
+    expiry = map_inputs.earliest_expiry(table)
+    print(f"- pinned table: snapshot {table.snapshot_date}, earliest input expires {expiry.isoformat()}")
+    on_expiry = [new.score_country(c["code"], as_of=expiry) for c in new.COUNTRIES]
+    print(f"- on {expiry.isoformat()} (first day too old): ok {sum(r['esg_status'] == 'ok' for r in on_expiry)}, "
+          f"incomplete {sum(r['esg_status'] == 'incomplete' for r in on_expiry)}, "
+          f"countries with a too_old reason for renewables or HDI "
+          f"{sum(1 for r in on_expiry if {'renewable_share', 'hdi'} & {k for k, v in r['input_reasons'].items() if v['code'] == 'too_old'})}")
 
     print("\n## Korea\n")
     kor = next(r for r in rows if r["code"] == "KOR")
