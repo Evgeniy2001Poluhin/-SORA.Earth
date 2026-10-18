@@ -21,7 +21,7 @@ vi.mock("@/api/mock", async (importOriginal) => {
 
 import ForecastPage from "./ForecastPage";
 import { isMock } from "@/api/mock";
-import { renderWithQuery } from "@/test/utils";
+import { renderWithQuery, stubChartLayout } from "@/test/utils";
 import { stubJson } from "@/test/http";
 
 const renderPage = () => renderWithQuery(<MemoryRouter><ForecastPage /></MemoryRouter>);
@@ -62,5 +62,68 @@ describe("ForecastPage confidence", () => {
     });
     const { container } = renderPage();
     await waitFor(() => expect(confidence(container)).toBe("MEDIUM"));
+  });
+});
+
+/** Calendar days 2026-09-DD, as the server writes `ds`. */
+const day = (i: number) => `2026-09-${String(i).padStart(2, "0")}`;
+const historyOf = (days: number[]) => days.map((i) => ({ ds: day(i), y: 60 + i }));
+const forecastOf = (days: number[]) =>
+  days.map((i) => ({ ds: day(i), yhat: 66 + i, yhat_lower: 60 + i, yhat_upper: 72 + i }));
+
+describe("ForecastPage: what the numbers and labels claim", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    stubChartLayout();
+  });
+
+  // F063: a row is a calendar day (the server fills gaps), so say days, with dates.
+  it("says how many calendar days the history spans, with both dates", async () => {
+    stubJson({
+      history: historyOf([1, 2, 3, 4, 5]), forecast: forecastOf([6, 7, 8]),
+      model: "ensemble", metric: "score", confidence: "medium", metadata: null,
+    });
+    const { container } = renderPage();
+    await waitFor(() => expect(confidence(container)).toBe("MEDIUM"));
+    expect(container.textContent).toContain("5 calendar days, 2026-09-01 → 2026-09-05");
+    expect(container.textContent).not.toContain("5d history");
+  });
+
+  // F064: the marker is the last history date, so it is not "now".
+  it("labels the last-history marker with its date, not as now", async () => {
+    stubJson({
+      history: historyOf([1, 2, 3, 4, 5]), forecast: forecastOf([6, 7, 8]),
+      model: "ensemble", metric: "score", confidence: "medium", metadata: null,
+    });
+    const { container } = renderPage();
+    await waitFor(() => expect(container.textContent).toContain("last observation 2026-09-05"));
+    expect(container.textContent).not.toMatch(/\bnow\b/);
+  });
+
+  // F066: the response has no coverage, level or method field, so the band may
+  // only be called a nominal interval.
+  it("names the band a nominal interval whose coverage is not validated", async () => {
+    stubJson({
+      history: historyOf([1, 2, 3, 4, 5]), forecast: forecastOf([6, 7, 8]),
+      model: "ensemble", metric: "score", confidence: "medium", metadata: null,
+    });
+    const { container } = renderPage();
+    await waitFor(() =>
+      expect(container.textContent).toContain("nominal 90% interval (model-based, coverage not validated)"),
+    );
+    expect(container.textContent).not.toContain("90% CI");
+  });
+
+  // F067: the backend's avg_ci_width is upper minus lower, the full width.
+  it("shows a width of 10 as a width, never as ±10", async () => {
+    stubJson({
+      history: historyOf([1, 2, 3, 4, 5]), forecast: forecastOf([6, 7, 8]),
+      model: "lstm", metric: "score", confidence: "medium",
+      metadata: { mc_samples: 50, avg_ci_width: 10, max_ci_width: 12, seq_length: 14, autoregressive: true },
+    });
+    const { container } = renderPage();
+    await waitFor(() => expect(container.textContent).toContain("Avg interval width"));
+    expect(container.textContent).toContain("10.000");
+    expect(container.textContent).not.toContain("±");
   });
 });

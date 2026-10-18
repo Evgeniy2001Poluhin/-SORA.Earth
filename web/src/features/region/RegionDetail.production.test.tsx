@@ -11,7 +11,9 @@
  * `confidence` is `len(distinct source names) / 3` and the required metric set
  * spans exactly two sources — so it is 0.67 for all 85 regions on every input.
  * The card was fixed in #395 and the tooltip in this PR, and this test verifies
- * the detail page shows the count ("2 из 3 ожидаемых") without a percentage.
+ * the detail page shows the count without a percentage. The count is taken from
+ * the expected set in `inputs` ("2 из 2 ожидаемых"), not from the constant 3 in
+ * the confidence formula (F074).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
@@ -105,7 +107,9 @@ describe("RegionDetail on the production path", () => {
     expect(page, "the Confidence card was removed").not.toContain("Confidence");
   });
 
-  it("shows the source count as '2 из 3 ожидаемых'", async () => {
+  it("shows the expected sources and how many are present: '2 из 2 ожидаемых'", async () => {
+    // F074. The denominator is the set the inputs expect (two sources here), not
+    // the constant 3 from the backend's confidence formula.
     stubJson(REGION_MOW_RESPONSE);
 
     renderWithQuery(
@@ -118,7 +122,27 @@ describe("RegionDetail on the production path", () => {
 
     await screen.findByText("89.3", { exact: false });
 
-    expect(screen.getByText(/2 из 3 ожидаемых/)).toBeInTheDocument();
+    expect(screen.getByText(/2 из 2 ожидаемых/)).toBeInTheDocument();
+    expect(screen.queryByText(/из 3/)).toBeNull();
+  });
+
+  it("counts a source as absent when none of its inputs has a value", async () => {
+    const rosstatMissing = REGION_MOW_RESPONSE.inputs.map((inp) =>
+      inp.source === "rosstat" ? { ...inp, value: null, missing: true } : inp,
+    );
+    stubJson({ ...REGION_MOW_RESPONSE, inputs: rosstatMissing });
+
+    renderWithQuery(
+      <MemoryRouter initialEntries={["/region/RU-MOW"]}>
+        <Routes>
+          <Route path="/region/:code" element={<RegionDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("89.3", { exact: false });
+
+    expect(screen.getByText(/1 из 2 ожидаемых/)).toBeInTheDocument();
   });
 
   it("shows the score kind and vintage", async () => {

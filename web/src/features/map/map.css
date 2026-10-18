@@ -334,3 +334,12 @@
 .esg-tooltip, .esg-tooltip * { color: #eef2f0 !important; opacity: 1 !important; }
 .esg-tooltip .tip-title, .esg-tooltip b, .esg-tooltip strong { color: #ffffff !important; font-weight: 700 !important; }
 .esg-tooltip .tip-sub, .esg-tooltip .muted { color: #b8c4bf !important; }
+
+/* F071/F072: a value that is not measured is shown as such, in the muted tone. */
+.esg-tooltip .tip-nodata { color: #8d9a94 !important; font-style: italic; font-weight: 400 !important; }
+/* F070: the source line. A static reference value is italic and muted, so it
+   does not read like the live figures above it. */
+.esg-tooltip .tip-source { margin-top: 4px; font-size: 11px; }
+.esg-tooltip .tip-source-static { color: #8d9a94 !important; font-style: italic; }
+/* F073: which kind of source the aggregates use, and how many countries. */
+.map-scope { font-size: 12px; opacity: .7; margin: 4px 0 0; }

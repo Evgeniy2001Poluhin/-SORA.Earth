@@ -6,6 +6,7 @@ import {
   Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { api } from "@/api/client";
+import { BAND_LABEL, historySpan, lastObservationLabel } from "./forecastLabels";
 
 /** Model-specific extras returned alongside a forecast; see app/services/forecasting. */
 type ForecastMetadata = {
@@ -65,6 +66,7 @@ export default function ForecastPage() {
   ] : [];
 
   const lastActual = data?.history.at(-1)?.y;
+  const lastHistoryDate = data?.history.at(-1)?.ds;
   const lastForecast = data?.forecast.at(-1)?.yhat;
   const delta = lastActual && lastForecast ? lastForecast - lastActual : null;
   // `confidence` is `Optional[...] = None` in `ForecastResponse`, and both of
@@ -81,7 +83,7 @@ export default function ForecastPage() {
           <h1>Forecast</h1>
           <p className="muted">
             {data?.model ?? "—"} model
-            {data && <> · {data.history.length}d history · {horizon}d projection</>}
+            {data && <> · {historySpan(data.history)} · {horizon}d projection</>}
             {isFetching && !isLoading && <span style={{ marginLeft: 8, opacity: 0.5 }}>updating…</span>}
           </p>
         </div>
@@ -211,19 +213,19 @@ export default function ForecastPage() {
                 labelFormatter={(l) => `Date: ${l}`}
                 formatter={(value: unknown, name: unknown) => {
                   const label = String(name ?? "");
-                  if (label === "90% CI" && Array.isArray(value))
+                  if (label === BAND_LABEL && Array.isArray(value))
                     return [`${Number(value[0]).toFixed(2)} — ${Number(value[1]).toFixed(2)}`, label];
                   if (typeof value === "number") return [value.toFixed(3), label];
                   return [String(value ?? ""), label];
                 }}
               />
               <Legend />
-              {data.history.length > 0 && (
+              {lastHistoryDate && (
                 <ReferenceLine
-                  x={data.history.at(-1)!.ds}
+                  x={lastHistoryDate}
                   stroke="#555"
                   strokeDasharray="4 4"
-                  label={{ value: "now", fill: "#777", fontSize: 10 }}
+                  label={{ value: lastObservationLabel(lastHistoryDate), fill: "#777", fontSize: 10 }}
                 />
               )}
               <Area
@@ -231,7 +233,7 @@ export default function ForecastPage() {
                 stroke="none"
                 fill="#16a34a"
                 fillOpacity={0.12}
-                name="90% CI"
+                name={BAND_LABEL}
                 connectNulls={false}
               />
               <Line
@@ -260,7 +262,12 @@ export default function ForecastPage() {
       {data?.metadata && (
         <div style={{ padding: "0 24px 16px", fontSize: 12, color: "#888" }}>
           {data.metadata.mc_samples && <span>MC samples: {data.metadata.mc_samples} · </span>}
-          {data.metadata.avg_ci_width != null && <span>Avg CI: ±{data.metadata.avg_ci_width.toFixed(3)} · </span>}
+          {/* avg_ci_width is upper minus lower over the horizon (lstm.py, prophet.py):
+              the full width, and not symmetric about yhat for lstm's percentile band,
+              so it is shown as a width, not as a plus-or-minus. */}
+          {data.metadata.avg_ci_width != null && (
+            <span>Avg interval width (upper − lower): {data.metadata.avg_ci_width.toFixed(3)} · </span>
+          )}
           {data.metadata.slope_per_day != null && <span>Slope: {data.metadata.slope_per_day.toFixed(4)}/day · </span>}
           {data.metadata.models_used && <span>Models: {data.metadata.models_used.join(", ")} · </span>}
           {data.metadata.autoregressive && <span>Autoregressive: ✓</span>}

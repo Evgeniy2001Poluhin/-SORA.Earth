@@ -5,6 +5,7 @@ import {
   Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { api } from "@/api/client";
+import { BAND_LABEL, historySpan, lastObservationLabel } from "./forecastLabels";
 
 /** Model-specific extras returned alongside a forecast; see app/services/forecasting. */
 type ForecastMetadata = {
@@ -58,6 +59,15 @@ const MODEL_COLORS: Record<string, string> = {
   prophet: "#10b981",   // green
   lstm: "#f59e0b",      // amber
 };
+
+/**
+ * Each band is a nominal model interval whose coverage is not validated, so its
+ * legend entry says that in the Forecast page's own words. The model name comes
+ * first because three bands share one chart. Not "CI": the response carries no
+ * coverage figure to back that word. Its `confidence` field is a grade, not a
+ * coverage (app/schemas.py, `ForecastResponse`, lines 133-139).
+ */
+const bandName = (model: string) => `${model}: ${BAND_LABEL}`;
 
 export default function ForecastComparePage() {
   const [horizon, setHorizon] = useState(30);
@@ -139,7 +149,7 @@ export default function ForecastComparePage() {
           <h1>Forecast Model Comparison</h1>
           <p className="muted">
             Compare {MODELS.length} models side-by-side
-            {queries[0].data && <> · {queries[0].data.history.length}d history · {horizon}d projection</>}
+            {queries[0].data && <> · {historySpan(queries[0].data.history)} · {horizon}d projection</>}
           </p>
         </div>
       </header>
@@ -174,10 +184,10 @@ export default function ForecastComparePage() {
           ))}
         </div>
 
-        {/* Toggle CI bands */}
+        {/* Toggle the nominal model bands */}
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer" }}>
           <input type="checkbox" checked={showBands} onChange={e => setShowBands(e.target.checked)} />
-          Show confidence intervals
+          Show {BAND_LABEL}
         </label>
       </div>
 
@@ -217,11 +227,11 @@ export default function ForecastComparePage() {
                   x={lastHistoryDate}
                   stroke="#555"
                   strokeDasharray="4 4"
-                  label={{ value: "now", fill: "#777", fontSize: 10 }}
+                  label={{ value: lastObservationLabel(lastHistoryDate), fill: "#777", fontSize: 10 }}
                 />
               )}
 
-              {/* Confidence bands */}
+              {/* Nominal model bands, not validated confidence intervals */}
               {showBands && (
                 <>
                   <Area
@@ -229,7 +239,7 @@ export default function ForecastComparePage() {
                     stroke="none"
                     fill={MODEL_COLORS.ensemble}
                     fillOpacity={0.1}
-                    name="Ensemble CI"
+                    name={bandName("Ensemble")}
                     connectNulls={false}
                   />
                   <Area
@@ -237,7 +247,7 @@ export default function ForecastComparePage() {
                     stroke="none"
                     fill={MODEL_COLORS.prophet}
                     fillOpacity={0.1}
-                    name="Prophet CI"
+                    name={bandName("Prophet")}
                     connectNulls={false}
                   />
                   <Area
@@ -245,7 +255,7 @@ export default function ForecastComparePage() {
                     stroke="none"
                     fill={MODEL_COLORS.lstm}
                     fillOpacity={0.1}
-                    name="LSTM CI"
+                    name={bandName("LSTM")}
                     connectNulls={false}
                   />
                 </>
@@ -367,8 +377,11 @@ export default function ForecastComparePage() {
           </div>
           {Object.values(currentMetrics).some(m => m.r2_score != null && m.r2_score < 0) && (
             <p style={{ marginTop: 12, fontSize: 11, color: "#888", fontStyle: "italic" }}>
-              ⚠️ Negative R² indicates insufficient test data{currentMetrics.ensemble?.test_samples != null ? ` (${currentMetrics.ensemble.test_samples} samples)` : ""}.
-              Performance metrics will stabilize with 30+ test samples (~60 days of data).
+              {`⚠️ Negative R² means the model did worse than predicting the mean of its test data.${
+                currentMetrics.ensemble?.test_samples != null
+                  ? ` The ensemble's test set has ${currentMetrics.ensemble.test_samples} samples.`
+                  : ""
+              } A small test set is one possible reason, not an established one.`}
             </p>
           )}
         </div>

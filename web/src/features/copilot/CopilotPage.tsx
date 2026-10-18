@@ -4,8 +4,8 @@ import { SessionsSidebar } from "./SessionsSidebar";
 import { useMutation } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
-import { copilotApi } from "@/api/endpoints/copilot";
-import type { CopilotRequest, CopilotResponse } from "@/api/endpoints/copilot";
+import { copilotApi, shapValuesFromExplain } from "@/api/endpoints/copilot";
+import type { CopilotCompliance, CopilotRequest, CopilotResponse, CopilotShapValue } from "@/api/endpoints/copilot";
 import "./copilot.css";
 import { errorMessage } from "@/lib/errors";
 
@@ -20,17 +20,94 @@ interface FormValues {
 
 type PresetKey = "HIGH" | "MODERATE" | "LOW";
 
+// social_impact is on the API scale, 0-10 (app/scales.py). These are the same
+// projects the 0-100 model-scale values described: 85 -> 8.5, 60 -> 6, 30 -> 3.
 const PRESETS: Record<PresetKey, FormValues> = {
-  HIGH:     { probability: 0.87, budget: 2000000, co2_reduction: 8000, social_impact: 85, duration_months: 18, co2_per_dollar: 4.0 },
-  MODERATE: { probability: 0.55, budget: 1500000, co2_reduction: 3000, social_impact: 60, duration_months: 24, co2_per_dollar: 2.0 },
-  LOW:      { probability: 0.22, budget: 5000000, co2_reduction: 800,  social_impact: 30, duration_months: 36, co2_per_dollar: 0.4 },
+  HIGH:     { probability: 0.87, budget: 2000000, co2_reduction: 8000, social_impact: 8.5, duration_months: 18, co2_per_dollar: 4.0 },
+  MODERATE: { probability: 0.55, budget: 1500000, co2_reduction: 3000, social_impact: 6, duration_months: 24, co2_per_dollar: 2.0 },
+  LOW:      { probability: 0.22, budget: 5000000, co2_reduction: 800,  social_impact: 3, duration_months: 36, co2_per_dollar: 0.4 },
 };
 
 const PRESET_KEYS: PresetKey[] = ["HIGH", "MODERATE", "LOW"];
 
+/** What the page shows. A field the source does not carry is null and renders as
+ *  "unknown": never a stand-in value (F018, F019, F021). */
+interface ShownResult extends Omit<CopilotResponse, "probability" | "model_version"> {
+  probability: number | null;
+  model_version: string | null;
+}
+
+/** Two decimals, or "unknown" for anything that is not a finite number. A real 0 is "0.00" (F022). */
+const fmt2 = (x: unknown): string => (typeof x === "number" && Number.isFinite(x) ? x.toFixed(2) : "unknown");
+
+/** An answer from /copilot/explain. This page never sends a model_version, so the one
+ *  the answer carries is the backend's own default ("v5"), not a record of the model
+ *  that scored. It is shown as unknown until the backend reports the real model (F019). */
+function fromExplain(r: CopilotResponse): ShownResult {
+  return { ...r, model_version: null };
+}
+
+/** The sentinel's verdict in words. It is a keyword scan, not a compliance check, so it
+ *  counts flags and never says PASS or FAIL (F024). */
+function heuristicScreen(c: CopilotCompliance) {
+  const flags = c.pii_findings.length + c.bias_findings.length + c.policy_violations.length;
+  const scanned = c.redacted_text.trim() !== "";
+  const label = !scanned
+    ? "heuristic screen: no text scanned"
+    : flags === 0
+    ? "heuristic screen: no flags"
+    : `heuristic screen: ${flags} ${flags === 1 ? "flag" : "flags"}`;
+  const tone = !scanned ? "warn" : flags === 0 ? "pass" : c.risk_score >= 0.5 ? "fail" : "warn";
+  return { label, tone };
+}
+
+/** Raised when no usable SHAP values came back, so the explanation was never requested. */
+class ExplainUnavailableError extends Error {
+  constructor(detail: string) {
+    super("No SHAP values came back for these inputs, so no explanation was requested. " + detail);
+    this.name = "ExplainUnavailableError";
+  }
+}
+
+/** The model's own attributions for the form's current inputs (F016, F017). The copilot
+ *  request carries these, never constants. A failure stops the flow before any copilot call. */
+async function shapFor(v: FormValues): Promise<CopilotShapValue[]> {
+  try {
+    return shapValuesFromExplain(await copilotApi.shapFor({
+      budget_usd: Number(v.budget),
+      co2_reduction_tons_per_year: Number(v.co2_reduction),
+      social_impact_score: Number(v.social_impact),
+      project_duration_months: Number(v.duration_months),
+    }));
+  } catch (e: unknown) {
+    throw new ExplainUnavailableError(errorMessage(e));
+  }
+}
+
+function requestFor(v: FormValues, shap_values: CopilotShapValue[]): CopilotRequest {
+  return {
+    probability: Number(v.probability),
+    features: {
+      budget: Number(v.budget),
+      co2_reduction: Number(v.co2_reduction),
+      social_impact: Number(v.social_impact),
+      duration_months: Number(v.duration_months),
+      co2_per_dollar: Number(v.co2_per_dollar),
+    },
+    shap_values,
+  };
+}
+
+function failureText(e: unknown): string {
+  return e instanceof ExplainUnavailableError ? e.message : errorMessage(e);
+}
+
 export function CopilotPage() {
   const { register, handleSubmit, reset, control } = useForm<FormValues>({ defaultValues: PRESETS.HIGH });
-  const [result, setResult] = useState<CopilotResponse | null>(null);
+  const [result, setResult] = useState<ShownResult | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  // What had arrived when the user pressed Stop; null unless a stream was stopped.
+  const [stoppedText, setStoppedText] = useState<string | null>(null);
   const [activePreset, setActivePreset] = useState<PresetKey | null>("HIGH");
   // useWatch rather than watch(): the value is only read to render a label, and
   // watch() returns a new function result on every render, which the React
@@ -50,14 +127,17 @@ export function CopilotPage() {
       const lastAssistant = [...s.messages].reverse().find((m) => m.role === "assistant");
       if (lastAssistant) {
         setStreamingText(lastAssistant.content);
+        // A saved chat keeps its messages and nothing else: no probability and no
+        // model version were stored with them, so neither is shown (F018, F019).
+        setStoppedText(null);
         setResult({
           verdict: { label: "Restored", level: "info" },
-          probability: 0,
+          probability: null,
           confidence: "restored",
           key_drivers: { positive: [], negative: [] },
           risks: [],
           recommendation: lastAssistant.content,
-          model_version: "v5",
+          model_version: null,
           explanation_mode: "restored",
         });
       }
@@ -70,6 +150,7 @@ export function CopilotPage() {
   const newChat = useCallback(() => {
     setCurrentSessionId(null);
     setResult(null);
+    setStoppedText(null);
     setStreamingText("");
     setActivePreset("HIGH");
     reset(PRESETS.HIGH);
@@ -77,61 +158,47 @@ export function CopilotPage() {
 
   const mut = useMutation({
     mutationFn: async (v: FormValues) => {
-      const body: CopilotRequest = {
-        probability: Number(v.probability),
-        features: {
-          budget: Number(v.budget),
-          co2_reduction: Number(v.co2_reduction),
-          social_impact: Number(v.social_impact),
-          duration_months: Number(v.duration_months),
-          co2_per_dollar: Number(v.co2_per_dollar),
-        },
-        shap_values: [
-          { feature: "co2_reduction", shap_value: 0.12 },
-          { feature: "social_impact", shap_value: 0.08 },
-          { feature: "budget", shap_value: -0.04 },
-        ],
-      };
+      const body = requestFor(v, await shapFor(v));
       if (currentSessionId) body.session_id = currentSessionId;
-      return copilotApi.explain(body);
+      return fromExplain(await copilotApi.explain(body));
     },
+    onMutate: () => { setFailure(null); setStoppedText(null); },
     onSuccess: (r) => { setResult(r); if (r.session_id) setCurrentSessionId(r.session_id); setSidebarTick(t=>t+1); toast.success("Explanation generated"); },
-    onError: (e: unknown) => toast.error("Failed: " + errorMessage(e)),
+    onError: (e: unknown) => {
+      // The previous explanation was for other inputs; do not leave it on screen beside the error.
+      setResult(null);
+      setFailure(failureText(e));
+      toast.error("Failed: " + failureText(e));
+    },
   });
 
   const submit = (v: FormValues) => { setActivePreset(null); mut.mutate(v); };
   const applyPreset = (k: PresetKey) => { setActivePreset(k); reset(PRESETS[k]); mut.mutate(PRESETS[k]); };
 
   const runStream = async (v: FormValues) => {
+    // One controller per stream: Stop aborts it, and the request carries its signal.
+    const controller = new AbortController();
+    abortRef.current = controller;
     setStreaming(true);
     setStreamingText("");
+    setStoppedText(null);
     setResult(null);
+    setFailure(null);
     setActivePreset(null);
-    const body: CopilotRequest = {
-      probability: Number(v.probability),
-      features: {
-        budget: Number(v.budget),
-        co2_reduction: Number(v.co2_reduction),
-        social_impact: Number(v.social_impact),
-        duration_months: Number(v.duration_months),
-        co2_per_dollar: Number(v.co2_per_dollar),
-      },
-      shap_values: [
-        { feature: "co2_reduction", shap_value: 0.12 },
-        { feature: "social_impact", shap_value: 0.08 },
-        { feature: "budget", shap_value: -0.04 },
-      ],
-    };
+    let acc = "";
+    let finished = false;
     try {
-      let acc = "";
+      const body = requestFor(v, await shapFor(v));
       if (currentSessionId) body.session_id = currentSessionId;
-      for await (const ev of copilotApi.explainStream(body)) {
+      for await (const ev of copilotApi.explainStream(body, { signal: controller.signal })) {
         if (ev.type === "meta") {
           if (ev.session_id) { setCurrentSessionId(ev.session_id); setSidebarTick(t=>t+1); }
         } else if (ev.type === "token") {
           acc += ev.value;
           setStreamingText(acc);
         } else if (ev.type === "done") {
+          finished = true;
+          // The stream carries no model version (its meta and done events have none), so none is shown (F021).
           setResult({
             verdict: { label: "Streamed", level: "info" },
             probability: Number(v.probability),
@@ -139,20 +206,36 @@ export function CopilotPage() {
             key_drivers: { positive: [], negative: [] },
             risks: [],
             recommendation: acc.trim(),
-            model_version: "v5",
+            model_version: null,
             explanation_mode: "stream",
             sources: ev.sources,
             compliance: ev.compliance,
           });
         }
       }
-      toast.success("Stream complete");
+      if (controller.signal.aborted && !finished) {
+        // The stream closed after Stop, before done: keep what arrived, marked as incomplete.
+        setStoppedText(acc.trim());
+        toast("Stream stopped");
+      } else {
+        toast.success("Stream complete");
+      }
     } catch (e: unknown) {
-      toast.error("Stream failed: " + errorMessage(e));
+      if (controller.signal.aborted && !finished) {
+        // A fetch aborted by Stop rejects here. That is the user's choice, not a failure.
+        setStoppedText(acc.trim());
+        toast("Stream stopped");
+      } else {
+        setFailure(failureText(e));
+        toast.error(e instanceof ExplainUnavailableError ? failureText(e) : "Stream failed: " + errorMessage(e));
+      }
     } finally {
+      abortRef.current = null;
       setStreaming(false);
     }
   };
+
+  const heuristic = result?.compliance ? heuristicScreen(result.compliance) : null;
 
   return (
     <div className="copilot-layout">
@@ -188,12 +271,12 @@ export function CopilotPage() {
           </div>
 
           <div className="row">
-            <label>Probability ({probability ? Number(probability).toFixed(2) : "0.50"})</label>
+            <label>Probability ({fmt2(probability)})</label>
             <input type="range" min={0} max={1} step={0.01} {...register("probability", { valueAsNumber: true })} />
           </div>
           <div className="row"><label>Budget (USD)</label><input type="number" {...register("budget", { valueAsNumber: true })} /></div>
           <div className="row"><label>CO2 reduction (t/yr)</label><input type="number" {...register("co2_reduction", { valueAsNumber: true })} /></div>
-          <div className="row"><label>Social impact (0-100)</label><input type="number" {...register("social_impact", { valueAsNumber: true })} /></div>
+          <div className="row"><label>Social impact (0–10)</label><input type="number" min={0} max={10} step={0.5} {...register("social_impact", { valueAsNumber: true })} /></div>
           <div className="row"><label>Duration (months)</label><input type="number" {...register("duration_months", { valueAsNumber: true })} /></div>
           <div className="row"><label>CO2 per dollar</label><input type="number" step="0.1" {...register("co2_per_dollar", { valueAsNumber: true })} /></div>
 
@@ -211,7 +294,7 @@ export function CopilotPage() {
           ) : (
             <>
               <button className="btn-primary" type="button" disabled={streaming}
-                onClick={handleSubmit(runStream)}>
+                onClick={() => handleSubmit(runStream)()}>
                 {streaming ? "Streaming..." : "⡡ Stream AI Explanation"}
               </button>
               {streaming && (
@@ -224,13 +307,24 @@ export function CopilotPage() {
         </form>
 
         <div className="copilot-result">
+          {failure && (
+            <div className="copilot-failure" role="alert">
+              <strong>No explanation was generated.</strong> {failure}
+            </div>
+          )}
           {streaming && (
             <div className="streaming-block" style={{padding:"20px",lineHeight:"1.6",fontSize:"14px"}}>
               <div className="section-title">⡡ Streaming...</div>
               <div style={{whiteSpace:"normal"}}><MarkdownAnswer content={streamingText} /><span className="cursor-blink">▊</span></div>
             </div>
           )}
-          {!result && !streaming && (
+          {stoppedText !== null && !streaming && (
+            <div className="copilot-stopped">
+              <MarkdownAnswer content={stoppedText} />
+              <span className="copilot-stopped-marker">(stopped)</span>
+            </div>
+          )}
+          {!result && !streaming && !failure && stoppedText === null && (
             <div className="copilot-empty">
               <div className="copilot-empty-orb" />
               <p>No explanation yet</p>
@@ -243,12 +337,18 @@ export function CopilotPage() {
                 <span className={"verdict-badge verdict-" + result.verdict.level}>
                   {result.verdict.label}
                 </span>
-                <span className="confidence-chip">Confidence · {result.confidence}</span>
+                <span className="confidence-chip">Mode · {result.confidence}</span>
               </div>
 
               <div className="prob-display">
-                <span className="prob-value">{(result.probability * 100).toFixed(0)}</span>
-                <span className="prob-value-suffix">/ 100</span>
+                {typeof result.probability === "number" && Number.isFinite(result.probability) ? (
+                  <>
+                    <span className="prob-value">{(result.probability * 100).toFixed(0)}</span>
+                    <span className="prob-value-suffix">/ 100</span>
+                  </>
+                ) : (
+                  <span className="prob-value">unknown</span>
+                )}
                 <div className="prob-value-label">Success probability (your assumption)</div>
               </div>
 
@@ -299,7 +399,8 @@ export function CopilotPage() {
                         <span className="source-title">{s.title}</span>
                         <span className="source-meta">
                           <span className={"cat-chip cat-" + s.category}>{s.category.replace("_"," ")}</span>
-                          <span className="score-chip">{Math.round(s.score * 100)}% match</span>
+                          {/* 1 - cosine distance (app/services/rag/retriever.py): a similarity, not a probability. */}
+                          <span className="score-chip">similarity {fmt2(s.score)}</span>
                         </span>
                       </div>
                       <p className="source-excerpt">{s.excerpt}</p>
@@ -308,21 +409,24 @@ export function CopilotPage() {
                 </>
               )}
 
-              {result.compliance && (
-                <div className={"sentinel-badge sentinel-" + (result.compliance.passed ? "pass" : (result.compliance.risk_score >= 0.5 ? "fail" : "warn"))}>
-                  <span className="sentinel-icon">{result.compliance.passed ? "✓" : "⚠"}</span>
-                  <span className="sentinel-label">SENTINEL · {result.compliance.passed ? "PASS" : (result.compliance.risk_score >= 0.5 ? "FAIL" : "WARN")}</span>
-                  <span className="sentinel-meta">risk {(result.compliance.risk_score * 100).toFixed(0)}%</span>
-                  {result.compliance.pii_findings.length > 0 && (
-                    <span className="sentinel-meta">PII {result.compliance.pii_findings.length}</span>
-                  )}
-                  {result.compliance.bias_findings.length > 0 && (
-                    <span className="sentinel-meta">bias {result.compliance.bias_findings.length}</span>
-                  )}
-                  {result.compliance.policy_violations.length > 0 && (
-                    <span className="sentinel-meta">policy {result.compliance.policy_violations.length}</span>
-                  )}
-                </div>
+              {result.compliance && heuristic && (
+                <>
+                  <div className={"sentinel-badge sentinel-" + heuristic.tone}>
+                    <span className="sentinel-icon">{heuristic.tone === "pass" ? "✓" : "⚠"}</span>
+                    <span className="sentinel-label">{heuristic.label}</span>
+                    <span className="sentinel-meta">risk index {fmt2(result.compliance.risk_score)}</span>
+                    {result.compliance.pii_findings.length > 0 && (
+                      <span className="sentinel-meta">PII {result.compliance.pii_findings.length}</span>
+                    )}
+                    {result.compliance.bias_findings.length > 0 && (
+                      <span className="sentinel-meta">bias {result.compliance.bias_findings.length}</span>
+                    )}
+                    {result.compliance.policy_violations.length > 0 && (
+                      <span className="sentinel-meta">policy {result.compliance.policy_violations.length}</span>
+                    )}
+                  </div>
+                  <div className="sentinel-note">Keyword heuristic, not a compliance certification. The risk index is not a probability.</div>
+                </>
               )}
 
 
@@ -335,8 +439,8 @@ export function CopilotPage() {
               )}
 
               <div className="chips-row">
-                <span className="mode-chip">Mode · {result.explanation_mode}</span>
-                <span className="mode-chip">Model · {result.model_version}</span>
+                <span className="mode-chip">Explanation mode · {result.explanation_mode}</span>
+                <span className="mode-chip">Model · {result.model_version ?? "unknown"}</span>
               </div>
             </>
           )}

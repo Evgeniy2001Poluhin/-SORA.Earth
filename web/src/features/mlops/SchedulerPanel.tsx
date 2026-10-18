@@ -1,7 +1,23 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { schedulerApi } from "@/api/endpoints/scheduler";
+import { schedulerApi, type SchedulerStatus } from "@/api/endpoints/scheduler";
 import { useAuth } from "@/store/auth";
+
+/**
+ * The status only when the scheduler actually answered; null otherwise.
+ *
+ * - A failed refetch is not an answer. TanStack Query keeps the last good
+ *   `data` after an error, so `data` alone would show an old reading as current.
+ * - A payload without a boolean `running` says nothing about running.
+ * - The local fallback reports `running: false` and no jobs without having
+ *   reached the scheduler container. That false is not a measurement, so it
+ *   must not read as IDLE.
+ */
+function answeredStatus(isError: boolean, data: SchedulerStatus | undefined): SchedulerStatus | null {
+  if (isError || !data || typeof data.running !== "boolean") return null;
+  if (data.source !== "scheduler_container" && data.source !== "local_scheduler") return null;
+  return data;
+}
 
 export function SchedulerPanel() {
   const user = useAuth((s) => s.user);
@@ -17,17 +33,30 @@ export function SchedulerPanel() {
 
   if (!enabled) return (<div className="kpi"><div className="kpi-lbl">Scheduler</div><div className="kpi-val" style={{ fontSize: 13 }}>Sign in required</div></div>);
 
-  const s = status.data;
+  // Every value below comes from `live`, so a pending, failed or fallback
+  // answer shows as unknown rather than as a healthy or empty success.
+  const live = answeredStatus(status.isError, status.data);
   const items = (history.data ?? []).slice(0, 10);
+  const statusText = live ? (live.running ? "RUNNING" : "IDLE") : status.isPending ? "LOADING" : "UNKNOWN";
+  const jobsText = live && Array.isArray(live.jobs) ? String(live.jobs.length) : "\u2014";
+  const enabledText = live?.enabled == null ? "\u2014" : live.enabled ? "YES" : "NO";
+  const runsText = live?.retrain_history_count ?? "\u2014";
+  const historyNote = history.isError
+    ? "Run history unavailable"
+    : history.isPending
+      ? "Loading run history..."
+      : items.length === 0
+        ? "No history yet"
+        : null;
 
   return (
     <div>
-      <div className="eyebrow" style={{ marginBottom: 12 }}>Scheduler runs: {s?.retrain_history_count ?? "\u2014"}</div>
+      <div className="eyebrow" style={{ marginBottom: 12 }}>Scheduler runs: {runsText}</div>
       <div className="kpi-grid" style={{ marginBottom: 16 }}>
-        <div className="kpi"><div className="kpi-lbl">Status</div><div className="kpi-val" style={{ fontSize: 18, color: s?.running ? "var(--planet)" : "var(--muted)" }}>{s?.running ? "RUNNING" : "IDLE"}</div></div>
-        <div className="kpi"><div className="kpi-lbl">Jobs</div><div className="kpi-val tabular">{s?.jobs?.length ?? 0}</div></div>
-        <div className="kpi"><div className="kpi-lbl">Enabled</div><div className="kpi-val" style={{ fontSize: 18 }}>{s?.enabled == null ? "\u2014" : s.enabled ? "YES" : "NO"}</div></div>
-        <div className="kpi"><div className="kpi-lbl">History</div><div className="kpi-val tabular">{s?.retrain_history_count ?? "\u2014"}</div></div>
+        <div className="kpi"><div className="kpi-lbl">Status</div><div className="kpi-val" style={{ fontSize: 18, color: live?.running ? "var(--planet)" : "var(--muted)" }}>{statusText}</div></div>
+        <div className="kpi"><div className="kpi-lbl">Jobs</div><div className="kpi-val tabular">{jobsText}</div></div>
+        <div className="kpi"><div className="kpi-lbl">Enabled</div><div className="kpi-val" style={{ fontSize: 18 }}>{enabledText}</div></div>
+        <div className="kpi"><div className="kpi-lbl">History</div><div className="kpi-val tabular">{runsText}</div></div>
       </div>
       <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
         <button disabled={trigger.isPending} onClick={() => trigger.mutate()} style={{ padding: "10px 16px", background: "var(--planet)", color: "var(--bg)", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}>{trigger.isPending ? "..." : "Trigger retrain"}</button>
@@ -36,8 +65,8 @@ export function SchedulerPanel() {
       {msg && (<div style={{ marginBottom: 16, color: msg.startsWith("OK") ? "var(--planet)" : "var(--danger, #EF4444)" }}>{msg}</div>)}
       <div className="mlops-table">
         <div className="mlops-row mlops-head"><div>Started</div><div>Job</div><div>Trigger</div><div className="tabular">Dur</div><div>Version</div><div>Status</div></div>
-        {items.length === 0 && (<div className="mlops-row"><div style={{ color: "var(--muted)" }}>No history yet</div></div>)}
-        {items.map((r) => (
+        {historyNote && (<div className="mlops-row"><div style={{ color: history.isError ? "var(--danger, #EF4444)" : "var(--muted)" }}>{historyNote}</div></div>)}
+        {!history.isError && items.map((r) => (
           <div key={r.id} className="mlops-row">
             <div style={{ fontSize: 11, color: "var(--muted)" }}>{new Date(r.started_at).toLocaleString()}</div>
             <div className="mono" style={{ fontSize: 11 }}>{r.job_name}</div>

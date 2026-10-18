@@ -147,7 +147,8 @@ export interface ExplainLocalRequest {
 export interface ExplainLocalContribution {
   feature: string;
   value: number;
-  shap_value: number;
+  /** null when no SHAP value came back for the feature: unknown, not zero. */
+  shap_value: number | null;
 }
 
 export interface ExplainLocalResponse {

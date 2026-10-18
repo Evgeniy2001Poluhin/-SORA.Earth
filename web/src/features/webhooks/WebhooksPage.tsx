@@ -21,6 +21,18 @@ async function failureText(r: Response): Promise<string> {
 }
 
 /**
+ * What a list shows before the server has answered: loading, or a failure.
+ * Neither is "none", so neither may read as an empty list.
+ */
+function NoAnswer({ what, failed }: { what: string; failed: boolean }) {
+  return (
+    <p style={{color:"var(--muted)"}}>
+      {failed ? `${what} unavailable: the request failed.` : `Loading ${what.toLowerCase()}…`}
+    </p>
+  );
+}
+
+/**
  * fetch, but a non-2xx is a failure.
  *
  * fetch only rejects on a transport error. A 4xx or 5xx arrives as a resolved
@@ -54,14 +66,21 @@ export default function WebhooksPage() {
   const [secret, setSecret] = useState<string|null>(null);
   const [problem, setProblem] = useState<string|null>(null);
 
-  const { data: subs = [], error: subsError } = useQuery<Sub[]>({
+  // `data` stays undefined until the server answers. Defaulting it to [] made
+  // "no answer yet" and "the server has none" the same empty list, so a request
+  // still in flight, or one that failed, printed "No subscriptions yet".
+  const subsQuery = useQuery<Sub[]>({
     queryKey: ["webhooks", "subscriptions"],
     queryFn: async () => (await expectOk(API)).json(),
   });
-  const { data: dels = [], error: delsError } = useQuery<Del[]>({
+  const delsQuery = useQuery<Del[]>({
     queryKey: ["webhooks", "deliveries"],
     queryFn: async () => (await expectOk(API + "/deliveries")).json(),
   });
+  const subs = subsQuery.data;
+  const dels = delsQuery.data;
+  const subsError = subsQuery.error;
+  const delsError = delsQuery.error;
 
   const reload = () => qc.invalidateQueries({ queryKey: ["webhooks"] });
 
@@ -112,13 +131,15 @@ export default function WebhooksPage() {
       {loadProblem && <p role="alert" style={{color:"#d50000",fontSize:13}}>Could not load webhooks: {loadProblem}</p>}
 
       <h3>Active subscriptions</h3>
-      {subs.length===0 ? <p style={{color:"var(--muted)"}}>No subscriptions yet</p> :
+      {subs === undefined ? <NoAnswer what="Subscriptions" failed={!!subsError} /> :
+       subs.length===0 ? <p style={{color:"var(--muted)"}}>No subscriptions yet</p> :
         <table style={{width:"100%",fontSize:13}}><thead><tr><th>URL</th><th>Event</th><th>Active</th><th></th></tr></thead>
         <tbody>{subs.map(s=>(<tr key={s.id}><td>{s.url}</td><td>{s.event_type}</td><td>{s.active?"yes":"no"}</td>
           <td><button onClick={()=>del(s.id)} style={{color:"#d50000",background:"none",border:"none",cursor:"pointer"}}>delete</button></td></tr>))}</tbody></table>}
 
       <h3 style={{marginTop:24}}>Recent deliveries</h3>
-      {dels.length===0 ? <p style={{color:"var(--muted)"}}>No deliveries yet</p> :
+      {dels === undefined ? <NoAnswer what="Deliveries" failed={!!delsError} /> :
+       dels.length===0 ? <p style={{color:"var(--muted)"}}>No deliveries yet</p> :
         <table style={{width:"100%",fontSize:13}}><thead><tr><th>Sub</th><th>Event</th><th>Status</th><th>OK</th><th>When</th></tr></thead>
         <tbody>{dels.map(d=>(<tr key={d.id}><td>{d.subscription_id}</td><td>{d.event_type}</td>
           <td>{d.status_code??"—"}</td><td>{d.ok?"✓":"✗"}</td><td>{new Date(d.created_at).toLocaleString()}</td></tr>))}</tbody></table>}

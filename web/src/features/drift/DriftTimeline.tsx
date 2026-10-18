@@ -1,11 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid } from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { driftBaselineApi } from "@/api/endpoints/driftBaseline";
 import type { MlflowDriftEvent, KsFeatureStat } from "@/api/endpoints/driftBaseline";
 
 /** Rows the server requires before it will run a KS test (`MIN_WINDOW_ROWS`).
  *  Quoted only to make the "not enough data" line specific; the server decides. */
 const MIN_KS_ROWS = 10;
+
+/** A number the server actually sent, or null. `Number(null)` is 0 and
+ *  `Number(undefined)` is NaN, so the value is type-checked before it is shown. */
+const sentNumber = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) ? v : null;
 
 export function DriftTimeline() {
   const tl = useQuery({ queryKey: ["drift-mlflow-history"], queryFn: driftBaselineApi.mlflowHistory, refetchInterval: 30000 });
@@ -93,7 +98,6 @@ export function DriftTimeline() {
             <XAxis dataKey="timeShort" stroke="var(--muted)" fontSize={11} />
             <YAxis domain={[0, 1]} stroke="var(--muted)" fontSize={11} />
             <Tooltip contentStyle={{ background: "var(--bg)", border: "1px solid rgba(255,255,255,0.1)", fontSize: 12 }} />
-            <ReferenceLine y={0.31} stroke="#F5C84B" strokeDasharray="4 4" label={{ value: "threshold 0.31", fill: "#F5C84B", fontSize: 10, position: "right" }} />
             <Line type="monotone" dataKey="drift_score" stroke="#2FE0A6" strokeWidth={2} dot={{ r: 4, fill: "#2FE0A6" }} activeDot={{ r: 6 }} />
           </LineChart>
         </ResponsiveContainer>
@@ -107,6 +111,12 @@ export function DriftTimeline() {
               : "No drift events yet"}
         </div>
       )}
+      {/* The backend returns no threshold for this chart, so none is drawn. A run
+          is written only when a check flagged at least one feature, and its score
+          is the share flagged (app/mlflow_tracking.py, _log_drift_event_now). */}
+      <p style={{ color: "var(--faint)", fontSize: 11, marginTop: -12, marginBottom: 24, fontFamily: "var(--f-mono)" }}>
+        Each run is recorded only when at least one feature was flagged. Its drift score is the share of features flagged in that run.
+      </p>
 
       <div className="eyebrow" style={{ marginBottom: 12 }}>Kolmogorov-Smirnov per-feature: {ksLabel()}</div>
       <div className="drift-table" style={{ marginBottom: 24 }}>
@@ -117,19 +127,26 @@ export function DriftTimeline() {
           <div>Decision</div>
         </div>
         {ksFeatures.map(([name, f]) => {
-          const drift = f.drift;
-          const sig = Number(f.p_value ?? 1) < 0.01;
+          // The server's own verdict. Absent, it is unknown: "stable" is a claim
+          // the server did not make.
+          const decision = typeof f.drift === "boolean" ? f.drift : null;
+          const stat = sentNumber(f.ks_stat);
+          const p = sentNumber(f.p_value);
           return (
             <div key={name} className="drift-row" style={{ gridTemplateColumns: "1.4fr 1fr 1fr 1fr" }}>
               <div className="mono" style={{ fontSize: 12 }}>{name}</div>
-              <div className="tabular">{Number(f.ks_stat ?? 0).toFixed(4)}</div>
-              <div className="tabular" style={{ color: sig ? "#EF4444" : "var(--muted)" }}>{Number(f.p_value ?? 1).toFixed(4)}</div>
+              <div className="tabular">{stat != null ? stat.toFixed(4) : "unavailable"}</div>
+              <div className="tabular" style={{ color: p == null ? undefined : decision === true ? "#EF4444" : "var(--muted)" }}>
+                {p != null ? p.toFixed(4) : "unavailable"}
+              </div>
               <div>
-                <span className="drift-pill" style={{
-                  background: drift ? "rgba(239,68,68,0.12)" : "rgba(47,224,166,0.12)",
-                  color: drift ? "#EF4444" : "#2FE0A6",
-                  border: "1px solid " + (drift ? "rgba(239,68,68,0.4)" : "rgba(47,224,166,0.4)")
-                }}>{drift ? "DRIFT" : "stable"}</span>
+                <span className="drift-pill" style={decision === null
+                  ? { color: "var(--muted)", border: "1px solid var(--line)" }
+                  : {
+                    background: decision ? "rgba(239,68,68,0.12)" : "rgba(47,224,166,0.12)",
+                    color: decision ? "#EF4444" : "#2FE0A6",
+                    border: "1px solid " + (decision ? "rgba(239,68,68,0.4)" : "rgba(47,224,166,0.4)")
+                  }}>{decision === null ? "unknown" : decision ? "DRIFT" : "stable"}</span>
               </div>
             </div>
           );
@@ -147,8 +164,9 @@ export function DriftTimeline() {
           <div>Features</div>
         </div>
         {data.slice().reverse().map((e) => {
-          const high = e.drift_score != null && e.drift_score >= 0.31;
-          const scoreColor = e.drift_score == null ? "var(--muted)" : high ? "#EF4444" : "#2FE0A6";
+          // Shown as recorded, not coloured against a number this page chose: the
+          // server sends no threshold for it.
+          const scoreColor = e.drift_score == null ? "var(--muted)" : "var(--text)";
           return (
             <div key={e.run} className="drift-row" style={{ gridTemplateColumns: "80px 1fr 80px 80px 1fr 1.2fr" }}>
               <div className="mono" style={{ fontSize: 11 }}>{e.run}</div>
@@ -163,7 +181,7 @@ export function DriftTimeline() {
       </div>
 
       <p style={{ color: "var(--faint)", fontSize: 11, marginTop: 16, fontFamily: "var(--f-mono)" }}>
-        KS-test: H0 = same distribution; reject when p &lt; 0.01. Drift score = fraction of features with rejected H0.
+        KS test: H0 = the feature has the same distribution as the training data. The server decides DRIFT or stable at its own significance level; this page does not apply one.
       </p>
     </div>
   );
