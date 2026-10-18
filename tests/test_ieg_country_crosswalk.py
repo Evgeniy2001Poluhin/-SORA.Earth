@@ -62,6 +62,10 @@ REGISTRY = (
     reg_rec("XKX", "XK", "Kosovo", "Europe & Central Asia"),
     reg_rec("STP", "ST", "Sao Tome and Principe"),
     reg_rec("SRB", "RS", "Serbia", "Europe & Central Asia"),
+    reg_rec("PSE", "PS", "West Bank and Gaza", "Middle East, North Africa, Afghanistan & Pakistan"),
+    reg_rec("TLS", "TL", "Timor-Leste", "East Asia & Pacific"),
+    reg_rec("YEM", "YE", "Yemen, Rep.", "Middle East, North Africa, Afghanistan & Pakistan"),
+    reg_rec("IDN", "ID", "Indonesia", "East Asia & Pacific"),
     reg_rec("WLD", "1W", "World", "Aggregates"),
     reg_rec("ECA", "7E", "Europe & Central Asia (excluding high income)", "Aggregates"),
     reg_rec("EMU", "XC", "Euro area", "Aggregates"),
@@ -178,6 +182,8 @@ class World:
     aliases: Path
     regional: Path
     pins: object
+    approval: object = None  # the approval output directory, or None
+    remap: object = None  # the remap table CSV
 
 
 def _write_snapshot(base, ieg, pno, ieg_per_page, pno_per_page):
@@ -248,8 +254,51 @@ def _write_oghist(base, rows, header_has_wb_code=True):
     return sha(manifest_bytes)
 
 
+DEFAULT_APPROVAL = ("2002", "agrees", "accepted")  # (resolved_wb_fy, aux_state, status)
+APPROVAL_LABEL = "PPAR-LABEL-SENTINEL"
+REMAP_SOURCE = "https://databank.worldbank.org/metadataglossary/world-development-indicators/country/"
+
+
+def remap_row(code, rule, action, *, target="", iso2="", start="", end="", source=None,
+              reason="synthetic reason", status="proposed", witness=None):
+    convert = action == "convert"
+    if source is None:
+        source = REMAP_SOURCE + target if convert else ""
+    return {
+        "source_namespace": "WB-2", "raw_code": code, "rule_id": rule, "action": action,
+        "target_namespace": "WB id" if convert else "", "target_code": target, "target_iso2": iso2,
+        "start_fy": start, "end_fy": end,
+        "witness_policy": (cw.REMAP_WITNESS_POLICY if convert else "") if witness is None else witness,
+        "reason": reason, "source_url": source, "status": status,
+    }
+
+
+def _write_approval(root, ieg_all, ieg_per_page, snap_manifest_sha, digest, approvals, label):
+    """A synthetic approval output: one row per IEG record, with a label column the step must never read."""
+    d = root / "approval"
+    d.mkdir(parents=True)
+    buf = io.StringIO(newline="")
+    fields = ["project_id", *cw.APPROVAL_FIELDS, "ieg_evaluation_fy_raw"]
+    writer = csv.DictWriter(buf, fieldnames=fields, lineterminator="\n")
+    writer.writeheader()
+    for j, rec in enumerate(ieg_all):
+        page, index = divmod(j, ieg_per_page)
+        fy, aux, status = (approvals or {}).get(rec["project_id"], DEFAULT_APPROVAL)
+        writer.writerow({"project_id": rec["project_id"], "ieg_page_file": f"ieg/page-{page:05d}.json",
+                         "ieg_index": str(index), "resolved_wb_fy": fy, "aux_state": aux, "status": status,
+                         "ieg_evaluation_fy_raw": label})
+    body = buf.getvalue().encode("utf-8")
+    (d / cw.APPROVAL_ROWS_FILE).write_bytes(body)
+    manifest = {"inputs": {"manifest_sha256": snap_manifest_sha, "page_digest": digest, "snapshot": "synthetic"},
+                "outputs": {cw.APPROVAL_ROWS_FILE: {"sha256": sha(body), "bytes": len(body)}}}
+    manifest_bytes = json.dumps(manifest, sort_keys=True).encode("utf-8")
+    (d / "manifest.json").write_bytes(manifest_bytes)
+    return d, sha(manifest_bytes), sha(body)
+
+
 def make_world(root, ieg, pno=(), *, anchors=True, aliases=None, regional=None, registry=None,
-               oghist_rows=None, ieg_per_page=3, pno_per_page=4, countries_total=None):
+               oghist_rows=None, ieg_per_page=3, pno_per_page=4, countries_total=None,
+               approvals=None, approval_label=APPROVAL_LABEL, remap_rows=None, no_approval=False):
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     ieg_all = ([ieg_rec(pid, name) for pid, name in BASE_IEG_ANCHORS] if anchors else []) + list(ieg)
@@ -265,14 +314,27 @@ def make_world(root, ieg, pno=(), *, anchors=True, aliases=None, regional=None, 
     _write_table(aliases_path, ALIAS_HEADER, DEFAULT_ALIASES if aliases is None else aliases)
     regional_path = root / "regional.csv"
     _write_table(regional_path, REGIONAL_HEADER, DEFAULT_REGIONAL if regional is None else regional)
-    pins = cw.Pins(snap_manifest_sha, digest, countries_manifest_sha, countries_raw_sha, oghist_sha)
-    return World(root / "snap", root / "countries", root / "oghist", aliases_path, regional_path, pins)
+    approval_dir = approval_sha = approval_rows_sha = None
+    if not no_approval:
+        approval_dir, approval_sha, approval_rows_sha = _write_approval(
+            root, ieg_all, ieg_per_page, snap_manifest_sha, digest, approvals, approval_label)
+    remap_path = cw.DEFAULT_REMAP
+    if remap_rows is not None:
+        remap_path = root / "remap.csv"
+        _write_table(remap_path, cw.REMAP_COLUMNS, remap_rows)
+    pins = cw.Pins(snap_manifest_sha, digest, countries_manifest_sha, countries_raw_sha, oghist_sha,
+                   approval_sha or cw.PINNED_APPROVAL_MANIFEST_SHA256,
+                   approval_rows_sha or cw.PINNED_APPROVAL_ROWS_SHA256)
+    return World(root / "snap", root / "countries", root / "oghist", aliases_path, regional_path, pins,
+                 approval_dir, remap_path)
 
 
 def run(world, out, **kwargs):
     return cw.build(world.snapshot, world.countries, world.oghist, world.aliases, out,
-                    regional_path=kwargs.pop("regional_path", world.regional), pins=kwargs.pop("pins", world.pins),
-                    **kwargs)
+                    regional_path=kwargs.pop("regional_path", world.regional),
+                    remap_path=kwargs.pop("remap_path", world.remap),
+                    approval_path=kwargs.pop("approval_path", world.approval),
+                    pins=kwargs.pop("pins", world.pins), **kwargs)
 
 
 def _read(path):
@@ -437,12 +499,15 @@ def test_a_name_resolved_by_code_is_not_redirected_by_the_name(tmp_path):
     assert row_of(out, "P-CG2")["wb_code"] == "COG"
 
 
-def test_retired_zr_code_is_quarantined_and_no_successor_is_assigned(tmp_path):
-    out, _ = one(tmp_path, [ieg_rec("P-ZR", "Democratic Republic of the Congo")],
-                 [pno_rec("P-ZR", ["ZR"], ["Democratic Republic of the Congo"])])
+def test_retired_zr_code_without_approval_evidence_is_quarantined_with_no_successor(tmp_path):
+    world = make_world(tmp_path / "w", [ieg_rec("P-ZR", "Democratic Republic of the Congo")],
+                       [pno_rec("P-ZR", ["ZR"], ["Democratic Republic of the Congo"])])
+    out = tmp_path / "out"
+    run(world, out, approval_path=None)
     row = row_of(out, "P-ZR")
     assert row["status"] == "quarantine" and row["reason"] == "pno_code_not_in_registry"
     assert row["wb_code"] == "" and row["wb_code"] != "COD"
+    assert row["remap_outcome"] == "quarantine_fy_unknown"
 
 
 def test_an_unknown_code_is_quarantined_even_when_both_sources_agree(tmp_path):
@@ -575,7 +640,7 @@ def test_quarantine_reason_counts_match_the_rows(tmp_path):
     out, _ = one(tmp_path, ieg, [pno_rec("P-Q1", ["ZR"], ["Democratic Republic of the Congo"])])
     qa = qa_of(out)
     quar = [r for r in rows_of(out) if r["status"] == "quarantine"]
-    assert qa["reason_counts"].get("quarantine:pno_code_not_in_registry") == sum(
+    assert qa["reason_counts"].get("quarantine:pno_code_not_in_registry", 0) == sum(
         1 for r in quar if r["reason"] == "pno_code_not_in_registry")
     assert qa["reason_counts"].get("quarantine:neither_usable_source") == sum(
         1 for r in quar if r["reason"] == "neither_usable_source")
@@ -1040,7 +1105,8 @@ def test_a_failed_parent_fsync_reports_durability_unconfirmed_with_exit_three(tm
     monkeypatch.setattr(cw, "DEFAULT_PINS", world.pins)
     code = cw.main(["--snapshot", str(world.snapshot), "--countries", str(world.countries),
                     "--oghist", str(world.oghist), "--aliases", str(world.aliases),
-                    "--regional", str(world.regional), "--out", str(tmp_path / "out")])
+                    "--regional", str(world.regional), "--approval", str(world.approval),
+                    "--remap", str(world.remap), "--out", str(tmp_path / "out")])
     assert code == 3
     assert (tmp_path / "out" / cw.OUT_MANIFEST).exists()
     assert "durability is not confirmed" in capsys.readouterr().err
@@ -1074,7 +1140,8 @@ def test_main_publishes_with_exit_zero_and_prints_the_manifest_sha(tmp_path, mon
     out = tmp_path / "out"
     code = cw.main(["--snapshot", str(world.snapshot), "--countries", str(world.countries),
                     "--oghist", str(world.oghist), "--aliases", str(world.aliases),
-                    "--regional", str(world.regional), "--out", str(out)])
+                    "--regional", str(world.regional), "--approval", str(world.approval),
+                    "--remap", str(world.remap), "--out", str(out)])
     assert code == 0
     printed = capsys.readouterr().out.strip()
     assert printed == f"manifest sha256: {sha((out / cw.OUT_MANIFEST).read_bytes())}"
@@ -1084,7 +1151,8 @@ def test_main_refuses_with_exit_one_on_a_pin_mismatch(tmp_path, capsys):
     world = make_world(tmp_path / "w", [ieg_rec("P-MAIN2", "Republic of Angola")])
     code = cw.main(["--snapshot", str(world.snapshot), "--countries", str(world.countries),
                     "--oghist", str(world.oghist), "--aliases", str(world.aliases),
-                    "--regional", str(world.regional), "--out", str(tmp_path / "out")])
+                    "--regional", str(world.regional), "--approval", str(world.approval),
+                    "--remap", str(world.remap), "--out", str(tmp_path / "out")])
     assert code == 1
     assert not (tmp_path / "out").exists()
     assert "refused" in capsys.readouterr().err
@@ -1128,3 +1196,364 @@ def test_the_script_imports_only_the_standard_library():
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             roots.add(node.module.split(".")[0])
     assert roots <= set(sys.stdlib_module_names), roots - set(sys.stdlib_module_names)
+
+
+# --- C11: the reviewed legacy WB-2 remap (rule CW-08) ------------------------------------------
+
+
+def test_the_committed_remap_table_has_its_declared_shape_and_policy():
+    path = REPO_ROOT / "scripts" / "ieg_country_remap_v1.csv"
+    with open(path, encoding="utf-8", newline="") as fh:
+        assert tuple(next(csv.reader(fh))) == cw.REMAP_COLUMNS
+    rows = {r["raw_code"]: r for r in _read_path(path)}
+    assert set(rows) == {"ZR", "GZ", "TP", "RY", "YF", "YU", "TW"}
+    converts = {"ZR": ("COD", "CD", "", ""), "GZ": ("PSE", "PS", "", ""), "TP": ("TLS", "TL", "", ""),
+                "RY": ("YEM", "YE", "1991", ""), "YF": ("SRB", "RS", "2007", "")}
+    for code, (wb, iso2, start, end) in converts.items():
+        row = rows[code]
+        assert row["action"] == "convert" and row["target_namespace"] == "WB id", code
+        assert (row["target_code"], row["target_iso2"]) == (wb, iso2), code
+        assert (row["start_fy"], row["end_fy"]) == (start, end), code
+        assert row["witness_policy"] == cw.REMAP_WITNESS_POLICY, code
+        assert row["source_url"] == REMAP_SOURCE + wb, code
+    for code in ("YU", "TW"):
+        row = rows[code]
+        assert row["action"] == "quarantine", code
+        assert (row["target_namespace"], row["target_code"], row["target_iso2"], row["start_fy"],
+                row["witness_policy"]) == ("", "", "", "", ""), code
+        assert row["reason"], code
+    assert {r["status"] for r in rows.values()} == {"proposed"}
+    assert len({r["rule_id"] for r in rows.values()}) == len(rows)
+
+
+def _remap_world(tmp_path, rows):
+    return make_world(tmp_path / "w", [ieg_rec("P-RM", "Republic of Angola")], remap_rows=rows)
+
+
+def test_a_remap_target_the_registry_does_not_carry_is_refused(tmp_path):
+    world = _remap_world(tmp_path, [remap_row("GZ", "REMAP-02", "convert", target="XYZ", iso2="PS")])
+    with pytest.raises(cw.SourceError, match="not a registry country"):
+        run(world, tmp_path / "out")
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_remap_target_whose_iso2_disagrees_with_the_registry_is_refused(tmp_path):
+    world = _remap_world(tmp_path, [remap_row("GZ", "REMAP-02", "convert", target="PSE", iso2="XX")])
+    with pytest.raises(cw.SourceError, match="not a registry country"):
+        run(world, tmp_path / "out")
+
+
+def test_a_remap_row_for_a_code_the_registry_carries_is_refused(tmp_path):
+    world = _remap_world(tmp_path, [remap_row("AO", "REMAP-09", "convert", target="AGO", iso2="AO")])
+    with pytest.raises(cw.SourceError, match="is a registry code"):
+        run(world, tmp_path / "out")
+
+
+def test_a_remap_witness_text_other_than_the_implemented_policy_is_refused(tmp_path):
+    world = _remap_world(tmp_path, [remap_row("GZ", "REMAP-02", "convert", target="PSE", iso2="PS",
+                                              witness="any name will do")])
+    with pytest.raises(cw.SourceError, match="witness_policy"):
+        run(world, tmp_path / "out")
+
+
+def test_a_remap_source_that_is_not_the_wb_glossary_entry_is_refused(tmp_path):
+    world = _remap_world(tmp_path, [remap_row("GZ", "REMAP-02", "convert", target="PSE", iso2="PS",
+                                              source="https://example.org/PSE")])
+    with pytest.raises(cw.SourceError, match="source_url"):
+        run(world, tmp_path / "out")
+
+
+def test_a_quarantine_row_that_names_a_target_is_refused(tmp_path):
+    world = _remap_world(tmp_path, [remap_row("YU", "REMAP-06", "quarantine", target="SRB", iso2="RS")])
+    with pytest.raises(cw.SourceError, match="quarantine row"):
+        run(world, tmp_path / "out")
+
+
+def test_a_fiscal_year_bound_that_is_not_a_year_is_refused(tmp_path):
+    world = _remap_world(tmp_path, [remap_row("RY", "REMAP-04", "convert", target="YEM", iso2="YE", start="91")])
+    with pytest.raises(cw.SourceError, match="not a fiscal year"):
+        run(world, tmp_path / "out")
+
+
+def test_two_remap_rules_for_one_raw_code_are_refused(tmp_path):
+    world = _remap_world(tmp_path, [remap_row("GZ", "REMAP-02", "convert", target="PSE", iso2="PS"),
+                                    remap_row("GZ", "REMAP-08", "quarantine")])
+    with pytest.raises(cw.SourceError, match="two rules"):
+        run(world, tmp_path / "out")
+
+
+def test_ry_converts_from_fy1991_and_is_quarantined_at_fy1990(tmp_path):
+    ieg = [ieg_rec("P-RY90", "Republic of Yemen"), ieg_rec("P-RY91", "Republic of Yemen")]
+    pno = [pno_rec("P-RY90", ["RY"], ["Republic of Yemen"]), pno_rec("P-RY91", ["RY"], ["Republic of Yemen"])]
+    out, _ = one(tmp_path, ieg, pno, approvals={"P-RY90": ("1990", "agrees", "accepted"),
+                                               "P-RY91": ("1991", "agrees", "accepted")})
+    below, at = row_of(out, "P-RY90"), row_of(out, "P-RY91")
+    assert below["status"] == "quarantine" and below["remap_outcome"] == "quarantine_fy_below_start"
+    assert below["reason"] == "pno_code_not_in_registry" and below["wb_code"] == "" and below["remap_fy_used"] == "1990"
+    assert at["status"] == "resolved_by_remap" and at["remap_outcome"] == "converted"
+    assert at["wb_code"] == "YEM" and at["iso2"] == "YE" and at["remap_fy_used"] == "1991"
+
+
+def test_yf_converts_from_fy2007_and_is_quarantined_at_fy2006(tmp_path):
+    ieg = [ieg_rec("P-YF06", "Republic of Serbia"), ieg_rec("P-YF07", "Republic of Serbia")]
+    pno = [pno_rec("P-YF06", ["YF"], ["Republic of Serbia"]), pno_rec("P-YF07", ["YF"], ["Republic of Serbia"])]
+    out, _ = one(tmp_path, ieg, pno, approvals={"P-YF06": ("2006", "agrees", "accepted"),
+                                               "P-YF07": ("2007", "agrees", "accepted")})
+    below, at = row_of(out, "P-YF06"), row_of(out, "P-YF07")
+    assert below["status"] == "quarantine" and below["remap_outcome"] == "quarantine_fy_below_start"
+    assert at["status"] == "resolved_by_remap" and at["wb_code"] == "SRB" and at["iso2"] == "RS"
+
+
+def test_an_unknown_approval_fy_quarantines_even_a_code_with_no_threshold(tmp_path):
+    out, _ = one(tmp_path, [ieg_rec("P-ZU", "Democratic Republic of the Congo")],
+                 [pno_rec("P-ZU", ["ZR"], ["Democratic Republic of the Congo"])],
+                 approvals={"P-ZU": ("", "absent", "quarantine")})
+    row = row_of(out, "P-ZU")
+    assert row["status"] == "quarantine" and row["remap_outcome"] == "quarantine_fy_unknown"
+    assert row["reason"] == "pno_code_not_in_registry" and row["wb_code"] == ""
+
+
+def test_a_zero_fiscal_year_is_not_a_usable_approval_fy(tmp_path):
+    out, _ = one(tmp_path, [ieg_rec("P-Z0", "Democratic Republic of the Congo")],
+                 [pno_rec("P-Z0", ["ZR"], ["Democratic Republic of the Congo"])],
+                 approvals={"P-Z0": ("0000", "agrees", "accepted")})
+    row = row_of(out, "P-Z0")
+    assert row["status"] == "quarantine" and row["remap_outcome"] == "quarantine_fy_unknown"
+
+
+def test_without_approval_evidence_every_remap_row_is_quarantined(tmp_path):
+    world = make_world(tmp_path / "w", [ieg_rec("P-NA", "Democratic Republic of the Congo")],
+                       [pno_rec("P-NA", ["ZR"], ["Democratic Republic of the Congo"])])
+    out = tmp_path / "out"
+    run(world, out, approval_path=None)
+    row = row_of(out, "P-NA")
+    assert row["status"] == "quarantine" and row["remap_outcome"] == "quarantine_fy_unknown"
+    assert row["remap_fy_status"] == "no_approval_evidence"
+
+
+def test_a_pno_approval_fy_that_disagrees_is_a_conflicting_fy_and_quarantines(tmp_path):
+    out, _ = one(tmp_path, [ieg_rec("P-AX", "Democratic Republic of the Congo")],
+                 [pno_rec("P-AX", ["ZR"], ["Democratic Republic of the Congo"])],
+                 approvals={"P-AX": ("2010", "disagrees", "accepted_with_aux_warning")})
+    row = row_of(out, "P-AX")
+    assert row["status"] == "quarantine" and row["remap_outcome"] == "quarantine_fy_conflict"
+    assert row["remap_fy_used"] == "2010" and row["remap_aux_state"] == "disagrees" and row["wb_code"] == ""
+
+
+def test_a_name_that_names_another_country_is_a_witness_conflict(tmp_path):
+    out, _ = one(tmp_path, [ieg_rec("P-WC", "Congo, Rep.")],
+                 [pno_rec("P-WC", ["ZR"], ["Democratic Republic of the Congo"])])
+    row = row_of(out, "P-WC")
+    assert row["status"] == "quarantine" and row["remap_outcome"] == "quarantine_witness_conflict"
+    assert row["remap_witness"] == "conflict" and row["wb_code"] == ""
+
+
+def test_an_indonesia_name_on_a_timor_leste_code_is_never_attached_to_timor_leste(tmp_path):
+    out, _ = one(tmp_path, [ieg_rec("P-IDN", "Indonesia")],
+                 [pno_rec("P-IDN", ["TP"], ["Democratic Republic of Timor-Leste"])])
+    row = row_of(out, "P-IDN")
+    assert row["status"] == "quarantine" and row["remap_outcome"] == "quarantine_witness_conflict"
+    assert row["wb_code"] == "" and row["iso2"] == ""
+
+
+def test_a_timor_leste_name_agrees_by_registry_name_and_an_unknown_name_is_absent(tmp_path):
+    ieg = [ieg_rec("P-TL1", "Timor-Leste"), ieg_rec("P-TL2", "East Timor")]
+    pno = [pno_rec("P-TL1", ["TP"], ["Democratic Republic of Timor-Leste"]),
+           pno_rec("P-TL2", ["TP"], ["Democratic Republic of Timor-Leste"])]
+    out, _ = one(tmp_path, ieg, pno)
+    agree, absent = row_of(out, "P-TL1"), row_of(out, "P-TL2")
+    assert (agree["status"], agree["wb_code"], agree["remap_witness"]) == ("resolved_by_remap", "TLS", "agree")
+    assert (absent["status"], absent["wb_code"], absent["remap_witness"]) == ("resolved_by_remap", "TLS", "absent")
+
+
+def test_a_region_name_on_a_remap_code_is_a_multi_country_witness_and_quarantines(tmp_path):
+    out, _ = one(tmp_path, [ieg_rec("P-RG", "Latin America and Caribbean")],
+                 [pno_rec("P-RG", ["ZR"], ["Democratic Republic of the Congo"])])
+    row = row_of(out, "P-RG")
+    assert row["status"] == "quarantine" and row["remap_outcome"] == "quarantine_witness_region_name"
+    assert row["wb_code"] == ""
+
+
+def test_zr_gz_and_tp_convert_when_the_name_agrees_or_is_absent(tmp_path):
+    ieg = [ieg_rec("P-ZA", "Democratic Republic of the Congo"), ieg_rec("P-GB", "West Bank and Gaza"),
+           ieg_rec("P-GA", "Palestinian Territories"), ieg_rec("P-TA", "East Timor")]
+    pno = [pno_rec("P-ZA", ["ZR"], ["Democratic Republic of the Congo"]),
+           pno_rec("P-GB", ["GZ"], ["West Bank and Gaza"]),
+           pno_rec("P-GA", ["GZ"], ["West Bank and Gaza"]),
+           pno_rec("P-TA", ["TP"], ["Democratic Republic of Timor-Leste"])]
+    out, _ = one(tmp_path, ieg, pno)
+    expect = {"P-ZA": ("COD", "CD", "agree"), "P-GB": ("PSE", "PS", "agree"),
+              "P-GA": ("PSE", "PS", "absent"), "P-TA": ("TLS", "TL", "absent")}
+    for pid, (wb, iso2, witness) in expect.items():
+        row = row_of(out, pid)
+        assert row["status"] == "resolved_by_remap" and row["rule_id"] == "CW-08", pid
+        assert (row["wb_code"], row["iso2"], row["remap_witness"]) == (wb, iso2, witness), pid
+
+
+def test_a_converted_row_records_its_rule_raw_code_target_fy_and_witness(tmp_path):
+    out, _ = one(tmp_path, [ieg_rec("P-REC", "Democratic Republic of the Congo")],
+                 [pno_rec("P-REC", ["ZR"], ["Democratic Republic of the Congo"])],
+                 approvals={"P-REC": ("2003", "agrees", "accepted")})
+    row = row_of(out, "P-REC")
+    assert row["status"] == "resolved_by_remap" and row["rule_id"] == "CW-08"
+    assert row["remap_rule_id"] == "REMAP-01" and row["remap_outcome"] == "converted"
+    assert row["remap_raw_code"] == "ZR" and row["resolved_pno_code"] == "ZR"
+    assert row["remap_target_wb"] == "COD" and row["remap_target_iso2"] == "CD"
+    assert row["wb_code"] == "COD" and row["iso2"] == "CD" and row["registry_name"] == "Congo, Dem. Rep."
+    assert row["code_system"] == "WB" and row["remap_witness"] == "agree"
+    assert (row["remap_fy_used"], row["remap_fy_status"], row["remap_aux_state"]) == ("2003", "accepted", "agrees")
+
+
+def test_a_record_at_index_zero_is_joined_and_converted(tmp_path):
+    world = make_world(tmp_path / "w", [ieg_rec("P-IX0", "Democratic Republic of the Congo")],
+                       [pno_rec("P-IX0", ["ZR"], ["Democratic Republic of the Congo"])], anchors=False,
+                       aliases=(), regional=())
+    out = tmp_path / "out"
+    run(world, out)
+    row = row_of(out, "P-IX0")
+    assert row["ieg_index"] == "0" and row["status"] == "resolved_by_remap"
+
+
+def test_yu_and_tw_stay_quarantined_even_with_an_agreeing_name_and_a_known_fy(tmp_path):
+    ieg = [ieg_rec("P-YU", "Socialist Federal Republic of Yugoslavia"), ieg_rec("P-TW", "Taiwan, China")]
+    pno = [pno_rec("P-YU", ["YU"], ["Socialist Federal Republic of Yugoslavia"]),
+           pno_rec("P-TW", ["TW"], ["Taiwan, China"])]
+    out, _ = one(tmp_path, ieg, pno)
+    for pid, rule in (("P-YU", "REMAP-06"), ("P-TW", "REMAP-07")):
+        row = row_of(out, pid)
+        assert row["status"] == "quarantine" and row["reason"] == "pno_code_not_in_registry", pid
+        assert row["remap_outcome"] == "quarantine_table" and row["remap_rule_id"] == rule, pid
+        assert row["wb_code"] == "" and row["resolved_pno_code"] == "", pid
+
+
+def test_a_remap_code_whose_name_resolves_elsewhere_stays_a_conflict_not_a_conversion(tmp_path):
+    out, _ = one(tmp_path, [ieg_rec("P-NC", "Republic of Congo")],
+                 [pno_rec("P-NC", ["ZR"], ["Democratic Republic of the Congo"])])
+    row = row_of(out, "P-NC")
+    assert row["status"] == "conflict" and row["reason"] == "name_code_disagree"
+    assert row["remap_outcome"] == "" and row["wb_code"] == ""
+
+
+def test_a_duplicated_project_whose_remap_rows_disagree_supersedes_the_remap_outcome(tmp_path):
+    ieg = [ieg_rec("P-DU", "Democratic Republic of the Congo"), ieg_rec("P-DU", "Congo, Rep.")]
+    out, _ = one(tmp_path, ieg, [pno_rec("P-DU", ["ZR"], ["Democratic Republic of the Congo"])])
+    for row in all_rows_of(out, "P-DU"):
+        assert row["status"] == "conflict" and row["remap_outcome"] == "superseded_by_duplicate_conflict"
+
+
+def test_the_remap_counts_agree_with_the_rows_and_the_totals_add_up(tmp_path):
+    ieg = [ieg_rec("P-C1", "Democratic Republic of the Congo"), ieg_rec("P-C2", "Republic of Yemen"),
+           ieg_rec("P-C3", "Republic of Yemen"), ieg_rec("P-C4", "Socialist Federal Republic of Yugoslavia")]
+    pno = [pno_rec("P-C1", ["ZR"], ["Democratic Republic of the Congo"]),
+           pno_rec("P-C2", ["RY"], ["Republic of Yemen"]), pno_rec("P-C3", ["RY"], ["Republic of Yemen"]),
+           pno_rec("P-C4", ["YU"], ["Socialist Federal Republic of Yugoslavia"])]
+    out, _ = one(tmp_path, ieg, pno, approvals={"P-C2": ("1980", "agrees", "accepted")})
+    qa, rows = qa_of(out), rows_of(out)
+    eligible = [r for r in rows if r["remap_outcome"]]
+    assert qa["remap"]["eligible_rows"] == len(eligible) == 4
+    assert qa["remap"]["outcome_counts"] == {"converted": 2, "quarantine_fy_below_start": 1, "quarantine_table": 1}
+    for code, entry in qa["remap"]["by_raw_code"].items():
+        converted = sum(1 for r in eligible if r["remap_raw_code"] == code and r["status"] == "resolved_by_remap")
+        assert entry["converted_rows"] == converted, code
+    assert sum(qa["status_counts"].values()) == qa["counts"]["ieg_records_in"] == len(rows)
+    assert qa["schema_version"] == "2" and manifest_of(out)["rule_version"] == "2"
+
+
+def test_the_raw_cells_are_json_encoded_and_the_manifest_says_so(tmp_path):
+    out, world = one(tmp_path, [ieg_rec("P-JS", "Democratic Republic of the Congo")],
+                     [pno_rec("P-JS", ["ZR"], ["Democratic Republic of the Congo"])])
+    row = row_of(out, "P-JS")
+    assert row["ieg_country_raw"] == '"Democratic Republic of the Congo"'
+    assert row["pno_countrycode_raw"] == '["ZR"]'
+    man = manifest_of(out)
+    assert {"ieg_country_raw", "pno_countryname_raw", "pno_countrycode_raw", "absent_marker"} <= set(man["cell_encoding"])
+    assert man["inputs"]["approval"]["rows_sha256"] == world.pins.approval_rows_sha256
+    assert man["inputs"]["remap"]["sha256"] == sha(cw.DEFAULT_REMAP.read_bytes())
+    assert man["projection"]["approval_fields"] == list(cw.APPROVAL_FIELDS)
+
+
+def test_changed_labels_in_the_ieg_and_approval_files_give_byte_identical_data(tmp_path):
+    pno = [pno_rec("P-LB1", ["ZR"], ["Democratic Republic of the Congo"]),
+           pno_rec("P-LB2", ["RY"], ["Republic of Yemen"])]
+    ieg_a = [ieg_rec("P-LB1", "Democratic Republic of the Congo", outcome="Satisfactory"),
+             ieg_rec("P-LB2", "Republic of Yemen", outcome="Satisfactory")]
+    ieg_b = [ieg_rec("P-LB1", "Democratic Republic of the Congo", outcome="Unsatisfactory"),
+             ieg_rec("P-LB2", "Republic of Yemen", outcome="Unsatisfactory")]
+    world_a = make_world(tmp_path / "a", ieg_a, pno, approval_label="LABEL-A")
+    world_b = make_world(tmp_path / "b", ieg_b, pno, approval_label="LABEL-B")
+    run(world_a, tmp_path / "out_a")
+    run(world_b, tmp_path / "out_b")
+    for name in DATA_FILES:
+        assert (tmp_path / "out_a" / name).read_bytes() == (tmp_path / "out_b" / name).read_bytes(), name
+
+
+def test_the_approval_projection_refuses_evaluation_fy():
+    view = cw._Projection({"ieg_page_file": "ieg/page-00000.json", "ieg_index": "0", "resolved_wb_fy": "1991",
+                           "aux_state": "absent", "status": "fy_only", "ieg_evaluation_fy_raw": "2008"},
+                          cw.APPROVAL_FIELDS)
+    assert view.get("resolved_wb_fy") == "1991"
+    with pytest.raises(cw.ProjectionError):
+        view.get("ieg_evaluation_fy_raw")
+
+
+def test_an_approval_manifest_that_is_not_the_pinned_one_is_refused(tmp_path):
+    world = make_world(tmp_path / "w", [ieg_rec("P-AP", "Republic of Angola")])
+    with pytest.raises(cw.PinMismatch, match="approval manifest"):
+        run(world, tmp_path / "out", pins=_pins(world, approval_manifest_sha256="0" * 64))
+
+
+def test_an_approval_rows_file_that_differs_from_its_manifest_is_refused(tmp_path):
+    world = make_world(tmp_path / "w", [ieg_rec("P-AR", "Republic of Angola")])
+    path = world.approval / cw.APPROVAL_ROWS_FILE
+    path.write_bytes(path.read_bytes() + b"\n")
+    with pytest.raises(cw.SourceError, match="differs from the approval manifest"):
+        run(world, tmp_path / "out")
+
+
+def test_an_approval_built_from_another_snapshot_is_refused(tmp_path):
+    world = make_world(tmp_path / "w", [ieg_rec("P-AS", "Republic of Angola")])
+    man_path = world.approval / "manifest.json"
+    man = json.loads(man_path.read_text(encoding="utf-8"))
+    man["inputs"]["manifest_sha256"] = "1" * 64
+    new_bytes = json.dumps(man, sort_keys=True).encode("utf-8")
+    man_path.write_bytes(new_bytes)
+    with pytest.raises(cw.SourceError, match="different snapshot"):
+        run(world, tmp_path / "out", pins=_pins(world, approval_manifest_sha256=sha(new_bytes)))
+
+
+def test_an_approval_that_misses_an_ieg_locator_is_refused(tmp_path):
+    world = make_world(tmp_path / "w", [ieg_rec("P-MS", "Republic of Angola")])
+    rows_path = world.approval / cw.APPROVAL_ROWS_FILE
+    lines = rows_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    body = "".join([lines[0]] + lines[2:]).encode("utf-8")
+    rows_path.write_bytes(body)
+    man_path = world.approval / "manifest.json"
+    man = json.loads(man_path.read_text(encoding="utf-8"))
+    man["outputs"][cw.APPROVAL_ROWS_FILE] = {"sha256": sha(body), "bytes": len(body)}
+    man_bytes = json.dumps(man, sort_keys=True).encode("utf-8")
+    man_path.write_bytes(man_bytes)
+    pins = _pins(world, approval_manifest_sha256=sha(man_bytes), approval_rows_sha256=sha(body))
+    with pytest.raises(cw.SourceError, match="do not name the same locators"):
+        run(world, tmp_path / "out", pins=pins)
+
+
+def test_an_approval_quarantined_upstream_is_unknown_even_when_it_carries_a_fy(tmp_path):
+    out, _ = one(tmp_path, [ieg_rec("P-QF", "Democratic Republic of the Congo")],
+                 [pno_rec("P-QF", ["ZR"], ["Democratic Republic of the Congo"])],
+                 approvals={"P-QF": ("2005", "agrees", "quarantine")})
+    row = row_of(out, "P-QF")
+    assert row["status"] == "quarantine" and row["remap_outcome"] == "quarantine_fy_unknown"
+
+
+def test_the_approval_rows_are_read_only_through_the_approval_projection(tmp_path, monkeypatch):
+    world = make_world(tmp_path / "w", [ieg_rec("P-PJ", "Republic of Angola")])
+    seen = []
+    real = cw.project
+
+    def spy(raw, allowed):
+        seen.append(tuple(allowed))
+        return real(raw, allowed)
+
+    monkeypatch.setattr(cw, "project", spy)
+    cw._load_approval(world.approval, world.pins)
+    assert seen and all(allowed == cw.APPROVAL_FIELDS for allowed in seen)
