@@ -9,9 +9,11 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { evaluateApi } from "@/api/endpoints/evaluate";
+import { healthApi } from "@/api/endpoints/health";
 import type { EvaluateRequest, EvaluateResponse, ExplainResponse, RiskLevel } from "@/api/types";
 import { UncertaintyCard } from "./UncertaintyCard";
 import { SUCCESS_PROBABILITY_LABEL, SUCCESS_PROBABILITY_NOTE } from "./successProbabilityNote";
+import { serviceSnapshotOf, type HealthStatus } from "./serviceHealth";
 import { fmtNum, fmtMoney, clamp } from "@/lib/format";
 import "./evaluate.css";
 import { errorMessage } from "@/lib/errors";
@@ -26,6 +28,13 @@ const PRESETS: { id:string; label:string; body:EvaluateRequest }[] = [
   { id:"waste",  label:"Waste Recycling",  body:{ project_name:"Circular Materials",   country:"Italy",   budget_usd:95000,  co2_reduction_tons_per_year:240, social_impact_score:8, project_duration_months:16 } },
 ];
 const riskTone: Record<RiskLevel,string> = { Low:"low", Medium:"med", High:"high" };
+// Only "operational" keeps the green pill. Degraded and unknown get their own
+// classes (evaluate.css), so the pill never reads green without a healthy answer.
+const HEALTH_PILL: Record<HealthStatus,{ label:string; className:string }> = {
+  operational: { label:"Operational", className:"status-pill" },
+  degraded:    { label:"Degraded",    className:"status-pill is-degraded" },
+  unknown:     { label:"Unknown",     className:"status-pill is-unknown" },
+};
 
 function useCountUp(target:number, duration=900) {
   const [v, setV] = useState(0);
@@ -95,6 +104,18 @@ export function EvaluatePage() {
     rawExplain && Array.isArray(rawExplain.explanation) ? rawExplain : undefined;
   const score = useCountUp(result?.total_score ?? 0);
   const prob  = useCountUp(result?.success_probability ?? 0);
+  // The hero's Models and Status are the service's own answer, not constants.
+  // While the call is pending, or after the latest attempt fails, there is no
+  // answer, so both read "unknown" rather than a healthy default (#236). The
+  // query is asked again every 60 s while the page is visible, so an open tab
+  // does not keep showing an answer from long ago.
+  const health = useQuery({
+    queryKey: ["service-health"],
+    queryFn: healthApi.get,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+  });
+  const service = serviceSnapshotOf({ data: health.data, isError: health.isError });
   const countryList = useMemo(()=> countries ? Object.keys(countries).sort() : [], [countries]);
   const setField = <K extends keyof EvaluateRequest>(k:K, v:EvaluateRequest[K]) => setForm(s=>({...s,[k]:v}));
   const applyPreset = (id:string) => { const p=PRESETS.find(x=>x.id===id); if(!p) return; setForm(p.body); setActivePreset(id); };
@@ -143,7 +164,7 @@ export function EvaluatePage() {
         <tr><td class="k">Economic</td><td>${escapeHtml(result?.economic_score?.toFixed(1))}</td></tr>
       </table>
       <h3>Recommendations</h3><ul>${rows}</ul>
-      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${escapeHtml(new Date().toISOString())} · ML Scoring Engine · RF·MLP·Stacking</div>
+      <div class="muted" style="margin-top:40px;font-size:10px">Generated ${escapeHtml(new Date().toISOString())} · ML Scoring Engine · models reported by the service at export: ${escapeHtml(service.models)}</div>
       </body></html>`);
     w.document.close(); setTimeout(()=>w.print(), 300);
   };
@@ -163,9 +184,8 @@ export function EvaluatePage() {
         </div>
         <div className="ev-hero-meta">
           <Row k="Unit"   v={<><span style={{color:"var(--planet)"}}>◆</span> ML Scoring Engine</>}/>
-          <Row k="Models" v="RF · MLP · Stacking"/>
-          <Row k="AUC"    v={<span className="tabular">0.82 prod · 0.98 cv</span>}/>
-          <Row k="Status" v={<span className="status-pill">Operational</span>}/>
+          <Row k="Models" v={service.models}/>
+          <Row k="Status" v={<HealthPill status={service.status}/>}/>
         </div>
       </section>
 
@@ -303,6 +323,10 @@ function Skeleton(){
 }
 function Row({k,v}:{k:string;v:React.ReactNode}) {
   return <div className="ev-hero-row"><div className="k mono">{k}</div><div className="v">{v}</div></div>;
+}
+function HealthPill({status}:{status:HealthStatus}) {
+  const p = HEALTH_PILL[status];
+  return <span className={p.className}>{p.label}</span>;
 }
 function Field({label,children}:{label:string;children:React.ReactNode}) {
   return <div className="ev-field"><label>{label}</label>{children}</div>;
