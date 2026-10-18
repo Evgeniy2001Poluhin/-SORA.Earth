@@ -561,7 +561,7 @@ def _lstm_fit_outcome(df: pd.DataFrame) -> dict:
     "/lstm-status",
     response_model=LstmStatusOk,
     responses={503: {"model": LstmStatusUnavailable, "description": "Status could not be determined."}},
-    summary="LSTM activation status and progress towards its threshold",
+    summary="LSTM fitted membership and observed-data training eligibility",
 )
 def get_lstm_status(db: Session = Depends(_get_db)):
     """Get LSTM activation status and progress towards threshold.
@@ -571,9 +571,12 @@ def get_lstm_status(db: Session = Depends(_get_db)):
           not say whether the fitted ensemble includes the LSTM; see
           lstm_in_ensemble for that.
         - samples: int - Rows in the forecast series
-        - threshold: int - Required samples for LSTM activation
-        - days_remaining: int - Days until threshold (if not active)
-        - next_activation_date: str - Estimated date when LSTM will activate
+        - threshold: int - Required observed points for training eligibility
+        - observed_samples: int - Recorded points, excluding interpolated dates
+        - eligible_for_training: bool - Observation count reaches threshold
+        - observations_remaining: int - Missing observed points, not days
+        - days_remaining: int - Legacy row-count deficit, not a time forecast
+        - next_activation_date: str - Legacy estimate; not an activation promise
         - models_active: list - Models in the fitted ensemble ([] if the fit failed)
         - weights: dict - Weights of the fitted ensemble ({} if the fit failed)
         - lstm_in_ensemble: bool | None - Whether the fitted ensemble includes
@@ -584,7 +587,11 @@ def get_lstm_status(db: Session = Depends(_get_db)):
     # on the event loop and held up every other request on the worker for the
     # length of the fit; as `def` FastAPI runs the handler in its threadpool.
     from datetime import datetime, timedelta
-    from app.services.forecasting.ensemble import LSTM_MIN_ROWS
+    from app.services.forecasting.ensemble import LSTM_MIN_ROWS, observed_sample_count
+    from app.prom_metrics import sora_forecast_lstm_active
+
+    # A request that fails must not leave the previous successful fit green.
+    sora_forecast_lstm_active.set(float("nan"))
 
     # Query current data volume
     from sqlalchemy import text
@@ -609,8 +616,11 @@ def get_lstm_status(db: Session = Depends(_get_db)):
     try:
         df = _query_time_series(db, "score")
         n_samples = len(df)
+        n_observed = observed_sample_count(df)
+        eligible_for_training = n_observed >= LSTM_MIN_ROWS
+        observations_remaining = max(0, LSTM_MIN_ROWS - n_observed)
 
-        # Check if LSTM would activate with current data
+        # Preserve legacy dense-row eligibility; it is not fitted membership.
         lstm_active = n_samples >= LSTM_MIN_ROWS
 
         # Calculate days remaining
@@ -623,25 +633,33 @@ def get_lstm_status(db: Session = Depends(_get_db)):
 
         # The ensemble's weights and active models. Refitted only when the
         # series has changed since the last call; see `_lstm_fit_outcome`.
-        outcome = _lstm_fit_outcome(df)
+        outcome = (_lstm_fit_outcome(df) if n_observed else {
+            "weights": {}, "models_active": [], "lstm_in_ensemble": None,
+            "reason_code": "no_observations",
+        })
         weights = outcome["weights"]
         models_active = outcome["models_active"]
         lstm_in_ensemble = outcome["lstm_in_ensemble"]
         reason_code = outcome["reason_code"]
 
-        if reason_code is None:
-            message = "LSTM active" if lstm_active else f"Need {days_remaining} more days of data"
+        if lstm_in_ensemble is True:
+            message = "LSTM is in the fitted ensemble."
+        elif lstm_in_ensemble is False:
+            message = "LSTM is not in the fitted ensemble."
+        elif reason_code == "no_observations":
+            message = "No observations are available; ensemble fitting was not attempted."
         else:
             message = "Ensemble could not be fitted, so no weights or active models are reported."
 
         # Export metrics to Prometheus
         from app.prom_metrics import (
             sora_forecast_samples_total,
-            sora_forecast_lstm_active,
             sora_forecast_days_remaining,
         )
         sora_forecast_samples_total.set(n_samples)
-        sora_forecast_lstm_active.set(1.0 if lstm_active else 0.0)
+        sora_forecast_lstm_active.set(
+            float("nan") if lstm_in_ensemble is None else float(lstm_in_ensemble)
+        )
         sora_forecast_days_remaining.set(days_remaining)
 
         return LstmStatusOk(
@@ -654,6 +672,9 @@ def get_lstm_status(db: Session = Depends(_get_db)):
             models_active=models_active,
             weights=weights,
             lstm_in_ensemble=lstm_in_ensemble,
+            observed_samples=n_observed,
+            eligible_for_training=eligible_for_training,
+            observations_remaining=observations_remaining,
             unique_days_raw=unique_days,
             last_evaluation_date=last_date.isoformat(),
             message=message,
