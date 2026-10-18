@@ -172,7 +172,7 @@ def _spec_for(manifest, key):
     return plan[0][3]
 
 
-def _wb_observations(snapshot_dir, manifest, key):
+def _wb_observations(snapshot_dir, manifest, key, snapshot_year):
     """{iso3: {year: observation}} for one World Bank series, from its raw pages, re-checked."""
     entry = manifest["indicators"][key]
     spec = _spec_for(manifest, key)
@@ -180,7 +180,8 @@ def _wb_observations(snapshot_dir, manifest, key):
     for request in entry["requests"]:
         rel = f"raw/{key}/page-{request['page']:05d}.json"
         body = (snapshot_dir / rel).read_bytes()
-        parsed = snap.parse_wb_page(body, f"{key} page {request['page']}", entry["code"], spec, set(snap.MAP_ISO3))
+        parsed = snap.parse_wb_page(body, f"{key} page {request['page']}", entry["code"], spec,
+                                    set(snap.MAP_ISO3), snapshot_year=snapshot_year)
         if len(parsed["rows"]) != request["rows"] or parsed["total"] != request["api_total"]:
             raise BuildError(f"{key} page {request['page']}: the raw bytes disagree with the manifest")
         pages.append((request, parsed))
@@ -200,11 +201,11 @@ def _wb_observations(snapshot_dir, manifest, key):
     return observations
 
 
-def _hdi_observations(snapshot_dir, manifest, key):
+def _hdi_observations(snapshot_dir, manifest, key, snapshot_year):
     """{iso3: {year: observation}} for the UNDP HDI, from the raw CSV, re-checked."""
     entry = manifest["indicators"][key]
     body = (snapshot_dir / "raw/hdi/composite_indices_time_series.csv").read_bytes()
-    parsed = snap.parse_undp_csv(body, "hdi csv", set(snap.MAP_ISO3))
+    parsed = snap.parse_undp_csv(body, "hdi csv", set(snap.MAP_ISO3), snapshot_year=snapshot_year)
     observations = {}
     for iso3, by_year in parsed["table"].items():
         for year, value in by_year.items():
@@ -218,10 +219,10 @@ def _hdi_observations(snapshot_dir, manifest, key):
     return observations
 
 
-def _observations(snapshot_dir, manifest, key):
+def _observations(snapshot_dir, manifest, key, snapshot_year):
     if manifest["indicators"][key]["kind"] == "undp_csv":
-        return _hdi_observations(snapshot_dir, manifest, key)
-    return _wb_observations(snapshot_dir, manifest, key)
+        return _hdi_observations(snapshot_dir, manifest, key, snapshot_year)
+    return _wb_observations(snapshot_dir, manifest, key, snapshot_year)
 
 
 def _check_manifest_latest(manifest, key, observations):
@@ -248,7 +249,7 @@ def build_table(snapshot_dir):
     snapshot_year = int(manifest["snapshot_date_utc"][:4])
     observations = {}
     for key in INPUT_FOR_KEY:
-        observations[key] = _observations(snapshot_dir, manifest, key)
+        observations[key] = _observations(snapshot_dir, manifest, key, snapshot_year)
         _check_manifest_latest(manifest, key, observations[key])
 
     countries = []

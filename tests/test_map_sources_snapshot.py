@@ -551,3 +551,75 @@ def test_the_build_refuses_a_re_signed_mixed_release(tmp_path, world):
     _resign(snapshot, rel)
     with pytest.raises((build.BuildError, snap.SnapshotError), match="release stamps"):
         build.write_build(snapshot, tmp_path / "out")
+
+
+# ---------------------------------------------------------------------------
+# No observation after the snapshot year: refused at the snapshot and the build
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("code", [GINI, RENEW, CO2, GOV])
+def test_a_value_after_the_snapshot_year_is_refused(tmp_path, world, code):
+    iso3, _year, value = world.series[code][0]
+    world.series[code][0] = (iso3, "2027", value)
+    with pytest.raises(snap.SnapshotError, match="after the snapshot year"):
+        _take(tmp_path)
+    assert not _snapshot_dir(tmp_path).exists()
+
+
+def test_a_future_hdi_year_is_refused(tmp_path, world):
+    world.csv = world.csv.replace(b"hdi_2023", b"hdi_2027", 1)
+    with pytest.raises(snap.SnapshotError, match="after the snapshot year"):
+        _take(tmp_path)
+    assert not _snapshot_dir(tmp_path).exists()
+
+
+def test_the_snapshot_year_itself_is_allowed_and_is_the_latest(tmp_path, world):
+    """A figure for the snapshot's own year is current, with age zero, and is selected."""
+    world.series[CO2].append(("DEU", "2026", 6.5))
+    table, _manifest = build.write_build(_take_then_dir(tmp_path), tmp_path / "out")
+    deu = {c["iso3"]: c for c in table["countries"]}["DEU"]["inputs"]["co2_per_capita"]
+    assert deu["year"] == "2026"
+    assert deu["age_years"] == 0
+    assert deu["value"] == 6.5
+
+
+def test_a_null_future_row_is_not_an_observation(tmp_path, world):
+    """A future year with no value is not a figure: it is accepted and never selected."""
+    world.series[CO2].append(("DEU", "2027", None))
+    table, _manifest = build.write_build(_take_then_dir(tmp_path), tmp_path / "out")
+    deu = {c["iso3"]: c for c in table["countries"]}["DEU"]["inputs"]["co2_per_capita"]
+    assert deu["year"] == "2024"
+
+
+def _take_then_dir(tmp_path):
+    _take(tmp_path)
+    return _snapshot_dir(tmp_path)
+
+
+@pytest.mark.parametrize("rel", [
+    "raw/gini/page-00001.json",
+    "raw/renewables/page-00001.json",
+    "raw/co2_per_capita/page-00001.json",
+    "raw/gov_effectiveness/page-00001.json",
+])
+def test_the_build_refuses_a_re_signed_future_year(tmp_path, world, rel):
+    """The raw row is changed to a future year and re-signed: only the build's re-check can refuse it."""
+    snapshot = _take_then_dir(tmp_path)
+    page = snapshot / rel
+    payload = json.loads(page.read_text())
+    row = next(r for r in payload[1] if r["value"] is not None)
+    row["date"] = "2027"
+    page.write_text(json.dumps(payload))
+    _resign(snapshot, rel)
+    with pytest.raises((build.BuildError, snap.SnapshotError), match="after the snapshot year"):
+        build.write_build(snapshot, tmp_path / "out")
+
+
+def test_the_build_refuses_a_re_signed_future_hdi_year(tmp_path, world):
+    snapshot = _take_then_dir(tmp_path)
+    rel = "raw/hdi/composite_indices_time_series.csv"
+    path = snapshot / rel
+    path.write_bytes(path.read_bytes().replace(b"hdi_2023", b"hdi_2027", 1))
+    _resign(snapshot, rel)
+    with pytest.raises((build.BuildError, snap.SnapshotError), match="after the snapshot year"):
+        build.write_build(snapshot, tmp_path / "out")

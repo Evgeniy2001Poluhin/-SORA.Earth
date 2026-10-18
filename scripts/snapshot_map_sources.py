@@ -251,7 +251,22 @@ def _check_range(label, value, bounds, what):
 # script call these, so the build re-applies every refusal to the raw files.
 # ---------------------------------------------------------------------------
 
-def parse_wb_page(body, label, code, spec, requested):
+def _check_not_future(label, iso3, year, snapshot_year):
+    """A value for a year after the snapshot's own year is refused, never selected.
+
+    A snapshot dated 2026 cannot hold an observation for 2027: the figure does not
+    exist yet, so a row for it is a defect in the source or in the bytes, and its
+    age would be negative. A null value for a future year is not an observation and
+    is not refused here.
+    """
+    if snapshot_year is not None and int(year) > snapshot_year:
+        raise SnapshotError(
+            f"{label}: {iso3} has a value for {year}, after the snapshot year {snapshot_year}; "
+            "an observation cannot postdate the snapshot that holds it. Refusing."
+        )
+
+
+def parse_wb_page(body, label, code, spec, requested, snapshot_year=None):
     """One World Bank page. Returns its meta and its rows, each checked on its own.
 
     `spec` is the entry of WB_SPECS (or a renewables entry) for `code`. The rows
@@ -294,6 +309,7 @@ def parse_wb_page(body, label, code, spec, requested):
                 raise SnapshotError(f"{label}: row {index} ({iso3} {year}) value is not a number: {value!r}")
             value = float(value)
             _check_range(label, value, spec["range"], f"{iso3} {year} value")
+            _check_not_future(label, iso3, year, snapshot_year)
         name = indicator.get("value") or ""
         names.add(name)
         parsed.append({"iso3": iso3, "year": year, "value": value, "indicator_name": name})
@@ -366,7 +382,7 @@ def assemble_wb_series(pages, label):
     return rows
 
 
-def parse_undp_csv(body, label, requested):
+def parse_undp_csv(body, label, requested, snapshot_year=None):
     """The UNDP composite-indices time series. Returns {iso3: {year: value or None}}.
 
     Only the hdi_YYYY columns are read; the other indices are not used. A row
@@ -414,6 +430,7 @@ def parse_undp_csv(body, label, requested):
                 value = float(raw)
             except ValueError:
                 raise SnapshotError(f"{label}: {iso3} {year} is not a number: {raw!r}") from None
+            _check_not_future(label, iso3, year, snapshot_year)
             _check_range(label, value, HDI_RANGE, f"{iso3} hdi_{year}")
             values[year] = value
         table[iso3] = values
@@ -532,7 +549,7 @@ def _wb_metadata(label, code):
     }
 
 
-def _fetch_wb(name, code, spec, requests_log):
+def _fetch_wb(name, code, spec, requests_log, snapshot_year=None):
     """Every page of one World Bank series for MAP_ISO3, raw and checked."""
     label = f"{name} ({code})"
     metadata = _wb_metadata(label, code)
@@ -550,7 +567,7 @@ def _fetch_wb(name, code, spec, requests_log):
         page_label = f"{label} page {page_number}"
         fetched_at = _utc_now()
         body, full_url = _get(page_label, _wb_series_url(code), params)
-        parsed = parse_wb_page(body, page_label, code, spec, set(MAP_ISO3))
+        parsed = parse_wb_page(body, page_label, code, spec, set(MAP_ISO3), snapshot_year)
         requests_log.append({
             "page": page_number,
             "url": full_url,
@@ -577,7 +594,7 @@ def _fetch_wb(name, code, spec, requests_log):
     }
 
 
-def _fetch_hdi():
+def _fetch_hdi(snapshot_year=None):
     """The UNDP docs page (kept raw), the newest composite-indices CSV on it, and that CSV."""
     label = "hdi"
     docs_fetched_at = _utc_now()
@@ -587,7 +604,7 @@ def _fetch_hdi():
     csv_body, csv_full = _get(f"{label} csv", csv_url, None)
     if _looks_like_html(csv_body):
         raise SnapshotError(f"{label} csv: the response is HTML, not CSV")
-    table = parse_undp_csv(csv_body, f"{label} csv", set(MAP_ISO3))
+    table = parse_undp_csv(csv_body, f"{label} csv", set(MAP_ISO3), snapshot_year)
     return {
         "docs": {
             "url": docs_url,
@@ -671,6 +688,7 @@ def take_snapshot(root, date_str, renewables=DEFAULT_RENEWABLES, only=None):
         raise SnapshotError(f"renewables must be one of {sorted(RENEWABLE_CODES)}, not {renewables!r}")
     only = list(only or ["gini", "renewables", "co2_per_capita", "gov_effectiveness", "hdi"])
     root = Path(root)
+    snapshot_year = int(date_str[:4])
     out = root / date_str
     partial = root / f"{date_str}.partial"
     _refuse_existing(out, partial)
@@ -695,7 +713,7 @@ def take_snapshot(root, date_str, renewables=DEFAULT_RENEWABLES, only=None):
         for name, kind, code, spec in plan:
             if kind == "world_bank":
                 log = []
-                series = _fetch_wb(name, code, spec, log)
+                series = _fetch_wb(name, code, spec, log, snapshot_year)
                 for page_number, body, _parsed in series["pages"]:
                     write(f"raw/{name}/page-{page_number:05d}.json", body)
                 summary = _series_summary(name, series)
@@ -711,7 +729,7 @@ def take_snapshot(root, date_str, renewables=DEFAULT_RENEWABLES, only=None):
                     **summary,
                 }
             else:
-                hdi = _fetch_hdi()
+                hdi = _fetch_hdi(snapshot_year)
                 write("raw/undp-documentation-and-downloads.html", hdi["docs"]["body"])
                 write("raw/hdi/composite_indices_time_series.csv", hdi["csv"]["body"])
                 _check_no_empty_series("hdi", hdi["table"])
