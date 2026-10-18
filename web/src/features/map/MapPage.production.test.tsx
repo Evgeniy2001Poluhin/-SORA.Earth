@@ -19,7 +19,7 @@ vi.mock("@/api/mock", async (importOriginal) => {
 import MapPage from "./MapPage";
 import { isMock } from "@/api/mock";
 import { renderWithQuery } from "@/test/utils";
-import { stubJson } from "@/test/http";
+import { stubJson, stubStatus, stubTransportError } from "@/test/http";
 
 const render = () => renderWithQuery(<MemoryRouter><MapPage /></MemoryRouter>);
 
@@ -91,124 +91,120 @@ function statValue(container: HTMLElement, label: string): string | null {
 }
 const topNames = (container: HTMLElement) =>
   Array.from(container.querySelectorAll(".top-list li b")).map((b) => b.textContent);
+const topRows = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll(".top-list li")).map((li) => li.textContent ?? "");
 const scopeLines = (container: HTMLElement) =>
   Array.from(container.querySelectorAll(".map-scope")).map((p) => p.textContent ?? "");
 
-// Shapes as /map/countries sends them: a static profile carries the formula
-// values the backend derives from its ESG score; a live country carries its own.
-const ICELAND_STATIC = {
-  name: "Iceland", esg: 86, band: "leader", code: "IS", lat: 65, lon: -19,
-  esg_source: "hardcoded", renewable_share_pct: 81.7, co2_intensity_t_per_capita: 4.52,
+// Shapes as /map/countries sends them (C8).
+const ICELAND_INCOMPLETE = {
+  name: "Iceland", esg: null, band: null, code: "IS", lat: 65, lon: -19,
+  esg_status: "incomplete", esg_source: null, missing_inputs: ["gini_index", "gov_effectiveness"],
+  renewable_share_pct: null, co2_intensity_t_per_capita: null,
 };
-const JAPAN_STATIC = {
-  name: "Japan", esg: 77, band: "advanced", code: "JP", lat: 36, lon: 138,
-  esg_source: "hardcoded", renewable_share_pct: 73.2, co2_intensity_t_per_capita: 6.1,
-};
-const SWEDEN_LIVE = {
+const SWEDEN_OK = {
   name: "Sweden", esg: 81.5, band: "leader", code: "SE", lat: 60, lon: 15,
-  esg_source: "world_bank_live", renewable_share_pct: 60.1, co2_intensity_t_per_capita: 3.6,
+  esg_status: "ok", esg_source: "world_bank_live", missing_inputs: [],
+  renewable_share_pct: 60.1, co2_intensity_t_per_capita: null,
 };
-// Live ESG, but no renewables or CO2 in the payload.
-const CHILE_LIVE_NO_PHYSICAL = {
+const CHILE_MIXED = {
   name: "Chile", esg: 62.5, band: "developing", code: "CL", lat: -33, lon: -70,
-  esg_source: "world_bank_live", renewable_share_pct: null, co2_intensity_t_per_capita: null,
+  esg_status: "mixed", esg_source: "mixed", missing_inputs: [],
+  renewable_share_pct: null, co2_intensity_t_per_capita: null,
 };
-// A BENCHMARKS score: the backend used to label it world_bank_live.
-const JAPAN_BENCHMARK = {
-  name: "Japan", esg: 77, band: "advanced", code: "JP", lat: 36, lon: 138,
-  esg_source: "static_benchmark", renewable_share_pct: null, co2_intensity_t_per_capita: null,
+const ZERO_OK = {
+  name: "Zeroland", esg: 0, band: "lagging", code: "ZZ", lat: 0, lon: 0,
+  esg_status: "ok", esg_source: "world_bank_live", missing_inputs: [],
+  renewable_share_pct: null, co2_intensity_t_per_capita: null,
 };
 
-describe("MapPage sources (F070-F073)", () => {
+describe("MapPage scores (C8)", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("leaves a country with no live source out of the top-10, the average and the leaders", async () => {
-    // Iceland is the highest score on the page and a static reference value.
-    // Sweden and Chile are live, so every aggregate is over those two. Chile
-    // has no renewables or CO2 and stays in: its ESG score is itself live.
-    stubJson({ total_countries: 3, bands: {}, countries: [ICELAND_STATIC, SWEDEN_LIVE, CHILE_LIVE_NO_PHYSICAL] });
+  it("leaves an incomplete country out of the top-10, the average and the leaders", async () => {
+    stubJson({ total_countries: 3, bands: {}, countries: [ICELAND_INCOMPLETE, SWEDEN_OK, CHILE_MIXED] });
 
     const { container } = render();
     await waitFor(() => expect(topNames(container).length).toBeGreaterThan(0), { timeout: 3000 });
 
     expect(topNames(container)).toEqual(["Sweden", "Chile"]);
     expect(statValue(container, "avg ESG"), "(81.5 + 62.5) / 2, without Iceland").toBe("72");
-    expect(statValue(container, "leaders"), "Iceland is a leader, but static").toBe("1");
+    expect(statValue(container, "leaders"), "Iceland has no score, so it is not a leader").toBe("1");
     expect(container.textContent ?? "").not.toContain("Iceland");
   });
 
-  it("states which source the aggregates use and how many countries that is", async () => {
-    stubJson({ total_countries: 3, bands: {}, countries: [ICELAND_STATIC, SWEDEN_LIVE, CHILE_LIVE_NO_PHYSICAL] });
+  it("states N as x of y countries, with the ok and mixed split, in the header and above the top-10", async () => {
+    stubJson({ total_countries: 3, bands: {}, countries: [ICELAND_INCOMPLETE, SWEDEN_OK, CHILE_MIXED] });
 
     const { container } = render();
     await waitFor(() => expect(topNames(container).length).toBeGreaterThan(0), { timeout: 3000 });
 
-    // Once in the header and once above the top-10: both state the same N.
+    expect(container.textContent ?? "").toContain("N = 2 of 3 countries have a score");
     const lines = scopeLines(container);
     expect(lines).toHaveLength(2);
     for (const line of lines) {
-      expect(line).toContain("live source only (world_bank_live): N = 2 of 3 countries");
+      expect(line).toContain("N = 2 of 3 countries (1 ok, 1 mixed); 1 incomplete, excluded");
     }
   });
 
-  it("with all three kinds on the page, uses only world_bank_live and counts N over it", async () => {
-    // Before static_benchmark was a known kind, Japan made this page say "mixed
-    // or unlabelled sources" and averaged all four countries together.
-    stubJson({
-      total_countries: 4,
-      bands: {},
-      esg_source_meanings: {
-        world_bank_live: "Score computed from a fresh live-cache entry (under 24h old).",
-        static_benchmark: "Live cache empty or stale. Score computed from the static BENCHMARKS row.",
-        hardcoded: "No external data for this country. Score is the hand-entered COUNTRIES profile.",
-      },
-      countries: [ICELAND_STATIC, SWEDEN_LIVE, JAPAN_BENCHMARK, CHILE_LIVE_NO_PHYSICAL],
-    });
+  it("a real 0 score is scored: it is ranked and counted in the average", async () => {
+    stubJson({ total_countries: 2, bands: {}, countries: [SWEDEN_OK, ZERO_OK] });
 
     const { container } = render();
     await waitFor(() => expect(topNames(container).length).toBeGreaterThan(0), { timeout: 3000 });
 
-    expect(topNames(container)).toEqual(["Sweden", "Chile"]);
-    expect(statValue(container, "avg ESG"), "(81.5 + 62.5) / 2, without Iceland or Japan").toBe("72");
-    expect(statValue(container, "leaders"), "Iceland is static, so the only live leader is Sweden").toBe("1");
-    const lines = scopeLines(container);
-    expect(lines).toHaveLength(2);
-    for (const line of lines) {
-      expect(line).toContain("live source only (world_bank_live): N = 2 of 4 countries");
-    }
-    expect(container.textContent ?? "").not.toContain("mixed");
-    expect(container.textContent ?? "").not.toContain("Japan");
+    expect(topNames(container)).toEqual(["Sweden", "Zeroland"]);
+    expect(statValue(container, "avg ESG"), "(81.5 + 0) / 2, rounded").toBe("41");
   });
 
-  it("says so, and uses every country, when all of them are static reference values", async () => {
-    stubJson({ total_countries: 2, bands: {}, countries: [ICELAND_STATIC, JAPAN_STATIC] });
+  it("a null score is never averaged as 0", async () => {
+    stubJson({ total_countries: 2, bands: {}, countries: [SWEDEN_OK, ICELAND_INCOMPLETE] });
 
     const { container } = render();
     await waitFor(() => expect(topNames(container).length).toBeGreaterThan(0), { timeout: 3000 });
 
-    expect(scopeLines(container)[0]).toContain("static reference values only: N = 2 countries");
-    expect(topNames(container)).toEqual(["Iceland", "Japan"]);
-    expect(statValue(container, "avg ESG")).toBe("82");
+    expect(statValue(container, "avg ESG"), "the average of Sweden alone, not (81.5 + 0) / 2").toBe("82");
   });
 
-  it("says mixed when a country's source is missing, rather than guessing its kind", async () => {
-    // Without esg_source the page cannot tell live from static, so it uses
-    // every country and says that it could not separate them.
-    stubJson({
-      total_countries: 2,
-      bands: {},
-      countries: [
-        { name: "Sweden", esg: 81.5, band: "leader", code: "SE", lat: 60, lon: 15 },
-        { name: "Chile", esg: 62.5, band: "developing", code: "CL", lat: -33, lon: -70 },
-      ],
-    });
+  it("marks a mixed score as mixed in the ranking", async () => {
+    stubJson({ total_countries: 2, bands: {}, countries: [SWEDEN_OK, CHILE_MIXED] });
 
     const { container } = render();
     await waitFor(() => expect(topNames(container).length).toBeGreaterThan(0), { timeout: 3000 });
 
-    expect(scopeLines(container)[0]).toContain("mixed or unlabelled sources: N = 2 countries");
-    expect(statValue(container, "avg ESG")).toBe("72");
+    const chile = topRows(container).find((t) => t.includes("Chile")) ?? "";
+    expect(chile).toContain("(mixed)");
+    const sweden = topRows(container).find((t) => t.includes("Sweden")) ?? "";
+    expect(sweden).not.toContain("(mixed)");
+  });
+
+  it("with no scored country, shows no average and does not print NaN or null", async () => {
+    stubJson({ total_countries: 1, bands: {}, countries: [ICELAND_INCOMPLETE] });
+
+    const { container } = render();
+    await waitFor(() => expect(container.textContent ?? "").toContain("no complete score"), { timeout: 3000 });
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("no complete score: N = 0 of 1 countries");
+    expect(text).not.toMatch(/NaN|null|undefined/);
+    expect(topNames(container)).toEqual([]);
+  });
+
+  it("shows unavailable on a failed request, not an incomplete score", async () => {
+    stubStatus(500, "upstream said no");
+
+    const { container } = render();
+    await waitFor(() => expect(container.textContent ?? "").toContain("unavailable"), { timeout: 3000 });
+
+    expect(container.textContent ?? "").not.toContain("incomplete");
+  });
+
+  it("shows unavailable on a transport error too", async () => {
+    stubTransportError();
+
+    const { container } = render();
+    await waitFor(() => expect(container.textContent ?? "").toContain("unavailable"), { timeout: 3000 });
   });
 });

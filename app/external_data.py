@@ -173,6 +173,13 @@ def _is_cache_valid(country: str) -> bool:
     return datetime.now() - ts < CACHE_TTL
 
 
+def live_entry_fetched_at(country: str) -> Optional[datetime]:
+    """When the live-cache entry for `country` was stored, or None if there is no valid entry."""
+    if not _is_cache_valid(country):
+        return None
+    return _cache_timestamps.get(country)
+
+
 def invalidate_cache(country: Optional[str] = None) -> None:
     """Invalidate live cache for one country or all."""
     if country:

@@ -1,32 +1,74 @@
+"""Map ESG scores: one score per country, computed from the inputs it actually used.
+
+Contract (Council decision C8):
+
+- Five inputs are required by the formula: renewable_share, co2_per_capita,
+  gini_index, gov_effectiveness and hdi.
+- An input qualifies when it is a measured live value (World Bank or OECD, in a
+  fresh live-cache entry), or a static reference value from BENCHMARKS whose
+  source and period are stated (SOURCES or SOURCE_EXCEPTIONS). Anything else is
+  missing: absent, not a finite number, a default constant, or a benchmark with
+  no stated source. No default is ever substituted for a missing input.
+- esg_status is "ok" when all five qualify as measured, "mixed" when all five
+  qualify and some are static references, and "incomplete" otherwise. An
+  incomplete country has esg null and names its missing_inputs.
+- The COUNTRIES profile is a hand-entered reference. It is returned as
+  reference_profile and never produces a score.
+- /map/countries and /map/countries/{code} both build each country through
+  _country_item, so the same code gives the same score, status, inputs and version.
+"""
 from fastapi import APIRouter, HTTPException
-from typing import List, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+import logging
 import math
+
+from app.country_benchmarks import SOURCES, SOURCE_EXCEPTIONS
+from app.external_data import get_merged_country_data, live_entry_fetched_at
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["map"])
 
-# What `esg_source` says about where a country's score came from. Served as
-# `esg_source_meanings` by /map/countries, so a client can read the tokens
-# without this file.
-ESG_SOURCE_LIVE = "world_bank_live"      # fresh live-cache entry
-ESG_SOURCE_STATIC = "static_benchmark"   # cache empty or stale: BENCHMARKS
-ESG_SOURCE_HARDCODED = "hardcoded"       # no external data: COUNTRIES profile
-ESG_SOURCE_MEANINGS = {
-    ESG_SOURCE_LIVE: "Score computed from a fresh live-cache entry (under 24h old). "
-                     "Its hdi, co2 and gov_effectiveness inputs come from BENCHMARKS.",
-    ESG_SOURCE_STATIC: "Live cache empty or stale. Score computed from the static BENCHMARKS row "
-                       "in app/country_benchmarks.py.",
-    ESG_SOURCE_HARDCODED: "No external data for this country. Score is the hand-entered COUNTRIES "
-                          "profile in app/api/map_data.py.",
-}
+METHODOLOGY_VERSION = "map-esg-v2"
+
+# The inputs the formula reads. A score exists only when every one of them qualifies.
+REQUIRED_INPUTS: Tuple[str, ...] = (
+    "renewable_share",
+    "co2_per_capita",
+    "gini_index",
+    "gov_effectiveness",
+    "hdi",
+)
 
 # The source tags app/external_data.py writes per indicator that are measurements.
-# "benchmark" and "global_avg" are static figures, not measurements.
+# "benchmark" and "global_avg" are static figures or defaults, never measurements.
 LIVE_INDICATOR_SOURCES = frozenset({"world_bank", "oecd"})
 
+SCORE_OK = "ok"
+SCORE_MIXED = "mixed"
+SCORE_INCOMPLETE = "incomplete"
+ESG_STATUS_MEANINGS = {
+    SCORE_OK: "All five inputs are measured (World Bank or OECD) in a fresh live-cache entry.",
+    SCORE_MIXED: "All five inputs are valid. Some are static reference values from BENCHMARKS, "
+                 "each with a stated source and period. Same formula as ok.",
+    SCORE_INCOMPLETE: "At least one input is missing, invalid, or has no stated source. "
+                      "No score is given; missing_inputs names them.",
+}
 
-def _unmeasured() -> Dict[str, Any]:
-    """Physical fields when no live measurement exists: null, never derived."""
-    return {"co2_intensity_t_per_capita": None, "renewable_share_pct": None}
+# What `esg_source` says about where a score's inputs came from. Null when there is no score.
+ESG_SOURCE_LIVE = "world_bank_live"
+ESG_SOURCE_MIXED = "mixed"
+ESG_SOURCE_MEANINGS = {
+    ESG_SOURCE_LIVE: "Every input is a measured value from a fresh live-cache entry (under 24h old).",
+    ESG_SOURCE_MIXED: "Some inputs are static reference values from the BENCHMARKS table. Each "
+                      "carries its stated source and period under inputs.",
+}
+
+REFERENCE_NOTE = ("Hand-entered COUNTRIES profile. Not a measurement, and not used to compute "
+                  "esg, esg_status or any input.")
+
+# Map name -> the name BENCHMARKS and the live cache use.
+_NAME_MAP = {"United States": "USA", "United Kingdom": "UK", "South Korea": "Korea", "Czech Republic": "Czechia"}
 
 # 32 country profiles (lat, lon, base ESG profile)
 # Coords are country centroids; scores derived deterministically
@@ -66,7 +108,9 @@ COUNTRIES: List[Dict[str, Any]] = [
     {"code":"RUS","name":"Russia","lat":55.75,"lon":37.62,"esg":58},
 ]
 
-def _band(esg: int) -> str:
+
+def _band(esg: Optional[float]) -> Optional[str]:
+    if esg is None: return None
     if esg >= 80: return "leader"
     if esg >= 70: return "advanced"
     if esg >= 60: return "developing"
@@ -74,85 +118,180 @@ def _band(esg: int) -> str:
     return "lagging"
 
 
-_NAME_MAP={"United States":"USA","United Kingdom":"UK","South Korea":"Korea","Czech Republic":"Czechia"}
-def _measured(ind: Dict[str, Any], sources: Dict[str, str], key: str):
-    """The value of one indicator, only if the live cache says a live source published it."""
-    if sources.get(key) in LIVE_INDICATOR_SOURCES:
-        return ind.get(key)
+def _finite(value: Any) -> Optional[float]:
+    """The value as a float when it is a finite real number; None for anything else.
+
+    Booleans are refused: True is an int in Python and would otherwise score as 1.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def _text(value: Any) -> Optional[str]:
+    return None if value is None else str(value)
+
+
+def _static_provenance(country: str, key: str) -> Optional[Dict[str, Any]]:
+    """The source and period stated for a BENCHMARKS value, or None when none is stated."""
+    exception = SOURCE_EXCEPTIONS.get((country, key))
+    if exception is not None:
+        return {"source": exception["source"], "series": exception.get("series"),
+                "period": _text(exception.get("year"))}
+    record = SOURCES.get(key) or {}
+    if not record.get("source"):
+        return None
+    period = record.get("year")
+    if period is None:
+        period = record.get("years")
+    if period is None:
+        return None
+    return {"source": record["source"], "series": record.get("series"), "period": _text(period)}
+
+
+def _resolve(country: str, key: str, d: Dict[str, Any], ind: Dict[str, Any],
+             sources: Dict[str, str], periods: Dict[str, Any],
+             fetched_at: Optional[str]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """One required input: (provenance, None) when it qualifies, (None, reason) when it does not."""
+    if key in ind and sources.get(key) in LIVE_INDICATOR_SOURCES:
+        value = _finite(ind[key])
+        if value is None:
+            return None, "live value is not a finite number"
+        return {"value": value, "source": sources[key], "period": _text(periods.get(key)),
+                "fetched_at": fetched_at, "kind": "measured"}, None
+
+    raw = d.get(key)
+    if raw is None:
+        if key in ind:
+            return None, f"live cache holds a '{sources.get(key)}' value, which is not a measurement"
+        return None, "no measured value and no BENCHMARKS value"
+    value = _finite(raw)
+    if value is None:
+        return None, "BENCHMARKS value is not a finite number"
+    provenance = _static_provenance(country, key)
+    if provenance is None:
+        return None, "BENCHMARKS value has no stated source and period"
+    return {"value": value, "source": provenance["source"], "period": provenance["period"],
+            "fetched_at": None, "kind": "static"}, None
+
+
+def _measured_value(ind: Dict[str, Any], sources: Dict[str, str], key: str) -> Optional[float]:
+    """A live measurement for display, whatever the score's status. Never a static value."""
+    if key in ind and sources.get(key) in LIVE_INDICATOR_SOURCES:
+        return _finite(ind[key])
     return None
 
 
-def _live_esg(name: str, fallback: int) -> Tuple[int, Dict[str, Any], str]:
-    """Score one country. Returns (score, extra, esg_source).
+def _formula(inputs: Dict[str, Dict[str, Any]]) -> Tuple[int, Dict[str, int]]:
+    renew = inputs["renewable_share"]["value"]
+    co2 = inputs["co2_per_capita"]["value"]
+    gini = inputs["gini_index"]["value"]
+    gov = inputs["gov_effectiveness"]["value"]
+    hdi = inputs["hdi"]["value"]
+    e = 0.6 * min(renew, 100) + 0.4 * max(0, (16 - co2) / 16 * 100)
+    soc = 0.7 * hdi * 100 + 0.3 * max(0, (60 - gini) / 40 * 100)
+    g = (gov + 2.5) / 5 * 100
+    total = round(0.4 * e + 0.35 * soc + 0.25 * g)
+    return total, {"E": round(e), "S": round(soc), "G": round(g)}
 
-    esg_source says where the score's inputs came from:
-      ESG_SOURCE_LIVE       the live cache held a fresh entry for the country
-      ESG_SOURCE_STATIC     the cache was empty or stale: BENCHMARKS supplied the inputs
-      ESG_SOURCE_HARDCODED  no external data: the COUNTRIES profile score is returned
 
-    `extra` always carries renewable_share_pct and co2_intensity_t_per_capita. Each
-    is the measured value when a live source published it, otherwise None. Neither
-    is ever derived from the score.
+def score_country(name: str) -> Dict[str, Any]:
+    """Score one country from the inputs it actually has. The only scoring function.
+
+    Returns esg (int, or None when incomplete), esg_status, esg_source, the inputs
+    that qualified with their provenance, missing_inputs with a reason for each,
+    the pillar breakdown, the measured physical fields, and methodology_version.
     """
-    name=_NAME_MAP.get(name,name)
+    lookup = _NAME_MAP.get(name, name)
+    failure: Optional[str] = None
     try:
-        from app.external_data import get_merged_country_data
-        d = get_merged_country_data(name)
-        if not d:
-            return fallback, _unmeasured(), ESG_SOURCE_HARDCODED
-        live = d.get("live", {}) or {}
-        ind = live.get("indicators", {}) or {}
-        sources = live.get("indicator_sources", {}) or {}
-        # Score inputs. Where the cache has no value these fall back to BENCHMARKS
-        # and then to defaults, exactly as before; the reported physical fields below
-        # do not use those fallbacks.
-        co2 = ind.get("co2_per_capita", d.get("co2_per_capita", 5.0))
-        renew = ind.get("renewable_share", d.get("renewable_share", 20.0))
-        gini = ind.get("gini_index", d.get("gini_index", 35.0))
-        # gov_effectiveness can be None (e.g., Finland); the fallback chain uses 0.0
-        gov = ind.get("gov_effectiveness")
-        if gov is None:
-            gov = d.get("gov_effectiveness")
-        if gov is None:
-            gov = 0.0
-        hdi = d.get("hdi", 0.7)
-        e = 0.6*min(renew,100) + 0.4*max(0,(16-co2)/16*100)
-        soc = 0.7*hdi*100 + 0.3*max(0,(60-gini)/40*100)
-        g = (gov+2.5)/5*100
-        total = round(0.4*e + 0.35*soc + 0.25*g)
-        m_renew = _measured(ind, sources, "renewable_share")
-        m_co2 = _measured(ind, sources, "co2_per_capita")
-        extra = {
-            "co2_intensity_t_per_capita": round(m_co2, 1) if m_co2 is not None else None,
-            "renewable_share_pct": round(m_renew, 1) if m_renew is not None else None,
-            "hdi": round(hdi,3),
-            "gini_index": round(gini,1),
-            "gov_effectiveness": round(gov,2),
-            "esg_breakdown": {"E": round(e), "S": round(soc), "G": round(g)},
-        }
-        source = ESG_SOURCE_LIVE if live else ESG_SOURCE_STATIC
-        return total, extra, source
+        d = get_merged_country_data(lookup) or {}
+        stamp = live_entry_fetched_at(lookup)
     except Exception:
-        return fallback, _unmeasured(), ESG_SOURCE_HARDCODED
+        logger.exception("map score: country data lookup failed for %s", name)
+        d, stamp, failure = {}, None, "country data lookup failed"
+
+    live = d.get("live") or {}
+    ind = live.get("indicators") or {}
+    sources = live.get("indicator_sources") or {}
+    periods = live.get("indicator_periods") or {}
+    fetched_at = stamp.isoformat() if stamp is not None else None
+
+    inputs: Dict[str, Dict[str, Any]] = {}
+    missing: List[str] = []
+    notes: Dict[str, str] = {}
+    for key in REQUIRED_INPUTS:
+        if failure is not None:
+            qualified, reason = None, failure
+        else:
+            qualified, reason = _resolve(lookup, key, d, ind, sources, periods, fetched_at)
+        if qualified is None:
+            missing.append(key)
+            notes[key] = reason or "missing"
+        else:
+            inputs[key] = qualified
+
+    esg: Optional[int] = None
+    breakdown: Optional[Dict[str, int]] = None
+    status = SCORE_INCOMPLETE
+    source: Optional[str] = None
+    if not missing:
+        kinds = {item["kind"] for item in inputs.values()}
+        status = SCORE_OK if kinds == {"measured"} else SCORE_MIXED
+        source = ESG_SOURCE_LIVE if status == SCORE_OK else ESG_SOURCE_MIXED
+        esg, breakdown = _formula(inputs)
+
+    def _input(key: str) -> Optional[float]:
+        return inputs[key]["value"] if key in inputs else None
+
+    renew_m = _measured_value(ind, sources, "renewable_share")
+    co2_m = _measured_value(ind, sources, "co2_per_capita")
+    hdi, gini, gov = _input("hdi"), _input("gini_index"), _input("gov_effectiveness")
+    return {
+        "esg": esg,
+        "esg_status": status,
+        "esg_source": source,
+        "missing_inputs": missing,
+        "input_notes": notes,
+        "inputs": inputs,
+        "esg_breakdown": breakdown,
+        "hdi": round(hdi, 3) if hdi is not None else None,
+        "gini_index": round(gini, 1) if gini is not None else None,
+        "gov_effectiveness": round(gov, 2) if gov is not None else None,
+        "renewable_share_pct": round(renew_m, 1) if renew_m is not None else None,
+        "co2_intensity_t_per_capita": round(co2_m, 1) if co2_m is not None else None,
+        "methodology_version": METHODOLOGY_VERSION,
+    }
+
+
+def _country_item(c: Dict[str, Any]) -> Dict[str, Any]:
+    """One country as both routes serve it. The only place a country's response is built."""
+    scored = score_country(c["name"])
+    item = {k: v for k, v in c.items() if k != "esg"}
+    item.update(scored)
+    item["band"] = _band(scored["esg"])
+    item["reference_profile"] = {"esg": c["esg"], "note": REFERENCE_NOTE}
+    return item
 
 
 @router.get("/map/countries")
 def map_countries():
-    """Every country's score, with `esg_source` naming where it came from.
+    """Every country's score, with its status, provenance and the inputs it is missing.
 
-    `esg_source` is one of the tokens in `esg_source_meanings`. The physical fields
-    `renewable_share_pct` and `co2_intensity_t_per_capita` are measured values or
-    null; nothing in this response is derived from the ESG score.
+    `esg` is null for an incomplete country: it is never 0. `esg_status` is ok, mixed or
+    incomplete. `inputs` gives each qualifying input's value, source, period and fetch
+    time (null when unknown). Nothing in this response is a default or a derived value.
     """
-    items = []
-    for c in COUNTRIES:
-        score, extra, src = _live_esg(c["name"], c["esg"])
-        item = {**c, "esg": score, "esg_source": src, "band": _band(score)}
-        item.update(extra)
-        items.append(item)
-    items.sort(key=lambda x: -x["esg"])
+    items = [_country_item(c) for c in COUNTRIES]
+    items.sort(key=lambda x: (x["esg"] is None, -(x["esg"] or 0), x["name"]))
+    counts = {SCORE_OK: 0, SCORE_MIXED: 0, SCORE_INCOMPLETE: 0}
+    for item in items:
+        counts[item["esg_status"]] += 1
     return {
         "total_countries": len(items),
+        "scored_countries": counts[SCORE_OK] + counts[SCORE_MIXED],
+        "status_counts": counts,
         "bands": {
             "leader": "ESG >= 80",
             "advanced": "70-79",
@@ -160,28 +299,18 @@ def map_countries():
             "emerging": "50-59",
             "lagging": "< 50",
         },
+        "esg_status_meanings": ESG_STATUS_MEANINGS,
         "esg_source_meanings": ESG_SOURCE_MEANINGS,
+        "methodology_version": METHODOLOGY_VERSION,
         "countries": items,
     }
 
+
 @router.get("/map/countries/{code}")
 def country_detail(code: str):
-    """One country's reference profile.
-
-    Its `esg` is the hand-entered COUNTRIES score (esg_source "hardcoded"), which can
-    differ from the score /map/countries computes for the same country from live or
-    benchmark data. The physical fields and the two ESG-derived fields are null:
-    nothing measures them, and they were formulas of the score.
-    """
+    """One country, built by the same function as /map/countries, so the two agree."""
     code = code.upper()
     for c in COUNTRIES:
         if c["code"] == code:
-            return {
-                **c,
-                "esg_source": ESG_SOURCE_HARDCODED,
-                "band": _band(c["esg"]),
-                **_unmeasured(),
-                "csrd_alignment": None,
-                "audit_ready_share_pct": None,
-            }
+            return {**_country_item(c), "csrd_alignment": None, "audit_ready_share_pct": None}
     raise HTTPException(status_code=404, detail=f"Country {code} not found")

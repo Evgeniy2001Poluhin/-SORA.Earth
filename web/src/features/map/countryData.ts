@@ -1,27 +1,23 @@
 /**
- * Provenance rules for the global ESG map (F070-F073).
+ * Rules for the global ESG map (Council decision C8).
  *
- * `/api/v1/map/countries` tags each country with `esg_source`, and sends
- * `esg_source_meanings` describing each token.
- * `world_bank_live`: a fresh live-cache entry.
- * `static_benchmark`: the BENCHMARKS row, when the live cache is empty or stale.
- * `hardcoded`: the COUNTRIES profile, when there is no external data.
- * The two static kinds are classified alike; see STATIC_SOURCES.
+ * `/api/v1/map/countries` gives each country one score, or none:
  *
- * Two rules follow, and the page depends on both:
+ * - `esg_status` "ok": every input is measured live. The score is shown.
+ * - `esg_status` "mixed": every input is valid, some from the static reference
+ *   table with a stated source. The score is shown, labelled mixed.
+ * - `esg_status` "incomplete": an input is missing or invalid. `esg` is null,
+ *   and `missing_inputs` names what is absent.
  *
- * 1. Renewables and CO2 per capita are shown as measured only when the source is
- *    the live one. For a static profile the backend fills both from its ESG score
- *    with formulas, so those numbers are not measurements. Anything not known to
- *    be live renders as "no data".
+ * Rules the page depends on:
  *
- * 2. Leaders, top-N and averages are computed over one kind of source, and the
- *    page states which kind and how many countries it used. A static profile is
- *    not ranked against a live score as if they were the same kind of number.
- *
- * The `world_bank_live` token is taken at face value. The backend now sends it only
- * for a fresh live-cache entry, but an older backend also labelled benchmark-only
- * scores with it, and this page cannot tell the two apart.
+ * 1. A null score is never 0. It is drawn neutral, labelled incomplete, and
+ *    left out of every ranking, leader count, top-N and average.
+ * 2. Averages and leaders are over scored countries only, and the page states
+ *    N as "N = x of y countries".
+ * 3. Renewables and CO2 per capita are measured values or null. The backend
+ *    sends a number only when a live source measured it.
+ * 4. An API error is shown as "unavailable", which is not the same as incomplete.
  */
 
 export interface MapCountry {
@@ -29,9 +25,12 @@ export interface MapCountry {
   name: string;
   lat: number;
   lon: number;
-  esg: number;
-  band: string;
+  /** The score, or null when the country is incomplete. Never 0 for "no score". */
+  esg: number | null;
+  band: string | null;
+  esg_status?: string | null;
   esg_source?: string | null;
+  missing_inputs?: string[] | null;
   co2_intensity_t_per_capita?: number | null;
   renewable_share_pct?: number | null;
 }
@@ -44,21 +43,34 @@ export const BAND_COLOR: Record<string, string> = {
   lagging:    "#dc2626",
 };
 
-/** A score from a fresh live-cache entry. */
-export const LIVE_SOURCE = "world_bank_live";
+/** Drawn for a country with no score: not a band, and not a 0. */
+export const NEUTRAL_COLOR = "#9ca3af";
 
-/** Both static kinds: the score comes from a table in the source tree, not from
- *  live data. `static_benchmark` is the BENCHMARKS row used when the live cache is
- *  empty or stale; `hardcoded` is the COUNTRIES profile used with no external data.
- *  Before the backend split them, the first was labelled live. */
-export const STATIC_SOURCES: ReadonlySet<string> = new Set(["hardcoded", "static_benchmark"]);
+/** The three statuses the backend sends. */
+export type ScoreStatus = "ok" | "mixed" | "incomplete";
 
-export type SourceKind = "live" | "static" | "unknown";
+/** Human names for the inputs, so the page does not print field names. */
+export const INPUT_LABELS: Record<string, string> = {
+  renewable_share: "renewables share",
+  co2_per_capita: "CO2 per capita",
+  gini_index: "Gini index",
+  gov_effectiveness: "government effectiveness",
+  hdi: "human development index",
+};
 
-export function sourceKindOf(source: string | null | undefined): SourceKind {
-  if (source === LIVE_SOURCE) return "live";
-  if (source != null && STATIC_SOURCES.has(source)) return "static";
-  return "unknown";
+/** The score as a number, or null when there is none. Zero is a real score. */
+export function scoreOf(c: MapCountry): number | null {
+  return typeof c.esg === "number" && Number.isFinite(c.esg) ? c.esg : null;
+}
+
+export type ScoreKind = ScoreStatus | "unlabelled";
+
+/** ok, mixed, incomplete, or unlabelled (a score with no status, from an older backend).
+ *  A null score is always incomplete, whatever its status field says. */
+export function statusOf(c: MapCountry): ScoreKind {
+  if (scoreOf(c) === null) return "incomplete";
+  if (c.esg_status === "ok" || c.esg_status === "mixed") return c.esg_status;
+  return "unlabelled";
 }
 
 /** The text the country tooltip shows after "source:": the backend's meaning for
@@ -83,12 +95,9 @@ export interface MeasuredPhysical {
 const finiteOrNull = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : null;
 
-/** Renewables and CO2 per capita, only when they come from the live source.
- *  Everything else is null, which the page renders as "no data". */
+/** Renewables and CO2 per capita as the backend measured them. Anything not a
+ *  finite number is "no data". */
 export function measuredPhysicalOf(c: MapCountry): MeasuredPhysical {
-  if (sourceKindOf(c.esg_source) !== "live") {
-    return { renewable_share_pct: null, co2_intensity_t_per_capita: null };
-  }
   return {
     renewable_share_pct: finiteOrNull(c.renewable_share_pct),
     co2_intensity_t_per_capita: finiteOrNull(c.co2_intensity_t_per_capita),
@@ -96,47 +105,58 @@ export function measuredPhysicalOf(c: MapCountry): MeasuredPhysical {
 }
 
 export interface AggregateScope {
-  /** The countries the leaders, top-N and average are computed over. */
+  /** The scored countries: the only ones leaders, top-N and averages may use. */
   included: MapCountry[];
   /** Every country in the payload. */
   total: number;
-  /** Names the kind of source used and the number of countries. */
+  /** Countries with no score, excluded from everything above. */
+  incomplete: number;
+  /** Names N, and the statuses it counts. */
   label: string;
 }
 
 /** Which countries the aggregates may use, and how to say so.
  *
- *  - Any country whose source is missing or unrecognised: the kinds cannot be
- *    told apart, so every country is used and the label says "mixed".
- *  - Otherwise, if any country is live: only the live ones are used.
- *  - Otherwise every country is static, and the label says so. */
+ *  Incomplete countries are always excluded. The label gives N as "N = x of y
+ *  countries", with the ok and mixed split, so the reader can see what the
+ *  average is over. */
 export function aggregateScopeOf(countries: MapCountry[]): AggregateScope {
   const total = countries.length;
-  if (total === 0) return { included: [], total, label: "no countries" };
+  const included = countries.filter((c) => scoreOf(c) !== null);
+  const incomplete = total - included.length;
 
-  const kinds = countries.map((c) => sourceKindOf(c.esg_source));
-  if (kinds.includes("unknown")) {
-    return {
-      included: countries,
-      total,
-      label: `mixed or unlabelled sources: N = ${total} countries`,
-    };
+  if (total === 0) return { included, total, incomplete: 0, label: "no countries" };
+  if (included.length === 0) {
+    return { included, total, incomplete, label: `no complete score: N = 0 of ${total} countries` };
   }
 
-  const live = countries.filter((c) => sourceKindOf(c.esg_source) === "live");
-  if (live.length > 0) {
-    const n = live.length === total ? `${total} countries` : `${live.length} of ${total} countries`;
-    return { included: live, total, label: `live source only (${LIVE_SOURCE}): N = ${n}` };
-  }
+  const count = (kind: ScoreKind) => included.filter((c) => statusOf(c) === kind).length;
+  const split = [`${count("ok")} ok`, `${count("mixed")} mixed`];
+  const unlabelled = count("unlabelled");
+  if (unlabelled > 0) split.push(`${unlabelled} unlabelled`);
+  const excluded = incomplete > 0 ? `; ${incomplete} incomplete, excluded` : "";
 
   return {
-    included: countries,
+    included,
     total,
-    label: `static reference values only: N = ${total} countries`,
+    incomplete,
+    label: `N = ${included.length} of ${total} countries (${split.join(", ")})${excluded}`,
   };
 }
 
-/** Highest ESG first. Returns a new array; the input is not reordered. */
+/** The mean of the scores. Null countries are not averaged as 0: they are left out.
+ *  Null when no country has a score, so the page shows no average rather than NaN. */
+export function meanScore(countries: MapCountry[]): number | null {
+  const scores = countries
+    .map(scoreOf)
+    .filter((s): s is number => s !== null);
+  if (scores.length === 0) return null;
+  return Math.round(scores.reduce((sum, s) => sum + s, 0) / scores.length);
+}
+
+/** Scored countries, highest first. Incomplete countries are not ranked.
+ *  Returns a new array; the input is not reordered. */
 export function byEsgDesc(countries: MapCountry[]): MapCountry[] {
-  return [...countries].sort((a, b) => b.esg - a.esg);
+  const scored = countries.filter((c): c is MapCountry & { esg: number } => scoreOf(c) !== null);
+  return scored.sort((a, b) => b.esg - a.esg);
 }

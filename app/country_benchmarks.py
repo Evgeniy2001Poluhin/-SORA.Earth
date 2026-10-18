@@ -53,6 +53,12 @@ SOURCES = {
     },
 }
 
+# Source and period stated for one country where SOURCES does not cover it. The
+# gini_index note above says Finland's value is World Bank SI.POV.GINI, 2023.
+SOURCE_EXCEPTIONS = {
+    ("Finland", "gini_index"): {"source": "World Bank", "series": "SI.POV.GINI", "year": 2023},
+}
+
 BENCHMARKS = {
     "Germany":      {"co2_per_capita": 6.9,  "renewable_share": 46.3, "esg_rank": 8,  "hdi": 0.95, "gdp_per_capita": 56104,  "gini_index": 31.7, "gov_effectiveness": 1.54},
     "France":       {"co2_per_capita": 4.0,  "renewable_share": 44.2, "esg_rank": 12, "hdi": 0.91, "gdp_per_capita": 46103,  "gini_index": 31.6, "gov_effectiveness": 1.36},

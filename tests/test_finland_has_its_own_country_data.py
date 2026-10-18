@@ -159,37 +159,32 @@ def test_evaluate_endpoint_for_finland_returns_null_esg_rank(client):
 
 def test_map_route_handles_null_gov_effectiveness():
     """
-    _live_esg handles None for gov_effectiveness by falling back to 0.0.
+    Finland has no gov_effectiveness. C8: that is missing, never a default 0.0.
 
-    The function reads gov_effectiveness from indicators, then from d, then defaults to 0.0.
-    This test calls _live_esg with a data dict where d["gov_effectiveness"] = None
-    (as it is for Finland in the benchmark), and verifies it doesn't crash and uses 0.0.
+    The map score for Finland is therefore null and incomplete, and gov_effectiveness
+    is named in missing_inputs. Finland's gini is World Bank 2023 and qualifies.
     """
-    from app.api.map_data import _live_esg
+    from app.api.map_data import score_country
     from unittest.mock import patch
     from app.country_benchmarks import BENCHMARKS
 
     finland_data = BENCHMARKS["Finland"].copy()
     finland_data["live"] = {
-        "indicators": {}  # Empty indicators, so it falls back to d["gov_effectiveness"]
+        "indicators": {}  # Empty indicators, so the score reads BENCHMARKS only
     }
 
-    with patch("app.external_data.get_merged_country_data") as mock_get:
+    with patch("app.api.map_data.get_merged_country_data") as mock_get:
         mock_get.return_value = finland_data
-        
-        # Call _live_esg for Finland
-        total_score, extra, source = _live_esg("Finland", 87)  # 87 is Finland's hardcoded esg in COUNTRIES
-        
-        # Should not crash
-        assert isinstance(total_score, (int, float))
-        assert isinstance(extra, dict)
-        
-        # extra should contain gov_effectiveness rounded to 2 decimals
-        # When None falls back to 0.0, round(0.0, 2) = 0.0
-        assert "gov_effectiveness" in extra
-        assert extra["gov_effectiveness"] == 0.0, (
-            f"Expected gov_effectiveness=0.0 (fallback from None), got {extra['gov_effectiveness']}"
-        )
+
+        result = score_country("Finland")
+
+        assert result["esg"] is None
+        assert result["esg_status"] == "incomplete"
+        assert result["gov_effectiveness"] is None
+        assert "gov_effectiveness" in result["missing_inputs"]
+        assert "gov_effectiveness" not in result["inputs"]
+        assert result["inputs"]["gini_index"]["source"] == "World Bank"
+        assert result["inputs"]["gini_index"]["period"] == "2023"
 
 
 def test_investor_dashboard_benchmark_display_handles_null():

@@ -76,66 +76,90 @@ def test_unmeasured_physical_fields_are_null_not_derived(cache):
     for c in body["countries"]:
         assert c["renewable_share_pct"] is None, f"{c['code']} renewables {c['renewable_share_pct']}"
         assert c["co2_intensity_t_per_capita"] is None, f"{c['code']} co2 {c['co2_intensity_t_per_capita']}"
-        # The old formulas, at this country's own score, are absent.
-        assert c["renewable_share_pct"] != min(round(c["esg"] * 0.95, 1), 95.0), c["code"]
-        assert c["co2_intensity_t_per_capita"] != round(20.0 - c["esg"] * 0.18, 2), c["code"]
+        # The old formulas, at this country's own score, are absent. With no score
+        # (C8: incomplete) there is no score to derive from, so the check is vacuous there.
+        if c["esg"] is not None:
+            assert c["renewable_share_pct"] != min(round(c["esg"] * 0.95, 1), 95.0), c["code"]
+            assert c["co2_intensity_t_per_capita"] != round(20.0 - c["esg"] * 0.18, 2), c["code"]
 
     rows = {c["code"]: c for c in body["countries"]}
-    assert rows["ISL"]["esg_source"] == "hardcoded"
+    # ISL has no BENCHMARKS row. C8: no input qualifies, so there is no score and no source.
+    assert rows["ISL"]["esg_status"] == "incomplete"
+    assert rows["ISL"]["esg"] is None
+    assert rows["ISL"]["esg_source"] is None
 
 
 def test_country_detail_sends_no_derived_values():
     """The detail route sent the same two formulas, plus two more derived from the score."""
     row = _client().get("/map/countries/ISL").json()
 
-    assert row["esg_source"] == "hardcoded"
+    # C8: the COUNTRIES profile never produces a score; it is a separate reference field.
+    assert row["esg"] is None
+    assert row["esg_status"] == "incomplete"
+    assert row["esg_source"] is None
+    assert row["reference_profile"]["esg"] == 86  # ISL's hand-entered COUNTRIES value, unscored
     assert row["renewable_share_pct"] is None
     assert row["co2_intensity_t_per_capita"] is None
     assert row["csrd_alignment"] is None
     assert row["audit_ready_share_pct"] is None
 
 
-def test_benchmark_fallback_is_labelled_static_when_cache_is_empty_or_stale(cache):
-    """BENCHMARKS supplied the score, so the label is static, not live."""
-    from app.api.map_data import _live_esg
+def test_benchmark_fallback_is_not_labelled_live_when_cache_is_empty_or_stale(cache):
+    """BENCHMARKS never reads as live. C8: gini and gov have no stated source, so DEU is incomplete."""
+    from app.api.map_data import score_country
 
     client = _client()
 
-    # Cache empty.
-    assert _countries(client)["DEU"]["esg_source"] == "static_benchmark"
-    score, extra, src = _live_esg("Germany", 71)
-    assert src == "static_benchmark"
-    assert extra["renewable_share_pct"] is None
+    # Cache empty: renewables and hdi are static with a stated source; gini and gov are not.
+    row = _countries(client)["DEU"]
+    assert row["esg_source"] is None
+    assert row["esg_status"] == "incomplete"
+    assert row["esg"] is None
+    assert row["renewable_share_pct"] is None
+    assert "gini_index" in row["missing_inputs"] and "gov_effectiveness" in row["missing_inputs"]
+    assert row["inputs"]["renewable_share"]["kind"] == "static"
+    assert row["inputs"]["renewable_share"]["source"] == "World Bank"
+    assert row["inputs"]["renewable_share"]["fetched_at"] is None
+    assert score_country("Germany")["esg"] is None
 
-    # Cache stale: 48 hours old against a 24-hour TTL.
+    # Cache stale: 48 hours old against a 24-hour TTL. Identical to empty.
     _put_live(cache, "Germany", age_hours=48,
               indicators={"renewable_share": 45.0},
               sources={"renewable_share": "world_bank"})
-    row = _countries(client)["DEU"]
-    assert row["esg_source"] == "static_benchmark"
-    assert row["renewable_share_pct"] is None
+    stale = _countries(client)["DEU"]
+    assert stale["esg_status"] == "incomplete"
+    assert stale["renewable_share_pct"] is None
+    assert stale["inputs"]["renewable_share"]["kind"] == "static"
 
 
-def test_fresh_live_cache_is_labelled_live(cache):
-    """A fresh entry is live. Its measured renewables are reported; benchmark CO2 is not."""
+def test_fresh_live_cache_is_measured_where_it_measures(cache):
+    """A fresh entry reports its measured renewables. Benchmark CO2 is never reported as measured.
+
+    C8: gov_effectiveness is benchmark-only, so DEU stays incomplete, but its renewables
+    are still a measurement and are shown as one.
+    """
     _put_live(cache, "Germany", age_hours=0,
               indicators={"renewable_share": 45.0, "co2_per_capita": 6.9},
               sources={"renewable_share": "world_bank", "co2_per_capita": "benchmark"})
 
     row = _countries(_client())["DEU"]
 
-    assert row["esg_source"] == "world_bank_live"
+    assert row["esg_status"] == "incomplete"
+    assert row["esg_source"] is None
     assert row["renewable_share_pct"] == 45.0
     assert row["co2_intensity_t_per_capita"] is None
+    assert row["inputs"]["renewable_share"]["source"] == "world_bank"
+    assert row["inputs"]["renewable_share"]["kind"] == "measured"
+    assert row["inputs"]["renewable_share"]["fetched_at"] is not None
 
 
 def test_esg_source_values_are_described_in_the_response(cache):
     body = _client().get("/map/countries").json()
 
     meanings = body["esg_source_meanings"]
-    assert set(meanings) == {"world_bank_live", "static_benchmark", "hardcoded"}
+    assert set(meanings) == {"world_bank_live", "mixed"}
     assert all(text.strip() for text in meanings.values())
-    assert {c["esg_source"] for c in body["countries"]} <= set(meanings)
+    assert {c["esg_source"] for c in body["countries"] if c["esg_source"] is not None} <= set(meanings)
 
 
 # ---------- /map/russia: sources_used ----------

@@ -10,7 +10,10 @@ import "./map.css";
 import { useState } from "react";
 import RussiaMapModal from "./RussiaMapModal";
 import CountryTooltipBody from "./CountryTooltipBody";
-import { BAND_COLOR, aggregateScopeOf, byEsgDesc, type MapCountry } from "./countryData";
+import {
+  BAND_COLOR, NEUTRAL_COLOR, aggregateScopeOf, byEsgDesc, meanScore, scoreOf, statusOf,
+  type MapCountry,
+} from "./countryData";
 
 type MapData = {
   total_countries: number;
@@ -20,7 +23,8 @@ type MapData = {
   countries: MapCountry[];
 };
 
-const radiusByEsg = (esg: number) => 3 + (esg / 100) * 4;
+/** Radius for a scored country. A country with no score is drawn at the smallest size. */
+const radiusByEsg = (esg: number | null) => (esg === null ? 3 : 3 + (esg / 100) * 4);
 
 export default function MapPage() {
   const [ruOpen, setRuOpen] = useState(false);
@@ -31,20 +35,17 @@ export default function MapPage() {
   });
 
   if (isLoading) return <div className="map-page"><p className="muted">Loading map...</p></div>;
-  if (error)     return <div className="map-page"><p className="err">{(error as Error).message}</p></div>;
+  // A failed request is not an incomplete score: say the data is unavailable.
+  if (error) return <div className="map-page"><p className="err">ESG map unavailable: the country scores could not be loaded.</p></div>;
   // #236: `{}` is truthy, so this passed an empty 200 to
   // `data.countries.filter` and blanked the map.
   if (!data || !Array.isArray(data.countries)) return null;
 
-  // F073: leaders, top-N and average are computed over one kind of source, and
-  // the page says which kind and how many countries that is. See countryData.ts.
+  // Leaders, top-N and averages are over scored countries only. See countryData.ts.
   const scope = aggregateScopeOf(data.countries);
   const ranked = byEsgDesc(scope.included);
   const leaders = scope.included.filter(c => c.band === "leader").length;
-  // Averaging an empty list divides by zero, which prints "NaN" rather than failing.
-  const average = ranked.length > 0
-    ? Math.round(ranked.reduce((s, c) => s + c.esg, 0) / ranked.length)
-    : null;
+  const average = meanScore(scope.included);
 
   return (
     <div className="map-page">
@@ -52,7 +53,7 @@ export default function MapPage() {
         <div>
           <h1>Global ESG Map</h1>
           <p className="muted">
-            {data.total_countries} countries, ESG color-coded, click marker to evaluate
+            N = {scope.included.length} of {scope.total} countries have a score. Click a marker to evaluate.
           </p>
           <p className="map-scope">Leaders, top and average: {scope.label}</p>
         </div>
@@ -64,11 +65,11 @@ export default function MapPage() {
           {ranked.length > 0 && (
             <>
               <div className="stat"><b>{ranked[0].name}</b><em>top: {ranked[0].esg}</em></div>
-              <div className="stat"><b>{average}</b><em>avg ESG</em></div>
+              <div className="stat"><b>{average ?? "—"}</b><em>avg ESG</em></div>
             </>
           )}
         </div>
-              <button onClick={() => setRuOpen(true)}
+        <button onClick={() => setRuOpen(true)}
           style={{ marginTop: 8, padding: "6px 14px", borderRadius: 6,
             background: "#1a1d20", border: "1px solid #2a2e33", color: "var(--text)", cursor: "pointer" }}>
           🇷🇺 Россия — карта регионов
@@ -83,6 +84,11 @@ export default function MapPage() {
             <em>{data.bands[band]}</em>
           </div>
         ))}
+        <div className="legend-item">
+          <span className="dot" style={{ background: NEUTRAL_COLOR }} />
+          <span>incomplete</span>
+          <em>no score: {scope.incomplete}</em>
+        </div>
       </div>
 
       <div className="map-wrap">
@@ -117,28 +123,33 @@ export default function MapPage() {
             noWrap
           />
 
-          {/* Main markers */}
-          {data.countries.map((c) => (
-            <CircleMarker
-              key={c.code}
-              center={[c.lat, c.lon]}
-              radius={radiusByEsg(c.esg)}
-              pathOptions={{
-                color: "#ffffff",
-                fillColor: BAND_COLOR[c.band] || "#888",
-                fillOpacity: 1,
-                weight: 1,
-                opacity: 0.9,
-              }}
-              eventHandlers={{
-                click: () => nav("/evaluate?country=" + encodeURIComponent(c.name)),
-              }}
-            >
-              <Tooltip direction="top" offset={[0, -6]} opacity={1} className="esg-tooltip">
-                <CountryTooltipBody country={c} meanings={data.esg_source_meanings} />
-              </Tooltip>
-            </CircleMarker>
-          ))}
+          {/* Main markers. An incomplete country is neutral and dashed: no band, no 0. */}
+          {data.countries.map((c) => {
+            const score = scoreOf(c);
+            const incomplete = score === null;
+            return (
+              <CircleMarker
+                key={c.code}
+                center={[c.lat, c.lon]}
+                radius={radiusByEsg(score)}
+                pathOptions={{
+                  color: "#ffffff",
+                  fillColor: incomplete ? NEUTRAL_COLOR : (c.band ? BAND_COLOR[c.band] : undefined) || NEUTRAL_COLOR,
+                  fillOpacity: incomplete ? 0.5 : 1,
+                  weight: 1,
+                  opacity: 0.9,
+                  dashArray: incomplete ? "2 3" : undefined,
+                }}
+                eventHandlers={{
+                  click: () => nav("/evaluate?country=" + encodeURIComponent(c.name)),
+                }}
+              >
+                <Tooltip direction="top" offset={[0, -6]} opacity={1} className="esg-tooltip">
+                  <CountryTooltipBody country={c} meanings={data.esg_source_meanings} />
+                </Tooltip>
+              </CircleMarker>
+            );
+          })}
         </MapContainer>
       </div>
 
@@ -150,16 +161,16 @@ export default function MapPage() {
             <li
               key={c.code}
               onClick={() => nav("/evaluate?country=" + encodeURIComponent(c.name))}
-              style={{ borderLeft: `3px solid ${BAND_COLOR[c.band] || "#888"}` }}
+              style={{ borderLeft: `3px solid ${(c.band && BAND_COLOR[c.band]) || NEUTRAL_COLOR}` }}
             >
               <span className="rank">#{i + 1}</span>
               <b>{c.name}</b>
-              <em>{c.esg}</em>
+              <em>{c.esg}{statusOf(c) === "mixed" ? " (mixed)" : ""}</em>
             </li>
           ))}
         </ol>
       </section>
-          <RussiaMapModal open={ruOpen} onClose={() => setRuOpen(false)} />
+      <RussiaMapModal open={ruOpen} onClose={() => setRuOpen(false)} />
     </div>
   );
 }

@@ -341,5 +341,7 @@
    does not read like the live figures above it. */
 .esg-tooltip .tip-source { margin-top: 4px; font-size: 11px; }
 .esg-tooltip .tip-source-static { color: #8d9a94 !important; font-style: italic; }
+.esg-tooltip .tip-status { margin-top: 4px; font-size: 11px; color: #b8c4bf !important; }
+.esg-tooltip .tip-missing { margin-top: 6px; font-size: 11px; color: #b8c4bf !important; }
 /* F073: which kind of source the aggregates use, and how many countries. */
 .map-scope { font-size: 12px; opacity: .7; margin: 4px 0 0; }
