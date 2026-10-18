@@ -4,13 +4,18 @@ Contract (Council decision C8, part 2):
 
 - The formula reads five inputs: renewable_share, co2_per_capita, gini_index,
   gov_effectiveness and hdi. They come only from the pinned table in
-  data/map_inputs (app/map_inputs.py), verified against its manifest.
+  data/map_inputs (app/map_inputs.py), verified against the manifest sha256 pinned
+  in code.
 - An input qualifies when the table holds a value for it, the value is finite and
   inside its scale, the source and release are stated, and its age at the date of
-  use is within the maximum for that input. Anything else is missing, with a reason.
+  use is within the maximum for that input. Anything else is missing, with a
+  machine-readable reason (`input_reasons`: no_observation, too_old, ...).
 - esg_status is "ok" when all five qualify and "incomplete" otherwise. An
   incomplete country has esg null and names its missing_inputs. Coverage never
   decides admissibility: no rule is relaxed to raise the count.
+- Every qualifying input carries its max age and `expires_at`, the first day it is
+  too old. The response carries the snapshot date and the earliest expiry, and says
+  when that expiry is within EXPIRY_NOTICE_DAYS.
 - The live cache does not feed the score. BENCHMARKS and the COUNTRIES profile do
   not feed it either. The COUNTRIES profile is returned as reference_profile only.
 - A missing or unverifiable table means every country is incomplete. No value from
@@ -36,14 +41,15 @@ ESG_STATUS_MEANINGS = {
     SCORE_OK: "All five inputs are in the pinned official table (data/map_inputs), each within its "
               "maximum age at the date of use.",
     SCORE_INCOMPLETE: "At least one input is missing, outside its scale, too old at the date of use, "
-                      "or unsourced. No score is given; missing_inputs names them and input_notes says why.",
+                      "or unsourced. No score is given; missing_inputs names them, input_reasons "
+                      "gives a code for each, and input_notes gives the sentence.",
 }
 
 # What `esg_source` says about where a score's inputs came from. Null when there is no score.
 ESG_SOURCE_PINNED = "pinned_table"
 ESG_SOURCE_MEANINGS = {
     ESG_SOURCE_PINNED: "Every input is read from the pinned official table, data/map_inputs. Each input "
-                       "carries its source, release, year and age.",
+                       "carries its source, release, year, age, maximum age and expires_at.",
 }
 
 REFERENCE_NOTE = ("Hand-entered COUNTRIES profile. Not a measurement, and not used to compute "
@@ -117,9 +123,10 @@ def score_country(code: str, *, as_of=None, state: Optional[map_inputs.TableStat
     `code` is the ISO3 code, which is the table's key. `as_of` is the date ages are
     measured at (default: today). `state` is the loaded table or its failure
     (default: the process's table). Returns esg (int, or None when incomplete),
-    esg_status, esg_source, the qualifying inputs with their provenance,
+    esg_status, esg_source, the qualifying inputs with their provenance and expiry,
     missing_inputs with a reason for each, the pillar breakdown, the physical fields,
-    and the versions and digests the score was computed from.
+    the snapshot date, the maximum ages, and the versions and digests the score was
+    computed from.
     """
     as_of = map_inputs.use_date() if as_of is None else as_of
     state = map_inputs.current_table_state() if state is None else state
@@ -129,14 +136,16 @@ def score_country(code: str, *, as_of=None, state: Optional[map_inputs.TableStat
     inputs: Dict[str, Dict[str, Any]] = {}
     missing: List[str] = []
     notes: Dict[str, str] = {}
+    reasons: Dict[str, Dict[str, Any]] = {}
     for key in REQUIRED_INPUTS:
         if table is None:
-            qualified, reason = None, f"pinned input table unavailable: {state.reason}"
+            qualified, reason = None, map_inputs.unavailable_reason(state.reason)
         else:
             qualified, reason = map_inputs.resolve(table, iso3, key, as_of)
         if qualified is None:
             missing.append(key)
-            notes[key] = reason or "missing"
+            notes[key] = reason["text"]
+            reasons[key] = reason
         else:
             inputs[key] = qualified
 
@@ -152,6 +161,12 @@ def score_country(code: str, *, as_of=None, state: Optional[map_inputs.TableStat
     def _input(key: str) -> Optional[float]:
         return inputs[key]["value"] if key in inputs else None
 
+    # The earliest day any of this country's table values is too old, whether or not it
+    # qualifies today: the date the country's data starts to age out.
+    row = table.rows.get(iso3) if table is not None else None
+    country_expiries = map_inputs.row_expiries(row) if row is not None else {}
+    earliest = min(country_expiries.values()).isoformat() if country_expiries else None
+
     renew, co2 = _input("renewable_share"), _input("co2_per_capita")
     hdi, gini, gov = _input("hdi"), _input("gini_index"), _input("gov_effectiveness")
     return {
@@ -160,6 +175,7 @@ def score_country(code: str, *, as_of=None, state: Optional[map_inputs.TableStat
         "esg_source": source,
         "missing_inputs": missing,
         "input_notes": notes,
+        "input_reasons": reasons,
         "inputs": inputs,
         "esg_breakdown": breakdown,
         "hdi": round(hdi, 3) if hdi is not None else None,
@@ -168,15 +184,18 @@ def score_country(code: str, *, as_of=None, state: Optional[map_inputs.TableStat
         "renewable_share_pct": round(renew, 1) if renew is not None else None,
         "co2_intensity_t_per_capita": round(co2, 1) if co2 is not None else None,
         "age_reference_date": as_of.isoformat(),
+        "snapshot_date": table.snapshot_date if table is not None else None,
+        "max_age_years": dict(map_inputs.MAX_AGE_YEARS),
+        "earliest_expiry": earliest,
         "methodology_version": METHODOLOGY_VERSION,
         "inputs_table_sha256": state.table.table_sha256 if table is not None else None,
         "inputs_manifest_sha256": state.table.manifest_sha256 if table is not None else None,
     }
 
 
-def _country_item(c: Dict[str, Any]) -> Dict[str, Any]:
+def _country_item(c: Dict[str, Any], as_of=None) -> Dict[str, Any]:
     """One country as both routes serve it. The only place a country's response is built."""
-    scored = score_country(c["code"])
+    scored = score_country(c["code"], as_of=as_of)
     item = {k: v for k, v in c.items() if k != "esg"}
     item.update(scored)
     item["band"] = _band(scored["esg"])
@@ -186,19 +205,25 @@ def _country_item(c: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.get("/map/countries")
 def map_countries():
-    """Every country's score, with its status, provenance and the inputs it is missing.
+    """Every country's score, with its status, provenance, reasons and expiry.
 
     `esg` is null for an incomplete country: it is never 0. `esg_status` is ok or
-    incomplete. `inputs` gives each qualifying input's value, unit, year, age, source,
-    release and fetch time. `inputs_table_sha256` and `inputs_manifest_sha256` name the
-    exact table the scores came from (null when no table is available).
+    incomplete. `inputs` gives each qualifying input's value, unit, year, age, maximum
+    age, expires_at, source, release and fetch time. `input_reasons` gives a code for
+    each missing input. `snapshot_date`, `earliest_expiry`, `days_to_earliest_expiry`
+    and `expiry_notice` say when the pinned data stops being usable. The digests name
+    the exact table the scores came from (null when no table is available).
     """
-    items = [_country_item(c) for c in COUNTRIES]
+    as_of = map_inputs.use_date()
+    items = [_country_item(c, as_of) for c in COUNTRIES]
     items.sort(key=lambda x: (x["esg"] is None, -(x["esg"] or 0), x["name"]))
     counts = {SCORE_OK: 0, SCORE_INCOMPLETE: 0}
     for item in items:
         counts[item["esg_status"]] += 1
     state = map_inputs.current_table_state()
+    table = state.table
+    earliest = map_inputs.earliest_expiry(table) if table is not None else None
+    days = map_inputs.days_until(earliest, as_of)
     return {
         "total_countries": len(items),
         "scored_countries": counts[SCORE_OK],
@@ -213,8 +238,16 @@ def map_countries():
         "esg_status_meanings": ESG_STATUS_MEANINGS,
         "esg_source_meanings": ESG_SOURCE_MEANINGS,
         "methodology_version": METHODOLOGY_VERSION,
-        "inputs_table_sha256": state.table.table_sha256 if state.table is not None else None,
-        "inputs_manifest_sha256": state.table.manifest_sha256 if state.table is not None else None,
+        "table_available": table is not None,
+        "table_unavailable_reason": state.reason,
+        "snapshot_date": table.snapshot_date if table is not None else None,
+        "max_age_years": dict(map_inputs.MAX_AGE_YEARS),
+        "earliest_expiry": earliest.isoformat() if earliest is not None else None,
+        "days_to_earliest_expiry": days,
+        "expiry_notice": map_inputs.expiry_notice(days),
+        "expiry_notice_days": map_inputs.EXPIRY_NOTICE_DAYS,
+        "inputs_table_sha256": table.table_sha256 if table is not None else None,
+        "inputs_manifest_sha256": table.manifest_sha256 if table is not None else None,
         "countries": items,
     }
 

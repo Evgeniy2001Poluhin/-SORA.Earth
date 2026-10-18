@@ -21,9 +21,8 @@ from app.api import map_data
 @pytest.fixture
 def shipped(monkeypatch):
     monkeypatch.setattr(map_inputs, "use_date", lambda: date(2026, 10, 19))
-    map_inputs.reset_table_cache()
+    monkeypatch.setattr(map_inputs, "_STATE", {})
     yield
-    map_inputs.reset_table_cache()
 
 
 def _by_code(client):

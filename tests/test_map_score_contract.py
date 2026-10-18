@@ -218,11 +218,10 @@ def test_a_missing_table_is_incomplete_with_its_reason(clock):
 # ---------- list == detail, nulls, and counts ----------
 
 @pytest.fixture
-def shipped(clock):
+def shipped(clock, monkeypatch):
     """The process's real table, with the clock at the day it was written."""
-    map_inputs.reset_table_cache()
+    monkeypatch.setattr(map_inputs, "_STATE", {})
     yield
-    map_inputs.reset_table_cache()
 
 
 def test_list_and_detail_agree_for_every_country(shipped):
@@ -235,7 +234,8 @@ def test_list_and_detail_agree_for_every_country(shipped):
         for field in ("esg", "esg_status", "esg_source", "missing_inputs", "input_notes", "inputs",
                       "esg_breakdown", "methodology_version", "reference_profile", "age_reference_date",
                       "inputs_table_sha256", "inputs_manifest_sha256", "renewable_share_pct",
-                      "co2_intensity_t_per_capita"):
+                      "co2_intensity_t_per_capita", "input_reasons", "snapshot_date", "earliest_expiry",
+                      "max_age_years"):
             assert detail[field] == listed[code][field], (code, field)
 
 

@@ -1,4 +1,170 @@
 {
+  "gini_age": {
+    "age_years_histogram": {
+      "2": 5,
+      "3": 15,
+      "4": 5,
+      "5": 3,
+      "6": 2,
+      "7": 1,
+      "8": 1
+    },
+    "countries_with_any_gini": 32,
+    "countries_without_any_gini": [
+      "NZL"
+    ],
+    "kept_at_window": {
+      "10": 32,
+      "5": 28,
+      "7": 31
+    },
+    "latest_per_country": {
+      "ARE": {
+        "age_years": 8,
+        "latest_year": "2018"
+      },
+      "ARG": {
+        "age_years": 2,
+        "latest_year": "2024"
+      },
+      "AUS": {
+        "age_years": 6,
+        "latest_year": "2020"
+      },
+      "AUT": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "BEL": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "BRA": {
+        "age_years": 2,
+        "latest_year": "2024"
+      },
+      "CAN": {
+        "age_years": 4,
+        "latest_year": "2022"
+      },
+      "CHE": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "CHL": {
+        "age_years": 2,
+        "latest_year": "2024"
+      },
+      "CHN": {
+        "age_years": 4,
+        "latest_year": "2022"
+      },
+      "CZE": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "DEU": {
+        "age_years": 4,
+        "latest_year": "2022"
+      },
+      "DNK": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "ESP": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "FIN": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "FRA": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "GBR": {
+        "age_years": 5,
+        "latest_year": "2021"
+      },
+      "IND": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "ISL": {
+        "age_years": 7,
+        "latest_year": "2019"
+      },
+      "ITA": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "JPN": {
+        "age_years": 6,
+        "latest_year": "2020"
+      },
+      "KEN": {
+        "age_years": 4,
+        "latest_year": "2022"
+      },
+      "KOR": {
+        "age_years": 5,
+        "latest_year": "2021"
+      },
+      "MEX": {
+        "age_years": 2,
+        "latest_year": "2024"
+      },
+      "NLD": {
+        "age_years": 5,
+        "latest_year": "2021"
+      },
+      "NOR": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "NZL": null,
+      "POL": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "PRT": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "RUS": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "SWE": {
+        "age_years": 3,
+        "latest_year": "2023"
+      },
+      "USA": {
+        "age_years": 2,
+        "latest_year": "2024"
+      },
+      "ZAF": {
+        "age_years": 4,
+        "latest_year": "2022"
+      }
+    },
+    "policy_max_age_years": 10
+  },
+  "max_age_rationale": {
+    "co2_per_capita": "Annual series with a lag of one to three years; 5 years keeps every country at its latest year.",
+    "gini_index": "A provisional usage policy, kept for historical context; not a proven period of validity. Gini comes from household surveys that a country runs irregularly, so the latest survey year can lag the present. The observation year is recorded beside each value, so its age is visible. The 5-year and 7-year alternatives are in manifest gini_age.",
+    "gov_effectiveness": "WGI is published yearly; 3 years keeps the latest estimate in its current window.",
+    "hdi": "UNDP publishes annually; 3 years keeps the latest composite index in its current window.",
+    "renewable_share": "Annual series with a lag of one to three years; 5 years keeps every country at its latest year."
+  },
+  "max_age_years": {
+    "co2_per_capita": 5,
+    "gini_index": 10,
+    "gov_effectiveness": 3,
+    "hdi": 3,
+    "renewable_share": 5
+  },
   "outputs": {
     "map_inputs.json": {
       "bytes": 63168,

@@ -49,9 +49,8 @@ def _countries(client) -> dict:
 def shipped(monkeypatch):
     """The process's real table, with the clock on the day it was written."""
     monkeypatch.setattr(map_inputs, "use_date", lambda: date(2026, 10, 19))
-    map_inputs.reset_table_cache()
+    monkeypatch.setattr(map_inputs, "_STATE", {})
     yield
-    map_inputs.reset_table_cache()
 
 
 @pytest.fixture

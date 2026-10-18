@@ -2,16 +2,21 @@
 
 data/map_inputs/<snapshot date>/map_inputs.json is built offline by
 scripts/build_map_inputs.py from a verified snapshot of the official sources.
-manifest.json next to it records the table's byte size and sha256. This module
-reads the table only when those bytes match the manifest.
+manifest.json next to it records the table's byte size and sha256. Two checks
+must both pass before a table is used:
 
-A table that is missing, unreadable, has a different hash, has another schema,
-or fails the table-level scale checks gives no inputs at all. Nothing falls back
-to BENCHMARKS, to the COUNTRIES profile or to the live cache: when the table is
-unavailable, every country is incomplete.
+1. the manifest's own sha256 equals PINNED_MANIFEST_SHA256, the constant in this
+   file. A table edited together with its manifest is refused here: the manifest
+   can be made consistent with the table, but not with this constant;
+2. the table's sha256 and size equal what the manifest records.
+
+A table that is missing, unreadable, pinned to another manifest, mismatched,
+another schema, or failing the table-level scale checks gives no inputs at all.
+Nothing falls back to BENCHMARKS, to the COUNTRIES profile or to the live cache:
+when the table is unavailable, every country is incomplete.
 
 Age is measured at the date of use, not at the snapshot's date. A value whose age
-at that date exceeds its maximum is missing, with the reason written out.
+at that date exceeds its maximum is missing, with a reason that says so.
 """
 from __future__ import annotations
 
@@ -32,6 +37,15 @@ TABLE_DIR: Path = Path(__file__).resolve().parents[1] / "data" / "map_inputs" / 
 TABLE_NAME = "map_inputs.json"
 MANIFEST_NAME = "manifest.json"
 TABLE_SCHEMA = "map-inputs/v1"
+
+# The sha256 of data/map_inputs/2026-10-18/manifest.json, pinned in code. The manifest
+# records the table's hash, so editing table and manifest together passes the table
+# check on its own; only this constant refuses that. Changing it is the commit that
+# pins a new snapshot, and nothing else should. Regenerate with `shasum -a 256`.
+PINNED_MANIFEST_SHA256 = "5d133d3bf441092b9a1739a6ca2b1501327b493efd60609a52af2f10db027acf"
+
+# The date a value ages out is reported as this many days ahead of the date of use.
+EXPIRY_NOTICE_DAYS = 60
 
 # The five inputs the formula reads, in the order the table holds them.
 INPUT_KEYS: Tuple[str, ...] = (
@@ -109,9 +123,23 @@ def _finite(value: Any) -> Optional[float]:
     return number if math.isfinite(number) else None
 
 
+def _reason(code: str, text: str, **fields: Any) -> Dict[str, Any]:
+    """A missing input's reason: a machine-readable code, the sentence for people, and any figures."""
+    return {"code": code, "text": text, **fields}
+
+
 def _unavailable(reason: str) -> TableState:
     logger.warning("map inputs: pinned table unavailable: %s", reason)
     return TableState(table=None, reason=reason)
+
+
+def expires_at(year: int, max_age: int) -> date:
+    """The first day a value from `year` is too old: 1 January after its last permitted year.
+
+    A value is usable while the date's year minus `year` is at most `max_age`, so the
+    first unusable day is 1 January of year + max_age + 1.
+    """
+    return date(year + max_age + 1, 1, 1)
 
 
 def _table_level_scale_problem(rows: List[Dict[str, Any]]) -> Optional[str]:
@@ -146,6 +174,10 @@ def load_table(directory: Optional[Path] = None) -> TableState:
         table_bytes = (directory / TABLE_NAME).read_bytes()
     except OSError as exc:
         return _unavailable(f"table files not readable ({exc.__class__.__name__})")
+
+    manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+    if not hmac.compare_digest(manifest_sha, PINNED_MANIFEST_SHA256):
+        return _unavailable("manifest.json is not the manifest pinned in app/map_inputs.py")
 
     try:
         manifest = json.loads(manifest_bytes.decode("utf-8"))
@@ -191,13 +223,14 @@ def load_table(directory: Optional[Path] = None) -> TableState:
         table=PinnedTable(
             rows=rows,
             table_sha256=table_sha,
-            manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
+            manifest_sha256=manifest_sha,
             snapshot_date=snapshot.get("date_utc"),
         ),
         reason=None,
     )
 
 
+# The loaded table, kept per process. Tests replace this dict to load a different table.
 _STATE: Dict[str, TableState] = {}
 
 
@@ -208,61 +241,101 @@ def current_table_state() -> TableState:
     return _STATE["state"]
 
 
-def reset_table_cache() -> None:
-    """Forget the loaded table. For tests that point TABLE_DIR elsewhere."""
-    _STATE.clear()
-
-
 def use_date() -> date:
     """The date ages are measured at: today, in UTC. Tests replace this to freeze the clock."""
     return datetime.now(timezone.utc).date()
 
 
-def resolve(table: PinnedTable, iso3: str, key: str, as_of: date) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def resolve(table: PinnedTable, iso3: str, key: str, as_of: date) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """One input for one country: (provenance, None) when it qualifies, (None, reason) when not.
 
     A measured 0 is a value, not a missing one. Nothing is substituted for a missing
-    value: not another year, not another indicator, not a default.
+    value: not another year, not another indicator, not a default. A reason has a
+    `code` (no_observation, too_old, outside_scale, ...) and a `text`; a too_old reason
+    also carries the year, the age at the date of use, the limit and the expiry date.
     """
     row = table.rows.get(iso3)
     if row is None:
-        return None, "no row for this country in the pinned table"
+        return None, _reason("no_row", "no row for this country in the pinned table")
     entry = (row.get("inputs") or {}).get(key)
     if not isinstance(entry, dict):
-        return None, "no entry for this input in the pinned table"
+        return None, _reason("no_entry", "no entry for this input in the pinned table")
 
     value = _finite(entry.get("value"))
     if value is None:
         if entry.get("value") is None:
-            return None, "no observation in the pinned table"
-        return None, "pinned value is not a finite number"
+            return None, _reason("no_observation", "no observation in the pinned table")
+        return None, _reason("not_a_number", "pinned value is not a finite number")
 
     low, high = SCALE[key]
     if not low <= value <= high:
-        return None, f"value {value:g} is outside the input's scale {low:g} to {high:g}"
+        return None, _reason("outside_scale",
+                             f"value {value:g} is outside the input's scale {low:g} to {high:g}")
 
     year_text = entry.get("year")
     if not isinstance(year_text, str) or not _YEAR.match(year_text):
-        return None, "the pinned value has no year"
+        return None, _reason("no_year", "the pinned value has no year")
     year = int(year_text)
     age = as_of.year - year
     if age < 0:
-        return None, f"year {year} is after the date of use {as_of.isoformat()}"
+        return None, _reason("after_use_date", f"year {year} is after the date of use {as_of.isoformat()}")
     limit = MAX_AGE_YEARS[key]
+    expiry = expires_at(year, limit)
     if age > limit:
-        return None, f"too old: {age} years at {as_of.isoformat()}, the limit is {limit}"
+        return None, _reason(
+            "too_old",
+            f"too old: {age} years at {as_of.isoformat()}, the limit is {limit}",
+            year=year_text, age_years=age, max_age_years=limit, expires_at=expiry.isoformat(),
+        )
 
     source = entry.get("source")
     release = entry.get("release")
     if not source or not release:
-        return None, "the pinned value states no source or release"
+        return None, _reason("no_source", "the pinned value states no source or release")
 
     return {
         "value": value,
         "unit": entry.get("unit"),
         "year": year_text,
         "age_years": age,
+        "max_age_years": limit,
+        "expires_at": expiry.isoformat(),
         "source": source,
         "release": release,
         "fetched_at": entry.get("fetched_at"),
     }, None
+
+
+def unavailable_reason(detail: Optional[str]) -> Dict[str, Any]:
+    """The reason every input carries when there is no verified table."""
+    return _reason("table_unavailable", f"pinned input table unavailable: {detail}", detail=detail)
+
+
+def row_expiries(row: Dict[str, Any]) -> Dict[str, date]:
+    """Each input of one table row that has a value and a year, with the date it ages out."""
+    out: Dict[str, date] = {}
+    inputs = row.get("inputs") if isinstance(row.get("inputs"), dict) else {}
+    for key in INPUT_KEYS:
+        entry = inputs.get(key)
+        if not isinstance(entry, dict) or _finite(entry.get("value")) is None:
+            continue
+        year_text = entry.get("year")
+        if isinstance(year_text, str) and _YEAR.match(year_text):
+            out[key] = expires_at(int(year_text), MAX_AGE_YEARS[key])
+    return out
+
+
+def earliest_expiry(table: PinnedTable) -> Optional[date]:
+    """The first day any value in the table is too old. The table's own clock, not a country's."""
+    dates = [d for row in table.rows.values() for d in row_expiries(row).values()]
+    return min(dates) if dates else None
+
+
+def days_until(target: Optional[date], as_of: date) -> Optional[int]:
+    """Whole days from `as_of` to `target`; negative once it has passed. None when there is no target."""
+    return None if target is None else (target - as_of).days
+
+
+def expiry_notice(days: Optional[int]) -> bool:
+    """True when the earliest expiry is within EXPIRY_NOTICE_DAYS, including when it has passed."""
+    return days is not None and days <= EXPIRY_NOTICE_DAYS
