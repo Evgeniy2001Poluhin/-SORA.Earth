@@ -40,6 +40,9 @@ export default function HistoryPage() {
       year: "2-digit", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit",
     });
 
+  // `/history` returns the count for the filters and one page of rows, and no
+  // aggregate (app/api/evaluate.py, `get_history`: `items`, `total`). So this
+  // mean covers only the rows on screen, and the label says "page average".
   // The mean of no rows is not 0.0; it is nothing. And a row without a score
   // is not a row that scored zero: `evaluations.total_score` is a nullable
   // column, and `a + null` counted it as one.
@@ -85,7 +88,7 @@ export default function HistoryPage() {
       <div className="ev-meta">
         <span>{data.total ?? "—"} evaluations</span>
         <span>·</span>
-        <span>avg score {avgScore != null ? avgScore.toFixed(1) : "—"}</span>
+        <span>page average score {avgScore != null ? avgScore.toFixed(1) : "—"}</span>
         <span>·</span>
         <span>page {page} of {pages ?? "—"}</span>
       </div>

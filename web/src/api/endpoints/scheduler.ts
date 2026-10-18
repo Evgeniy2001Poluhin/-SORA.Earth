@@ -2,6 +2,11 @@ import { api } from "../client";
 
 export interface SchedulerStatus {
   running: boolean;
+  /** Which branch of `get_scheduler_status()` answered (app/scheduler.py):
+   *  "scheduler_container" (read from Redis), "local_scheduler" (this process
+   *  has jobs), or "local_fallback" (the container was not reached, so
+   *  `running` and `jobs` describe nothing about it). */
+  source?: string;
   /** Absent when the scheduler container could not be reached: the field
    *  describes that container, and this process cannot speak for it. */
   enabled?: boolean | null;

@@ -5,7 +5,7 @@ import {
   Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { api } from "@/api/client";
-import { historySpan, lastObservationLabel } from "./forecastLabels";
+import { BAND_LABEL, historySpan, lastObservationLabel } from "./forecastLabels";
 
 /** Model-specific extras returned alongside a forecast; see app/services/forecasting. */
 type ForecastMetadata = {
@@ -59,6 +59,15 @@ const MODEL_COLORS: Record<string, string> = {
   prophet: "#10b981",   // green
   lstm: "#f59e0b",      // amber
 };
+
+/**
+ * Each band is a nominal model interval whose coverage is not validated, so its
+ * legend entry says that in the Forecast page's own words. The model name comes
+ * first because three bands share one chart. Not "CI": the response carries no
+ * coverage figure to back that word. Its `confidence` field is a grade, not a
+ * coverage (app/schemas.py, `ForecastResponse`, lines 133-139).
+ */
+const bandName = (model: string) => `${model}: ${BAND_LABEL}`;
 
 export default function ForecastComparePage() {
   const [horizon, setHorizon] = useState(30);
@@ -175,10 +184,10 @@ export default function ForecastComparePage() {
           ))}
         </div>
 
-        {/* Toggle CI bands */}
+        {/* Toggle the nominal model bands */}
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer" }}>
           <input type="checkbox" checked={showBands} onChange={e => setShowBands(e.target.checked)} />
-          Show confidence intervals
+          Show {BAND_LABEL}
         </label>
       </div>
 
@@ -222,7 +231,7 @@ export default function ForecastComparePage() {
                 />
               )}
 
-              {/* Confidence bands */}
+              {/* Nominal model bands, not validated confidence intervals */}
               {showBands && (
                 <>
                   <Area
@@ -230,7 +239,7 @@ export default function ForecastComparePage() {
                     stroke="none"
                     fill={MODEL_COLORS.ensemble}
                     fillOpacity={0.1}
-                    name="Ensemble CI"
+                    name={bandName("Ensemble")}
                     connectNulls={false}
                   />
                   <Area
@@ -238,7 +247,7 @@ export default function ForecastComparePage() {
                     stroke="none"
                     fill={MODEL_COLORS.prophet}
                     fillOpacity={0.1}
-                    name="Prophet CI"
+                    name={bandName("Prophet")}
                     connectNulls={false}
                   />
                   <Area
@@ -246,7 +255,7 @@ export default function ForecastComparePage() {
                     stroke="none"
                     fill={MODEL_COLORS.lstm}
                     fillOpacity={0.1}
-                    name="LSTM CI"
+                    name={bandName("LSTM")}
                     connectNulls={false}
                   />
                 </>

@@ -24,8 +24,11 @@ export default function CountryRanking(props: Props) {
     return m;
   }, [rows]);
 
+  // No count while loading. The number was typed into this string, so it read
+  // 27 whatever the server was about to score. The server's own `count` arrives
+  // with the response, not before it.
   if (loading) {
-    return <div className="cr-empty">Running 27 evaluations...</div>;
+    return <div className="cr-empty">Scoring countries...</div>;
   }
   if (rows.length === 0) {
     return <div className="cr-empty">Run an evaluation first to see country ranking.</div>;
