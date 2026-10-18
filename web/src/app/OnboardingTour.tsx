@@ -1,9 +1,20 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import TourTooltip from "./TourTooltip";
-import Joyride, { STATUS, type Step, type CallBackProps } from "react-joyride";
+import Joyride, {
+  EVENTS,
+  STATUS,
+  type CallBackProps,
+  type FloaterProps,
+  type Step,
+} from "react-joyride";
+import { CARD_MARGIN, resolvePlacement, type Rect } from "./tourPlacement";
 
 const KEY = "sora_tour_done";
 
+// disableBeacon: without it Joyride makes a step wait for a click on a beacon
+// at its target. A continuous tour already skips the beacon after the first
+// step, so this states that rule for every step rather than changing what a
+// user sees.
 const STEPS: Step[] = [
   {
     target: "body",
@@ -14,23 +25,27 @@ const STEPS: Step[] = [
   },
   {
     target: '[data-tour="evaluate"]',
+    disableBeacon: true,
     title: "Evaluate projects",
-    content: "Score any ESG project: success probability, CO2 impact, social and economic scores.",
+    content: "Score a project from the figures you enter: a rule-based ESG score with its breakdown, plus an unvalidated ML success estimate.",
   },
   {
     target: '[data-tour="copilot"]',
+    disableBeacon: true,
     title: "AI Co-Pilot",
-    content: "Ask questions in natural language — RAG-grounded answers with source citations.",
+    content: "Why this prediction? Enter a project's figures to see its drivers, risks and the knowledge excerpts retrieved for it.",
   },
   {
     target: '[data-tour="map"]',
+    disableBeacon: true,
     title: "Geospatial map",
     content: "Explore ESG scores by country on an interactive map.",
   },
   {
     target: '[data-tour="status"]',
+    disableBeacon: true,
     title: "System status",
-    content: "Live service health for all components. You are all set.",
+    content: "Checks of the API, models, database and external data, as the service reports them. You are all set.",
   },
 ];
 
@@ -65,6 +80,37 @@ const ST = {
   spotlight: { borderRadius: 10 },
 };
 
+// Popper keeps a card placed at its target at least CARD_MARGIN from the
+// viewport edges. Its default is 5px, measured against the scroll parent.
+const FLOATER_PROPS: Partial<FloaterProps> = {
+  options: { preventOverflow: { boundariesElement: "viewport", padding: CARD_MARGIN } },
+};
+
+/**
+ * For each step, whether its target cannot be seen. Reads the DOM, so it is
+ * only meaningful once the nav is laid out: the tour calls it when a step is
+ * about to open and on resize, never during render.
+ */
+function offScreenSteps(): boolean[] {
+  const viewport = {
+    width: document.documentElement.clientWidth,
+    height: document.documentElement.clientHeight,
+  };
+  return STEPS.map((step) => {
+    const el = typeof step.target === "string" ? document.querySelector(step.target) : step.target;
+    let rect: Rect | null = null;
+    if (el) {
+      const r = el.getBoundingClientRect();
+      rect = { left: r.left, top: r.top, width: r.width, height: r.height };
+    }
+    return resolvePlacement("bottom", rect, viewport) === "center";
+  });
+}
+
+function focusNext() {
+  document.querySelector<HTMLElement>('[data-action="primary"]')?.focus({ preventScroll: true });
+}
+
 export default function OnboardingTour({ runSignal = 0 }: { runSignal?: number }) {
   // Whether the tour was already completed is known before the first paint,
   // so read it as lazy initial state rather than setting it from an effect.
@@ -80,7 +126,31 @@ export default function OnboardingTour({ runSignal = 0 }: { runSignal?: number }
     if (runSignal > 0) setRun(true);
   }
 
+  // Steps start on their own placement; measured before each step opens.
+  const [offScreen, setOffScreen] = useState<boolean[]>(() => STEPS.map(() => false));
+  const measure = useCallback(() => {
+    const next = offScreenSteps();
+    setOffScreen((prev) => (prev.every((v, i) => v === next[i]) ? prev : next));
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [measure]);
+
+  const steps = useMemo(
+    () => STEPS.map((step, i) => (offScreen[i] ? { ...step, placement: "center" as const } : step)),
+    [offScreen],
+  );
+
   const cb = (d: CallBackProps) => {
+    // Joyride mounts a step's card with the placement it has at that moment,
+    // so refresh before the next step can open.
+    if (d.type === EVENTS.STEP_BEFORE) measure();
+    // The card is hidden until Joyride opens it, and a focus call made while it
+    // mounts does nothing. Focus Next once the card is open, without scrolling.
+    // The welcome card is left alone, as Joyride left it.
+    if (d.type === EVENTS.TOOLTIP && d.index > 0) window.setTimeout(focusNext, 0);
     if (([STATUS.FINISHED, STATUS.SKIPPED] as string[]).includes(d.status)) {
       localStorage.setItem(KEY, "1");
       setRun(false);
@@ -89,13 +159,18 @@ export default function OnboardingTour({ runSignal = 0 }: { runSignal?: number }
 
   return (
     <Joyride
-      steps={STEPS}
+      steps={steps}
       run={run}
       callback={cb}
       continuous
       showSkipButton
       showProgress
+      // The tour must not scroll the page or the nav to reach a target. Joyride
+      // would otherwise do both, and its focus handling goes with the scrolling;
+      // focusNext and the Tab trap in TourTooltip cover focus instead.
+      disableScrolling
       disableScrollParentFix
+      floaterProps={FLOATER_PROPS}
       tooltipComponent={TourTooltip}
       styles={{ options: ST.options, spotlight: { borderRadius: 12 } }}
     />

@@ -8,6 +8,7 @@ import type { DiscrepancyResponse, ExplainLocalRequest } from "@/api/types";
 import "./calibration.css";
 import { BrierReliabilityPanel } from "./BrierReliabilityPanel";
 import { errorMessage } from "@/lib/errors";
+import { SUCCESS_PROBABILITY_NOTE } from "../evaluate/successProbabilityNote";
 
 interface FormValues {
   budget: number;
@@ -92,13 +93,13 @@ export function CalibrationPage() {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginTop: 20, marginBottom: 24 }}>
-            <div className="kpi"><div className="kpi-lbl">Weighted proba</div><div className="kpi-val tabular">{(data.consensus.weighted_proba * 100).toFixed(1)}%</div></div>
-            <div className="kpi"><div className="kpi-lbl">Tree CI 90%</div><div className="kpi-val tabular" style={{ fontSize: 16 }}>{(data.tree_uncertainty.ci_90[0] * 100).toFixed(1)}-{(data.tree_uncertainty.ci_90[1] * 100).toFixed(1)}%</div></div>
+            <div className="kpi"><div className="kpi-lbl">Weighted proba</div><div className="kpi-val tabular" title={SUCCESS_PROBABILITY_NOTE}>{(data.consensus.weighted_proba * 100).toFixed(1)}%<span className="calib-unvalidated">unvalidated</span></div></div>
+            <div className="kpi"><div className="kpi-lbl">Tree spread (5–95%)</div><div className="kpi-val tabular" style={{ fontSize: 16 }}>{(data.tree_uncertainty.ci_90[0] * 100).toFixed(1)}-{(data.tree_uncertainty.ci_90[1] * 100).toFixed(1)}%</div><div className="calib-kpi-note">not a confidence interval for the outcome</div></div>
             <div className="kpi"><div className="kpi-lbl">Tree std</div><div className="kpi-val tabular">{(data.tree_uncertainty.std * 100).toFixed(2)}%</div></div>
             <div className="kpi"><div className="kpi-lbl">N trees</div><div className="kpi-val tabular">{data.tree_uncertainty.n_trees}</div></div>
           </div>
 
-          <div className="eyebrow" style={{ marginBottom: 12 }}>Per-model probability</div>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>Per-model probability <span className="calib-unvalidated" style={{ margin: 0 }}>unvalidated</span></div>
           <div className="chart-wrap">
             <ResponsiveContainer width="100%" height={280} minWidth={1} minHeight={1}>
               <BarChart data={chartData} margin={{ top: 16, right: 24, left: 0, bottom: 8 }}>
@@ -118,7 +119,7 @@ export function CalibrationPage() {
               <div key={d.model} className="model-meta-row">
                 <span className="model-dot" style={{ background: MODEL_COLOR[d.model] }} />
                 <span className="mono">{d.model}</span>
-                <span className="tabular muted">proba {(d.proba * 100).toFixed(2)}%{d.nd && <span title="Почти бинарный прогноз (0/1)"> ≈det</span>}</span>
+                <span className="tabular muted" title={SUCCESS_PROBABILITY_NOTE}>proba {(d.proba * 100).toFixed(2)}%{d.nd && <span title="Почти бинарный прогноз (0/1)"> ≈det</span>}</span>
                 <span className="tabular muted">weight {(d.weight * 100).toFixed(0)}%</span>
               </div>
             ))}

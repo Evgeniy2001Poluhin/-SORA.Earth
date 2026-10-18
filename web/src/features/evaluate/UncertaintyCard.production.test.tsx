@@ -65,12 +65,14 @@ describe("UncertaintyCard on the production path", () => {
   it("renders the server's tree vote, not the canned one", async () => {
     stubJson(SERVER_UNCERTAINTY);
 
-    renderWithQuery(<UncertaintyCard payload={PAYLOAD} />);
+    const { container } = renderWithQuery(<UncertaintyCard payload={PAYLOAD} />);
 
     // 20 of 33 trees vote for success, not the canned 72 of 100.
     await waitFor(() => expect(screen.getByText("20 of 33 trees vote for success")).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByText("60.0%")).toBeInTheDocument();
-    expect(screen.getByText("MEDIUM CONFIDENCE")).toBeInTheDocument();
+    // The badge reads the spread of the tree votes, not a confidence level (F033).
+    expect(screen.getByText("MEDIUM TREE AGREEMENT")).toBeInTheDocument();
+    expect(container.textContent ?? "").not.toMatch(/CONFIDENCE/);
   });
 
   it("a 500 rejects instead of returning an interval", async () => {

@@ -39,8 +39,10 @@ export async function fetchModelVersion(): Promise<ModelVersionInfo> {
   } catch { /* ignore — badge still works from v2 */ }
   return {
     name: j.name ?? meta.algorithm ?? "model",
-    alias: j.alias ?? "production",
-    version: j.version ?? meta.retrained_at ?? "—",
+    // Empty, not a default: ModelBadge renders an empty value as "unknown".
+    // A retrain date is not a version, so it is no longer used as one.
+    alias: j.alias ?? "",
+    version: j.version ?? "",
     retrained_at: meta.retrained_at,
     total_samples: meta.total_samples,
     n_estimators: meta.n_estimators,

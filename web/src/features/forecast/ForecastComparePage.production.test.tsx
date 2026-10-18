@@ -28,7 +28,7 @@ vi.mock("@/api/mock", async (importOriginal) => {
 
 import ForecastComparePage from "./ForecastComparePage";
 import { isMock } from "@/api/mock";
-import { renderWithQuery } from "@/test/utils";
+import { renderWithQuery, stubChartLayout } from "@/test/utils";
 
 const FORECAST = {
   history: [1, 2, 3].map((i) => ({ ds: `2026-09-0${i}`, y: 60 + i })),
@@ -107,6 +107,98 @@ describe("ForecastComparePage metrics table", () => {
     serve({ score: { ensemble: { ...VALIDATED, r2_score: -0.4 } } });
     const { container } = renderWithQuery(<ForecastComparePage />);
     await waitFor(() => expect(container.textContent).toContain("Negative R²"));
-    expect(container.textContent).toContain("(6 samples)");
+    expect(container.textContent).toContain("ensemble's test set has 6 samples");
+  });
+});
+
+describe("ForecastComparePage: what the numbers and labels claim", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    stubChartLayout();
+  });
+
+  // F063: the header says calendar days with dates, not "3d history".
+  it("says how many calendar days the history spans, with both dates", async () => {
+    serve({});
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(container.textContent).toContain("calendar days"));
+    expect(container.textContent).toContain("3 calendar days, 2026-09-01 → 2026-09-03");
+    expect(container.textContent).not.toContain("3d history");
+  });
+
+  // F065: the marker is the last history date, labelled with that date.
+  it("labels the last-history marker with its date, not as now", async () => {
+    serve({});
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(container.textContent).toContain("last observation 2026-09-03"));
+    expect(container.textContent).not.toMatch(/\bnow\b/);
+  });
+
+  // F068: negative R² means worse than the test-set mean; a small test set is a
+  // possible reason, not the established one.
+  it("says a negative R² means worse than predicting the mean, not insufficient data", async () => {
+    serve({ score: { prophet: { ...VALIDATED, r2_score: -0.4 } } });
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(container.textContent).toContain("Negative R²"));
+    expect(container.textContent).toContain("did worse than predicting the mean of its test data");
+    expect(container.textContent).not.toContain("insufficient test data");
+  });
+
+  // F069: no promise about when the metrics will settle.
+  it("makes no promise about when the metrics will stabilise", async () => {
+    serve({ score: { prophet: { ...VALIDATED, r2_score: -0.4 } } });
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(container.textContent).toContain("Negative R²"));
+    expect(container.textContent).not.toMatch(/stabili[sz]e/);
+    expect(container.textContent).not.toContain("30+");
+    expect(container.textContent).not.toContain("60 days");
+  });
+});
+
+describe("ForecastComparePage: the bands are nominal intervals, not confidence intervals", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    stubChartLayout();
+  });
+
+  // The Forecast page labels its single band with BAND_LABEL, the words #461
+  // established as all the response supports. This page's legend called three
+  // bands "Ensemble CI", "Prophet CI" and "LSTM CI", and its toggle said
+  // "Show confidence intervals". Neither word is backed by a coverage figure.
+  const NOMINAL = "nominal 90% interval (model-based, coverage not validated)";
+  const legend = (c: HTMLElement) =>
+    Array.from(c.querySelectorAll(".recharts-legend-item-text")).map((el) => el.textContent ?? "");
+
+  it("names each band in the legend with the Forecast page's wording", async () => {
+    serve({});
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(legend(container)).toContain(`Ensemble: ${NOMINAL}`));
+    expect(legend(container)).toContain(`Prophet: ${NOMINAL}`);
+    expect(legend(container)).toContain(`LSTM: ${NOMINAL}`);
+  });
+
+  it("does not call any band a CI in the legend", async () => {
+    serve({});
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(legend(container).length).toBeGreaterThan(0));
+    expect(legend(container).join("\n")).not.toMatch(/\bCI\b/);
+    expect(container.textContent).not.toMatch(/confidence interval/i);
+  });
+
+  it("words the band toggle as a nominal interval, not a confidence interval", async () => {
+    serve({});
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(legend(container).length).toBeGreaterThan(0));
+    const toggle = container.querySelector('input[type="checkbox"]')?.closest("label");
+    expect(toggle?.textContent).toContain(NOMINAL);
+    expect(toggle?.textContent).not.toMatch(/confidence/i);
+  });
+
+  // Control: the series that are values, not bands, keep their plain names.
+  it("still names the history and the three forecasts in the legend", async () => {
+    serve({});
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(legend(container)).toContain("History"));
+    expect(legend(container)).toEqual(expect.arrayContaining(["History", "Ensemble", "Prophet", "LSTM"]));
   });
 });

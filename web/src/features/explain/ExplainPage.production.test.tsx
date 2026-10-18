@@ -40,7 +40,7 @@ const SERVER_EXPLANATION = {
 
 /** The page fires two requests at once. Answering them by URL keeps the
  *  waterfall an image and the explanation JSON, as in production. */
-function stubExplainEndpoints() {
+function stubExplainEndpoints(payload: unknown = SERVER_EXPLANATION) {
   const stub = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes("waterfall")) {
@@ -49,7 +49,7 @@ function stubExplainEndpoints() {
         headers: { "content-type": "image/svg+xml" },
       });
     }
-    return new Response(JSON.stringify(SERVER_EXPLANATION), {
+    return new Response(JSON.stringify(payload), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -147,5 +147,65 @@ describe("SHAP explain on the production path", () => {
     });
     expect(screen.queryByText("server_side_feature_a")).not.toBeInTheDocument();
     expect(screen.queryByText("co2_reduction")).not.toBeInTheDocument();
+  });
+});
+
+/** The value cell of one contribution row, as the reader sees it. */
+const valueFor = (feature: string) =>
+  screen.getByText(feature).closest(".contrib-row")?.querySelector(".contrib-val")?.textContent;
+
+describe("ExplainPage: what the numbers and labels claim", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    // jsdom has no object-URL support, and the page needs it to show the image.
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, writable: true, value: vi.fn(() => "blob:test") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, writable: true, value: vi.fn() });
+  });
+
+  // F025: the subtitle's fixed latency figures are not measured on anything shown.
+  it("quotes no fixed latency figures and no cache behaviour in the subtitle", () => {
+    const { container } = renderWithQuery(<ExplainPage />);
+    expect(container.textContent).not.toMatch(/\b500 ?ms\b/);
+    expect(container.textContent).not.toMatch(/\b14 ?ms\b/);
+    expect(container.textContent).not.toContain("disk-cached");
+  });
+
+  // F025/F026: the response carries no cache field or header, so no cache verdict
+  // may be shown, however fast the call was.
+  it("shows the measured time after a request, with no cached or cold verdict", async () => {
+    stubExplainEndpoints();
+    const user = userEvent.setup();
+    const { container } = renderWithQuery(<ExplainPage />);
+
+    await user.click(screen.getByRole("button", { name: "MED" }));
+
+    await waitFor(() => expect(container.querySelector(".elapsed-pill")).not.toBeNull(), { timeout: 3000 });
+    expect(container.querySelector(".elapsed-pill")!.textContent).toMatch(/^\d+ ?ms$/);
+    expect(container.textContent).not.toContain("cached");
+    expect(container.textContent).not.toContain("cold");
+  });
+
+  // F027: a SHAP value the server did not send is unknown, not zero; a real zero is zero.
+  it("shows a missing SHAP value as a dash, never as 0.000, and keeps a real 0", async () => {
+    stubExplainEndpoints({
+      prediction: 0.611,
+      base_value: 0.402,
+      top_contributions: [
+        { feature: "feature_null", value: 1, shap_value: null },
+        { feature: "feature_absent", value: 2 },
+        { feature: "feature_zero", value: 3, shap_value: 0 },
+        { feature: "feature_positive", value: 4, shap_value: 0.21 },
+      ],
+    });
+    const user = userEvent.setup();
+    renderWithQuery(<ExplainPage />);
+
+    await user.click(screen.getByRole("button", { name: "MED" }));
+
+    await waitFor(() => expect(screen.getByText("feature_positive")).toBeInTheDocument(), { timeout: 3000 });
+    expect(valueFor("feature_null")).toBe("—");
+    expect(valueFor("feature_absent")).toBe("—");
+    expect(valueFor("feature_zero")).toBe("0.000");
+    expect(valueFor("feature_positive")).toBe("+0.210");
   });
 });
