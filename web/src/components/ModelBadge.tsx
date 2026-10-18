@@ -16,17 +16,20 @@ export function ModelBadge() {
     );
   }
 
-  const alias = data.alias || "production";
-  const version = data.version || "-";
-  const short = version.slice(0, 8);
-  const tip = data.name + " v" + version + " @" + alias;
+  // A value the server did not send is shown as "unknown", never as a default
+  // alias or a placeholder version (audit F077).
+  const alias = data.alias || "unknown";
+  const hasVersion = Boolean(data.version);
+  const versionText = hasVersion ? "v" + data.version.slice(0, 8) : "unknown";
+  const tip =
+    data.name + (hasVersion ? " v" + data.version : " version unknown") + " @" + alias;
 
   return (
     <span className={"model-badge model-badge--" + alias} title={tip}>
       <span className="model-badge__at">@</span>
       <span>{alias}</span>
       <span className="model-badge__dot">·</span>
-      <span>v{short}</span>
+      <span>{versionText}</span>
     </span>
   );
 }
