@@ -104,17 +104,17 @@ const ICELAND_INCOMPLETE = {
 };
 const SWEDEN_OK = {
   name: "Sweden", esg: 81.5, band: "leader", code: "SE", lat: 60, lon: 15,
-  esg_status: "ok", esg_source: "world_bank_live", missing_inputs: [],
+  esg_status: "ok", esg_source: "pinned_table", missing_inputs: [],
   renewable_share_pct: 60.1, co2_intensity_t_per_capita: null,
 };
-const CHILE_MIXED = {
+const CHILE_OK = {
   name: "Chile", esg: 62.5, band: "developing", code: "CL", lat: -33, lon: -70,
-  esg_status: "mixed", esg_source: "mixed", missing_inputs: [],
+  esg_status: "ok", esg_source: "pinned_table", missing_inputs: [],
   renewable_share_pct: null, co2_intensity_t_per_capita: null,
 };
 const ZERO_OK = {
   name: "Zeroland", esg: 0, band: "lagging", code: "ZZ", lat: 0, lon: 0,
-  esg_status: "ok", esg_source: "world_bank_live", missing_inputs: [],
+  esg_status: "ok", esg_source: "pinned_table", missing_inputs: [],
   renewable_share_pct: null, co2_intensity_t_per_capita: null,
 };
 
@@ -124,7 +124,7 @@ describe("MapPage scores (C8)", () => {
   });
 
   it("leaves an incomplete country out of the top-10, the average and the leaders", async () => {
-    stubJson({ total_countries: 3, bands: {}, countries: [ICELAND_INCOMPLETE, SWEDEN_OK, CHILE_MIXED] });
+    stubJson({ total_countries: 3, bands: {}, countries: [ICELAND_INCOMPLETE, SWEDEN_OK, CHILE_OK] });
 
     const { container } = render();
     await waitFor(() => expect(topNames(container).length).toBeGreaterThan(0), { timeout: 3000 });
@@ -135,8 +135,8 @@ describe("MapPage scores (C8)", () => {
     expect(container.textContent ?? "").not.toContain("Iceland");
   });
 
-  it("states N as x of y countries, with the ok and mixed split, in the header and above the top-10", async () => {
-    stubJson({ total_countries: 3, bands: {}, countries: [ICELAND_INCOMPLETE, SWEDEN_OK, CHILE_MIXED] });
+  it("states N as x of y countries, with the ok count, in the header and above the top-10", async () => {
+    stubJson({ total_countries: 3, bands: {}, countries: [ICELAND_INCOMPLETE, SWEDEN_OK, CHILE_OK] });
 
     const { container } = render();
     await waitFor(() => expect(topNames(container).length).toBeGreaterThan(0), { timeout: 3000 });
@@ -145,7 +145,7 @@ describe("MapPage scores (C8)", () => {
     const lines = scopeLines(container);
     expect(lines).toHaveLength(2);
     for (const line of lines) {
-      expect(line).toContain("N = 2 of 3 countries (1 ok, 1 mixed); 1 incomplete, excluded");
+      expect(line).toContain("N = 2 of 3 countries (2 ok); 1 incomplete, excluded");
     }
   });
 
@@ -168,16 +168,15 @@ describe("MapPage scores (C8)", () => {
     expect(statValue(container, "avg ESG"), "the average of Sweden alone, not (81.5 + 0) / 2").toBe("82");
   });
 
-  it("marks a mixed score as mixed in the ranking", async () => {
-    stubJson({ total_countries: 2, bands: {}, countries: [SWEDEN_OK, CHILE_MIXED] });
+  it("ranks an ok score without a status suffix", async () => {
+    stubJson({ total_countries: 2, bands: {}, countries: [SWEDEN_OK, CHILE_OK] });
 
     const { container } = render();
     await waitFor(() => expect(topNames(container).length).toBeGreaterThan(0), { timeout: 3000 });
 
     const chile = topRows(container).find((t) => t.includes("Chile")) ?? "";
-    expect(chile).toContain("(mixed)");
-    const sweden = topRows(container).find((t) => t.includes("Sweden")) ?? "";
-    expect(sweden).not.toContain("(mixed)");
+    expect(chile).not.toContain("mixed");
+    expect(chile).toContain("62.5");
   });
 
   it("with no scored country, shows no average and does not print NaN or null", async () => {

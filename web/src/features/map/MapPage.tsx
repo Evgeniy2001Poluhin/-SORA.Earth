@@ -11,7 +11,7 @@ import { useState } from "react";
 import RussiaMapModal from "./RussiaMapModal";
 import CountryTooltipBody from "./CountryTooltipBody";
 import {
-  BAND_COLOR, NEUTRAL_COLOR, aggregateScopeOf, byEsgDesc, meanScore, scoreOf, statusOf,
+  BAND_COLOR, NEUTRAL_COLOR, aggregateScopeOf, byEsgDesc, meanScore, scoreOf,
   type MapCountry,
 } from "./countryData";
 
@@ -165,7 +165,7 @@ export default function MapPage() {
             >
               <span className="rank">#{i + 1}</span>
               <b>{c.name}</b>
-              <em>{c.esg}{statusOf(c) === "mixed" ? " (mixed)" : ""}</em>
+              <em>{c.esg}</em>
             </li>
           ))}
         </ol>

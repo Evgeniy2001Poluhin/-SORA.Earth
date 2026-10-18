@@ -3,11 +3,10 @@
  *
  * `/api/v1/map/countries` gives each country one score, or none:
  *
- * - `esg_status` "ok": every input is measured live. The score is shown.
- * - `esg_status` "mixed": every input is valid, some from the static reference
- *   table with a stated source. The score is shown, labelled mixed.
- * - `esg_status` "incomplete": an input is missing or invalid. `esg` is null,
- *   and `missing_inputs` names what is absent.
+ * - `esg_status` "ok": all five inputs are in the pinned official table, each
+ *   within its maximum age at the date of use. The score is shown.
+ * - `esg_status` "incomplete": an input is missing, out of scale, too old or
+ *   unsourced. `esg` is null, and `missing_inputs` names what is absent.
  *
  * Rules the page depends on:
  *
@@ -15,10 +14,21 @@
  *    left out of every ranking, leader count, top-N and average.
  * 2. Averages and leaders are over scored countries only, and the page states
  *    N as "N = x of y countries".
- * 3. Renewables and CO2 per capita are measured values or null. The backend
- *    sends a number only when a live source measured it.
+ * 3. Renewables and CO2 per capita are the pinned values, or null when the
+ *    input does not qualify.
  * 4. An API error is shown as "unavailable", which is not the same as incomplete.
  */
+
+/** One input as the backend pins it: its value, year, age and where it came from. */
+export interface InputProvenance {
+  value: number;
+  unit: string | null;
+  year: string;
+  age_years: number;
+  source: string;
+  release: string | null;
+  fetched_at: string | null;
+}
 
 export interface MapCountry {
   code: string;
@@ -31,6 +41,9 @@ export interface MapCountry {
   esg_status?: string | null;
   esg_source?: string | null;
   missing_inputs?: string[] | null;
+  /** Each qualifying input, keyed by input name. */
+  inputs?: Partial<Record<string, InputProvenance>> | null;
+  input_notes?: Record<string, string> | null;
   co2_intensity_t_per_capita?: number | null;
   renewable_share_pct?: number | null;
 }
@@ -46,8 +59,8 @@ export const BAND_COLOR: Record<string, string> = {
 /** Drawn for a country with no score: not a band, and not a 0. */
 export const NEUTRAL_COLOR = "#9ca3af";
 
-/** The three statuses the backend sends. */
-export type ScoreStatus = "ok" | "mixed" | "incomplete";
+/** The two statuses the backend sends. */
+export type ScoreStatus = "ok" | "incomplete";
 
 /** Human names for the inputs, so the page does not print field names. */
 export const INPUT_LABELS: Record<string, string> = {
@@ -65,12 +78,31 @@ export function scoreOf(c: MapCountry): number | null {
 
 export type ScoreKind = ScoreStatus | "unlabelled";
 
-/** ok, mixed, incomplete, or unlabelled (a score with no status, from an older backend).
+/** ok, incomplete, or unlabelled (a score with no status, from an older backend).
  *  A null score is always incomplete, whatever its status field says. */
 export function statusOf(c: MapCountry): ScoreKind {
   if (scoreOf(c) === null) return "incomplete";
-  if (c.esg_status === "ok" || c.esg_status === "mixed") return c.esg_status;
+  if (c.esg_status === "ok") return "ok";
   return "unlabelled";
+}
+
+/** The order inputs are listed in, and the decimals each is shown with. */
+export const INPUT_ORDER: readonly string[] = [
+  "renewable_share", "co2_per_capita", "gini_index", "gov_effectiveness", "hdi",
+];
+const DECIMALS: Record<string, number> = {
+  renewable_share: 1, co2_per_capita: 1, gini_index: 1, gov_effectiveness: 2, hdi: 3,
+};
+
+/** One scored input as a tooltip line: its value and unit, its year, and its source. */
+export function describeInput(key: string, p: InputProvenance): { label: string; text: string } {
+  const decimals = DECIMALS[key] ?? 2;
+  const value = Number.isFinite(p.value) ? p.value.toFixed(decimals) : "no value";
+  const unit = p.unit ? ` ${p.unit}` : "";
+  return {
+    label: INPUT_LABELS[key] ?? key,
+    text: `${value}${unit}, ${p.year}, ${p.source}`,
+  };
 }
 
 /** The text the country tooltip shows after "source:": the backend's meaning for
@@ -118,8 +150,7 @@ export interface AggregateScope {
 /** Which countries the aggregates may use, and how to say so.
  *
  *  Incomplete countries are always excluded. The label gives N as "N = x of y
- *  countries", with the ok and mixed split, so the reader can see what the
- *  average is over. */
+ *  countries", with the ok count, so the reader can see what the average is over. */
 export function aggregateScopeOf(countries: MapCountry[]): AggregateScope {
   const total = countries.length;
   const included = countries.filter((c) => scoreOf(c) !== null);
@@ -131,7 +162,7 @@ export function aggregateScopeOf(countries: MapCountry[]): AggregateScope {
   }
 
   const count = (kind: ScoreKind) => included.filter((c) => statusOf(c) === kind).length;
-  const split = [`${count("ok")} ok`, `${count("mixed")} mixed`];
+  const split = [`${count("ok")} ok`];
   const unlabelled = count("unlabelled");
   if (unlabelled > 0) split.push(`${unlabelled} unlabelled`);
   const excluded = incomplete > 0 ? `; ${incomplete} incomplete, excluded` : "";

@@ -1,7 +1,8 @@
 /**
  * The country tooltip shows what each number is, where it came from, and when a
  * country has no score. C8: an incomplete country says so and names what is missing;
- * it never shows a number in place of the score.
+ * it never shows a number in place of the score. A scored country shows each input's
+ * value, year and source.
  *
  * Tested through the extracted body: react-leaflet's Tooltip is a layer and is
  * not in the DOM until a marker is opened in a real map.
@@ -10,20 +11,27 @@ import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 
 import CountryTooltipBody from "./CountryTooltipBody";
-import type { MapCountry } from "./countryData";
+import type { InputProvenance, MapCountry } from "./countryData";
 
-// As the backend sends a country with a complete, measured score.
-const SWEDEN_OK: MapCountry = {
-  code: "SE", name: "Sweden", lat: 60, lon: 15, esg: 81.5, band: "leader",
-  esg_status: "ok", esg_source: "world_bank_live", missing_inputs: [],
-  renewable_share_pct: 60.1, co2_intensity_t_per_capita: null,
+const SWEDEN_INPUTS: Partial<Record<string, InputProvenance>> = {
+  renewable_share: {
+    value: 60.1, unit: "% (of total final energy consumption)", year: "2021", age_years: 5,
+    source: "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+    release: "World Bank lastupdated 2026-10-08", fetched_at: "2026-10-18T13:07:20Z",
+  },
+  gini_index: {
+    value: 27.7, unit: "index, 0-100 (survey-based, sparse years)", year: "2022", age_years: 4,
+    source: "World Bank SI.POV.GINI (World Development Indicators)",
+    release: "World Bank lastupdated 2026-10-08", fetched_at: "2026-10-18T13:07:16Z",
+  },
 };
 
-// A complete score that uses one static reference value with a stated source.
-const JAPAN_MIXED: MapCountry = {
-  code: "JP", name: "Japan", lat: 36, lon: 138, esg: 77, band: "advanced",
-  esg_status: "mixed", esg_source: "mixed", missing_inputs: [],
-  renewable_share_pct: null, co2_intensity_t_per_capita: null,
+// As the backend sends a country with a complete score from the pinned table.
+const SWEDEN_OK: MapCountry = {
+  code: "SE", name: "Sweden", lat: 60, lon: 15, esg: 81.5, band: "leader",
+  esg_status: "ok", esg_source: "pinned_table", missing_inputs: [],
+  inputs: SWEDEN_INPUTS,
+  renewable_share_pct: 60.1, co2_intensity_t_per_capita: null,
 };
 
 // As the backend sends a country with a missing input: no score, names what is missing.
@@ -37,14 +45,13 @@ const ICELAND_INCOMPLETE: MapCountry = {
 // A real score of zero. It is a score, not a missing one.
 const ZERO_OK: MapCountry = {
   code: "ZZ", name: "Zeroland", lat: 0, lon: 0, esg: 0, band: "lagging",
-  esg_status: "ok", esg_source: "world_bank_live", missing_inputs: [],
+  esg_status: "ok", esg_source: "pinned_table", missing_inputs: [],
   renewable_share_pct: null, co2_intensity_t_per_capita: null,
 };
 
 // As /map/countries sends esg_source_meanings.
 const MEANINGS: Record<string, string> = {
-  world_bank_live: "Every input measured live, in a fresh live-cache entry.",
-  mixed: "Some inputs are static reference values with a stated source.",
+  pinned_table: "Every input is read from the pinned official table.",
 };
 
 function renderBody(country: MapCountry, meanings?: Record<string, string> | null) {
@@ -65,9 +72,10 @@ describe("the country tooltip", () => {
     expect(text).not.toMatch(/NaN|null|undefined/);
   });
 
-  it("gives no source line for an incomplete country", () => {
+  it("gives no source line and no input list for an incomplete country", () => {
     const text = renderBody(ICELAND_INCOMPLETE, MEANINGS).container.textContent ?? "";
     expect(text).not.toContain("source:");
+    expect(text).not.toContain("Gini index 27");
   });
 
   it("shows a real 0 score as 0, not as incomplete", () => {
@@ -80,19 +88,26 @@ describe("the country tooltip", () => {
     expect(text).not.toContain("Missing");
   });
 
-  it("labels a mixed score as mixed", () => {
-    const text = renderBody(JAPAN_MIXED, MEANINGS).container.textContent ?? "";
+  it("lists each scored input with its value, year and source", () => {
+    const { container } = renderBody(SWEDEN_OK, MEANINGS);
+    const items = Array.from(container.querySelectorAll(".tip-inputs li")).map((li) => li.textContent ?? "");
 
-    expect(text).toContain("77");
-    expect(text).toContain("mixed: some inputs are static reference values");
+    expect(items).toHaveLength(2);
+    expect(items[0]).toContain("renewables share");
+    expect(items[0]).toContain("60.1");
+    expect(items[0]).toContain("2021");
+    expect(items[0]).toContain("World Bank EG.FEC.RNEW.ZS");
+    expect(items[1]).toContain("Gini index");
+    expect(items[1]).toContain("27.7");
+    expect(items[1]).toContain("2022");
   });
 
-  it("does not label an ok score as mixed", () => {
+  it("does not label an ok score as mixed or unlabelled", () => {
     const text = renderBody(SWEDEN_OK, MEANINGS).container.textContent ?? "";
     expect(text).not.toContain("mixed");
   });
 
-  it("shows a live country's measured renewables, and no data for a value it lacks", () => {
+  it("shows a country's renewables, and no data for a value it lacks", () => {
     const text = renderBody(SWEDEN_OK, MEANINGS).container.textContent ?? "";
 
     expect(text).toContain("60.1%");
@@ -101,16 +116,13 @@ describe("the country tooltip", () => {
   });
 
   it("shows the backend's meaning in the source line when it sends one", () => {
-    const live = renderBody(SWEDEN_OK, MEANINGS).container.textContent ?? "";
-    const mixed = renderBody(JAPAN_MIXED, MEANINGS).container.textContent ?? "";
+    const text = renderBody(SWEDEN_OK, MEANINGS).container.textContent ?? "";
 
-    expect(live).toContain("source: Every input measured live");
-    expect(mixed).toContain("source: Some inputs are static reference values");
+    expect(text).toContain("source: Every input is read from the pinned official table.");
   });
 
   it("falls back to the raw token when the response carries no meanings", () => {
-    expect(renderBody(SWEDEN_OK).container.textContent).toContain("source: world_bank_live");
-    expect(renderBody(JAPAN_MIXED, null).container.textContent).toContain("source: mixed");
+    expect(renderBody(SWEDEN_OK).container.textContent).toContain("source: pinned_table");
   });
 
   it("names missing inputs by their human label", () => {

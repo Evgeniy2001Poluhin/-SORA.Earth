@@ -1,0 +1,27 @@
+{
+  "outputs": {
+    "map_inputs.json": {
+      "bytes": 63168,
+      "sha256": "3832f89f1f1dc4e32120aee189089b7b459278e1b89e273a7da4413ddcd1fead"
+    }
+  },
+  "schema": "map-inputs/v1",
+  "snapshot_date_utc": "2026-10-18",
+  "snapshot_manifest_sha256": "55f26096be501040a684ab700f1e760f2808caee84ff79f04d307f8a82e506c0",
+  "summary": {
+    "complete": 32,
+    "countries": 33,
+    "missing_reasons_per_input": {
+      "gini_index": {
+        "no_observation": 1
+      }
+    },
+    "present_per_input": {
+      "co2_per_capita": 33,
+      "gini_index": 32,
+      "gov_effectiveness": 33,
+      "hdi": 33,
+      "renewable_share": 33
+    }
+  }
+}

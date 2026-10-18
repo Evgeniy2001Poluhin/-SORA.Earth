@@ -9,8 +9,8 @@
  * shows a number in place of the score.
  */
 import {
-  BAND_COLOR, INPUT_LABELS, NEUTRAL_COLOR, measuredPhysicalOf, scoreOf, sourceLabelOf, statusOf,
-  type MapCountry,
+  BAND_COLOR, INPUT_LABELS, INPUT_ORDER, NEUTRAL_COLOR, describeInput, measuredPhysicalOf, scoreOf,
+  sourceLabelOf, type MapCountry,
 } from "./countryData";
 
 export default function CountryTooltipBody({
@@ -22,7 +22,6 @@ export default function CountryTooltipBody({
   meanings?: Readonly<Record<string, string>> | null;
 }) {
   const score = scoreOf(c);
-  const status = statusOf(c);
   const physical = measuredPhysicalOf(c);
   const renew = physical.renewable_share_pct;
   const co2 = physical.co2_intensity_t_per_capita;
@@ -55,11 +54,6 @@ export default function CountryTooltipBody({
           <div className="tip-bar">
             <div className="tip-bar-fill" style={{ width: score + "%", background: color }} />
           </div>
-          {status === "mixed" && (
-            <div className="tip-status">
-              mixed: some inputs are static reference values with a stated source
-            </div>
-          )}
         </>
       )}
 
@@ -74,6 +68,18 @@ export default function CountryTooltipBody({
         </div>
       </div>
 
+      {score !== null && c.inputs && (
+        <ul className="tip-inputs">
+          {INPUT_ORDER.filter((k) => c.inputs?.[k]).map((k) => {
+            const line = describeInput(k, c.inputs![k]!);
+            return (
+              <li key={k}>
+                <span>{line.label}</span> {line.text}
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {score !== null && (
         <div className="tip-source">source: {sourceLabelOf(c.esg_source, meanings)}</div>
       )}

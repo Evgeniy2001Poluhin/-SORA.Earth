@@ -157,34 +157,41 @@ def test_evaluate_endpoint_for_finland_returns_null_esg_rank(client):
     assert bench["hdi"] == 0.942
 
 
-def test_map_route_handles_null_gov_effectiveness():
+def test_map_route_handles_null_gov_effectiveness(monkeypatch):
     """
-    Finland has no gov_effectiveness. C8: that is missing, never a default 0.0.
+    Finland with no gov_effectiveness in the pinned table: that input is missing, never a default 0.0.
 
-    The map score for Finland is therefore null and incomplete, and gov_effectiveness
-    is named in missing_inputs. Finland's gini is World Bank 2023 and qualifies.
+    Under C8 part 2 the map scores from the pinned table only, not from BENCHMARKS, so
+    this test builds a table in which Finland's governance row is absent. The score is
+    null and incomplete, gov_effectiveness is named in missing_inputs, and Finland's
+    Gini qualifies from its own sourced row.
     """
+    import copy
+    from datetime import date
+    from app import map_inputs
     from app.api.map_data import score_country
-    from unittest.mock import patch
-    from app.country_benchmarks import BENCHMARKS
+    from tests.test_map_inputs import SHIPPED_DOC
 
-    finland_data = BENCHMARKS["Finland"].copy()
-    finland_data["live"] = {
-        "indicators": {}  # Empty indicators, so the score reads BENCHMARKS only
-    }
+    monkeypatch.setattr(map_inputs, "use_date", lambda: date(2026, 10, 19))
+    doc = copy.deepcopy(SHIPPED_DOC)
+    fin = next(c for c in doc["countries"] if c["iso3"] == "FIN")
+    fin["inputs"]["gov_effectiveness"] = {"reason": "no_observation", "value": None}
+    fin["complete"] = False
+    fin["missing"] = ["gov_effectiveness"]
+    rows = {c["iso3"]: c for c in doc["countries"]}
+    table = map_inputs.PinnedTable(rows=rows, table_sha256="c" * 64, manifest_sha256="d" * 64,
+                                   snapshot_date="2026-10-18")
+    state = map_inputs.TableState(table=table, reason=None)
 
-    with patch("app.api.map_data.get_merged_country_data") as mock_get:
-        mock_get.return_value = finland_data
+    result = score_country("FIN", state=state)
 
-        result = score_country("Finland")
-
-        assert result["esg"] is None
-        assert result["esg_status"] == "incomplete"
-        assert result["gov_effectiveness"] is None
-        assert "gov_effectiveness" in result["missing_inputs"]
-        assert "gov_effectiveness" not in result["inputs"]
-        assert result["inputs"]["gini_index"]["source"] == "World Bank"
-        assert result["inputs"]["gini_index"]["period"] == "2023"
+    assert result["esg"] is None
+    assert result["esg_status"] == "incomplete"
+    assert result["gov_effectiveness"] is None
+    assert "gov_effectiveness" in result["missing_inputs"]
+    assert "gov_effectiveness" not in result["inputs"]
+    assert result["inputs"]["gini_index"]["source"].startswith("World Bank SI.POV.GINI")
+    assert result["inputs"]["gini_index"]["year"] == fin["inputs"]["gini_index"]["year"]
 
 
 def test_investor_dashboard_benchmark_display_handles_null():

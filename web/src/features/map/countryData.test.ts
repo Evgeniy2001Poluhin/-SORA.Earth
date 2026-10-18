@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateScopeOf,
   byEsgDesc,
+  describeInput,
   measuredPhysicalOf,
   meanScore,
   scoreOf,
@@ -21,9 +22,7 @@ const country = (over: Partial<MapCountry>): MapCountry => ({
 });
 
 const OK = (name: string, esg: number, band = "developing") =>
-  country({ name, esg, band, esg_status: "ok", esg_source: "world_bank_live" });
-const MIXED = (name: string, esg: number, band = "developing") =>
-  country({ name, esg, band, esg_status: "mixed", esg_source: "mixed" });
+  country({ name, esg, band, esg_status: "ok", esg_source: "pinned_table" });
 const INCOMPLETE = (name: string, missing: string[] = ["gov_effectiveness"]) =>
   country({ name, esg: null, band: null, esg_status: "incomplete", esg_source: null, missing_inputs: missing });
 
@@ -45,25 +44,27 @@ describe("statusOf", () => {
     expect(statusOf(country({ esg: null, esg_status: "ok" }))).toBe("incomplete");
   });
 
-  it("reports ok and mixed as sent, and a score with no status as unlabelled", () => {
+  it("reports ok as sent, and a score with no status as unlabelled", () => {
     expect(statusOf(OK("Sweden", 81.5))).toBe("ok");
-    expect(statusOf(MIXED("Japan", 77))).toBe("mixed");
     expect(statusOf(country({ name: "Old", esg: 60 }))).toBe("unlabelled");
+  });
+
+  it("does not know a mixed status: the backend no longer sends one", () => {
+    expect(statusOf(country({ name: "Legacy", esg: 60, esg_status: "mixed" }))).toBe("unlabelled");
   });
 });
 
 describe("sourceLabelOf", () => {
   const MEANINGS = {
-    world_bank_live: "Every input measured live.",
-    mixed: "Some inputs are static reference values.",
+    pinned_table: "Every input is read from the pinned official table.",
   };
 
   it("shows the backend's meaning for the token when it sends one", () => {
-    expect(sourceLabelOf("mixed", MEANINGS)).toBe("Some inputs are static reference values.");
+    expect(sourceLabelOf("pinned_table", MEANINGS)).toBe("Every input is read from the pinned official table.");
   });
 
   it("falls back to the raw token when there is no meaning for it", () => {
-    expect(sourceLabelOf("mixed")).toBe("mixed");
+    expect(sourceLabelOf("pinned_table")).toBe("pinned_table");
     expect(sourceLabelOf("mock", MEANINGS)).toBe("mock");
   });
 
@@ -103,17 +104,17 @@ describe("aggregateScopeOf", () => {
   });
 
   it("excludes incomplete countries and states N as x of y", () => {
-    const s = aggregateScopeOf([INCOMPLETE("Iceland"), OK("Sweden", 81.5), MIXED("Japan", 77)]);
+    const s = aggregateScopeOf([INCOMPLETE("Iceland"), OK("Sweden", 81.5), OK("Japan", 77)]);
 
     expect(s.included.map((c) => c.name)).toEqual(["Sweden", "Japan"]);
     expect(s.total).toBe(3);
     expect(s.incomplete).toBe(1);
-    expect(s.label).toBe("N = 2 of 3 countries (1 ok, 1 mixed); 1 incomplete, excluded");
+    expect(s.label).toBe("N = 2 of 3 countries (2 ok); 1 incomplete, excluded");
   });
 
   it("says N with no exclusion note when every country is scored", () => {
     const s = aggregateScopeOf([OK("Sweden", 81.5), OK("Chile", 62.5)]);
-    expect(s.label).toBe("N = 2 of 2 countries (2 ok, 0 mixed)");
+    expect(s.label).toBe("N = 2 of 2 countries (2 ok)");
   });
 
   it("says no complete score when every country is incomplete", () => {
@@ -124,7 +125,26 @@ describe("aggregateScopeOf", () => {
 
   it("counts a score with no status as unlabelled, not as ok", () => {
     const s = aggregateScopeOf([country({ name: "Old", esg: 60 }), OK("Sweden", 81.5)]);
-    expect(s.label).toBe("N = 2 of 2 countries (1 ok, 0 mixed, 1 unlabelled)");
+    expect(s.label).toBe("N = 2 of 2 countries (1 ok, 1 unlabelled)");
+  });
+});
+
+describe("describeInput", () => {
+  it("shows the value at the input's own precision, with its unit, year and source", () => {
+    const line = describeInput("hdi", {
+      value: 0.94, unit: "index, 0-1", year: "2023", age_years: 3,
+      source: "UNDP Human Development Report", release: "release 2025", fetched_at: null,
+    });
+
+    expect(line.label).toBe("human development index");
+    expect(line.text).toBe("0.940 index, 0-1, 2023, UNDP Human Development Report");
+  });
+
+  it("keeps a measured zero as 0", () => {
+    const line = describeInput("renewable_share", {
+      value: 0, unit: "%", year: "2021", age_years: 5, source: "World Bank", release: null, fetched_at: null,
+    });
+    expect(line.text).toBe("0.0 %, 2021, World Bank");
   });
 });
 
@@ -157,7 +177,7 @@ describe("byEsgDesc", () => {
   });
 
   it("leaves an incomplete country out of the ranking entirely", () => {
-    const sorted = byEsgDesc([OK("Chile", 62.5), INCOMPLETE("Iceland"), MIXED("Japan", 77)]);
+    const sorted = byEsgDesc([OK("Chile", 62.5), INCOMPLETE("Iceland"), OK("Japan", 77)]);
 
     expect(sorted.map((c) => c.name)).toEqual(["Japan", "Chile"]);
   });
