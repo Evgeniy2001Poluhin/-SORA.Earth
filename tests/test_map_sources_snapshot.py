@@ -665,3 +665,17 @@ def test_a_gini_past_the_policy_window_still_shows_its_age(tmp_path, world):
     _table, manifest = build.write_build(_snapshot_dir(tmp_path), tmp_path / "out")
     assert manifest["gini_age"]["latest_per_country"]["DEU"] == {"latest_year": "2015", "age_years": 11}
     assert manifest["gini_age"]["kept_at_window"]["10"] == 32
+
+
+def test_a_gini_exactly_at_a_window_edge_is_kept_by_that_window(tmp_path, world):
+    """A latest Gini aged exactly 5 is inside a 5-year window: the window keeps <= its length."""
+    world.series[GINI] = [
+        (i, y, v) for i, y, v in world.series[GINI]
+        if i != "NZL" and not (i == "DEU" and y > "2021")
+    ]
+    _take(tmp_path)
+    _table, manifest = build.write_build(_snapshot_dir(tmp_path), tmp_path / "out")
+    gini = manifest["gini_age"]
+    assert gini["latest_per_country"]["DEU"] == {"latest_year": "2021", "age_years": 5}
+    assert gini["kept_at_window"]["5"] == 32
+    assert gini["age_years_histogram"] == {"2": 31, "5": 1}
