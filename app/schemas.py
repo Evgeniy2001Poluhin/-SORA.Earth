@@ -742,9 +742,18 @@ class MonteCarloUnavailable(BaseModel):
 
 
 class LstmStatusOk(BaseModel):
-    """Activation status was determined."""
+    """Activation status was determined.
+
+    `active` means "eligible by row count (samples >= threshold)". It does not
+    say whether the fitted ensemble includes the LSTM: `lstm_in_ensemble` does,
+    and is null when the fit failed and nothing was measured. `weights` and
+    `models_active` describe that fitted ensemble, so they are empty when the
+    fit failed; `reason_code` is `ensemble_fit_failed` in that case.
+    """
 
     status: Literal["ok"]
+    #: Eligible by row count: `samples >= threshold`. Not a statement about the
+    #: fitted ensemble; see `lstm_in_ensemble`.
     active: bool
     #: Rows in the forecast series. Not the same as `unique_days_raw`.
     samples: int
@@ -753,6 +762,12 @@ class LstmStatusOk(BaseModel):
     next_activation_date: Optional[str] = None
     models_active: List[str] = Field(default_factory=list)
     weights: Dict[str, float] = Field(default_factory=dict)
+    #: Whether the fitted ensemble includes the LSTM. None if the fit failed.
+    lstm_in_ensemble: Optional[bool] = None
+    #: Observation-based eligibility; legacy `active` counts dense rows only.
+    observed_samples: int = Field(ge=0)
+    eligible_for_training: bool
+    observations_remaining: int = Field(ge=0)
     unique_days_raw: int
     last_evaluation_date: Optional[str] = None
     message: str

@@ -19,6 +19,11 @@ LSTM_MIN_ROWS = 33  # seq_length(14) + max_lag(14) + buffer(5) = 33
 # Currently: 13 unique days → ~28 after interpolation → below threshold (correct behavior)
 
 
+def observed_sample_count(df: pd.DataFrame) -> int:
+    """Count evidence, not interpolated dates; legacy frames have no mask."""
+    return int(df["is_observed"].sum()) if "is_observed" in df.columns else len(df)
+
+
 class EnsembleForecaster(BaseForecastModel):
     """Ensemble model with intelligent auto-weighting and cold-start strategy.
 
@@ -111,8 +116,7 @@ class EnsembleForecaster(BaseForecastModel):
         # `len(df)` remains the fallback for a frame carrying no provenance --
         # a caller building one by hand, or a test -- so anything that never
         # went through the loader reads exactly as before.
-        n_samples = (int(df["is_observed"].sum())
-                     if "is_observed" in df.columns else len(df))
+        n_samples = observed_sample_count(df)
 
         # What each model is given, decided per model rather than left to
         # whatever the loader happened to return (#132).
