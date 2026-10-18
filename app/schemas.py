@@ -764,6 +764,10 @@ class LstmStatusOk(BaseModel):
     weights: Dict[str, float] = Field(default_factory=dict)
     #: Whether the fitted ensemble includes the LSTM. None if the fit failed.
     lstm_in_ensemble: Optional[bool] = None
+    #: Observation-based eligibility; legacy `active` counts dense rows only.
+    observed_samples: int = Field(ge=0)
+    eligible_for_training: bool
+    observations_remaining: int = Field(ge=0)
     unique_days_raw: int
     last_evaluation_date: Optional[str] = None
     message: str

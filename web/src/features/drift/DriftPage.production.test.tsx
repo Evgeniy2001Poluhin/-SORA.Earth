@@ -166,12 +166,11 @@ describe("LSTMProgressWidget when the API answers with nothing", () => {
   });
 
   it("draws the active block even if the server omits its lists", async () => {
-    // The contract promises `models_active` and `weights` when active is true.
-    // Reading them on the strength of `active` alone is the mistake #236 was
-    // about, one level in.
+    // Explicit fitted membership can be known even in a partial response.
+    // Missing model/weight lists must not crash the widget (#236).
     stubJson({
       status: "ok", active: true, samples: 40, threshold: 33, days_remaining: 0,
-      next_activation_date: null, message: "LSTM active", reason_code: null,
+      next_activation_date: null, message: "LSTM active", reason_code: null, lstm_in_ensemble: true,
       unique_days_raw: 40, last_evaluation_date: "2026-09-01",
     });
 
@@ -184,7 +183,7 @@ describe("LSTMProgressWidget when the API answers with nothing", () => {
   });
 
   it("renders the real progress the server reports", async () => {
-    stubJson({ active: false, samples: 137, threshold: 500, days_remaining: 12, next_activation_date: null, models_active: [], weights: {}, message: "" });
+    stubJson({ active: false, samples: 137, observed_samples: 137, eligible_for_training: false, observations_remaining: 363, threshold: 500, days_remaining: 12, next_activation_date: null, models_active: [], weights: {}, message: "" });
 
     const { container } = renderWithQuery(<LSTMProgressWidget />);
 
