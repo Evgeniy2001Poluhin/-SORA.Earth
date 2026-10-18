@@ -4,6 +4,7 @@ import { FeatureImportancePanel } from "./FeatureImportancePanel";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { mlopsApi } from "@/api/endpoints/mlops";
+import { TRAINING_METRICS_NOTE } from "../evaluate/successProbabilityNote";
 import "./mlops.css";
 
 export function MlopsHealthPage() {
@@ -21,30 +22,59 @@ export function MlopsHealthPage() {
   const metrics = m.data!;
   const meta    = status?.meta ?? {};
 
+  // A value the backend did not send is not a measurement. Absent and a
+  // measured zero are different answers, so only a real number is drawn as one.
+  const numOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const show = (v: number | null, digits?: number): string =>
+    v == null ? "—" : digits === undefined ? String(v) : v.toFixed(digits);
+  // A real 0 is "0.0s"; only an absent or non-finite duration is a dash.
+  const fmtDuration = (v: unknown): string => {
+    const n = numOrNull(v);
+    return n == null ? "—" : n.toFixed(1) + "s";
+  };
+
   const ds = health?.drift_status;
+  // "No baseline" and "insufficient data" are unmeasured, so they are neutral,
+  // not the green of a stable reading.
   const driftColor =
-    ds === "stable" || ds === "no_baseline"
+    ds === "stable"
       ? "var(--planet)"
-      : ds === "insufficient_data" || ds === "unknown"
+      : ds == null || ds === "no_baseline" || ds === "insufficient_data" || ds === "unknown"
         ? "var(--muted, #9aa0a6)"
         : "var(--danger, #EF4444)";
-  const modelColor = health?.model_status === "healthy" ? "var(--planet)" : "var(--danger, #EF4444)";
+  const ms = health?.model_status;
+  const modelColor =
+    ms === "healthy" ? "var(--planet)" : ms == null ? "var(--muted, #9aa0a6)" : "var(--danger, #EF4444)";
 
+  const accuracy     = numOrNull(metrics?.metrics?.accuracy);
+  const f1           = numOrNull(metrics?.metrics?.f1_score);
+  const rocAuc       = numOrNull(metrics?.metrics?.roc_auc);
+  const bestF1       = numOrNull(metrics?.metrics?.best_f1);
+  const testSamples  = numOrNull(metrics?.metrics?.test_samples);
+  const trainSamples = numOrNull(metrics?.metrics?.train_samples);
   const metricBars = [
-    { name: "accuracy", value: metrics?.metrics?.accuracy ?? 0 },
-    { name: "f1",       value: metrics?.metrics?.f1_score ?? 0 },
-    { name: "roc_auc",  value: metrics?.metrics?.roc_auc ?? 0 },
-    { name: "best_f1",  value: metrics?.metrics?.best_f1 ?? 0 },
+    { name: "accuracy", value: accuracy },
+    { name: "f1",       value: f1 },
+    { name: "roc_auc",  value: rocAuc },
+    { name: "best_f1",  value: bestF1 },
   ];
+  const splitLine =
+    testSamples == null
+      ? "Test-split size not reported."
+      : `Training-time evaluation on a held-out test set of ${testSamples} samples (training set: ${trainSamples ?? "not reported"}).`;
 
-  const hist = (status?.retrain_history || []).slice().reverse();
+  const models = Array.isArray(metrics?.models_available) ? metrics.models_available : null;
+  // A history list the backend did not send is unknown, not an empty history.
+  const rh = status?.retrain_history;
+  const historyList = Array.isArray(rh) ? rh : null;
+  const hist = (historyList ?? []).slice().reverse();
 
   return (
     <div className="card-body" style={{ padding: 32 }}>
       <div className="eyebrow" style={{ marginBottom: 8 }}>MLOps · Platform Health</div>
       <h1 className="display" style={{ fontSize: 36, margin: "0 0 8" }}>MLOps Control Room</h1>
       <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 28 }}>
-        Drift detection and training history. Auto-refresh every 10s.
+        Drift detection and training history. Health and drift refresh every 10s; model status and metrics load when the page opens.
       </p>
 
       <div className="kpi-grid">
@@ -58,11 +88,11 @@ export function MlopsHealthPage() {
         </div>
         <div className="kpi">
           <div className="kpi-lbl">Observations</div>
-          <div className="kpi-val tabular">{health?.observations_tracked ?? 0}</div>
+          <div className="kpi-val tabular">{show(numOrNull(health?.observations_tracked))}</div>
         </div>
         <div className="kpi">
           <div className="kpi-lbl">Threshold</div>
-          <div className="kpi-val tabular">{(status?.current_threshold ?? 0).toFixed(2)}</div>
+          <div className="kpi-val tabular">{show(numOrNull(status?.current_threshold), 2)}</div>
         </div>
       </div>
 
@@ -72,7 +102,7 @@ export function MlopsHealthPage() {
           <div className="kpi"><div className="kpi-lbl">Algorithm</div><div className="kpi-val mono" style={{ fontSize: 13 }}>{meta?.algorithm ?? "—"}</div></div>
           <div className="kpi"><div className="kpi-lbl">N estimators</div><div className="kpi-val tabular">{meta?.n_estimators ?? "—"}</div></div>
           <div className="kpi"><div className="kpi-lbl">Max depth</div><div className="kpi-val tabular">{meta?.max_depth ?? "—"}</div></div>
-          <div className="kpi"><div className="kpi-lbl">Train samples</div><div className="kpi-val tabular">{meta?.total_samples ?? "—"}</div></div>
+          <div className="kpi"><div className="kpi-lbl">Total samples</div><div className="kpi-val tabular">{meta?.total_samples ?? "—"}</div></div>
         </div>
         <p style={{ color: "var(--faint)", fontSize: 11, marginTop: 12, fontFamily: "var(--f-mono)" }}>retrained_at: {meta?.retrained_at ?? "—"}</p>
       </div>
@@ -89,19 +119,30 @@ export function MlopsHealthPage() {
             </BarChart>
           </ResponsiveContainer>
         </div>
+        <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 12 }}>
+          {metricBars.map((b) => (
+            <span key={b.name} className="tabular" style={{ marginRight: 16 }}>
+              {b.name} {b.value == null ? "unavailable" : b.value.toFixed(3)}
+            </span>
+          ))}
+        </p>
+        <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>{splitLine}</p>
+        <p style={{ color: "var(--faint)", fontSize: 12, marginTop: 4 }}>{TRAINING_METRICS_NOTE}</p>
       </div>
 
       <div className="mlops-section">
-        <div className="eyebrow" style={{ marginBottom: 12 }}>Retrain history · {hist.length}</div>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>Retrain history · {historyList === null ? "—" : hist.length}</div>
         <div className="mlops-table">
           <div className="mlops-row mlops-head">
             <div>Version</div><div>Trigger</div><div className="tabular">Dur</div><div className="tabular">Acc</div><div className="tabular">F1</div><div className="tabular">AUC</div><div>Status</div>
           </div>
-          {hist.map((r) => (
+          {historyList === null ? (
+            <div className="mlops-row"><div style={{ color: "var(--muted)", fontSize: 12 }}>unavailable</div></div>
+          ) : hist.map((r) => (
             <div key={r.model_version || r.started_at} className="mlops-row">
               <div className="mono" style={{ fontSize: 11 }}>{r.model_version || "—"}</div>
               <div style={{ color: "var(--muted)", fontSize: 12 }}>{r.trigger_source || "—"}</div>
-              <div className="tabular">{r.duration_sec ? r.duration_sec.toFixed(1) + "s" : "—"}</div>
+              <div className="tabular">{fmtDuration(r.duration_sec)}</div>
               <div className="tabular">{r.metrics?.accuracy?.toFixed(3) ?? "—"}</div>
               <div className="tabular">{r.metrics?.f1_score?.toFixed(3) ?? "—"}</div>
               <div className="tabular">{r.metrics?.roc_auc?.toFixed(3) ?? "—"}</div>
@@ -112,11 +153,13 @@ export function MlopsHealthPage() {
       </div>
 
       <div className="mlops-section">
-        <div className="eyebrow" style={{ marginBottom: 12 }}>Model artifacts · {metrics?.models_available?.length ?? 0}</div>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>Model artifacts · {models === null ? "—" : models.length}</div>
         <div className="mlops-chips">
-          {(metrics?.models_available ?? []).map((f) => (
-            <span key={f} className="mlops-chip">{f}</span>
-          ))}
+          {models === null
+            ? <span style={{ color: "var(--muted)", fontSize: 12 }}>unavailable</span>
+            : models.map((f) => (
+                <span key={f} className="mlops-chip">{f}</span>
+              ))}
         </div>
       </div>
 
