@@ -25,17 +25,31 @@ Selection rule (the policy is written into the output):
   * Nothing is substituted: not another indicator, not the static BENCHMARKS,
     not the global average, not a default.
 
-Maximum ages (years, measured against the snapshot's own year):
+Maximum ages (years, measured against the snapshot's own year). The reasons are
+also written into manifest.json (max_age_rationale, and gini_age for the Gini
+distribution); the manifest carries the shorter text.
 
-    gini_index          10   survey-based, sparse; a longer window would admit
-                             surveys too old to describe the present
-    gov_effectiveness    3   WGI is published yearly; three years is the window
-                             in which the latest estimate is still current
-    hdi                  3   UNDP publishes annually
-    renewable_share      5   the renewables and CO2 series are annual with a
-                             lag of one to three years; five keeps every country
-                             that the source currently reports
-    co2_per_capita       5   as above
+    gini_index          10   The Gini index comes from household income or
+                             consumption surveys that a country runs irregularly,
+                             so the latest figure can be several years old and still
+                             be the current official measure. The 2026-10-18 snapshot
+                             holds a latest Gini of 2018 to 2024 for 32 countries,
+                             ages 2 to 8 years. A 5-year window drops four (ISL 7,
+                             AUS 6, JPN 6, ARE 8); a 7-year window drops one (ARE 8);
+                             10 drops none. One Gini point moves the total score by
+                             about 0.26 points (0.35 x 0.3 x 2.5), so a stale figure is
+                             a small error and a missing one a larger one. 10 is kept:
+                             the data give no case for a shorter window, and the age is
+                             written beside every value so a reader can judge it. The
+                             age distribution is in manifest.json under gini_age.
+    gov_effectiveness    3   WGI is published yearly; three years keeps the latest
+                             estimate in the window in which it is still current.
+    hdi                  3   UNDP publishes annually.
+    renewable_share      5   The renewables and CO2 series are annual with a lag of
+                             one to three years; five keeps every country the final-
+                             energy series reports at its latest year (2021 in the
+                             2026 snapshot).
+    co2_per_capita       5   As renewable_share.
 
 Outputs, in a NEW directory (nothing is overwritten):
 
@@ -88,6 +102,23 @@ MAX_AGE_YEARS = {
     "renewable_share": 5,
     "co2_per_capita": 5,
 }
+
+
+# The reasons for each maximum age, written into the output manifest.
+MAX_AGE_RATIONALE = {
+    "gini_index": (
+        "Survey-based and published irregularly: the latest figure can be several years old "
+        "and still current. 10 years keeps every country with a survey on record; the "
+        "5-year and 7-year alternatives are in manifest gini_age. One Gini point moves the "
+        "total score by about 0.26 points, so the window is a coverage choice, not a "
+        "precision one."
+    ),
+    "gov_effectiveness": "WGI is published yearly; 3 years keeps the latest estimate in its current window.",
+    "hdi": "UNDP publishes annually; 3 years keeps the latest composite index in its current window.",
+    "renewable_share": "Annual series with a lag of one to three years; 5 years keeps every country at its latest year.",
+    "co2_per_capita": "Annual series with a lag of one to three years; 5 years keeps every country at its latest year.",
+}
+GINI_WINDOWS = (5, 7, 10)
 
 
 class BuildError(RuntimeError):
@@ -320,6 +351,35 @@ def build_table(snapshot_dir):
     }
 
 
+def gini_age_summary(countries):
+    """How old each country's latest Gini is, and how many each window would keep.
+
+    Computed from the table, so a country whose latest Gini is past the policy window
+    still shows its age here. A window keeps a country when its latest Gini is at most
+    that many years old.
+    """
+    ages = {}
+    for country in countries:
+        gini = country["inputs"]["gini_index"]
+        if "age_years" in gini:
+            ages[country["iso3"]] = {
+                "latest_year": gini.get("year", gini.get("latest_year")),
+                "age_years": gini["age_years"],
+            }
+    by_age = {}
+    for entry in ages.values():
+        key = str(entry["age_years"])
+        by_age[key] = by_age.get(key, 0) + 1
+    return {
+        "latest_per_country": {iso3: ages.get(iso3) for iso3 in sorted(snap.MAP_ISO3)},
+        "countries_with_any_gini": len(ages),
+        "countries_without_any_gini": sorted(set(snap.MAP_ISO3) - set(ages)),
+        "age_years_histogram": {k: by_age[k] for k in sorted(by_age, key=int)},
+        "kept_at_window": {str(w): sum(1 for e in ages.values() if e["age_years"] <= w) for w in GINI_WINDOWS},
+        "policy_max_age_years": MAX_AGE_YEARS["gini_index"],
+    }
+
+
 def _encode(obj):
     return (json.dumps(obj, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
 
@@ -342,6 +402,9 @@ def write_build(snapshot_dir, out):
             OUTPUT_NAME: {"sha256": _sha256(table_bytes), "bytes": len(table_bytes)},
         },
         "summary": table["summary"],
+        "max_age_years": MAX_AGE_YEARS,
+        "max_age_rationale": MAX_AGE_RATIONALE,
+        "gini_age": gini_age_summary(table["countries"]),
     }
     manifest_bytes = _encode(manifest)
 

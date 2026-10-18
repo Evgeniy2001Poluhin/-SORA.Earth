@@ -623,3 +623,45 @@ def test_the_build_refuses_a_re_signed_future_hdi_year(tmp_path, world):
     _resign(snapshot, rel)
     with pytest.raises((build.BuildError, snap.SnapshotError), match="after the snapshot year"):
         build.write_build(snapshot, tmp_path / "out")
+
+
+# ---------------------------------------------------------------------------
+# The Gini age policy: its reasons and the age distribution are in the manifest
+# ---------------------------------------------------------------------------
+
+def test_the_output_manifest_carries_the_reasons_for_every_maximum_age(tmp_path, world):
+    _take(tmp_path)
+    _table, manifest = build.write_build(_snapshot_dir(tmp_path), tmp_path / "out")
+    assert set(manifest["max_age_rationale"]) == set(build.MAX_AGE_YEARS)
+    assert manifest["max_age_years"] == build.MAX_AGE_YEARS
+    assert "Survey-based" in manifest["max_age_rationale"]["gini_index"]
+
+
+def test_the_gini_age_distribution_counts_each_window_and_names_the_missing(tmp_path, world):
+    """DEU's latest Gini is 2018 (age 8); everyone else is 2024 (age 2); NZL has none."""
+    world.series[GINI] = [
+        (i, y, v) for i, y, v in world.series[GINI]
+        if i != "NZL" and not (i == "DEU" and y > "2018")
+    ]
+    _take(tmp_path)
+    _table, manifest = build.write_build(_snapshot_dir(tmp_path), tmp_path / "out")
+    gini = manifest["gini_age"]
+    assert gini["countries_with_any_gini"] == 32
+    assert gini["countries_without_any_gini"] == ["NZL"]
+    assert gini["age_years_histogram"] == {"2": 31, "8": 1}
+    assert gini["kept_at_window"] == {"5": 31, "7": 31, "10": 32}
+    assert gini["latest_per_country"]["DEU"] == {"latest_year": "2018", "age_years": 8}
+    assert gini["latest_per_country"]["NZL"] is None
+    assert gini["policy_max_age_years"] == 10
+
+
+def test_a_gini_past_the_policy_window_still_shows_its_age(tmp_path, world):
+    """The distribution is measured, not filtered by the policy: a figure too old to
+    select still appears with its age, so the window can be judged from the record."""
+    world.series[GINI] = [
+        (i, y, v) for i, y, v in world.series[GINI] if not (i == "DEU" and y > "2015")
+    ]
+    _take(tmp_path)
+    _table, manifest = build.write_build(_snapshot_dir(tmp_path), tmp_path / "out")
+    assert manifest["gini_age"]["latest_per_country"]["DEU"] == {"latest_year": "2015", "age_years": 11}
+    assert manifest["gini_age"]["kept_at_window"]["10"] == 32
