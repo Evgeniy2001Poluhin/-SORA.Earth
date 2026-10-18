@@ -28,7 +28,7 @@ def _unmeasured() -> Dict[str, Any]:
     """Physical fields when no live measurement exists: null, never derived."""
     return {"co2_intensity_t_per_capita": None, "renewable_share_pct": None}
 
-# 32 country profiles (lat, lon, base ESG profile)
+# 33 country profiles (lat, lon, base ESG profile)
 # Coords are country centroids; scores derived deterministically
 COUNTRIES: List[Dict[str, Any]] = [
     {"code":"SWE","name":"Sweden","lat":60.1,"lon":18.6,"esg":89},
@@ -74,7 +74,20 @@ def _band(esg: int) -> str:
     return "lagging"
 
 
-_NAME_MAP={"United States":"USA","United Kingdom":"UK","South Korea":"Korea","Czech Republic":"Czechia"}
+# The name each map country is looked up under in BENCHMARKS and the live cache,
+# keyed by ISO3 and never by display name. USA and GBR keep the short keys they
+# have always been looked up under, so their scores do not change here. KOR and
+# CZE were looked up under "Korea" and "Czechia", which have no row in either
+# table, so neither country could ever resolve. "South Korea" is the name the
+# tables use for KOR; "Czech Republic" is the map's own name for CZE, which has
+# no BENCHMARKS row yet (its inputs come from the snapshot in part 2).
+_LOOKUP_NAME = {"USA": "USA", "GBR": "UK", "KOR": "South Korea", "CZE": "Czech Republic"}
+
+
+def _lookup_name(code: str, name: str) -> str:
+    """The BENCHMARKS / live-cache key for a map country, by ISO3 code."""
+    return _LOOKUP_NAME.get(code, name)
+
 def _measured(ind: Dict[str, Any], sources: Dict[str, str], key: str):
     """The value of one indicator, only if the live cache says a live source published it."""
     if sources.get(key) in LIVE_INDICATOR_SOURCES:
@@ -94,7 +107,6 @@ def _live_esg(name: str, fallback: int) -> Tuple[int, Dict[str, Any], str]:
     is the measured value when a live source published it, otherwise None. Neither
     is ever derived from the score.
     """
-    name=_NAME_MAP.get(name,name)
     try:
         from app.external_data import get_merged_country_data
         d = get_merged_country_data(name)
@@ -146,7 +158,7 @@ def map_countries():
     """
     items = []
     for c in COUNTRIES:
-        score, extra, src = _live_esg(c["name"], c["esg"])
+        score, extra, src = _live_esg(_lookup_name(c["code"], c["name"]), c["esg"])
         item = {**c, "esg": score, "esg_source": src, "band": _band(score)}
         item.update(extra)
         items.append(item)
