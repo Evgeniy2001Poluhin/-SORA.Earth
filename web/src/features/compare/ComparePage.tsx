@@ -55,7 +55,10 @@ function ResultCard(props: { side: Side; result: EvaluateResponse | undefined; l
   const tone = r.risk_level === "Low" ? "low" : r.risk_level === "High" ? "high" : "med";
   return (
     <div className={"cmp-result" + (props.isWinner ? " is-winner" : "")}>
-      {props.isWinner && <span className="cmp-winner-badge">★ WINNER · Δ {(Math.abs(props.delta||0)).toFixed(1)}</span>}
+      {/* Higher ESG index is what this is: a weighted formula over the three
+          axes and duration (app/main.py calculate_esg), not a forecast of which
+          project succeeds, so it is not called a winner. */}
+      {props.isWinner && <span className="cmp-winner-badge">★ Higher ESG index · Δ {(Math.abs(props.delta||0)).toFixed(1)}</span>}
       <div className="cmp-score-row">
         <div className="cmp-score tabular">{r.total_score.toFixed(1)}</div>
         <span className={"cmp-risk " + tone}>{r.risk_level} risk</span>
@@ -129,7 +132,7 @@ export function ComparePage() {
     <div className="cmp-page">
       <div className="cmp-hero">
         <h1 className="display">Compare two ESG projects.</h1>
-        <p>Run them side-by-side, see the gap on every axis. Same model, same benchmarks, no PR spin.</p>
+        <p>Run them side-by-side and see the gap on every axis. Each project is scored by its own request; the page does not check that both were scored by the same model.</p>
         <button className="btn-primary" onClick={runBoth}>Run both</button>
       </div>
 
@@ -143,8 +146,8 @@ export function ComparePage() {
           <div className="cmp-diff-head">
             <span className="eyebrow">DIFFERENCE</span>
             {winner ? (
-              <span>{winner === "A" ? A.form.project_name : B.form.project_name} leads by Δ {dsign(Math.abs(diff.total))}</span>
-            ) : <span>Tie</span>}
+              <span>Higher ESG index: {winner === "A" ? A.form.project_name : B.form.project_name} by Δ {dsign(Math.abs(diff.total))}</span>
+            ) : <span>Tie on ESG index</span>}
           </div>
           <div className="cmp-diff-axes">
             <div><span>Environment</span><b className={diff.env >= 0 ? "pos" : "neg"}>{dsign(diff.env)}</b></div>
@@ -152,7 +155,7 @@ export function ComparePage() {
             <div><span>Economic</span><b className={diff.eco >= 0 ? "pos" : "neg"}>{dsign(diff.eco)}</b></div>
             <div><span>Total</span><b className={diff.total >= 0 ? "pos" : "neg"}>{dsign(diff.total)}</b></div>
           </div>
-          <div className="cmp-diff-note">Positive Δ favours Project B over Project A.</div>
+          <div className="cmp-diff-note">Positive Δ means Project B has the higher ESG index.</div>
         </div>
       )}
     </div>
