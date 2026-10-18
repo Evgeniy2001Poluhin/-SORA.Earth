@@ -103,6 +103,7 @@ class FakeWorld:
         self.names = dict(NAMES)
         self.sources = dict(SOURCES)
         self.per_page_override = None
+        self.stamps = {}  # code -> function(page_number) -> lastupdated stamp, when a test needs one
         self.calls = []
 
     def get(self, label, url, params=None):
@@ -145,8 +146,9 @@ class FakeWorld:
                 "obs_status": "",
                 "decimal": 1,
             })
+        stamp = self.stamps[code](page) if code in self.stamps else "2026-10-08"
         meta = {"page": page, "pages": pages, "per_page": per_page, "total": total,
-                "sourceid": "2", "lastupdated": "2026-10-08"}
+                "sourceid": "2", "lastupdated": stamp}
         return json.dumps([meta, body_rows or None]).encode("utf-8"), url
 
 
@@ -495,3 +497,57 @@ def test_a_manifest_digest_that_does_not_recompute_is_refused(tmp_path, world):
     manifest_path.write_text(json.dumps(manifest))
     with pytest.raises(build.BuildError, match="digest does not recompute"):
         build.verify_snapshot(_snapshot_dir(tmp_path))
+
+
+# ---------------------------------------------------------------------------
+# One release per series: pages that disagree on lastupdated are refused
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("code", [GINI, RENEW, CO2, GOV])
+def test_pages_of_one_series_from_two_releases_are_refused(tmp_path, world, code):
+    """Two pages of one indicator with different lastupdated stamps mix two releases."""
+    world.stamps[code] = lambda page: "2026-09-01" if page == 2 else "2026-10-08"
+    with pytest.raises(snap.SnapshotError, match="release stamps"):
+        _take(tmp_path)
+    assert not _snapshot_dir(tmp_path).exists()
+
+
+def test_a_page_with_no_release_stamp_is_refused(tmp_path, world):
+    world.stamps[CO2] = lambda page: None
+    with pytest.raises(snap.SnapshotError, match="no lastupdated"):
+        _take(tmp_path)
+
+
+def test_one_release_across_every_page_is_accepted(tmp_path, world):
+    world.stamps[GOV] = lambda page: "2026-09-25"
+    manifest = _take(tmp_path)
+    assert manifest["indicators"]["gov_effectiveness"]["lastupdated"] == "2026-09-25"
+
+
+def _resign(snapshot_dir, rel):
+    """Re-sign one raw file: update its manifest entry and the digest, as someone who
+    controls the manifest could. The build must still refuse what the bytes say."""
+    manifest_path = snapshot_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    body = (snapshot_dir / rel).read_bytes()
+    for entry in manifest["files"]:
+        if entry["path"] == rel:
+            entry["sha256"] = hashlib.sha256(body).hexdigest()
+            entry["bytes"] = len(body)
+    manifest["snapshot_digest"] = snap._snapshot_digest(manifest["files"])
+    manifest_path.write_text(json.dumps(manifest))
+
+
+def test_the_build_refuses_a_re_signed_mixed_release(tmp_path, world):
+    """The snapshot is refused at creation. Here the raw page is changed and re-signed, so
+    only the build's own re-check of the bytes can catch it."""
+    _take(tmp_path)
+    snapshot = _snapshot_dir(tmp_path)
+    rel = "raw/gov_effectiveness/page-00002.json"
+    page = snapshot / rel
+    payload = json.loads(page.read_text())
+    payload[0]["lastupdated"] = "2026-09-01"
+    page.write_text(json.dumps(payload))
+    _resign(snapshot, rel)
+    with pytest.raises((build.BuildError, snap.SnapshotError), match="release stamps"):
+        build.write_build(snapshot, tmp_path / "out")

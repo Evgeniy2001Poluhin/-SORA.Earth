@@ -338,6 +338,19 @@ def assemble_wb_series(pages, label):
         if page["total"] != total:
             raise SnapshotError(f"{where}: meta.total changed from {total} to {page['total']} during the run")
         rows.extend(page["rows"])
+    # One release per series. Each page carries the World Bank's lastupdated stamp; pages
+    # that disagree mix two releases of the same indicator, and a page with no stamp
+    # cannot be pinned to any release at all. Both are refused, never reconciled.
+    stamps = [page["lastupdated"] for page in pages]
+    if any(not stamp for stamp in stamps):
+        raise SnapshotError(
+            f"{label}: a page carries no lastupdated release stamp; the series cannot be pinned to one release"
+        )
+    if len(set(stamps)) > 1:
+        raise SnapshotError(
+            f"{label}: the pages carry {len(set(stamps))} release stamps "
+            f"({', '.join(sorted(set(stamps)))}); a series must come from one release. Refusing to mix them."
+        )
     if len(pages) != pages_expected:
         raise SnapshotError(f"{label}: {len(pages)} pages fetched, meta.pages says {pages_expected}")
     if len(rows) != total:
