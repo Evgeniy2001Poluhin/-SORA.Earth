@@ -634,7 +634,7 @@ def test_the_output_manifest_carries_the_reasons_for_every_maximum_age(tmp_path,
     _table, manifest = build.write_build(_snapshot_dir(tmp_path), tmp_path / "out")
     assert set(manifest["max_age_rationale"]) == set(build.MAX_AGE_YEARS)
     assert manifest["max_age_years"] == build.MAX_AGE_YEARS
-    assert "Survey-based" in manifest["max_age_rationale"]["gini_index"]
+    assert "provisional usage policy" in manifest["max_age_rationale"]["gini_index"]
 
 
 def test_the_gini_age_distribution_counts_each_window_and_names_the_missing(tmp_path, world):
@@ -679,3 +679,19 @@ def test_a_gini_exactly_at_a_window_edge_is_kept_by_that_window(tmp_path, world)
     assert gini["latest_per_country"]["DEU"] == {"latest_year": "2021", "age_years": 5}
     assert gini["kept_at_window"]["5"] == 32
     assert gini["age_years_histogram"] == {"2": 31, "5": 1}
+
+
+def test_the_gini_rationale_makes_no_claim_about_the_size_of_a_stale_error(tmp_path, world):
+    """The sensitivity of the score to one Gini point does not measure how far the true Gini
+    has moved since its survey year, so no sentence may call a stale Gini a small error.
+    The window is described as provisional, and the observation year is named as the age."""
+    _take(tmp_path)
+    _table, manifest = build.write_build(_snapshot_dir(tmp_path), tmp_path / "out")
+    text = manifest["max_age_rationale"]["gini_index"]
+    docstring = build.__doc__
+    for claim in ("small error", "0.26", "precision", "coverage choice", "still current", "current official"):
+        assert claim not in text, claim
+        assert claim not in docstring[docstring.index("gini_index"):docstring.index("gov_effectiveness")], claim
+    assert "provisional" in text
+    assert "observation year" in text
+    assert "not a proven period of validity" in text

@@ -29,19 +29,17 @@ Maximum ages (years, measured against the snapshot's own year). The reasons are
 also written into manifest.json (max_age_rationale, and gini_age for the Gini
 distribution); the manifest carries the shorter text.
 
-    gini_index          10   The Gini index comes from household income or
-                             consumption surveys that a country runs irregularly,
-                             so the latest figure can be several years old and still
-                             be the current official measure. The 2026-10-18 snapshot
-                             holds a latest Gini of 2018 to 2024 for 32 countries,
-                             ages 2 to 8 years. A 5-year window drops four (ISL 7,
-                             AUS 6, JPN 6, ARE 8); a 7-year window drops one (ARE 8);
-                             10 drops none. One Gini point moves the total score by
-                             about 0.26 points (0.35 x 0.3 x 2.5), so a stale figure is
-                             a small error and a missing one a larger one. 10 is kept:
-                             the data give no case for a shorter window, and the age is
-                             written beside every value so a reader can judge it. The
-                             age distribution is in manifest.json under gini_age.
+    gini_index          10   A provisional usage policy, kept for historical context.
+                             It is not a proven period of validity. The Gini index
+                             comes from household income or consumption surveys that a
+                             country runs irregularly, so the latest survey year can lag
+                             the present. The 2026-10-18 snapshot holds a latest Gini of
+                             2018 to 2024 for 32 countries (ages 2 to 8 years). A 5-year
+                             window would drop four (ISL 7, AUS 6, JPN 6, ARE 8); a
+                             7-year window would drop one (ARE 8); 10 drops none. The
+                             observation year is recorded beside every value, so its age
+                             is visible to a reader. The age distribution is in
+                             manifest.json under gini_age.
     gov_effectiveness    3   WGI is published yearly; three years keeps the latest
                              estimate in the window in which it is still current.
     hdi                  3   UNDP publishes annually.
@@ -107,11 +105,10 @@ MAX_AGE_YEARS = {
 # The reasons for each maximum age, written into the output manifest.
 MAX_AGE_RATIONALE = {
     "gini_index": (
-        "Survey-based and published irregularly: the latest figure can be several years old "
-        "and still current. 10 years keeps every country with a survey on record; the "
-        "5-year and 7-year alternatives are in manifest gini_age. One Gini point moves the "
-        "total score by about 0.26 points, so the window is a coverage choice, not a "
-        "precision one."
+        "A provisional usage policy, kept for historical context; not a proven period of "
+        "validity. Gini comes from household surveys that a country runs irregularly, so the "
+        "latest survey year can lag the present. The observation year is recorded beside each "
+        "value, so its age is visible. The 5-year and 7-year alternatives are in manifest gini_age."
     ),
     "gov_effectiveness": "WGI is published yearly; 3 years keeps the latest estimate in its current window.",
     "hdi": "UNDP publishes annually; 3 years keeps the latest composite index in its current window.",
