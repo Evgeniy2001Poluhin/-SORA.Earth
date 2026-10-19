@@ -5,7 +5,7 @@ import {
   Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { api } from "@/api/client";
-import { BAND_LABEL, historySpan, lastObservationLabel } from "./forecastLabels";
+import { bandLabel, historySpan, lastObservationLabel, type IntervalLevel } from "./forecastLabels";
 
 /** Model-specific extras returned alongside a forecast; see app/services/forecasting. */
 type ForecastMetadata = {
@@ -16,6 +16,7 @@ type ForecastMetadata = {
   avg_ci_width?: number;
   slope_per_day?: number;
   autoregressive?: boolean;
+  interval_level?: number | null;
 };
 
 type HistPoint = { ds: string; y: number };
@@ -61,13 +62,14 @@ const MODEL_COLORS: Record<string, string> = {
 };
 
 /**
- * Each band is a nominal model interval whose coverage is not validated, so its
- * legend entry says that in the Forecast page's own words. The model name comes
- * first because three bands share one chart. Not "CI": the response carries no
- * coverage figure to back that word. Its `confidence` field is a grade, not a
- * coverage (app/schemas.py, `ForecastResponse`, lines 133-139).
+ * Each band is named from the level its own response states, so the ensemble
+ * (level null: it averages bounds built for different levels) is not labelled
+ * with a level it does not have. The model name comes first because three bands
+ * share one chart. Not "CI": no response carries a coverage figure to back that
+ * word. Its `confidence` field is a grade, not a coverage (app/schemas.py,
+ * `ForecastResponse`, lines 133-139).
  */
-const bandName = (model: string) => `${model}: ${BAND_LABEL}`;
+const bandName = (model: string, level: IntervalLevel) => `${model}: ${bandLabel(level)}`;
 
 export default function ForecastComparePage() {
   const [horizon, setHorizon] = useState(30);
@@ -136,6 +138,9 @@ export default function ForecastComparePage() {
     });
   }
 
+  const levelOf = (model: (typeof MODELS)[number]): IntervalLevel =>
+    queries[MODELS.indexOf(model)]?.data?.metadata?.interval_level;
+
   const lastHistoryDate = queries[0].data?.history.at(-1)?.ds;
   const yDomain = metric === "prob" ? [0, 1] : metric === "score" ? [0, 100] : undefined;
 
@@ -187,7 +192,7 @@ export default function ForecastComparePage() {
         {/* Toggle the nominal model bands */}
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer" }}>
           <input type="checkbox" checked={showBands} onChange={e => setShowBands(e.target.checked)} />
-          Show {BAND_LABEL}
+          Show {bandLabel(null)}
         </label>
       </div>
 
@@ -239,7 +244,7 @@ export default function ForecastComparePage() {
                     stroke="none"
                     fill={MODEL_COLORS.ensemble}
                     fillOpacity={0.1}
-                    name={bandName("Ensemble")}
+                    name={bandName("Ensemble", levelOf("ensemble"))}
                     connectNulls={false}
                   />
                   <Area
@@ -247,7 +252,7 @@ export default function ForecastComparePage() {
                     stroke="none"
                     fill={MODEL_COLORS.prophet}
                     fillOpacity={0.1}
-                    name={bandName("Prophet")}
+                    name={bandName("Prophet", levelOf("prophet"))}
                     connectNulls={false}
                   />
                   <Area
@@ -255,7 +260,7 @@ export default function ForecastComparePage() {
                     stroke="none"
                     fill={MODEL_COLORS.lstm}
                     fillOpacity={0.1}
-                    name={bandName("LSTM")}
+                    name={bandName("LSTM", levelOf("lstm"))}
                     connectNulls={false}
                   />
                 </>

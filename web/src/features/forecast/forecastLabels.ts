@@ -10,10 +10,24 @@
  */
 
 /**
- * The response carries no coverage, level or method field, so the band can be
- * called only what it is: a nominal interval, model-based, not validated.
+ * The nominal level the server states for a band: `metadata.interval_level`.
+ * `null` means the band mixes levels (the ensemble averages bounds); `undefined`
+ * means an older response that does not carry the field.
  */
-export const BAND_LABEL = "nominal 90% interval (model-based, coverage not validated)";
+export type IntervalLevel = number | null | undefined;
+
+const COVERAGE_CAVEAT = "model-based, coverage not validated";
+
+/**
+ * What a band may be called. The level is named only when the server states
+ * it; otherwise the band is a neutral model interval. The coverage caveat is
+ * kept in every case: no response carries a coverage figure.
+ */
+export function bandLabel(level: IntervalLevel): string {
+  if (level === 0.9) return `nominal 90% interval (${COVERAGE_CAVEAT})`;
+  if (level === 0.95) return `nominal 95% interval (${COVERAGE_CAVEAT})`;
+  return `model interval (${COVERAGE_CAVEAT})`;
+}
 
 /**
  * The reference line sits on the last history date, which is the last
