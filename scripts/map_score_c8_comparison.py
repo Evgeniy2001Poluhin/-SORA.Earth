@@ -3,8 +3,9 @@
 
 Both sides are read from commits, and nothing from the working tree is imported or used:
 
-- old: app/api/map_data.py at OLD_SHA (default). OLD_SHA was origin/main's head when the
-  report was regenerated. It is fixed, so the comparison does not move when main does.
+- old: app/api/map_data.py at OLD_SHA (default). OLD_SHA is a fixed revision chosen by hand;
+  the script does not check that it is origin/main's head. Being fixed, it keeps the
+  comparison from moving when main does.
 - new: app/api/map_data.py at NEW_SHA (default HEAD).
 
 For each commit, `git archive` writes its `app` tree and, where the commit has one,
@@ -60,8 +61,9 @@ ARCHIVE_PATHS = ("app", "data/map_inputs")
 # The date the new score's ages are measured at. Fixed so the report is reproducible.
 AS_OF = date(2026, 10, 19)
 
-# The old side: origin/main's head when this report was regenerated. Fixed, so the
-# comparison does not move when main does. Update it deliberately, and say so in the commit.
+# The old side: a fixed revision, chosen by hand. The script does not check that it is
+# origin/main's head, and offline it cannot. Being fixed, it keeps the comparison from
+# moving when main does. Update it deliberately, and say so in the commit.
 OLD_SHA = "e4009ec8ca8c6b25ab3616983c3736b63a22b594"
 
 INPUT_SHORT = {"renewable_share": "ren", "co2_per_capita": "co2", "gini_index": "gini",
@@ -305,7 +307,9 @@ def sha256_hex(data):
 
 
 def working_tree_clean():
-    """Nothing is changed except the report this script writes."""
+    """Returns True when the working tree is clean except for the report file this script writes.
+
+    That file is excluded because it is the output, not an input to the comparison."""
     return git("status", "--porcelain", "--", f":(exclude){REPORT_RELPATH}") == ""
 
 
@@ -484,7 +488,7 @@ def render(old, new, meta):
     w("")
     w("Offline comparison of two commits. Not a production measurement.")
     w("")
-    w(f"Old = app/api/map_data.py at {old['sha']} (origin/main when this was generated), empty live cache.")
+    w(f"Old = app/api/map_data.py at {old['sha']}, empty live cache.")
     w(f"New = app/api/map_data.py at {new['sha']}, pinned table {digests['dir']} "
       f"(manifest sha256 {digests['manifest_sha256'][:16]}...), ages at the date above.")
     w("Each row: old score and label, then the new score or null, status, missing inputs with reasons,")
