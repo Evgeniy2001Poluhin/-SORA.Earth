@@ -430,6 +430,15 @@ def test_manifest_hashes_every_output(tmp_path):
     assert _sha((out / "manifest.json").read_bytes()) == result["manifest_sha256"]
 
 
+def test_manifest_records_the_crosswalk_rows_own_sha256(tmp_path):
+    pins, out, _ = run_world(tmp_path, [R("P000001", 2000, 2010)])
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    crosswalk_rows = (Path(pins.crosswalk_dir) / eg.CROSSWALK_ROWS).read_bytes()
+    recorded = manifest["inputs"]["crosswalk"]["rows_sha256"]
+    assert recorded == _sha(crosswalk_rows)
+    assert recorded != manifest["inputs"]["oghist"]["rows_sha256"]
+
+
 def test_output_directory_is_never_overwritten(tmp_path):
     pins = build_world(tmp_path / "world", [R("P000001", 2000, 2010)])
     out = tmp_path / "out"

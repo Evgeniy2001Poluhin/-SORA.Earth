@@ -232,7 +232,7 @@ def load_approval(pins: Pins) -> tuple[dict, str]:
     return index, sha256_bytes(data)
 
 
-def load_crosswalk(pins: Pins, approval_rows_sha: str) -> tuple[dict, str]:
+def load_crosswalk(pins: Pins, approval_rows_sha: str) -> tuple[dict, str, str]:
     manifest = read_pinned_manifest(pins.crosswalk_dir, pins.crosswalk_manifest_sha, "crosswalk")
     inputs = manifest["inputs"]
     if inputs["snapshot"]["manifest_sha256"] != pins.snapshot_manifest_sha or inputs["snapshot"]["page_digest"] != pins.snapshot_page_digest:
@@ -257,7 +257,7 @@ def load_crosswalk(pins: Pins, approval_rows_sha: str) -> tuple[dict, str]:
             wb_code=row["wb_code"],
             pno_record_found=row["pno_record_found"],
         )
-    return index, manifest["inputs"]["oghist"]["income_history_sha256"]
+    return index, sha256_bytes(data), manifest["inputs"]["oghist"]["income_history_sha256"]
 
 
 def load_oghist(pins: Pins) -> tuple[dict, str]:
@@ -681,7 +681,7 @@ def run(pins: Pins, out_dir: Path, tool_info: dict | None = None) -> dict:
     tool = tool_info if tool_info is not None else default_tool_info()
     records, snap_info = load_snapshot(pins)
     approval, approval_sha = load_approval(pins)
-    crosswalk, crosswalk_oghist_sha = load_crosswalk(pins, approval_sha)
+    crosswalk, crosswalk_sha, crosswalk_oghist_sha = load_crosswalk(pins, approval_sha)
     oghist, oghist_sha = load_oghist(pins)
     if crosswalk_oghist_sha != oghist_sha:
         raise PinRefused("crosswalk: built from a different income_history.csv")
@@ -696,7 +696,7 @@ def run(pins: Pins, out_dir: Path, tool_info: dict | None = None) -> dict:
         },
         "ieg_page_sha256": snap_info["ieg_page_sha256"],
     }
-    files, manifest, qa = build_outputs(records, pins_info, approval, crosswalk, oghist, tool, approval_sha, crosswalk_oghist_sha, oghist_sha)
+    files, manifest, qa = build_outputs(records, pins_info, approval, crosswalk, oghist, tool, approval_sha, crosswalk_sha, oghist_sha)
     manifest_bytes = _json_bytes(manifest)
     files["manifest.json"] = manifest_bytes
     _write_atomically(out_dir, files)
