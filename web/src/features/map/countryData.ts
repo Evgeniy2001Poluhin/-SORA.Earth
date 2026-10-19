@@ -17,6 +17,10 @@
  * 3. Renewables and CO2 per capita are the pinned values, or null when the
  *    input does not qualify.
  * 4. An API error is shown as "unavailable", which is not the same as incomplete.
+ * 5. A score is admissible while the UTC date is before its `earliest_expiry`
+ *    (that date is the first day the input is too old, so the score stops at
+ *    00:00:00.000Z on it). The page withholds a score once the clock reaches
+ *    that instant, without waiting for the server to say so.
  */
 
 /** One input as the backend pins it: its value, year, age and where it came from. */
@@ -64,6 +68,10 @@ export interface MapCountry {
   earliest_expiry?: string | null;
   co2_intensity_t_per_capita?: number | null;
   renewable_share_pct?: number | null;
+  /** Set by `withClientExpiry`: the score is withheld because an input expired (UTC) before the page's clock. */
+  client_expired?: boolean;
+  /** The ISO date that withholds it (the country's `earliest_expiry`). */
+  client_expired_on?: string | null;
 }
 
 export const BAND_COLOR: Record<string, string> = {
@@ -139,18 +147,129 @@ export function reasonSentence(key: string, reason: InputReason): string {
   return `${label}: ${reason.text ?? reason.code}`;
 }
 
-/** The notice for the map: when the pinned data expires, and what that means. Null when there
- *  is nothing to say. `days` is negative once the expiry has passed. */
-export function expiryNoticeText(earliest: string | null | undefined, days: number | null | undefined,
-  notice: boolean | null | undefined): string | null {
-  if (!notice || !earliest || days == null) return null;
+const DAY_MS = 86_400_000;
+
+/** The notice window when the payload does not say (`expiry_notice_days`). */
+const DEFAULT_EXPIRY_NOTICE_DAYS = 60;
+
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** 00:00:00.000Z on an ISO calendar date (YYYY-MM-DD), in ms. Null for anything else,
+ *  including a date that does not exist such as 2027-02-30. */
+export function utcDayStartMs(isoDate: string | null | undefined): number | null {
+  if (typeof isoDate !== "string") return null;
+  const m = ISO_DATE.exec(isoDate);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  // setUTCFullYear, not Date.UTC: Date.UTC maps years 0-99 onto 1900-1999. The check below refuses a
+  // date that rolls over, such as 2027-02-30 becoming March.
+  const d = new Date(0);
+  d.setUTCFullYear(year, month - 1, day);
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return null;
+  return d.getTime();
+}
+
+/** 00:00:00.000Z of the UTC calendar day that `nowMs` falls on. */
+export function utcDayStartOf(nowMs: number): number {
+  return Math.floor(nowMs / DAY_MS) * DAY_MS;
+}
+
+/** The next UTC midnight strictly after `nowMs`. */
+export function nextUtcMidnightAfter(nowMs: number): number {
+  return utcDayStartOf(nowMs) + DAY_MS;
+}
+
+/** Whole days from the UTC calendar date of `nowMs` to `isoDate`, counted as the backend counts
+ *  them (`(expiry - today_utc).days`). Negative once the date has passed. Null when there is no
+ *  date to count to, or no clock. */
+export function utcDaysUntil(isoDate: string | null | undefined, nowMs: number): number | null {
+  const target = utcDayStartMs(isoDate);
+  if (target === null || !Number.isFinite(nowMs)) return null;
+  return Math.round((target - utcDayStartOf(nowMs)) / DAY_MS);
+}
+
+/** True when the country has a score and `nowMs` has reached its expiry: 00:00:00.000Z on
+ *  `earliest_expiry`, the first day the input is too old. A country with no score is never expired. */
+export function isScoreExpiredAt(c: MapCountry, nowMs: number): boolean {
+  if (scoreOf(c) === null) return false;
+  const deadline = utcDayStartMs(c.earliest_expiry);
+  return deadline !== null && nowMs >= deadline;
+}
+
+/** The countries as the page may show them at `nowMs`. A score whose expiry has passed is
+ *  withheld: it becomes unscored, so it is drawn neutral and left out of every ranking and average,
+ *  and it carries a marker naming the date. Every other country is returned as it was. */
+export function withClientExpiry(countries: MapCountry[], nowMs: number): MapCountry[] {
+  return countries.map((c) => {
+    if (!isScoreExpiredAt(c, nowMs)) return c;
+    return {
+      ...c,
+      esg: null,
+      band: null,
+      esg_status: "incomplete",
+      client_expired: true,
+      client_expired_on: c.earliest_expiry ?? null,
+    };
+  });
+}
+
+/** The ISO dates the held data stops being admissible on: the table's earliest expiry, and each
+ *  scored country's `earliest_expiry`. An incomplete country has no score to lose, so adds nothing. */
+export function expiryDatesOf(countries: readonly MapCountry[], tableEarliest: string | null | undefined): string[] {
+  const dates = new Set<string>();
+  const add = (iso: string | null | undefined) => {
+    if (iso && utcDayStartMs(iso) !== null) dates.add(iso);
+  };
+  add(tableEarliest);
+  for (const c of countries) {
+    if (scoreOf(c) !== null) add(c.earliest_expiry);
+  }
+  return [...dates];
+}
+
+/** The earliest of `dates` that the clock has reached while the data was fetched before it, so the
+ *  held data predates an expiry it cannot know about. Null when there is none. */
+export function expiredSinceFetch(dates: readonly string[], nowMs: number, fetchedAtMs: number): string | null {
+  let found: string | null = null;
+  let foundMs = Number.POSITIVE_INFINITY;
+  for (const iso of dates) {
+    const ms = utcDayStartMs(iso);
+    if (ms === null || ms > nowMs || ms <= fetchedAtMs) continue;
+    if (ms < foundMs) {
+      found = iso;
+      foundMs = ms;
+    }
+  }
+  return found;
+}
+
+/** The notice for the map: when the pinned data expires, counted from `nowMs` in UTC days. Null when
+ *  the date is further off than `noticeDays` (default 60), or there is no date. `days` is negative
+ *  once the expiry has passed. */
+export function expiryNoticeText(earliest: string | null | undefined, nowMs: number,
+  noticeDays?: number | null): string | null {
+  const days = utcDaysUntil(earliest, nowMs);
+  if (days === null || days > (noticeDays ?? DEFAULT_EXPIRY_NOTICE_DAYS)) return null;
   if (days < 0) {
     return `The pinned data expired on ${earliest}. Every country that needs an expired input is incomplete. `
       + "A newer snapshot must be pinned before scores return.";
   }
-  const when = days === 0 ? "today" : `in ${days} days`;
+  const when = days === 0 ? "today" : days === 1 ? "in 1 day" : `in ${days} days`;
   return `The pinned data expires on ${earliest}, ${when}. Scores that need an expired input go incomplete then. `
     + "A newer snapshot must be pinned before that date.";
+}
+
+/** Shown while a refresh is in flight after an expiry the held data predates. */
+export function expiredRefreshingText(expiredOn: string): string {
+  return `The pinned data expired on ${expiredOn} (UTC) and is being refreshed. `
+    + "Scores that needed it are withheld until then.";
+}
+
+/** Shown when the refresh after an expiry failed: the page has no fresh data it can trust. */
+export function expiredUnavailableText(expiredOn: string): string {
+  return `ESG map unavailable: the scores expired on ${expiredOn} (UTC) and fresh data could not be loaded.`;
 }
 
 /** The text the country tooltip shows after "source:": the backend's meaning for

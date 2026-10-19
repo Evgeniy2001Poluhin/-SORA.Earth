@@ -165,4 +165,20 @@ describe("the country tooltip", () => {
     const text = renderBody(SWEDEN_OK, MEANINGS).container.textContent ?? "";
     expect(text).toContain("usable until");
   });
+
+  it("says a withheld score is withheld, names the expiry date, and shows no number", () => {
+    // What withClientExpiry returns for a score whose input expired (UTC) before the page's clock.
+    const withheld: MapCountry = {
+      ...SWEDEN_OK, esg: null, band: null, esg_status: "incomplete",
+      client_expired: true, client_expired_on: "2027-01-01",
+    };
+    const { container } = renderBody(withheld, MEANINGS);
+    const text = container.textContent ?? "";
+
+    expect(text).toContain("Score withheld: an input expired on 2027-01-01 (UTC); waiting for fresh data.");
+    expect(container.querySelector(".tip-score-num")?.textContent).toBe("withheld");
+    expect(text).not.toContain("source:");
+    expect(text).not.toContain("usable until");
+    expect(text, "the withheld score is not shown").not.toContain("81.5");
+  });
 });

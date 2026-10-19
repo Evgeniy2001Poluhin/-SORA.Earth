@@ -7,7 +7,7 @@
  * valid answer meaning "no countries yet" — crashed on `countries[0].name`,
  * which needs no malformed payload at all.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
@@ -111,9 +111,20 @@ const SCORED_ONE = {
   }],
 };
 
+/** The notice counts days from the page's clock (UTC), so these pin that clock. Only Date is faked:
+ *  timers stay real and `waitFor` keeps working. */
+function atUtc(iso: string) {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  vi.setSystemTime(new Date(iso));
+}
+
 describe("MapPage pinned data (C8 part 3)", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("shows the snapshot date and the earliest expiry", async () => {
@@ -128,6 +139,7 @@ describe("MapPage pinned data (C8 part 3)", () => {
   });
 
   it("shows no expiry notice more than 60 days out", async () => {
+    atUtc("2026-10-19T12:00:00Z"); // 74 days before 2027-01-01
     stubJson({ ...SCORED_ONE, ...PINNED, days_to_earliest_expiry: 74, expiry_notice: false });
 
     const { container } = render();
@@ -137,6 +149,7 @@ describe("MapPage pinned data (C8 part 3)", () => {
   });
 
   it("shows a notice with the date and the days left within 60 days", async () => {
+    atUtc("2026-12-02T12:00:00Z"); // 30 days before 2027-01-01
     stubJson({ ...SCORED_ONE, ...PINNED, days_to_earliest_expiry: 30, expiry_notice: true });
 
     const { container } = render();
@@ -147,6 +160,7 @@ describe("MapPage pinned data (C8 part 3)", () => {
   });
 
   it("says the data has expired once the date has passed", async () => {
+    atUtc("2027-01-03T12:00:00Z"); // 2 days after 2027-01-01
     stubJson({ ...SCORED_ONE, ...PINNED, days_to_earliest_expiry: -2, expiry_notice: true });
 
     const { container } = render();

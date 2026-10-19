@@ -45,10 +45,14 @@ export default function CountryTooltipBody({
       {score === null ? (
         <>
           <div className="tip-score">
-            <div className="tip-score-num">incomplete</div>
+            <div className="tip-score-num">{c.client_expired ? "withheld" : "incomplete"}</div>
             <div className="tip-score-band">no score</div>
           </div>
-          {reasonMap !== null ? (
+          {c.client_expired ? (
+            <div className="tip-missing">
+              Score withheld: an input expired on {c.client_expired_on ?? "an unknown date"} (UTC); waiting for fresh data.
+            </div>
+          ) : reasonMap !== null ? (
             <ul className="tip-missing tip-reasons">
               {reasons.map((line) => (
                 <li key={line}>{line}</li>

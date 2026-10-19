@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MapContainer, TileLayer, CircleMarker, Tooltip, AttributionControl } from "react-leaflet";
 import { useNavigate } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
@@ -7,11 +7,13 @@ import {
 } from "./tiles";
 import { api } from "@/api/client";
 import "./map.css";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import RussiaMapModal from "./RussiaMapModal";
 import CountryTooltipBody from "./CountryTooltipBody";
+import { useUtcNow } from "./useUtcNow";
 import {
-  BAND_COLOR, NEUTRAL_COLOR, aggregateScopeOf, byEsgDesc, expiryNoticeText, meanScore, scoreOf,
+  BAND_COLOR, NEUTRAL_COLOR, aggregateScopeOf, byEsgDesc, expiredRefreshingText, expiredSinceFetch,
+  expiredUnavailableText, expiryDatesOf, expiryNoticeText, meanScore, scoreOf, withClientExpiry,
   type MapCountry,
 } from "./countryData";
 
@@ -25,40 +27,70 @@ type MapData = {
   table_unavailable_reason?: string | null;
   /** The snapshot the scores come from (ISO date). */
   snapshot_date?: string | null;
-  /** The first day any pinned value is too old (ISO date). */
+  /** The first day any pinned value is too old (ISO date). The countdown is counted from the page's clock. */
   earliest_expiry?: string | null;
   days_to_earliest_expiry?: number | null;
-  /** True when the earliest expiry is within `expiry_notice_days`, or has passed. */
-  expiry_notice?: boolean;
+  /** The notice window in days. Absent from older backends: 60. */
+  expiry_notice_days?: number | null;
   countries: MapCountry[];
 };
+
+const MAP_KEY = ["map-countries"];
 
 /** Radius for a scored country. A country with no score is drawn at the smallest size. */
 const radiusByEsg = (esg: number | null) => (esg === null ? 3 : 3 + (esg / 100) * 4);
 
+/** The expiry dates a payload carries, or none when it is not a usable payload. */
+function expiryDatesOfPayload(payload: MapData | undefined): string[] {
+  return payload && Array.isArray(payload.countries) ? expiryDatesOf(payload.countries, payload.earliest_expiry) : [];
+}
+
 export default function MapPage() {
   const [ruOpen, setRuOpen] = useState(false);
   const nav = useNavigate();
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["map-countries"],
+  const queryClient = useQueryClient();
+  const { data, isLoading, error, dataUpdatedAt } = useQuery({
+    queryKey: MAP_KEY,
     queryFn: () => api<MapData>("/map/countries"),
   });
 
+  const expiryDates = useMemo(() => expiryDatesOfPayload(data), [data]);
+  const nowMs = useUtcNow(expiryDates, dataUpdatedAt);
+
+  // The clock asks for a refresh; a fetch changing state does not. If the data held was fetched
+  // before an expiry that has now passed, and nothing is in flight, fetch again. Keyed on the clock
+  // alone, so a failing server is retried on the clock's schedule and not in a loop.
+  useEffect(() => {
+    const state = queryClient.getQueryState<MapData>(MAP_KEY);
+    if (!state || state.fetchStatus === "fetching") return;
+    if (expiredSinceFetch(expiryDatesOfPayload(state.data), nowMs, state.dataUpdatedAt) === null) return;
+    void queryClient.invalidateQueries({ queryKey: MAP_KEY });
+  }, [nowMs, queryClient]);
+
   if (isLoading) return <div className="map-page"><p className="muted">Loading map...</p></div>;
+  // The data held predates an expiry and the refresh after it failed: say so, and show no score.
+  const expiredOn = expiredSinceFetch(expiryDates, nowMs, dataUpdatedAt);
+  if (error && expiredOn !== null) {
+    return <div className="map-page"><p className="err">{expiredUnavailableText(expiredOn)}</p></div>;
+  }
   // A failed request is not an incomplete score: say the data is unavailable.
   if (error) return <div className="map-page"><p className="err">ESG map unavailable: the country scores could not be loaded.</p></div>;
   // #236: `{}` is truthy, so this passed an empty 200 to
   // `data.countries.filter` and blanked the map.
   if (!data || !Array.isArray(data.countries)) return null;
 
+  // A score whose input has expired by this clock is withheld: never drawn, ranked or averaged.
+  const countries = withClientExpiry(data.countries, nowMs);
   // Leaders, top-N and averages are over scored countries only. See countryData.ts.
-  const scope = aggregateScopeOf(data.countries);
+  const scope = aggregateScopeOf(countries);
   const ranked = byEsgDesc(scope.included);
   const leaders = scope.included.filter(c => c.band === "leader").length;
   const average = meanScore(scope.included);
-  const expiryNotice = data.table_available === false
-    ? null
-    : expiryNoticeText(data.earliest_expiry, data.days_to_earliest_expiry, data.expiry_notice);
+  const expiryNotice = expiredOn !== null
+    ? expiredRefreshingText(expiredOn)
+    : data.table_available === false
+      ? null
+      : expiryNoticeText(data.earliest_expiry, nowMs, data.expiry_notice_days);
 
   return (
     <div className="map-page">
@@ -151,7 +183,7 @@ export default function MapPage() {
           />
 
           {/* Main markers. An incomplete country is neutral and dashed: no band, no 0. */}
-          {data.countries.map((c) => {
+          {countries.map((c) => {
             const score = scoreOf(c);
             const incomplete = score === null;
             return (

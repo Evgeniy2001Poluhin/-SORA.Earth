@@ -50,28 +50,41 @@ describe("describeInput with expiry", () => {
   });
 });
 
+/** A clock that is `days` whole UTC days before 2027-01-01 (negative: after it). */
+const clockDaysBeforeExpiry = (days: number) => Date.parse("2027-01-01T12:00:00Z") - days * 86_400_000;
+
 describe("expiryNoticeText", () => {
-  it("is null when the notice is off, however close the date", () => {
-    expect(expiryNoticeText("2027-01-01", 10, false)).toBeNull();
+  it("is null when there is no date to report", () => {
+    expect(expiryNoticeText(null, clockDaysBeforeExpiry(10), 60)).toBeNull();
   });
 
-  it("is null when there is no date to report", () => {
-    expect(expiryNoticeText(null, null, true)).toBeNull();
+  it("is null when the date is further off than the notice window", () => {
+    expect(expiryNoticeText("2027-01-01", clockDaysBeforeExpiry(61), 60)).toBeNull();
+  });
+
+  it("shows at the edge of the window, and the window defaults to 60 days when the payload omits it", () => {
+    expect(expiryNoticeText("2027-01-01", clockDaysBeforeExpiry(60), 60)).not.toBeNull();
+    expect(expiryNoticeText("2027-01-01", clockDaysBeforeExpiry(60))).not.toBeNull();
+    expect(expiryNoticeText("2027-01-01", clockDaysBeforeExpiry(61))).toBeNull();
   });
 
   it("gives the date and the days left when the expiry is near", () => {
-    expect(expiryNoticeText("2027-01-01", 30, true)).toBe(
+    expect(expiryNoticeText("2027-01-01", clockDaysBeforeExpiry(30), 60)).toBe(
       "The pinned data expires on 2027-01-01, in 30 days. Scores that need an expired input go incomplete then. "
         + "A newer snapshot must be pinned before that date.",
     );
   });
 
+  it("reads one day as 'in 1 day', not 'in 1 days'", () => {
+    expect(expiryNoticeText("2027-01-01", clockDaysBeforeExpiry(1), 60)).toContain("expires on 2027-01-01, in 1 day.");
+  });
+
   it("says today on the day itself", () => {
-    expect(expiryNoticeText("2027-01-01", 0, true)).toContain("expires on 2027-01-01, today.");
+    expect(expiryNoticeText("2027-01-01", clockDaysBeforeExpiry(0), 60)).toContain("expires on 2027-01-01, today.");
   });
 
   it("says the data has expired once the date has passed, and what that means", () => {
-    const text = expiryNoticeText("2027-01-01", -3, true) ?? "";
+    const text = expiryNoticeText("2027-01-01", clockDaysBeforeExpiry(-3), 60) ?? "";
     expect(text).toContain("expired on 2027-01-01");
     expect(text).toContain("incomplete");
     expect(text).not.toContain("expires on");
