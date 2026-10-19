@@ -261,7 +261,7 @@ def _linear_forecast(
         model="LinearTrend",
         metric=metric,
         confidence="low",
-        metadata={"slope_per_day": round(float(coeffs[0]), 5), "ci95": round(ci, 3)}
+        metadata={"slope_per_day": round(float(coeffs[0]), 5), "ci95": round(ci, 3), "interval_level": 0.95}
     )
 
 

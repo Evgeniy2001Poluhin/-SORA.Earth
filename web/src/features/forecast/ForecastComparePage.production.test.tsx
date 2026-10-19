@@ -46,10 +46,16 @@ const UNVALIDATED = {
   train_samples: 24, test_samples: null, training_duration_sec: 1.1,
 };
 
-const serve = (metrics: unknown) => {
+/** The nominal level each model's response states (C16). The ensemble mixes levels, so null. */
+const LEVELS: Record<string, number | null> = { ensemble: null, prophet: 0.9, lstm: 0.9 };
+
+const serve = (metrics: unknown, levels: Record<string, number | null | undefined> = LEVELS) => {
   vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    const body = url.includes("/forecast/metrics/latest") ? metrics : FORECAST;
+    const model = url.match(/model=(\w+)/)?.[1] ?? "";
+    const body = url.includes("/forecast/metrics/latest")
+      ? metrics
+      : { ...FORECAST, metadata: { interval_level: levels[model] } };
     return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
   }) as typeof fetch);
 };
@@ -161,20 +167,39 @@ describe("ForecastComparePage: the bands are nominal intervals, not confidence i
     stubChartLayout();
   });
 
-  // The Forecast page labels its single band with BAND_LABEL, the words #461
-  // established as all the response supports. This page's legend called three
-  // bands "Ensemble CI", "Prophet CI" and "LSTM CI", and its toggle said
-  // "Show confidence intervals". Neither word is backed by a coverage figure.
-  const NOMINAL = "nominal 90% interval (model-based, coverage not validated)";
+  // The bands used to be called "Ensemble CI", "Prophet CI" and "LSTM CI", and
+  // the toggle said "Show confidence intervals". No response carries a coverage
+  // figure, so the word "CI" was never backed. C16: each band is named from the
+  // level its own response states; the ensemble states none.
+  const NOMINAL_90 = "nominal 90% interval (model-based, coverage not validated)";
+  const NOMINAL_95 = "nominal 95% interval (model-based, coverage not validated)";
+  const NEUTRAL = "model interval (model-based, coverage not validated)";
   const legend = (c: HTMLElement) =>
     Array.from(c.querySelectorAll(".recharts-legend-item-text")).map((el) => el.textContent ?? "");
 
-  it("names each band in the legend with the Forecast page's wording", async () => {
+  it("names each band in the legend from the level its response states", async () => {
     serve({});
     const { container } = renderWithQuery(<ForecastComparePage />);
-    await waitFor(() => expect(legend(container)).toContain(`Ensemble: ${NOMINAL}`));
-    expect(legend(container)).toContain(`Prophet: ${NOMINAL}`);
-    expect(legend(container)).toContain(`LSTM: ${NOMINAL}`);
+    await waitFor(() => expect(legend(container)).toContain(`Prophet: ${NOMINAL_90}`));
+    expect(legend(container)).toContain(`LSTM: ${NOMINAL_90}`);
+    // The ensemble averages bounds of different levels, so it states none.
+    expect(legend(container)).toContain(`Ensemble: ${NEUTRAL}`);
+    expect(legend(container).join("\n")).not.toContain("Ensemble: nominal");
+  });
+
+  it("names a band 95% when its own response says 95%", async () => {
+    serve({}, { ...LEVELS, prophet: 0.95 });
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(legend(container)).toContain(`Prophet: ${NOMINAL_95}`));
+    expect(legend(container)).toContain(`LSTM: ${NOMINAL_90}`);
+  });
+
+  it("does not name a level for a response that does not state one", async () => {
+    serve({}, { ensemble: undefined, prophet: undefined, lstm: null });
+    const { container } = renderWithQuery(<ForecastComparePage />);
+    await waitFor(() => expect(legend(container)).toContain(`LSTM: ${NEUTRAL}`));
+    expect(legend(container)).toContain(`Prophet: ${NEUTRAL}`);
+    expect(legend(container).join("\n")).not.toMatch(/nominal \d+%/);
   });
 
   it("does not call any band a CI in the legend", async () => {
@@ -185,12 +210,12 @@ describe("ForecastComparePage: the bands are nominal intervals, not confidence i
     expect(container.textContent).not.toMatch(/confidence interval/i);
   });
 
-  it("words the band toggle as a nominal interval, not a confidence interval", async () => {
+  it("words the band toggle as a model interval, not a confidence interval", async () => {
     serve({});
     const { container } = renderWithQuery(<ForecastComparePage />);
     await waitFor(() => expect(legend(container).length).toBeGreaterThan(0));
     const toggle = container.querySelector('input[type="checkbox"]')?.closest("label");
-    expect(toggle?.textContent).toContain(NOMINAL);
+    expect(toggle?.textContent).toContain(NEUTRAL);
     expect(toggle?.textContent).not.toMatch(/confidence/i);
   });
 

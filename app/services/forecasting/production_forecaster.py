@@ -132,7 +132,7 @@ class ProductionForecaster(BaseForecastModel):
                 model_name="MLflow-LSTM (stub)",
                 model_version="1.0",
                 confidence="low",
-                metadata={"note": "MLflow inference not implemented, using stub"}
+                metadata={"note": "MLflow inference not implemented, using stub", "interval_level": None}
             )
 
         return self.fallback_model.predict(horizon)

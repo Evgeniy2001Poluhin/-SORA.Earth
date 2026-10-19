@@ -171,7 +171,8 @@ class LSTMForecaster(BaseForecastModel):
             horizon: Number of days ahead to forecast
 
         Returns:
-            ForecastResult with point predictions and 90% confidence intervals
+            ForecastResult with point predictions and the nominal 90% interval
+            (5th/95th percentiles of the MC samples; metadata["interval_level"] = 0.90)
 
         Raises:
             ValueError: If model not fitted
@@ -232,7 +233,8 @@ class LSTMForecaster(BaseForecastModel):
                 "avg_ci_width": round(avg_ci, 4),
                 "max_ci_width": round(float(np.max(ci_widths)), 4),
                 "seq_length": self.seq_length,
-                "autoregressive": True
+                "autoregressive": True,
+                "interval_level": 0.90,
             }
         )
 
