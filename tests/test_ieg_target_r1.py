@@ -313,6 +313,10 @@ def test_outputs_have_the_documented_columns_and_split_counts():
     assert set(_csv(res, "target_rows.csv")[0]) == {
         "project_id", "split", "ieg_outcome_satisfactory", "outcome_raw_canonical", "n_source_records"}
     assert set(_csv(res, "target_exclusions.csv")[0]) == {"project_id", "split", "rule", "reason", "literals"}
+    # The audit carries no country, FY or other feature: its column set is closed.
+    assert set(_csv(res, "target_audit.csv")[0]) == {
+        "project_id", "ieg_page_file", "ieg_index", "outcome_present",
+        "outcome_original_json", "outcome_canonical", "used"}
     qa = _json(res, "target_qa.json")
     assert qa["candidates"] == {"development": 4, "holdout": 3, "total": 7}
     assert qa["class_counts"]["development"] == {"1": 2, "0": 2}
