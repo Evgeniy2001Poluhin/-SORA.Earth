@@ -88,3 +88,18 @@ html, body, #root { max-width: 100%; overflow-x: hidden; }
     min-height: 40px;
   }
 }
+
+/* Health pill, for the states that are not Operational. The base .status-pill
+   (design/base.css) is green, and must not stay green without a healthy answer
+   behind it. These rules live here, not in evaluate.css, because the header
+   pill is on every page and the Evaluate chunk loads only on one. The light
+   theme in base.css forces the pill with !important, so the light rules below
+   repeat that with a higher specificity. */
+.status-pill.is-degraded{background:rgba(241,193,89,.08);border-color:rgba(241,193,89,.3);color:var(--sun)}
+.status-pill.is-degraded::before{background:var(--sun);box-shadow:0 0 0 4px rgba(241,193,89,.18)}
+.status-pill.is-unknown{background:transparent;border-color:var(--line-2);color:var(--muted)}
+.status-pill.is-unknown::before{background:var(--faint);box-shadow:none;animation:none}
+:root[data-theme="light"] .status-pill.is-degraded{background:rgba(160,105,30,.12)!important;border-color:rgba(160,105,30,.36)!important;color:var(--sun)!important}
+:root[data-theme="light"] .status-pill.is-degraded::before{background:var(--sun)!important}
+:root[data-theme="light"] .status-pill.is-unknown{background:transparent!important;border-color:var(--line-2)!important;color:var(--muted)!important}
+:root[data-theme="light"] .status-pill.is-unknown::before{background:var(--faint)!important;box-shadow:none!important;animation:none!important}

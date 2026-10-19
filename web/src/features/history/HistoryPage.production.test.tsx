@@ -32,7 +32,7 @@ import { stubJson, stubStatus } from "@/test/http";
 
 const renderPage = () => renderWithQuery(<MemoryRouter><HistoryPage /></MemoryRouter>);
 
-/** The header line: "N evaluations · avg score X · page P of Q". */
+/** The header line: "N evaluations · page average score X · page P of Q". */
 const header = (c: HTMLElement) => c.querySelector(".ev-meta")?.textContent ?? "";
 
 const row = (id: number, total_score: number | null) => ({
@@ -68,7 +68,7 @@ describe("HistoryPage when the request fails", () => {
   it("does not print an average score of nothing", async () => {
     const { container } = renderPage();
     await waitFor(() => expect(container.textContent).toContain("Failed to load"));
-    expect(header(container)).not.toContain("avg score 0.0");
+    expect(header(container)).not.toContain("page average score 0.0");
   });
 
   it("does not say that no evaluations match the filters", async () => {
@@ -100,8 +100,8 @@ describe("HistoryPage when the history is genuinely empty", () => {
   it("does not average an empty list to 0.0", async () => {
     const { container } = renderPage();
     await waitFor(() => expect(container.textContent).toContain("No evaluations match the current filters."));
-    expect(header(container)).not.toContain("avg score 0.0");
-    expect(header(container)).toContain("avg score —");
+    expect(header(container)).not.toContain("page average score 0.0");
+    expect(header(container)).toContain("page average score —");
   });
 });
 
@@ -115,7 +115,18 @@ describe("HistoryPage with real rows", () => {
     stubJson({ items: [row(1, 70), row(2, 81)], total: 57, limit: 20, offset: 0 });
     const { container } = renderPage();
     await waitFor(() => expect(header(container)).toMatch(/\b57 evaluations/));
-    expect(header(container)).toContain("avg score 75.5");
+    expect(header(container)).toContain("page average score 75.5");
+  });
+
+  // F055: `/history` sends the count for the whole filter and only one page of
+  // rows, so a mean taken here covers the rows on screen. The label must say so;
+  // beside "57 evaluations" an unqualified "avg score" reads as the mean of all 57.
+  it("labels the average as the page's, not the filter's", async () => {
+    stubJson({ items: [row(1, 70), row(2, 81)], total: 57, limit: 20, offset: 0 });
+    const { container } = renderPage();
+    await waitFor(() => expect(header(container)).toMatch(/\b57 evaluations/));
+    expect(header(container)).toContain("page average");
+    expect(header(container)).not.toContain("avg score");
   });
 
   it("averages only the rows that carry a score", async () => {
@@ -126,7 +137,7 @@ describe("HistoryPage with real rows", () => {
     stubJson({ items: [row(1, 70), row(2, null), row(3, 80)], total: 3, limit: 20, offset: 0 });
     const { container } = renderPage();
     await waitFor(() => expect(header(container)).toMatch(/\b3 evaluations/));
-    expect(header(container)).toContain("avg score 75.0");
+    expect(header(container)).toContain("page average score 75.0");
     const cells = Array.from(container.querySelectorAll(".hist-item")).map((b) => b.textContent ?? "");
     expect(cells).toHaveLength(3);
     expect(cells[1]).toContain("—");
