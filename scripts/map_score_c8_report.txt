@@ -1,11 +1,41 @@
-# C8 part 2 and 3: map score, old commit against this branch (offline, AS_OF 2026-10-19)
+# C8 part 2 and 3: map score, old commit against new commit (offline, AS_OF 2026-10-19)
+
+Offline comparison of two commits. Not a production measurement.
 
 Old = app/api/map_data.py at e4009ec8ca8c6b25ab3616983c3736b63a22b594 (origin/main when this was generated), empty live cache.
-New = working tree on branch map-score-sourced, based on 8dd44879;
-      pinned table data/map_inputs/2026-10-18 (manifest sha256 5d133d3bf441092b...), ages at the date above.
+New = app/api/map_data.py at 14a14a060acfaf5b76b962c3c3adf2346ac8766a, pinned table data/map_inputs/2026-10-18 (manifest sha256 5d133d3bf441092b...), ages at the date above.
 Each row: old score and label, then the new score or null, status, missing inputs with reasons,
 and the year of each input the new score used (ren = renewables share, co2 = CO2 per capita,
 gini, gov = government effectiveness, hdi).
+
+## Provenance
+
+- old commit: e4009ec8ca8c6b25ab3616983c3736b63a22b594
+- new commit: 14a14a060acfaf5b76b962c3c3adf2346ac8766a
+- AS_OF: 2026-10-19
+- python: 3.11.15 (both sides, each in its own interpreter, -I)
+- working tree: clean
+- comparison script: scripts/map_score_c8_comparison.py, sha256 ae9ca216d6f614cc3ff7de714a8fda1fc6217f0a624586d8e1c26e22b14f5b6b
+- tree app: old 36e3b9a459853661d14f77c3724ca3784e121067, new 71fc0b4e2237f307dd9bccdc59155335d6fd6a9b
+- tree data/map_inputs: old absent at this commit, new fb7b0f0231086f003825602c23a4ad60edfd54ee
+- pinned table, new side: data/map_inputs/2026-10-18/map_inputs.json sha256 3832f89f1f1dc4e32120aee189089b7b459278e1b89e273a7da4413ddcd1fead
+- pinned table, new side: data/map_inputs/2026-10-18/manifest.json sha256 5d133d3bf441092b9a1739a6ca2b1501327b493efd60609a52af2f10db027acf
+- PINNED_MANIFEST_SHA256 declared in app/map_inputs.py: 5d133d3bf441092b9a1739a6ca2b1501327b493efd60609a52af2f10db027acf, equal to the manifest sha256
+- app modules loaded by the old side (path, git blob):
+  - app (namespace package, no file)
+  - app/api/__init__.py e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+  - app/api/map_data.py 8b0ffd41b8fa0b262987250ef1fe634a519fd7e4
+  - app/country_benchmarks.py 3c1d3e3e08482a5dc5230d3606c9bc0a9ba1d018
+  - app/database.py 4f971c8919ee56871fb1db991eebddb6f2ac4e71
+  - app/external_data.py 1b0247e9c38c2738004257c1197c23e9b7e23566
+- app modules loaded by the new side (path, git blob):
+  - app (namespace package, no file)
+  - app/api/__init__.py e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+  - app/api/map_data.py 96b80e8aa02f5ccd7fb8001e99913a2d1a80d007
+  - app/country_benchmarks.py 3c1d3e3e08482a5dc5230d3606c9bc0a9ba1d018
+  - app/database.py 4f971c8919ee56871fb1db991eebddb6f2ac4e71
+  - app/external_data.py 1b0247e9c38c2738004257c1197c23e9b7e23566
+  - app/map_inputs.py 726a19f72139aeb751d96e72bc658f6fd1ec5190
 
 | code | name | old | old label | new | new status | missing inputs (reason) | input years |
 |---|---|---|---|---|---|---|---|
