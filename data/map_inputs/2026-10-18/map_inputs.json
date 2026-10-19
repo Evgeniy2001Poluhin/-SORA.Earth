@@ -1,0 +1,1754 @@
+{
+  "countries": [
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 18.2552064370494,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 8,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 26.4,
+          "year": "2018"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.1286383,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.94,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 1.0,
+          "year": "2021"
+        }
+      },
+      "iso3": "ARE",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 4.01066531653131,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 42.4,
+          "year": "2024"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 0.2757855,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.865,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 9.2,
+          "year": "2021"
+        }
+      },
+      "iso3": "ARG",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 14.0986639619808,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 6,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 33.8,
+          "year": "2020"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.7511677,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.958,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 12.3,
+          "year": "2021"
+        }
+      },
+      "iso3": "AUS",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 6.32278424603578,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 31.2,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.5435989,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.93,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 36.0,
+          "year": "2021"
+        }
+      },
+      "iso3": "AUT",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 7.30661519351762,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 26.8,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.3176852,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.951,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 11.7,
+          "year": "2021"
+        }
+      },
+      "iso3": "BEL",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 2.31826466114939,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 50.3,
+          "year": "2024"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": -0.0356251,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.786,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 46.5,
+          "year": "2021"
+        }
+      },
+      "iso3": "BRA",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 14.0072704088031,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 4,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 31.5,
+          "year": "2022"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.7570824,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.939,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 23.8,
+          "year": "2021"
+        }
+      },
+      "iso3": "CAN",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 3.74568795220564,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 33.5,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.9685628,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.97,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 27.7,
+          "year": "2021"
+        }
+      },
+      "iso3": "CHE",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 3.93744000373189,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 43.0,
+          "year": "2024"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.0424726,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.878,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 24.2,
+          "year": "2021"
+        }
+      },
+      "iso3": "CHL",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 9.31508933799393,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 4,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 36.0,
+          "year": "2022"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 0.623841,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.797,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 15.2,
+          "year": "2021"
+        }
+      },
+      "iso3": "CHN",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 7.12966532502255,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 25.7,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.2414343,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.915,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 17.2,
+          "year": "2021"
+        }
+      },
+      "iso3": "CZE",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 6.94395663386317,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 4,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 33.7,
+          "year": "2022"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.4897351,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.959,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 17.6,
+          "year": "2021"
+        }
+      },
+      "iso3": "DEU",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 4.2782054919933,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 29.9,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.958875,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.962,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 39.5,
+          "year": "2021"
+        }
+      },
+      "iso3": "DNK",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 4.50540688376633,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 33.4,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.1301564,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.918,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 19.0,
+          "year": "2021"
+        }
+      },
+      "iso3": "ESP",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 5.53521221243539,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 27.4,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.9412284,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.948,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 50.2,
+          "year": "2021"
+        }
+      },
+      "iso3": "FIN",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:24Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 4.00355772602595,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:16Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 31.8,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.2114339,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.92,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:20Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 16.2,
+          "year": "2021"
+        }
+      },
+      "iso3": "FRA",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 4.22077337220883,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:17Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 32.4,
+          "year": "2021"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.2331241,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.946,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 12.2,
+          "year": "2021"
+        }
+      },
+      "iso3": "GBR",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 2.17365173535787,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:17Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 23.0,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 0.5021381,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.685,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 34.9,
+          "year": "2021"
+        }
+      },
+      "iso3": "IND",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 8.5199194837855,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 7,
+          "fetched_at": "2026-10-18T13:07:17Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 26.8,
+          "year": "2019"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.5454897,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.972,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 82.4,
+          "year": "2021"
+        }
+      },
+      "iso3": "ISL",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 5.07573834102673,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:17Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 34.3,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 0.9246078,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.915,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 17.5,
+          "year": "2021"
+        }
+      },
+      "iso3": "ITA",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 7.84242057238933,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 6,
+          "fetched_at": "2026-10-18T13:07:17Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 32.3,
+          "year": "2020"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 2.0412225,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.925,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 8.8,
+          "year": "2021"
+        }
+      },
+      "iso3": "JPN",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 0.38344092060836,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 4,
+          "fetched_at": "2026-10-18T13:07:17Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 38.5,
+          "year": "2022"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": -0.0893561,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.628,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 67.7,
+          "year": "2021"
+        }
+      },
+      "iso3": "KEN",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 11.3622569893006,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:17Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 32.9,
+          "year": "2021"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.5029013,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.937,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 3.6,
+          "year": "2021"
+        }
+      },
+      "iso3": "KOR",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 3.63738680384754,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:17Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 42.6,
+          "year": "2024"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": -0.1806742,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.789,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 13.0,
+          "year": "2021"
+        }
+      },
+      "iso3": "MEX",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 6.60188395966651,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:17Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 25.7,
+          "year": "2021"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.7401881,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.955,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 12.2,
+          "year": "2021"
+        }
+      },
+      "iso3": "NLD",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 7.17830173255862,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:17Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 26.5,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.8398211,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.97,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 61.4,
+          "year": "2021"
+        }
+      },
+      "iso3": "NOR",
+      "missing": []
+    },
+    {
+      "complete": false,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 6.01410207939509,
+          "year": "2024"
+        },
+        "gini_index": {
+          "reason": "no_observation",
+          "value": null
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.872764,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.938,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 28.9,
+          "year": "2021"
+        }
+      },
+      "iso3": "NZL",
+      "missing": [
+        "gini_index"
+      ]
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 7.55108565871718,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:17Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 28.5,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 0.7962743,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.906,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 15.2,
+          "year": "2021"
+        }
+      },
+      "iso3": "POL",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 3.32476489948602,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:17Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 33.9,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.0219371,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.89,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 32.3,
+          "year": "2021"
+        }
+      },
+      "iso3": "PRT",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 13.9845411189425,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:17Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 33.0,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": -0.5007182,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.832,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 3.5,
+          "year": "2021"
+        }
+      },
+      "iso3": "RUS",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:25Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 3.57381645984766,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:17Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 29.3,
+          "year": "2023"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.8173982,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.959,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:21Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 57.9,
+          "year": "2021"
+        }
+      },
+      "iso3": "SWE",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:26Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 13.6238622652793,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:18Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 41.8,
+          "year": "2024"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": 1.1909909,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.938,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:22Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 10.9,
+          "year": "2021"
+        }
+      },
+      "iso3": "USA",
+      "missing": []
+    },
+    {
+      "complete": true,
+      "inputs": {
+        "co2_per_capita": {
+          "age_years": 2,
+          "fetched_at": "2026-10-18T13:07:26Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EN.GHG.CO2.PC.CE.AR5 (World Development Indicators)",
+          "unit": "t CO2 per capita",
+          "value": 6.87684962627712,
+          "year": "2024"
+        },
+        "gini_index": {
+          "age_years": 4,
+          "fetched_at": "2026-10-18T13:07:18Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank SI.POV.GINI (World Development Indicators)",
+          "unit": "index, 0-100 (survey-based, sparse years)",
+          "value": 54.1,
+          "year": "2022"
+        },
+        "gov_effectiveness": {
+          "age_years": 1,
+          "fetched_at": "2026-10-18T13:07:28Z",
+          "release": "World Bank lastupdated 2026-09-25",
+          "source": "World Bank GOV_WGI_GE.EST (Worldwide Governance Indicators)",
+          "unit": "WGI estimate (approx. -2.5 to +2.5)",
+          "value": -0.0230339,
+          "year": "2025"
+        },
+        "hdi": {
+          "age_years": 3,
+          "fetched_at": "2026-10-18T13:07:30Z",
+          "release": "UNDP Human Development Report, release year 2025",
+          "source": "UNDP Human Development Report composite indices time series",
+          "unit": "index, 0-1",
+          "value": 0.741,
+          "year": "2023"
+        },
+        "renewable_share": {
+          "age_years": 5,
+          "fetched_at": "2026-10-18T13:07:22Z",
+          "release": "World Bank lastupdated 2026-10-08",
+          "source": "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+          "unit": "% (of total final energy consumption)",
+          "value": 9.7,
+          "year": "2021"
+        }
+      },
+      "iso3": "ZAF",
+      "missing": []
+    }
+  ],
+  "policy": {
+    "age_reference_year": 2026,
+    "max_age_years": {
+      "co2_per_capita": 5,
+      "gini_index": 10,
+      "gov_effectiveness": 3,
+      "hdi": 3,
+      "renewable_share": 5
+    },
+    "selection": "latest non-null year per country; no substitution, no fallback, no earlier year"
+  },
+  "schema": "map-inputs/v1",
+  "snapshot": {
+    "co2_code": "EN.GHG.CO2.PC.CE.AR5",
+    "date_utc": "2026-10-18",
+    "gov_effectiveness_code": "GOV_WGI_GE.EST",
+    "manifest_sha256": "55f26096be501040a684ab700f1e760f2808caee84ff79f04d307f8a82e506c0",
+    "renewables_choice": "final",
+    "renewables_code": "EG.FEC.RNEW.ZS",
+    "snapshot_digest": "e937adb255c06a4fa5a9b35d86ad0189925f01dec6879fc57c8c5c4ff0da2bc7"
+  },
+  "summary": {
+    "complete": 32,
+    "countries": 33,
+    "missing_reasons_per_input": {
+      "gini_index": {
+        "no_observation": 1
+      }
+    },
+    "present_per_input": {
+      "co2_per_capita": 33,
+      "gini_index": 32,
+      "gov_effectiveness": 33,
+      "hdi": 33,
+      "renewable_share": 33
+    }
+  }
+}

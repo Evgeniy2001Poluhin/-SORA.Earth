@@ -341,5 +341,16 @@
    does not read like the live figures above it. */
 .esg-tooltip .tip-source { margin-top: 4px; font-size: 11px; }
 .esg-tooltip .tip-source-static { color: #8d9a94 !important; font-style: italic; }
+.esg-tooltip .tip-status { margin-top: 4px; font-size: 11px; color: #b8c4bf !important; }
+.esg-tooltip .tip-missing { margin-top: 6px; font-size: 11px; color: #b8c4bf !important; }
+/* C8 part 3: the reasons a country is incomplete, one per line. */
+.esg-tooltip .tip-reasons { list-style: none; padding-left: 0; margin-top: 6px; }
+.esg-tooltip .tip-reasons li { margin-top: 3px; }
+/* C8 part 3: the pinned-data notice, shown when the earliest expiry is near or past. */
+.map-expiry-notice { color: #b45309; font-weight: 600; }
+/* C8 part 2: each scored input's value, year and source. Wraps, since sources are long. */
+.esg-tooltip .tip-inputs { margin: 6px 0 0; padding: 0; list-style: none; font-size: 11px; color: #b8c4bf !important; max-width: 280px; }
+.esg-tooltip .tip-inputs li { margin-top: 3px; overflow-wrap: anywhere; }
+.esg-tooltip .tip-inputs li span { color: #ffffff !important; font-weight: 600; }
 /* F073: which kind of source the aggregates use, and how many countries. */
 .map-scope { font-size: 12px; opacity: .7; margin: 4px 0 0; }
