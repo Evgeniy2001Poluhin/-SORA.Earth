@@ -2,8 +2,8 @@
 
 Offline comparison of two commits. Not a production measurement.
 
-Old = app/api/map_data.py at e4009ec8ca8c6b25ab3616983c3736b63a22b594 (origin/main when this was generated), empty live cache.
-New = app/api/map_data.py at 14a14a060acfaf5b76b962c3c3adf2346ac8766a, pinned table data/map_inputs/2026-10-18 (manifest sha256 5d133d3bf441092b...), ages at the date above.
+Old = app/api/map_data.py at e4009ec8ca8c6b25ab3616983c3736b63a22b594, empty live cache.
+New = app/api/map_data.py at 1c9f4e6d2daf5e3753014abba062d246f188e86a, pinned table data/map_inputs/2026-10-18 (manifest sha256 5d133d3bf441092b...), ages at the date above.
 Each row: old score and label, then the new score or null, status, missing inputs with reasons,
 and the year of each input the new score used (ren = renewables share, co2 = CO2 per capita,
 gini, gov = government effectiveness, hdi).
@@ -11,11 +11,11 @@ gini, gov = government effectiveness, hdi).
 ## Provenance
 
 - old commit: e4009ec8ca8c6b25ab3616983c3736b63a22b594
-- new commit: 14a14a060acfaf5b76b962c3c3adf2346ac8766a
+- new commit: 1c9f4e6d2daf5e3753014abba062d246f188e86a
 - AS_OF: 2026-10-19
 - python: 3.11.15 (both sides, each in its own interpreter, -I)
 - working tree: clean
-- comparison script: scripts/map_score_c8_comparison.py, sha256 ae9ca216d6f614cc3ff7de714a8fda1fc6217f0a624586d8e1c26e22b14f5b6b
+- comparison script: scripts/map_score_c8_comparison.py, sha256 62428b5ec69e89f10e8b335132bc3dd0a129b1276faf3cdd88aeabc367052037
 - tree app: old 36e3b9a459853661d14f77c3724ca3784e121067, new 71fc0b4e2237f307dd9bccdc59155335d6fd6a9b
 - tree data/map_inputs: old absent at this commit, new fb7b0f0231086f003825602c23a4ad60edfd54ee
 - pinned table, new side: data/map_inputs/2026-10-18/map_inputs.json sha256 3832f89f1f1dc4e32120aee189089b7b459278e1b89e273a7da4413ddcd1fead
