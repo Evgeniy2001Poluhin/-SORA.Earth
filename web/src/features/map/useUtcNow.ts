@@ -48,6 +48,10 @@ export function useUtcNow(expiryDates: readonly string[], fetchedAtMs: number): 
   useEffect(() => {
     const dates = dateKey === "" ? [] : dateKey.split(",");
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // New data may have arrived after its expiry passed, with no timer to say so: catch the clock up.
+    // One extra render per change of data, not a loop: the clock is external, read once here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNowMs(Date.now());
     const arm = () => {
       const now = Date.now();
       const wakeAt = [nextUtcMidnightAfter(now), now + MAX_WAIT_MS];

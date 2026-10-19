@@ -296,6 +296,26 @@ describe("MapPage across an expiry (C8 part 4)", () => {
     expect(text(container)).not.toContain("81.5");
   });
 
+  it("(g) withholds a response that lands after its expiry, with no timer having run since the page opened", async () => {
+    // No data yet, so no expiry timer exists. The clock is past the expiry when the response arrives.
+    startClock("2026-12-31T23:59:59Z");
+    const first = deferred<Response>();
+    respond = (n) => (n === 1 ? first.promise : new Promise<Response>(() => {}));
+    const { container } = renderMap();
+    await settle();
+    expect(mapCalls).toBe(1);
+
+    vi.setSystemTime(new Date("2027-01-01T00:00:02Z")); // no timer runs: the clock moves only
+    first.resolve(json(payload([SWEDEN_EXPIRES])));
+    await settle();
+
+    expect(text(container), "the expired score is not shown").not.toContain("81.5");
+    expect(markerFills(container), "the expired marker is neutral, not in its band colour")
+      .toEqual([NEUTRAL_COLOR]);
+    expect(topNames(container)).toEqual([]);
+    expect(text(container)).toContain("no complete score: N = 0 of 1 countries");
+  });
+
   it("wakes at least once an hour, so no timer waits longer than the browser can count", async () => {
     startClock("2026-12-02T12:00:00Z"); // the expiry is 30 days away
     respond = () => json(payload([SWEDEN_EXPIRES]));
