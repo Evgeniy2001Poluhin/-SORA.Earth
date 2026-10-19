@@ -1,9 +1,8 @@
 /**
- * The country tooltip shows what each number is and where it came from.
- *
- * F070: `esg_source` was dropped, so a static reference value read as live.
- * F071/F072: for a static profile the backend fills renewables and CO2 per
- * capita with formulas of the ESG score, and the page printed them as measured.
+ * The country tooltip shows what each number is, where it came from, and when a
+ * country has no score. C8: an incomplete country says so and names what is missing;
+ * it never shows a number in place of the score. A scored country shows each input's
+ * value, year and source.
  *
  * Tested through the extracted body: react-leaflet's Tooltip is a layer and is
  * not in the DOM until a marker is opened in a real map.
@@ -12,38 +11,48 @@ import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 
 import CountryTooltipBody from "./CountryTooltipBody";
-import type { MapCountry } from "./countryData";
+import type { InputProvenance, MapCountry } from "./countryData";
 
-// As the backend sends a static profile: the formulas, not measurements.
-const ICELAND_STATIC: MapCountry = {
-  code: "IS", name: "Iceland", lat: 65, lon: -19, esg: 86, band: "leader",
-  esg_source: "hardcoded", renewable_share_pct: 81.7, co2_intensity_t_per_capita: 4.52,
+const SWEDEN_INPUTS: Partial<Record<string, InputProvenance>> = {
+  renewable_share: {
+    value: 60.1, unit: "% (of total final energy consumption)", year: "2021", age_years: 5,
+    max_age_years: 5, expires_at: "2027-01-01",
+    source: "World Bank EG.FEC.RNEW.ZS (World Development Indicators)",
+    release: "World Bank lastupdated 2026-10-08", fetched_at: "2026-10-18T13:07:20Z",
+  },
+  gini_index: {
+    value: 27.7, unit: "index, 0-100 (survey-based, sparse years)", year: "2022", age_years: 4,
+    source: "World Bank SI.POV.GINI (World Development Indicators)",
+    release: "World Bank lastupdated 2026-10-08", fetched_at: "2026-10-18T13:07:16Z",
+  },
 };
-const SWEDEN_LIVE: MapCountry = {
+
+// As the backend sends a country with a complete score from the pinned table.
+const SWEDEN_OK: MapCountry = {
   code: "SE", name: "Sweden", lat: 60, lon: 15, esg: 81.5, band: "leader",
-  esg_source: "world_bank_live", renewable_share_pct: 60.1, co2_intensity_t_per_capita: 3.6,
-};
-const CHILE_LIVE_MISSING: MapCountry = {
-  code: "CL", name: "Chile", lat: -33, lon: -70, esg: 62.5, band: "developing",
-  esg_source: "world_bank_live", renewable_share_pct: null, co2_intensity_t_per_capita: null,
-};
-const UNLABELLED: MapCountry = {
-  code: "XX", name: "Nowhere", lat: 0, lon: 0, esg: 50, band: "emerging",
-  renewable_share_pct: 50, co2_intensity_t_per_capita: 2,
+  esg_status: "ok", esg_source: "pinned_table", missing_inputs: [],
+  inputs: SWEDEN_INPUTS,
+  renewable_share_pct: 60.1, co2_intensity_t_per_capita: null,
 };
 
-// The score from the BENCHMARKS table, with the formula-like values a static
-// profile could carry: the page must not show them either.
-const STATIC_BENCHMARK_COUNTRY: MapCountry = {
-  code: "JP", name: "Japan", lat: 36, lon: 138, esg: 77, band: "advanced",
-  esg_source: "static_benchmark", renewable_share_pct: 73.2, co2_intensity_t_per_capita: 6.1,
+// As the backend sends a country with a missing input: no score, names what is missing.
+const ICELAND_INCOMPLETE: MapCountry = {
+  code: "IS", name: "Iceland", lat: 65, lon: -19, esg: null, band: null,
+  esg_status: "incomplete", esg_source: null,
+  missing_inputs: ["gini_index", "gov_effectiveness"],
+  renewable_share_pct: null, co2_intensity_t_per_capita: null,
 };
 
-// As /map/countries sends them in esg_source_meanings.
+// A real score of zero. It is a score, not a missing one.
+const ZERO_OK: MapCountry = {
+  code: "ZZ", name: "Zeroland", lat: 0, lon: 0, esg: 0, band: "lagging",
+  esg_status: "ok", esg_source: "pinned_table", missing_inputs: [],
+  renewable_share_pct: null, co2_intensity_t_per_capita: null,
+};
+
+// As /map/countries sends esg_source_meanings.
 const MEANINGS: Record<string, string> = {
-  world_bank_live: "Score computed from a fresh live-cache entry (under 24h old).",
-  static_benchmark: "Live cache empty or stale. Score computed from the static BENCHMARKS row.",
-  hardcoded: "No external data for this country. Score is the hand-entered COUNTRIES profile.",
+  pinned_table: "Every input is read from the pinned official table.",
 };
 
 function renderBody(country: MapCountry, meanings?: Record<string, string> | null) {
@@ -51,87 +60,125 @@ function renderBody(country: MapCountry, meanings?: Record<string, string> | nul
 }
 
 describe("the country tooltip", () => {
-  it("shows no data for renewables and CO2 on a static profile, not the formula values", () => {
-    const { container } = renderBody(ICELAND_STATIC);
+  it("shows an incomplete country as incomplete, with what is missing, and no number", () => {
+    const { container } = renderBody(ICELAND_INCOMPLETE, MEANINGS);
     const text = container.textContent ?? "";
 
-    // The control: the score itself is still shown.
     expect(text).toContain("Iceland");
-    expect(text).toContain("86");
-
-    expect(text, "both rows read no data").toMatch(/Renewables\s*no data/);
-    expect(text).toMatch(/CO2 \/ capita\s*no data/);
-    expect(text, "81.7 is 86 * 0.95 from the backend formula, not a measurement")
-      .not.toContain("81.7");
-    expect(text, "4.52 is 20 - 86 * 0.18 from the backend formula, not a measurement")
-      .not.toContain("4.52");
-  });
-
-  it("shows no data for a live country's missing value, and not a number", () => {
-    const { container } = renderBody(CHILE_LIVE_MISSING);
-    const text = container.textContent ?? "";
-
-    expect((text.match(/no data/g) ?? []).length).toBe(2);
+    expect(text).toContain("incomplete");
+    expect(text).toContain("no score");
+    expect(text).toContain("Missing: Gini index, government effectiveness");
+    // "CO2" carries a digit of its own; the check is for a score or a value, which would be digits.
+    expect(text.replace("CO2", ""), "an incomplete country shows no score, no percentage").not.toMatch(/\d/);
     expect(text).not.toMatch(/NaN|null|undefined/);
   });
 
-  it("shows a live country's measured values", () => {
-    const { container } = renderBody(SWEDEN_LIVE);
-    const text = container.textContent ?? "";
-
-    expect(text).toContain("60.1%");
-    expect(text).toContain("3.6 t");
-    expect(text).not.toContain("no data");
+  it("gives no source line and no input list for an incomplete country", () => {
+    const text = renderBody(ICELAND_INCOMPLETE, MEANINGS).container.textContent ?? "";
+    expect(text).not.toContain("source:");
+    expect(text).not.toContain("Gini index 27");
   });
 
-  it("does not treat a source-less country's numbers as measured", () => {
-    const { container } = renderBody(UNLABELLED);
+  it("shows a real 0 score as 0, not as incomplete", () => {
+    const { container } = renderBody(ZERO_OK, MEANINGS);
     const text = container.textContent ?? "";
 
-    expect(text).toContain("source: unknown");
-    expect(text, "an unlabelled value is not known to be measured").not.toContain("50%");
-    expect((text.match(/no data/g) ?? []).length).toBe(2);
+    expect(text).toContain("Zeroland");
+    expect(container.querySelector(".tip-score-num")?.textContent).toBe("0");
+    expect(text).not.toContain("incomplete");
+    expect(text).not.toContain("Missing");
+  });
+
+  it("lists each scored input with its value, year and source", () => {
+    const { container } = renderBody(SWEDEN_OK, MEANINGS);
+    const items = Array.from(container.querySelectorAll(".tip-inputs li")).map((li) => li.textContent ?? "");
+
+    expect(items).toHaveLength(2);
+    expect(items[0]).toContain("renewables share");
+    expect(items[0]).toContain("60.1");
+    expect(items[0]).toContain("2021");
+    expect(items[0]).toContain("World Bank EG.FEC.RNEW.ZS");
+    expect(items[1]).toContain("Gini index");
+    expect(items[1]).toContain("27.7");
+    expect(items[1]).toContain("2022");
+  });
+
+  it("does not label an ok score as mixed or unlabelled", () => {
+    const text = renderBody(SWEDEN_OK, MEANINGS).container.textContent ?? "";
+    expect(text).not.toContain("mixed");
+  });
+
+  it("shows a country's renewables, and no data for a value it lacks", () => {
+    const text = renderBody(SWEDEN_OK, MEANINGS).container.textContent ?? "";
+
+    expect(text).toContain("60.1%");
+    expect(text).toContain("no data");
+    expect((text.match(/no data/g) ?? []).length).toBe(1);
   });
 
   it("shows the backend's meaning in the source line when it sends one", () => {
-    const hardcoded = renderBody(ICELAND_STATIC, MEANINGS).container.textContent ?? "";
-    const benchmark = renderBody(STATIC_BENCHMARK_COUNTRY, MEANINGS).container.textContent ?? "";
-    const live = renderBody(SWEDEN_LIVE, MEANINGS).container.textContent ?? "";
+    const text = renderBody(SWEDEN_OK, MEANINGS).container.textContent ?? "";
 
-    expect(hardcoded).toContain("source: No external data for this country.");
-    expect(benchmark).toContain("source: Live cache empty or stale.");
-    expect(live).toContain("source: Score computed from a fresh live-cache entry");
-    expect(hardcoded, "the raw token is replaced by the meaning").not.toContain("source: hardcoded");
+    expect(text).toContain("source: Every input is read from the pinned official table.");
   });
 
   it("falls back to the raw token when the response carries no meanings", () => {
-    expect(renderBody(ICELAND_STATIC).container.textContent).toContain("source: hardcoded");
-    expect(renderBody(STATIC_BENCHMARK_COUNTRY, null).container.textContent)
-      .toContain("source: static_benchmark");
-    expect(renderBody(SWEDEN_LIVE).container.textContent).toContain("source: world_bank_live");
+    expect(renderBody(SWEDEN_OK).container.textContent).toContain("source: pinned_table");
   });
 
-  it("falls back to the raw token for a token the meanings do not list", () => {
-    const text = renderBody(STATIC_BENCHMARK_COUNTRY, { hardcoded: MEANINGS.hardcoded }).container.textContent ?? "";
-    expect(text).toContain("source: static_benchmark");
+  it("names missing inputs by their human label", () => {
+    const text = renderBody({ ...ICELAND_INCOMPLETE, missing_inputs: ["hdi"] }).container.textContent ?? "";
+    expect(text).toContain("Missing: human development index");
   });
 
-  it("styles both static kinds as static, and the live kind as live", () => {
-    const sourceClass = (c: MapCountry, m: Record<string, string> | null) =>
-      renderBody(c, m).container.querySelector(".tip-source");
+  it("gives the reason for each missing input, and tells no observation from observation too old", () => {
+    const country: MapCountry = {
+      ...ICELAND_INCOMPLETE,
+      missing_inputs: ["gini_index", "hdi"],
+      input_reasons: {
+        gini_index: { code: "no_observation", text: "no observation in the pinned table" },
+        hdi: { code: "too_old", year: "2023", age_years: 4, max_age_years: 3, expires_at: "2027-01-01" },
+      },
+    };
+    const items = Array.from(renderBody(country, MEANINGS).container.querySelectorAll(".tip-reasons li"))
+      .map((li) => li.textContent ?? "");
 
-    for (const meanings of [MEANINGS, null]) {
-      expect(sourceClass(ICELAND_STATIC, meanings)?.classList.contains("tip-source-static")).toBe(true);
-      expect(sourceClass(STATIC_BENCHMARK_COUNTRY, meanings)?.classList.contains("tip-source-static")).toBe(true);
-      expect(sourceClass(SWEDEN_LIVE, meanings)?.classList.contains("tip-source-static")).toBe(false);
-    }
+    expect(items).toEqual([
+      "Gini index: no observation in the pinned source",
+      "human development index: observation too old (2023, 4 years old; the limit is 3 years)",
+    ]);
   });
 
-  it("shows no data for a static_benchmark country's physical values, as for hardcoded", () => {
-    const text = renderBody(STATIC_BENCHMARK_COUNTRY, MEANINGS).container.textContent ?? "";
+  it("shows an input with no reason by its label, beside the reasons that exist", () => {
+    const country: MapCountry = {
+      ...ICELAND_INCOMPLETE,
+      missing_inputs: ["gini_index", "hdi"],
+      input_reasons: { gini_index: { code: "no_observation" } },
+    };
+    const text = renderBody(country, MEANINGS).container.textContent ?? "";
 
-    expect((text.match(/no data/g) ?? []).length).toBe(2);
-    expect(text, "73.2 is a benchmark figure, not a live measurement").not.toContain("73.2%");
-    expect(text).not.toContain("6.1 t");
+    expect(text).toContain("Gini index: no observation in the pinned source");
+    expect(text).toContain("human development index");
+  });
+
+  it("shows the scored input's expiry in its line", () => {
+    const text = renderBody(SWEDEN_OK, MEANINGS).container.textContent ?? "";
+    expect(text).toContain("usable until");
+  });
+
+  it("says a withheld score is withheld, names the expiry date, and shows no number", () => {
+    // What withClientExpiry returns for a score whose input expired (UTC) before the page's clock.
+    const withheld: MapCountry = {
+      ...SWEDEN_OK, esg: null, band: null, esg_status: "incomplete",
+      client_expired: true, client_expired_on: "2027-01-01",
+    };
+    const { container } = renderBody(withheld, MEANINGS);
+    const text = container.textContent ?? "";
+
+    expect(text).toContain("Score withheld: an input expired on 2027-01-01 (UTC); waiting for fresh data.");
+    expect(container.querySelector(".tip-score-num")?.textContent).toBe("withheld");
+    expect(text).not.toContain("source:");
+    expect(text).not.toContain("usable until");
+    expect(text, "the withheld score is not shown").not.toContain("81.5");
   });
 });

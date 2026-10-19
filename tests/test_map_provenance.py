@@ -1,17 +1,18 @@
 """The map API sends no invented values and no mislabelled sources.
 
-Three defects, each pinned here:
+Defects this file pins:
 
 1. Invented values. /map/countries and /map/countries/{code} derived
    renewable_share_pct and co2_intensity_t_per_capita from the ESG score when
    nothing was measured: 0.95 * ESG and 20 - 0.18 * ESG.
 2. Mislabelled source. A score computed from BENCHMARKS, because the live cache
-   was empty or stale, was labelled "world_bank_live".
+   was empty or stale, was labelled "world_bank_live". Under C8 part 2 no value
+   comes from BENCHMARKS or the live cache: every input is the pinned table's.
 3. Empty sources. /map/russia sent sources_used = [] for every region, although
    the observations behind each score name the sources.
 """
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi import FastAPI
@@ -21,6 +22,7 @@ from sqlalchemy.orm import sessionmaker
 
 import app.database as database
 import app.external_data as ed
+from app import map_inputs
 from app.api import map_data
 from app.database import EnvironmentalObservation, IngesterRun, RegionESGScore, RegionSignal
 from app.ingesters import persist
@@ -44,8 +46,16 @@ def _countries(client) -> dict:
 
 
 @pytest.fixture
+def shipped(monkeypatch):
+    """The process's real table, with the clock on the day it was written."""
+    monkeypatch.setattr(map_inputs, "use_date", lambda: date(2026, 10, 19))
+    monkeypatch.setattr(map_inputs, "_STATE", {})
+    yield
+
+
+@pytest.fixture
 def cache(monkeypatch):
-    """An empty live cache for one test. monkeypatch restores the module's own dicts."""
+    """A live cache the test fills. Under C8 part 2 it must not change any score."""
     live, stamps = {}, {}
     monkeypatch.setattr(ed, "_live_cache", live)
     monkeypatch.setattr(ed, "_cache_timestamps", stamps)
@@ -64,78 +74,70 @@ def _put_live(cache, name, *, age_hours, indicators, sources):
     stamps[name] = datetime.now() - timedelta(hours=age_hours)
 
 
-def test_unmeasured_physical_fields_are_null_not_derived(cache):
-    """With no live measurement, renewables and CO2 are null for every country.
-
-    ISL and NZL have no BENCHMARKS row, so they take the hardcoded path, which used
-    to send 0.95 * ESG and 20 - 0.18 * ESG. With the cache empty, every other
-    country takes the static path, where CO2 was a BENCHMARKS figure sent as live.
-    """
+def test_physical_fields_are_the_pinned_values_never_derived_from_the_score(shipped):
+    """Renewables and CO2 are the table's values, or null. The old formulas, 0.95 * ESG and 20 - 0.18 * ESG, are gone."""
     body = _client().get("/map/countries").json()
+    rows = map_inputs.current_table_state().table.rows
 
     for c in body["countries"]:
-        assert c["renewable_share_pct"] is None, f"{c['code']} renewables {c['renewable_share_pct']}"
-        assert c["co2_intensity_t_per_capita"] is None, f"{c['code']} co2 {c['co2_intensity_t_per_capita']}"
-        # The old formulas, at this country's own score, are absent.
-        assert c["renewable_share_pct"] != min(round(c["esg"] * 0.95, 1), 95.0), c["code"]
-        assert c["co2_intensity_t_per_capita"] != round(20.0 - c["esg"] * 0.18, 2), c["code"]
+        table_row = rows[c["code"]]["inputs"]
+        expected_renew = table_row["renewable_share"]["value"]
+        expected_co2 = table_row["co2_per_capita"]["value"]
+        assert c["renewable_share_pct"] == round(expected_renew, 1), c["code"]
+        assert c["co2_intensity_t_per_capita"] == round(expected_co2, 1), c["code"]
+        if c["esg"] is not None:
+            assert c["renewable_share_pct"] != min(round(c["esg"] * 0.95, 1), 95.0), c["code"]
+            assert c["co2_intensity_t_per_capita"] != round(20.0 - c["esg"] * 0.18, 2), c["code"]
 
-    rows = {c["code"]: c for c in body["countries"]}
-    assert rows["ISL"]["esg_source"] == "hardcoded"
 
-
-def test_country_detail_sends_no_derived_values():
-    """The detail route sent the same two formulas, plus two more derived from the score."""
+def test_country_detail_sends_no_derived_values(shipped):
+    """The detail route agrees with the list, and its profile field is the reference, never the score."""
     row = _client().get("/map/countries/ISL").json()
+    listed = _countries(_client())["ISL"]
 
-    assert row["esg_source"] == "hardcoded"
-    assert row["renewable_share_pct"] is None
-    assert row["co2_intensity_t_per_capita"] is None
+    assert row["esg"] == listed["esg"]
+    assert row["esg_status"] == listed["esg_status"]
+    assert row["esg_source"] == listed["esg_source"]
+    assert row["reference_profile"]["esg"] == 86  # ISL's hand-entered COUNTRIES value, unscored
+    assert row["renewable_share_pct"] == listed["renewable_share_pct"]
+    assert row["co2_intensity_t_per_capita"] == listed["co2_intensity_t_per_capita"]
     assert row["csrd_alignment"] is None
     assert row["audit_ready_share_pct"] is None
 
 
-def test_benchmark_fallback_is_labelled_static_when_cache_is_empty_or_stale(cache):
-    """BENCHMARKS supplied the score, so the label is static, not live."""
-    from app.api.map_data import _live_esg
+def test_no_score_is_labelled_from_a_source_other_than_the_table(shipped, cache):
+    """A fresh live entry for every country changes nothing: no label, input or number moves."""
+    before = _countries(_client())
+    for c in map_data.COUNTRIES:
+        _put_live(cache, c["name"], age_hours=0,
+                  indicators={"renewable_share": 99.0, "gini_index": 99.0, "gov_effectiveness": 9.0},
+                  sources={"renewable_share": "world_bank", "gini_index": "world_bank", "gov_effectiveness": "world_bank"})
 
-    client = _client()
+    after = _countries(_client())
 
-    # Cache empty.
-    assert _countries(client)["DEU"]["esg_source"] == "static_benchmark"
-    score, extra, src = _live_esg("Germany", 71)
-    assert src == "static_benchmark"
-    assert extra["renewable_share_pct"] is None
-
-    # Cache stale: 48 hours old against a 24-hour TTL.
-    _put_live(cache, "Germany", age_hours=48,
-              indicators={"renewable_share": 45.0},
-              sources={"renewable_share": "world_bank"})
-    row = _countries(client)["DEU"]
-    assert row["esg_source"] == "static_benchmark"
-    assert row["renewable_share_pct"] is None
+    for code in before:
+        assert after[code]["esg"] == before[code]["esg"], code
+        assert after[code]["esg_source"] == before[code]["esg_source"], code
+        assert after[code]["inputs"] == before[code]["inputs"], code
+        assert "world_bank_live" not in str(after[code]), code
 
 
-def test_fresh_live_cache_is_labelled_live(cache):
-    """A fresh entry is live. Its measured renewables are reported; benchmark CO2 is not."""
-    _put_live(cache, "Germany", age_hours=0,
-              indicators={"renewable_share": 45.0, "co2_per_capita": 6.9},
-              sources={"renewable_share": "world_bank", "co2_per_capita": "benchmark"})
-
+def test_a_country_on_the_table_is_labelled_pinned_and_says_so(shipped):
     row = _countries(_client())["DEU"]
 
-    assert row["esg_source"] == "world_bank_live"
-    assert row["renewable_share_pct"] == 45.0
-    assert row["co2_intensity_t_per_capita"] is None
+    assert row["esg_status"] == "ok"
+    assert row["esg_source"] == "pinned_table"
+    assert row["inputs"]["renewable_share"]["source"].startswith("World Bank EG.FEC.RNEW.ZS")
+    assert row["inputs"]["renewable_share"]["fetched_at"] is not None
 
 
-def test_esg_source_values_are_described_in_the_response(cache):
+def test_esg_source_values_are_described_in_the_response(shipped):
     body = _client().get("/map/countries").json()
 
     meanings = body["esg_source_meanings"]
-    assert set(meanings) == {"world_bank_live", "static_benchmark", "hardcoded"}
+    assert set(meanings) == {"pinned_table"}
     assert all(text.strip() for text in meanings.values())
-    assert {c["esg_source"] for c in body["countries"]} <= set(meanings)
+    assert {c["esg_source"] for c in body["countries"] if c["esg_source"] is not None} <= set(meanings)
 
 
 # ---------- /map/russia: sources_used ----------
