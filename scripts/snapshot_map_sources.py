@@ -89,25 +89,49 @@ Monthly publication check (manual; nothing refreshes the data automatically)
 
 The map's inputs expire. data/map_inputs/<date>/ is the only table the map reads,
 and each value is refused once it is older than its limit (app/map_inputs.py,
-MAX_AGE_YEARS). The owner runs this check once a month:
+MAX_AGE_YEARS). The owner runs this check once a month, and again whenever the
+World Bank or UNDP announces a release:
 
-  1. Look at the World Bank "lastupdated" stamp for the five series and the UNDP
-     HDR release page. Note the newest observation year each of them now has
-     for the 33 countries.
-  2. If no series has a newer observation year than the pinned table's own
-     latest years, stop. Nothing is gained by a new snapshot. Scores then go
-     null as their values expire, and that is the correct outcome.
-  3. Only if an observation year has advanced, re-snapshot into a NEW dated
-     directory with this script, build with scripts/build_map_inputs.py into a
-     fresh directory, and check the table's hash against the manifest.
-  4. Pin the new manifest: put its sha256 in PINNED_MANIFEST_SHA256 in
-     app/map_inputs.py, and point TABLE_DIR at the new directory. That commit is
-     the only way new data reaches the map.
+  1. Re-snapshot into a NEW dated directory with this script, and build it with
+     scripts/build_map_inputs.py into a fresh directory. Neither step opens the
+     pinned table or the snapshot it was built from for writing.
+  2. Compare the new table with the pinned one country by country and input by
+     input: the value, its observation year, and whether it is present at all.
 
-Re-snapshotting the same observation years does not extend validity. A value's
-expiry is set by its observation year, not by the day it was fetched, so a new
-snapshot that still ends at 2023 for HDI expires on the same date as the old one.
-Only a newer observation year moves an expiry.
+       python3 -c 'import json, sys; rows = lambda p: {
+           (c["iso3"], k): (v.get("value"), v.get("year"))
+           for c in json.load(open(p))["countries"]
+           for k, v in (c.get("inputs") or {}).items() if isinstance(v, dict)}; a, b = (
+           rows(sys.argv[1]), rows(sys.argv[2])); [print(*k, a.get(k), "->", b.get(k))
+           for k in sorted(a.keys() | b.keys()) if a.get(k) != b.get(k)]' PINNED FRESH
+
+     with PINNED = data/map_inputs/<pinned date>/map_inputs.json and FRESH = the
+     map_inputs.json just built.
+
+     It prints one line per country and input that differs, and nothing when
+     the two tables carry the same values for the same years.
+
+     Compare the values, not the publication stamps. A "lastupdated" stamp or a
+     release page says a release happened, not which countries it changed, and
+     a series whose newest year is unchanged can still have revised or filled
+     values for individual countries in earlier years.
+  3. A reviewed refresh is warranted when either is true:
+       a. a newer observation period: an input now has a later year; or
+       b. a revision of a period the table already holds: a corrected value, a
+          changed series, or a gap filled for a country and year the table
+          already covers or lacked.
+     If the comparison prints nothing, stop and note the date of the check.
+  4. Pin the new manifest through a reviewed pull request that lists what
+     changed, by country and input, and which of 3a or 3b it is: put its
+     sha256 in PINNED_MANIFEST_SHA256 in app/map_inputs.py, and point TABLE_DIR
+     at the new directory. That commit is the only way new data reaches the map.
+
+Expiry. A value's expiry is set by its observation year, not by its release or
+the day it was fetched (app/map_inputs.py, expires_at). A refresh under 3b
+replaces values and does not move any expiry: a revised 2021 value expires on
+the same date as the 2021 value it replaces. Only a newer observation year (3a)
+moves an expiry. Re-snapshotting is therefore never a way to keep a country
+scored past its date.
 
 If no source has published new data by an expiry date, the scores that need the
 expired input stay null after it, and the map says so. That is the intended
