@@ -372,7 +372,7 @@ def _parse_vocabulary(data: bytes) -> Vocabulary:
         if " ".join(literal.split()) != literal or literal == "":
             raise IntegrityError("vocabulary literal is not in canonical form")
         if isinstance(value, bool) or value not in (0, 1):
-            raise IntegrityError(f"vocabulary value for a literal must be 1 or 0")
+            raise IntegrityError("vocabulary value for a literal must be 1 or 0")
     for literal in not_rated:
         if not isinstance(literal, str) or " ".join(literal.split()) != literal or literal == "":
             raise IntegrityError("vocabulary not_rated entry is not in canonical form")
