@@ -157,39 +157,41 @@ def test_evaluate_endpoint_for_finland_returns_null_esg_rank(client):
     assert bench["hdi"] == 0.942
 
 
-def test_map_route_handles_null_gov_effectiveness():
+def test_map_route_handles_null_gov_effectiveness(monkeypatch):
     """
-    _live_esg handles None for gov_effectiveness by falling back to 0.0.
+    Finland with no gov_effectiveness in the pinned table: that input is missing, never a default 0.0.
 
-    The function reads gov_effectiveness from indicators, then from d, then defaults to 0.0.
-    This test calls _live_esg with a data dict where d["gov_effectiveness"] = None
-    (as it is for Finland in the benchmark), and verifies it doesn't crash and uses 0.0.
+    Under C8 part 2 the map scores from the pinned table only, not from BENCHMARKS, so
+    this test builds a table in which Finland's governance row is absent. The score is
+    null and incomplete, gov_effectiveness is named in missing_inputs, and Finland's
+    Gini qualifies from its own sourced row.
     """
-    from app.api.map_data import _live_esg
-    from unittest.mock import patch
-    from app.country_benchmarks import BENCHMARKS
+    import copy
+    from datetime import date
+    from app import map_inputs
+    from app.api.map_data import score_country
+    from tests.test_map_inputs import SHIPPED_DOC
 
-    finland_data = BENCHMARKS["Finland"].copy()
-    finland_data["live"] = {
-        "indicators": {}  # Empty indicators, so it falls back to d["gov_effectiveness"]
-    }
+    monkeypatch.setattr(map_inputs, "use_date", lambda: date(2026, 10, 19))
+    doc = copy.deepcopy(SHIPPED_DOC)
+    fin = next(c for c in doc["countries"] if c["iso3"] == "FIN")
+    fin["inputs"]["gov_effectiveness"] = {"reason": "no_observation", "value": None}
+    fin["complete"] = False
+    fin["missing"] = ["gov_effectiveness"]
+    rows = {c["iso3"]: c for c in doc["countries"]}
+    table = map_inputs.PinnedTable(rows=rows, table_sha256="c" * 64, manifest_sha256="d" * 64,
+                                   snapshot_date="2026-10-18")
+    state = map_inputs.TableState(table=table, reason=None)
 
-    with patch("app.external_data.get_merged_country_data") as mock_get:
-        mock_get.return_value = finland_data
-        
-        # Call _live_esg for Finland
-        total_score, extra, source = _live_esg("Finland", 87)  # 87 is Finland's hardcoded esg in COUNTRIES
-        
-        # Should not crash
-        assert isinstance(total_score, (int, float))
-        assert isinstance(extra, dict)
-        
-        # extra should contain gov_effectiveness rounded to 2 decimals
-        # When None falls back to 0.0, round(0.0, 2) = 0.0
-        assert "gov_effectiveness" in extra
-        assert extra["gov_effectiveness"] == 0.0, (
-            f"Expected gov_effectiveness=0.0 (fallback from None), got {extra['gov_effectiveness']}"
-        )
+    result = score_country("FIN", state=state)
+
+    assert result["esg"] is None
+    assert result["esg_status"] == "incomplete"
+    assert result["gov_effectiveness"] is None
+    assert "gov_effectiveness" in result["missing_inputs"]
+    assert "gov_effectiveness" not in result["inputs"]
+    assert result["inputs"]["gini_index"]["source"].startswith("World Bank SI.POV.GINI")
+    assert result["inputs"]["gini_index"]["year"] == fin["inputs"]["gini_index"]["year"]
 
 
 def test_investor_dashboard_benchmark_display_handles_null():
