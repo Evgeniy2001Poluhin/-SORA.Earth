@@ -121,8 +121,12 @@ class ESGResult(BaseModel):
 class ForecastPoint(BaseModel):
     ds: str = Field(..., description="Date in YYYY-MM-DD format")
     yhat: float = Field(..., description="Point prediction")
-    yhat_lower: float = Field(..., description="Lower 90% confidence bound")
-    yhat_upper: float = Field(..., description="Upper 90% confidence bound")
+    yhat_lower: float = Field(..., description=(
+        "Lower bound of the model's prediction interval. Nominally 90% for most models; "
+        "the linear model uses +/-1.96 sigma (nominally 95%). Model-based, not a measured coverage."))
+    yhat_upper: float = Field(..., description=(
+        "Upper bound of the model's prediction interval. Nominally 90% for most models; "
+        "the linear model uses +/-1.96 sigma (nominally 95%). Model-based, not a measured coverage."))
 
 
 class HistoryPoint(BaseModel):
