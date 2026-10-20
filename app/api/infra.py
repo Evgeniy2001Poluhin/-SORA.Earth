@@ -22,7 +22,11 @@ from app.drift_detection import drift_detector
 from app.mlflow_tracking import get_experiment_stats
 from app.rate_limit import rate_limiter
 from app.middleware import METRICS, START_TIME
-from app.services.observation_coverage import EXPECTED_PER_DAY, coverage_report  # noqa: F401 (EXPECTED_PER_DAY kept importable from here)
+from app.services.observation_coverage import (  # noqa: F401 (EXPECTED_PER_DAY kept importable from here)
+    EXPECTED_PER_DAY,
+    CoverageNotSupported,
+    coverage_report,
+)
 from app.schemas import (AutoRetrainResponse, CoverageGap, IngestionAttention, ObservationCoverage,
                          ObservationPage, ObservationRow,
                          ProjectInput as Project)
@@ -955,7 +959,15 @@ def observation_coverage(
     Today's UTC day is excluded. It is incomplete by construction, and
     reporting it would put one guaranteed gap in every response -- an alert
     that fires every day is one nobody reads.
+
+    The denominator is the expected grid: every UTC day in the window crossed
+    with every declared point due that day. A point that supplied nothing for a
+    whole day is a gap, and gap_count counts point-days, not days. A source or
+    indicator with no declared point set answers 422, never an empty report.
     """
-    return coverage_report(source=source, indicator=indicator, days=days)
+    try:
+        return coverage_report(source=source, indicator=indicator, days=days)
+    except CoverageNotSupported as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 

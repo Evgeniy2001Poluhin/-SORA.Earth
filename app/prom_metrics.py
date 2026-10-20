@@ -197,21 +197,34 @@ sora_environmental_data_quality_score = Gauge(
 # work done by a process. Written in the scheduler container, which is one
 # process -- the mode is declared anyway, for the same reason the forecast
 # gauges declare it.
+#
+# The unit of gap_days is the point-day: an expected (UTC day, declared point)
+# pair with fewer than 19 distinct hours, a pair with no rows at all included.
+# The expected grid is the registry in app/services/environmental/regions.py.
 sora_observation_coverage_gap_days = Gauge(
     "sora_observation_coverage_gap_days",
-    "Point-days below the M3 coverage floor in the examined window",
+    "Expected point-days below the M3 coverage floor (no rows counts as a gap) in the examined window",
     ["source", "indicator"],
     multiprocess_mode="mostrecent",
 )
 sora_observation_coverage_days_examined = Gauge(
     "sora_observation_coverage_days_examined",
-    "Distinct UTC days the coverage query looked at",
+    "Calendar UTC days in the coverage window",
     ["source", "indicator"],
     multiprocess_mode="mostrecent",
 )
 sora_observation_coverage_points_examined = Gauge(
     "sora_observation_coverage_points_examined",
-    "Distinct points the coverage query looked at",
+    "Declared points expected on at least one day of the coverage window",
+    ["source", "indicator"],
+    multiprocess_mode="mostrecent",
+)
+#: Unix time of the last coverage report that computed successfully. The gap
+#: gauges above keep their last value when a run fails, so a stopped scheduler
+#: looks healthy through them; this one does not, and the staleness alert reads it.
+sora_observation_coverage_last_success_timestamp_seconds = Gauge(
+    "sora_observation_coverage_last_success_timestamp_seconds",
+    "Unix time of the last successful observation coverage report",
     ["source", "indicator"],
     multiprocess_mode="mostrecent",
 )

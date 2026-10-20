@@ -143,3 +143,70 @@ groups:
           severity: critical
         annotations:
           summary: "SORA app target is DOWN"
+
+      # M3 coverage: a declared point supplied too few hours on a day it was due.
+      #
+      # gap_days counts point-days, not days: one point silent for one day is one.
+      # The expected grid is every UTC day in the window crossed with the 21
+      # declared points, so a point that sent nothing at all is a gap. This rule
+      # reports lost usable point-days in the examined window. It does not
+      # diagnose an outage on its own, and it does not clear when data arrives:
+      # a historical gap stays until its day leaves the window (the M3 clock
+      # start at the scheduler, or the rolling 30 days).
+      #
+      # job named: the gauge is written only by the scheduler, and both processes
+      # export the same name (#284).
+      - uid: sora-observation-coverage-gap
+        title: M3 Observation Coverage Gap
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sora_observation_coverage_gap_days{job="sora-scheduler"} > 0
+              intervalMs: 1000
+              maxDataPoints: 43200
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Expected observation point-days are missing (M3 coverage)"
+          description: >-
+            gap_days counts (day, point) pairs with fewer than 19 distinct UTC
+            hours, a pair with no rows included. Read the denominators beside it
+            (days_examined, points_examined) at /api/v1/infra/observations/coverage.
+
+      # The gap gauge keeps its last value when a run fails, so a stopped or
+      # failing scheduler would look healthy through it. This rule reads the
+      # time of the last successful report instead.
+      #
+      # Fires when that time has been more than 15 minutes old for 45 minutes
+      # (the job runs every 15 minutes, so a healthy run keeps the age below
+      # that), or when the series is absent. Absence after a restart lasts up to
+      # one 15-minute cycle, which the 45-minute hold covers.
+      - uid: sora-observation-coverage-stale
+        title: M3 Observation Coverage Not Reporting
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: absent(sora_observation_coverage_last_success_timestamp_seconds{job="sora-scheduler"}) or time() - sora_observation_coverage_last_success_timestamp_seconds{job="sora-scheduler"} > 900
+              intervalMs: 1000
+              maxDataPoints: 43200
+        for: 45m
+        labels:
+          severity: warning
+        annotations:
+          summary: "M3 coverage has not reported successfully for 45 minutes"
+          description: >-
+            The coverage gauges are not being refreshed, so the gap alert above
+            is reading an old value. Check the scheduler container and its
+            observation coverage job (auto_observation_coverage) before trusting
+            that alert.

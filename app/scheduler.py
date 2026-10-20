@@ -193,6 +193,7 @@ from app.prom_metrics import (
     sora_observation_coverage_gap_days,
     sora_observation_coverage_days_examined,
     sora_observation_coverage_points_examined,
+    sora_observation_coverage_last_success_timestamp_seconds,
 )
 
 # The promotion decision, shared with the other caller that promotes. Imported at
@@ -1067,9 +1068,17 @@ def scheduled_observation_coverage():
     counting rows to counting hours (#179, amendment 1.3); a second copy would
     have gone on answering the old way while the endpoint answered the new one.
 
-    All three numbers are published together. A gap count of 0 means "nothing
-    fell short" or "nothing was looked at", and one gauge cannot tell those
-    apart -- the denominator is what makes the zero readable.
+    The count is over the expected grid: every UTC day in the window crossed with
+    every declared point due that day. A point that supplied no rows for a whole
+    day is a gap. The gauge name says `gap_days`, but the unit is point-days --
+    one point silent for one day is one gap. The denominator gauges are published
+    beside it, so a zero reads as "nothing fell short over N days and M points"
+    rather than "nothing was looked at".
+
+    If the report cannot be computed (no declared points, or the database fails),
+    the gauges are left as they were and the timestamp below is not advanced. The
+    alert on that timestamp is what notices a scheduler that has stopped
+    succeeding, because a gauge keeps its last value and would not show it.
     """
     from app.services.observation_coverage import M3_CLOCK_START, coverage_report
 
@@ -1094,6 +1103,8 @@ def scheduled_observation_coverage():
         report.days_examined)
     sora_observation_coverage_points_examined.labels(**labels).set(
         report.points_examined)
+    sora_observation_coverage_last_success_timestamp_seconds.labels(**labels).set(
+        time.time())
 
     if report.gap_count:
         logger.warning(
