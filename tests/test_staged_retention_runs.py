@@ -61,6 +61,7 @@ def runtime(tmp_path, monkeypatch):
     monkeypatch.setenv("SORA_RUNTIME_DIR", str(root))
 
     monkeypatch.setattr(retrain, "PROJECTS_CSV", str(data / "projects.csv"))
+    monkeypatch.setattr("app.services.retraining.PROJECTS_CSV", str(data / "projects.csv"))
     assert not (data / "projects.csv").exists()
     return {"root": root, "retrain": retrain}
 

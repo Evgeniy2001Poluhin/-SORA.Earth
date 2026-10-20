@@ -347,7 +347,7 @@ def retrain_models(trigger_source: str = "manual"):
     }
 
     try:
-        from app.api.retrain import _do_retrain
+        from app.services.retraining import _do_retrain
 
         result = _do_retrain(min_samples=50, trigger_source=trigger_source)
         metrics = result.get("metrics", {}) if isinstance(result, dict) else {}
@@ -702,7 +702,7 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         from app.model_source import serving_baseline
         baseline = serving_baseline()
         old_auc = baseline.auc
-        from app.api.retrain import _do_retrain
+        from app.services.retraining import _do_retrain
         result = _do_retrain(min_samples=50, trigger_source=trigger_source)
         new_metrics = result.get("metrics", {}) if isinstance(result, dict) else {}
         new_auc = new_metrics.get("auc_roc") or new_metrics.get("roc_auc")
@@ -1061,7 +1061,8 @@ def scheduled_observation_coverage():
     panel mentioned coverage, no gauge was declared, and nothing called the
     endpoint. An admin endpoint nobody calls reports a dip to nobody.
 
-    Through `app.api.infra.coverage_report`, not a copy of its query. That SQL
+    Through `app.services.observation_coverage.coverage_report`, which the API
+    route also calls, not a copy of its query. That SQL
     decides whether a day counts and has already been corrected once, from
     counting rows to counting hours (#179, amendment 1.3); a second copy would
     have gone on answering the old way while the endpoint answered the new one.
@@ -1070,11 +1071,11 @@ def scheduled_observation_coverage():
     fell short" or "nothing was looked at", and one gauge cannot tell those
     apart -- the denominator is what makes the zero readable.
     """
-    import app.api.infra as infra
+    from app.services.observation_coverage import coverage_report
 
     source, indicator = COVERAGE_WATCH
     try:
-        report = infra.coverage_report(
+        report = coverage_report(
             source=source, indicator=indicator, days=COVERAGE_WATCH_DAYS)
     except Exception as e:
         # Left unset rather than published as zero. A zero written here would be

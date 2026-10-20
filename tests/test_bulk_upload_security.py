@@ -174,6 +174,7 @@ def test_admin_upload_succeeds_over_http(uploads_dir, as_admin, tmp_path, monkey
     dataset = tmp_path / "projects.csv"
     dataset.write_text(VALID_CSV)
     monkeypatch.setattr(retrain, "PROJECTS_CSV", str(dataset))
+    monkeypatch.setattr("app.services.retraining.PROJECTS_CSV", str(dataset))
     monkeypatch.setattr(retrain, "DATASET_LOCK", str(tmp_path / ".lock"))
     (uploads_dir / "add.csv").write_text(VALID_CSV)
 
@@ -235,6 +236,7 @@ def test_toctou_swap_after_validation_reads_the_validated_file(uploads_dir, as_a
     dataset = tmp_path / "projects.csv"
     dataset.write_text(VALID_CSV)
     monkeypatch.setattr(retrain, "PROJECTS_CSV", str(dataset))
+    monkeypatch.setattr("app.services.retraining.PROJECTS_CSV", str(dataset))
     monkeypatch.setattr(retrain, "DATASET_LOCK", str(tmp_path / ".lock"))
 
     target = uploads_dir / "swap.csv"
@@ -265,6 +267,7 @@ def test_failed_write_leaves_the_dataset_unchanged(uploads_dir, as_admin, tmp_pa
     dataset.write_text(VALID_CSV)
     original = dataset.read_bytes()
     monkeypatch.setattr(retrain, "PROJECTS_CSV", str(dataset))
+    monkeypatch.setattr("app.services.retraining.PROJECTS_CSV", str(dataset))
     monkeypatch.setattr(retrain, "DATASET_LOCK", str(tmp_path / ".lock"))
     monkeypatch.setattr(
         retrain, "_replace_projects_csv",
@@ -287,6 +290,7 @@ def test_concurrent_upload_is_refused_while_the_lock_is_held(uploads_dir, as_adm
     dataset.write_text(VALID_CSV)
     lock_path = tmp_path / ".lock"
     monkeypatch.setattr(retrain, "PROJECTS_CSV", str(dataset))
+    monkeypatch.setattr("app.services.retraining.PROJECTS_CSV", str(dataset))
     monkeypatch.setattr(retrain, "DATASET_LOCK", str(lock_path))
     (uploads_dir / "add.csv").write_text(VALID_CSV)
 
@@ -308,6 +312,7 @@ def test_audit_records_actor_action_rows_and_result(uploads_dir, as_admin, tmp_p
     dataset = tmp_path / "projects.csv"
     dataset.write_text(VALID_CSV)
     monkeypatch.setattr(retrain, "PROJECTS_CSV", str(dataset))
+    monkeypatch.setattr("app.services.retraining.PROJECTS_CSV", str(dataset))
     monkeypatch.setattr(retrain, "DATASET_LOCK", str(tmp_path / ".lock"))
     (uploads_dir / "add.csv").write_text(VALID_CSV)
 

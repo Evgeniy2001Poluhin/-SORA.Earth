@@ -42,8 +42,10 @@ def dataset(tmp_path, monkeypatch):
     models = tmp_path / "models"
     models.mkdir()
     monkeypatch.setattr(retrain, "PROJECTS_CSV", str(tmp_path / "projects.csv"))
+    monkeypatch.setattr("app.services.retraining.PROJECTS_CSV", str(tmp_path / "projects.csv"))
     monkeypatch.setattr(retrain, "MODELS_DIR", str(models))
     monkeypatch.setattr(retrain, "PRED_LOG", str(tmp_path / "absent.csv"))
+    monkeypatch.setattr("app.services.retraining.PRED_LOG", str(tmp_path / "absent.csv"))
     monkeypatch.setattr(retrain, "DATASET_LOCK", str(tmp_path / ".lock"))
     return retrain
 

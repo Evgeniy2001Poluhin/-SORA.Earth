@@ -55,12 +55,12 @@ def loop(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "app.locks", types.SimpleNamespace(RedisLock=_Lock))
 
-    import app.api.retrain as retrain_module
     import app.scheduler as scheduler
+    import app.services.retraining as retraining_module
 
     retrains = []
     monkeypatch.setattr(
-        retrain_module, "_do_retrain",
+        retraining_module, "_do_retrain",
         lambda **kw: retrains.append(kw) or {"status": "ok", "metrics": {}},
         raising=False,
     )

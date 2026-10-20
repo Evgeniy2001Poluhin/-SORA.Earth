@@ -47,7 +47,7 @@ def test_auto_retrain_skips_when_no_drift():
 def test_auto_retrain_runs_when_drift_detected():
     token = _admin_token()
     from app.model_source import Baseline
-    with patch("app.api.drift.compute_drift") as mocked_drift,          patch("app.api.retrain._do_retrain") as mocked_retrain,          patch("app.model_source.serving_baseline") as mocked_baseline:
+    with patch("app.api.drift.compute_drift") as mocked_drift,          patch("app.services.retraining._do_retrain") as mocked_retrain,          patch("app.model_source.serving_baseline") as mocked_baseline:
         mocked_drift.return_value = _drift(True, features={"budget": {"ks_stat": 0.7, "p_value": 0.001, "drift": True}})
         mocked_baseline.return_value = Baseline(auc=0.95, source="active", ok=True)
         mocked_retrain.return_value = {"status": "success", "model_version": "test-v1", "metrics": {"roc_auc": 0.96}}
@@ -65,7 +65,7 @@ def test_auto_retrain_runs_when_drift_detected():
 def test_auto_retrain_rejects_degraded_model():
     token = _admin_token()
     from app.model_source import Baseline
-    with patch("app.api.drift.compute_drift") as mocked_drift,          patch("app.api.retrain._do_retrain") as mocked_retrain,          patch("app.model_source.serving_baseline") as mocked_baseline:
+    with patch("app.api.drift.compute_drift") as mocked_drift,          patch("app.services.retraining._do_retrain") as mocked_retrain,          patch("app.model_source.serving_baseline") as mocked_baseline:
         mocked_drift.return_value = _drift(True)
         mocked_baseline.return_value = Baseline(auc=0.95, source="active", ok=True)
         mocked_retrain.return_value = {"status": "success", "metrics": {"roc_auc": 0.90}}

@@ -44,6 +44,7 @@ def dataset(tmp_path, monkeypatch):
 
     path = tmp_path / "projects.csv"
     monkeypatch.setattr(retrain, "PROJECTS_CSV", str(path))
+    monkeypatch.setattr("app.services.retraining.PROJECTS_CSV", str(path))
     # MODELS_DIR is `models_dir()` evaluated at import, so patching the function
     # would leave the constant pointing at the real directory and the run would
     # overwrite the deployed model.
@@ -51,6 +52,7 @@ def dataset(tmp_path, monkeypatch):
     models.mkdir()
     monkeypatch.setattr(retrain, "MODELS_DIR", str(models))
     monkeypatch.setattr(retrain, "PRED_LOG", str(tmp_path / "absent.csv"))
+    monkeypatch.setattr("app.services.retraining.PRED_LOG", str(tmp_path / "absent.csv"))
     monkeypatch.setattr(retrain, "DATASET_LOCK", str(tmp_path / ".lock"))
 
     def _write(df):
@@ -185,6 +187,7 @@ def test_a_missing_dataset_is_refused_before_accepting(tmp_path, monkeypatch):
     import app.api.retrain as retrain
 
     monkeypatch.setattr(retrain, "PROJECTS_CSV", str(tmp_path / "absent.csv"))
+    monkeypatch.setattr("app.services.retraining.PROJECTS_CSV", str(tmp_path / "absent.csv"))
 
     with pytest.raises(HTTPException) as exc:
         retrain._preflight_retrain(10)
