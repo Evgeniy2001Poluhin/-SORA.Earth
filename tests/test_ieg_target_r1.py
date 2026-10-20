@@ -979,6 +979,98 @@ def test_blocked_receipt_names_the_digest_of_the_sealed_diagnostics():
     assert entry["bytes"] == len(res.sealed[r1.SEALED_BLOCKED])
 
 
+# ---------------------------------------------------------------- sections 13.11-13.13: ceilings, bound, USTAR
+
+def test_ceilings_and_tar_record_size_are_the_documented_values():
+    assert (r1.ROW_MAX, r1.JSON_MAX, r1.INNER_BYTES, r1.TAR_RECORDSIZE) == (16384, 1048576, 65, 10240)
+
+
+def _accepted_literal(literal, fy):
+    """True if the run is ok; False if it refuses with field_limit_exceeded; any other outcome fails."""
+    vocab = {"map": dict(H.DEFAULT_VOCAB["map"], **{literal: 1}), "not_rated": ["Not Rated"]}
+    world = H.make_world([_proj("P100001", "ARG", _rec(fy, literal))], vocab=vocab)
+    try:
+        res = H.run_pipeline(world)
+    except r1.IntegrityError as exc:
+        assert str(exc) == "field_limit_exceeded"
+        return False
+    return res.status == "ok"
+
+
+@pytest.mark.parametrize("fy", [2012, 2021], ids=["development", "holdout"])
+def test_row_max_boundary_is_exact(fy):
+    """The largest accepted literal is the one where some serialized record reaches ROW_MAX; one more byte refuses."""
+    assert _accepted_literal("L", fy)
+    lo, hi = 1, 20000
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if _accepted_literal("L" * mid, fy):
+            lo = mid
+        else:
+            hi = mid - 1
+    assert _accepted_literal("L" * lo, fy)
+    assert not _accepted_literal("L" * (lo + 1), fy)
+    assert 1000 < lo < 16384
+
+
+def test_a_256_control_character_literal_passes():
+    literal = "".join(chr(1 + i % 8) for i in range(256))
+    assert _accepted_literal(literal, 2012)
+
+
+def test_json_max_boundary_is_exact(monkeypatch):
+    projects = [_proj(f"P1{i:05d}", "ARG", _rec(2012, f"Unknown {i}")) for i in range(40)]
+    monkeypatch.setattr(r1, "JSON_MAX", 10 ** 9)
+    world, res = _run(projects)
+    plain = r1.open_seal(res.sealed[r1.SEALED_BLOCKED], r1.PURPOSE_BLOCKED, world.private_key, SYNTH_PERMIT)
+    size = len(r1.read_package(plain)["blocked_detail.json"])
+    # The receipt is also a JSON file under the ceiling, so the diagnostic must be the larger one here.
+    assert len(res.files["blocked_receipt.json"]) < size
+    monkeypatch.setattr(r1, "JSON_MAX", size)
+    assert H.run_pipeline(H.make_world(projects)).status == "blocked"
+    monkeypatch.setattr(r1, "JSON_MAX", size - 1)
+    with pytest.raises(r1.IntegrityError, match="field_limit_exceeded"):
+        H.run_pipeline(H.make_world(projects))
+
+
+def test_a_name_over_100_bytes_or_not_ascii_is_a_field_limit():
+    inner = {"inner_sha256.txt": b"x" * 65}
+    r1._tar_bytes({**inner, "x" * 100: b"a"})
+    with pytest.raises(r1.IntegrityError, match="field_limit_exceeded"):
+        r1._tar_bytes({**inner, "x" * 101: b"a"})
+    with pytest.raises(r1.IntegrityError, match="field_limit_exceeded"):
+        r1._tar_bytes({**inner, "ü.csv": b"a"})
+
+
+def test_bound_covers_archives_whose_files_are_all_at_their_ceilings():
+    holdout_h, max_m = 3, 2
+    counts = {"holdout": holdout_h, "max_records": max_m}
+    holdout_sizes = {
+        "inner_sha256.txt": 65,
+        "target_rows_holdout.csv": (holdout_h + 1) * r1.ROW_MAX,
+        "target_exclusions_holdout.csv": (holdout_h + 1) * r1.ROW_MAX,
+        "target_audit_holdout.csv": (holdout_h * max_m + 1) * r1.ROW_MAX,
+        "final_ids_holdout.txt": 8 * holdout_h,
+        "country_weights_holdout.json": r1.JSON_MAX,
+        "d1_holdout_full.json": r1.JSON_MAX,
+        "qa_holdout.json": r1.JSON_MAX,
+    }
+    tar = r1._tar_bytes({n: b"x" * s for n, s in holdout_sizes.items()})
+    assert len(tar) <= r1.sealed_upper_bound(counts)
+    blocked = r1._tar_bytes({"inner_sha256.txt": b"x" * 65, "blocked_detail.json": b"x" * r1.JSON_MAX})
+    assert len(blocked) <= r1.sealed_upper_bound(counts)
+    assert len(tar) % r1.TAR_RECORDSIZE == 0
+
+
+def test_capacity_below_the_bound_refuses_before_any_page(tmp_path, monkeypatch, file_opens):
+    fx = H.build_real_fixture(tmp_path / "tree", overrides={"permit": {"sealed_plaintext_bytes": 1000}})
+    fx.install(monkeypatch)
+    file_opens.clear()
+    with pytest.raises(r1.PermitRefused, match="below the bound"):
+        r1.load_real(fx.permit, trust_path=fx.trust)
+    assert not any(str(fx.paths["snapshot"]) in p for p in file_opens)
+
+
 # ---------------------------------------------------------------- guard against any research read
 
 def test_the_research_root_guard_recognises_a_research_path():

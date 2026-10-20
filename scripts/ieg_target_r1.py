@@ -71,6 +71,11 @@ D1_STATEMENT = (
     "G_eff — эффективное число стран, не эффективное число проектов"
 )
 
+ROW_MAX = 16384          # one serialized CSV record, newline included (13.12.1)
+JSON_MAX = 1048576       # one serialized JSON file (13.12.1)
+INNER_BYTES = 65         # inner_sha256.txt: 64 hex digits and a newline
+TAR_RECORDSIZE = 10240   # USTAR archives are padded to this (13.12.4)
+
 PID_RE = re.compile(r"P[0-9]{6}")
 EVAL_FY_RE = re.compile(r"[0-9]{4}")
 AS_OF_RE = re.compile(r"([0-9]{2})-([A-Za-z]{3})-([0-9]{4})")
@@ -198,16 +203,25 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def _json_bytes(obj) -> bytes:
-    return (json.dumps(obj, sort_keys=True, indent=2, separators=(",", ": "), ensure_ascii=False) + "\n").encode("utf-8")
+    """13.12.2: sorted keys, compact separators, UTF-8. Over JSON_MAX is a field-limit refusal (exit 5)."""
+    data = json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    if len(data) > JSON_MAX:
+        raise IntegrityError(FIELD_LIMIT)
+    return data
+
+
+def _csv_record(values) -> bytes:
+    """13.12.2: QUOTE_ALL, '\n' terminator. One record over ROW_MAX bytes is a field-limit refusal (exit 5)."""
+    buf = io.StringIO()
+    csv.writer(buf, quoting=csv.QUOTE_ALL, lineterminator="\n").writerow(list(values))
+    data = buf.getvalue().encode("utf-8")
+    if len(data) > ROW_MAX:
+        raise IntegrityError(FIELD_LIMIT)
+    return data
 
 
 def _csv_bytes(fields, rows) -> bytes:
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=list(fields), lineterminator="\n")
-    writer.writeheader()
-    for row in rows:
-        writer.writerow({f: row.get(f, "") for f in fields})
-    return buf.getvalue().encode("utf-8")
+    return b"".join([_csv_record(fields)] + [_csv_record([row.get(f, "") for f in fields]) for row in rows])
 
 
 def _typed_json(canon: tuple) -> str:
@@ -575,6 +589,36 @@ def inner_sha256(files: Mapping[str, bytes]) -> str:
         data = files[name]
         h.update(name.encode("utf-8") + b"\x00" + len(data).to_bytes(8, "big") + data)
     return h.hexdigest()
+
+
+def _tar_size_bound(data_sizes) -> int:
+    """Upper bound of a USTAR archive: 512-byte header and padded data per file, two end blocks, record padding."""
+    total = sum(512 + ((d + 511) // 512) * 512 for d in data_sizes) + 1024
+    return ((total + TAR_RECORDSIZE - 1) // TAR_RECORDSIZE) * TAR_RECORDSIZE
+
+
+def sealed_upper_bound(counts: Mapping[str, int]) -> int:
+    """Bound on the plaintext of either package. counts: holdout candidates H, records per project M (13.12.3)."""
+    holdout_h, max_m = counts["holdout"], counts["max_records"]
+    holdout_files = [
+        INNER_BYTES,
+        (holdout_h + 1) * ROW_MAX,              # target_rows_holdout.csv
+        (holdout_h + 1) * ROW_MAX,              # target_exclusions_holdout.csv
+        (holdout_h * max_m + 1) * ROW_MAX,      # target_audit_holdout.csv
+        8 * holdout_h,                          # final_ids_holdout.txt
+        JSON_MAX, JSON_MAX, JSON_MAX,           # country_weights_holdout, d1_holdout_full, qa_holdout
+    ]
+    blocked_files = [INNER_BYTES, JSON_MAX]     # blocked_detail.json
+    return max(_tar_size_bound(holdout_files), _tar_size_bound(blocked_files))
+
+
+def candidate_counts(candidates_csv: bytes) -> dict:
+    """H, the holdout candidates; M, the most records any candidate has at its maximum FY. Read from r2 only."""
+    rows = _candidate_rows(candidates_csv)
+    return {
+        "holdout": sum(1 for r in rows if r["window"] == "holdout"),
+        "max_records": max((len((r["authoritative_records"] or "").split(";")) for r in rows), default=0),
+    }
 
 
 def _tar_bytes(files: Mapping[str, bytes]) -> bytes:
@@ -1098,6 +1142,18 @@ def _read_real_structural(blobs: dict) -> None:
         blobs[f"structural/{name}"] = _read(struct / name, f"structural {name}")
 
 
+def _structural_bytes_pinned(blobs: dict, pins: Pins) -> None:
+    """The structural receipt's manifest and its three files against their pins, before any count is taken."""
+    _pin(sha256_bytes(blobs[K_STRUCT_MANIFEST]), pins.structural_manifest_sha, "structural receipt manifest")
+    manifest = _parse_json(blobs[K_STRUCT_MANIFEST], "structural manifest")
+    outputs = manifest.get("outputs") if isinstance(manifest, dict) else None
+    if not isinstance(outputs, dict):
+        raise PinRefused("structural manifest has no outputs")
+    for name in STRUCT_FILES:
+        if name not in outputs or sha256_bytes(blobs[f"structural/{name}"]) != outputs[name].get("sha256"):
+            raise PinRefused(f"structural receipt: {name} does not match its manifest")
+
+
 def _read_real_snapshot(blobs: dict) -> None:
     """The only reader of IEG pages. Called after every chain check has passed."""
     snap = Path(REAL_SNAPSHOT_DIR)
@@ -1179,6 +1235,10 @@ def load_real(permit_path, trust_path=None) -> Inputs:
 
     blobs = {K_VOCAB: vocab_bytes, K_D1: d1_bytes}
     _read_real_structural(blobs)
+    _structural_bytes_pinned(blobs, REAL_PINS)
+    needed = sealed_upper_bound(candidate_counts(blobs["structural/structural_candidates.csv"]))
+    if permit["sealed_plaintext_bytes"] < needed:
+        raise PermitRefused(f"permit sealed_plaintext_bytes is below the bound of {needed} bytes")
     _read_real_snapshot(blobs)
     inputs = validate_bytes(blobs, REAL_PINS)
     chain = {
