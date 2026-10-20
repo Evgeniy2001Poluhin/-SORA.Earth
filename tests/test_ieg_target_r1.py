@@ -1071,6 +1071,91 @@ def test_capacity_below_the_bound_refuses_before_any_page(tmp_path, monkeypatch,
     assert not any(str(fx.paths["snapshot"]) in p for p in file_opens)
 
 
+# ---------------------------------------------------------------- sections 13.6 and 13.9: pairs and determinism
+
+DEV_COMMON = [
+    _proj("P000001", "ARG", _rec(2012, "Satisfactory")),
+    _proj("P000002", "ARG", _rec(2015, "Unsatisfactory")),
+    _proj("P000003", "BRA", _rec(2016, "Highly Satisfactory")),
+    _proj("P000004", "CHL", _rec(2018, "Moderately Unsatisfactory")),
+]
+# Two holdout contents with the same candidate count: different classes, T2 and T4 in the second.
+HOLD_A = [
+    _proj("P000005", "BRA", _rec(2021, "Satisfactory")),
+    _proj("P000006", "CHL", _rec(2023, "Highly Unsatisfactory")),
+]
+HOLD_B = [
+    _proj("P000005", "ARG", _rec(2021, "Not Rated")),
+    _proj("P000006", "ARG", _rec(2023, "Satisfactory"), _rec(2023, "Unsatisfactory")),
+]
+
+
+def _open_outputs(res):
+    return {k: v for k, v in res.files.items() if k not in ("manifest.json", "d1_verdict.json")}
+
+
+def test_open_outputs_do_not_depend_on_the_holdout_contents():
+    _, res_a = _run(DEV_COMMON + HOLD_A)
+    world_b, res_b = _run(DEV_COMMON + HOLD_B)
+    assert res_a.status == res_b.status == "ok"
+    assert _open_outputs(res_a) == _open_outputs(res_b)
+    verdict_a, verdict_b = _json(res_a, "d1_verdict.json"), _json(res_b, "d1_verdict.json")
+    assert {k: v for k, v in verdict_a.items() if k != "holdout_d1"} == {
+        k: v for k, v in verdict_b.items() if k != "holdout_d1"}
+    # The inputs differ, and that is the only place the two runs may differ outside the sealed package.
+    assert res_a.input_sha256 != res_b.input_sha256
+
+
+def test_blocked_receipt_does_not_say_which_window_holds_the_unknown_value():
+    unknown_in_holdout = DEV_COMMON + [_proj("P000005", "ARG", _rec(2021, "Excellent"))]
+    unknown_in_dev = [_proj("P000001", "ARG", _rec(2012, "Excellent"))] + DEV_COMMON[1:] + [
+        _proj("P000005", "ARG", _rec(2021, "Satisfactory"))]
+    _, res_h = _run(unknown_in_holdout)
+    _, res_d = _run(unknown_in_dev)
+    assert res_h.status == res_d.status == "blocked"
+    receipt_h, receipt_d = _json(res_h, "blocked_receipt.json"), _json(res_d, "blocked_receipt.json")
+    # Input hashes, pins, run metadata and the ciphertext digest are per run; the rest must be equal.
+    volatile = ("inputs_sha256", "pins", "run", "sealed")
+    assert {k: v for k, v in receipt_h.items() if k not in volatile} == {
+        k: v for k, v in receipt_d.items() if k not in volatile}
+
+
+def test_audit_content_is_the_same_after_a_reordering_though_locators_move():
+    base = H.make_world(_twelve_projects(), page_size=3)
+    shuffled = H.make_world(_twelve_projects(), page_size=3, shuffle_seed=3)
+    res_a = H.run_pipeline(base)
+    res_b = H.run_pipeline(shuffled)
+
+    def content(res):
+        return sorted((r["project_id"], r["outcome_present"], r["outcome_original_json"],
+                       r["outcome_canonical"], r["used"]) for r in _csv(res, "target_audit.csv"))
+
+    assert content(res_a) == content(res_b)
+    assert _csv(res_a, "target_audit.csv") != _csv(res_b, "target_audit.csv")
+
+
+def test_decrypted_plaintext_is_identical_across_runs_though_ciphertexts_differ():
+    world, first = _run(ALL_PROJECTS)
+    second = H.run_pipeline(world)
+    assert first.sealed[r1.SEALED_HOLDOUT] != second.sealed[r1.SEALED_HOLDOUT]
+    assert _open_holdout(first, world) == _open_holdout(second, world)
+
+
+def test_plaintext_is_exactly_the_expected_tar_then_zero_padding():
+    import tarfile
+
+    world, res = _run(ALL_PROJECTS)
+    plain = _open_holdout(res, world)
+    files = r1.read_package(plain)
+    expected = r1._tar_bytes(files)
+    assert plain[:len(expected)] == expected
+    assert plain[len(expected):] == b"\0" * (len(plain) - len(expected))
+    assert len(plain) == world.seal.capacity
+    with tarfile.open(fileobj=io.BytesIO(plain), mode="r:") as tar:
+        names = tar.getnames()
+    assert names == ["inner_sha256.txt"] + sorted(n for n in HOLDOUT_NAMES if n != "inner_sha256.txt")
+
+
 # ---------------------------------------------------------------- guard against any research read
 
 def test_the_research_root_guard_recognises_a_research_path():
