@@ -81,7 +81,9 @@ def _scheduler_env(tmp_path: Path) -> dict:
     env = {k: v for k, v in os.environ.items() if not k.startswith("SORA_")}
     env.update({
         "SORA_ENV": "production",
-        "SORA_OFFLINE": "1",
+        # Not offline: SORA_OFFLINE=1 could hide a network side effect at import.
+        # The import check below blocks connection attempts and records them.
+        "SORA_OFFLINE": "0",
         "RUN_SCHEDULER": "false",
         "DATABASE_URL": f"sqlite:///{tmp_path / 'scheduler.db'}",
         "REDIS_URL": "",
@@ -111,15 +113,70 @@ def test_the_enumeration_is_not_empty_and_names_the_moved_modules():
     )
 
 
+#: Runs one import with recorders installed first. Connection attempts are
+#: recorded and then refused (connect raises, connect_ex returns ECONNREFUSED),
+#: so a module that tries to reach the network cannot succeed and cannot hide
+#: the attempt by catching the exception. A scheduler start is recorded and
+#: refused the same way. Job registrations are recorded only. The recorded
+#: lists are printed as the last stdout line, JSON.
+_IMPORT_RECORDER = textwrap.dedent('''
+    import importlib, json, socket, sys
+    from apscheduler.schedulers.base import BaseScheduler
+
+    connects, starts, jobs = [], [], []
+
+    def _refuse(via, address):
+        connects.append({"via": via, "address": repr(address)})
+
+    def _connect(self, address):
+        _refuse("socket.connect", address)
+        raise ConnectionRefusedError("blocked by the import-contract test")
+
+    def _connect_ex(self, address):
+        _refuse("socket.connect_ex", address)
+        return 111  # ECONNREFUSED
+
+    def _create_connection(address, *args, **kwargs):
+        _refuse("socket.create_connection", address)
+        raise ConnectionRefusedError("blocked by the import-contract test")
+
+    socket.socket.connect = _connect
+    socket.socket.connect_ex = _connect_ex
+    socket.create_connection = _create_connection
+
+    _real_start = BaseScheduler.start
+    _real_add_job = BaseScheduler.add_job
+
+    def _start(self, *args, **kwargs):
+        starts.append(type(self).__name__)
+        raise RuntimeError("blocked by the import-contract test: scheduler start")
+
+    def _add_job(self, func, *args, **kwargs):
+        jobs.append(kwargs.get("id") or getattr(func, "__name__", repr(func)))
+        return _real_add_job(self, func, *args, **kwargs)
+
+    BaseScheduler.start = _start
+    BaseScheduler.add_job = _add_job
+
+    importlib.import_module(sys.argv[1])
+    print(json.dumps({"connects": connects, "starts": starts, "jobs": jobs}))
+''')
+
+
 @pytest.mark.parametrize("module", _scheduler_import_targets())
 def test_scheduler_import_closure_member_imports_without_jwt_secret(module, tmp_path):
-    result = _run_python(
-        "import importlib, sys; importlib.import_module(sys.argv[1])",
-        _scheduler_env(tmp_path), module,
-    )
+    result = _run_python(_IMPORT_RECORDER, _scheduler_env(tmp_path), module)
     assert result.returncode == 0, (
         f"`import {module}` fails in the scheduler's environment "
-        f"(SORA_ENV=production, no SORA_JWT_SECRET):\n{result.stderr[-2000:]}"
+        f"(SORA_ENV=production, no SORA_JWT_SECRET, SORA_OFFLINE=0):\n"
+        f"{result.stderr[-2000:]}"
+    )
+    report = json.loads(result.stdout.strip().splitlines()[-1])
+    assert report["connects"] == [], (
+        f"`import {module}` attempted a network connection: {report['connects']}"
+    )
+    assert report["starts"] == [], (
+        f"`import {module}` started a scheduler: {report['starts']}"
     )
 
 
@@ -217,3 +274,66 @@ def test_closed_loop_with_drift_reaches_the_training_call_in_production_mode(tmp
     )
     assert payload["result"].get("drift_detected") is True
     assert payload["result"].get("retrained") is True, payload["result"]
+
+
+def test_retrain_models_reaches_the_training_call_in_production_mode(tmp_path):
+    """The second retrain entry point (`retrain_models`, not the closed loop).
+
+    Same discipline as the closed-loop test: production environment, no JWT
+    secret, the real lazy import of the training function. Stubbed: the Redis
+    lock, the journal rows, the prediction cache, and the training itself.
+    """
+    script = textwrap.dedent('''
+        import json
+        from unittest.mock import patch
+
+        training_calls = []
+        journal = []
+        cache_calls = []
+
+        def fake_train(min_samples=50, trigger_source="manual"):
+            training_calls.append({"min_samples": min_samples,
+                                   "trigger_source": trigger_source})
+            return {"status": "success", "metrics": {"roc_auc": 0.91}}
+
+        def fake_start(**kwargs):
+            journal.append({"event": "start", **kwargs})
+            return 99
+
+        def fake_finish(**kwargs):
+            journal.append({"event": "finish", **kwargs})
+
+        def fake_invalidate(prefix=None):
+            cache_calls.append(prefix)
+            return 0
+
+        class _Lock:
+            def __init__(self, *args, **kwargs):
+                pass
+            def acquire(self):
+                return True
+            def release(self):
+                pass
+
+        import app.scheduler as sched
+        with patch("app.locks.RedisLock", _Lock), \\
+             patch("app.services.retraining._do_retrain", fake_train), \\
+             patch("app.redis_cache.invalidate_prediction_cache", fake_invalidate), \\
+             patch.object(sched, "_start_retrain_log", fake_start), \\
+             patch.object(sched, "_finish_retrain_log", fake_finish):
+            result = sched.retrain_models(trigger_source="test")
+        print(json.dumps({"result": result, "training_calls": training_calls,
+                          "journal": journal, "cache_calls": cache_calls},
+                         default=str))
+    ''')
+    result = _run_python(script, _scheduler_env(tmp_path))
+    assert result.returncode == 0, result.stderr[-2000:]
+
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["training_calls"] == [
+        {"min_samples": 50, "trigger_source": "test"}
+    ], f"the training call did not happen; retrain_models returned {payload['result']}"
+    assert payload["result"].get("status") == "success", payload["result"]
+    finishes = [e for e in payload["journal"] if e["event"] == "finish"]
+    assert finishes and finishes[-1]["status"] == "success", payload["journal"]
+    assert payload["cache_calls"] == [None], "the prediction cache was not invalidated"
