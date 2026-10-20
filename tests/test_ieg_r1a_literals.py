@@ -950,39 +950,45 @@ def test_a_refusal_prints_only_refused(tmp_path, monkeypatch, capsys):
 OWNER_PIN_HEX = "ab" * 32
 
 
-def r1_tree_carrying_the_r1a_output(tree, monkeypatch, r0_overrides=None, r1a_overrides=None):
-    """A real-mode R1 tree that holds the R1a output: the R0 and procedure bytes R1a read, the R1a literals as the
-    R1a result, and an R1a receipt whose fields are the ones R1a wrote. R1 is configured by the test: its pins and
-    its owner key are set from the R1a tree, and its core limit is not changed. load_real then runs every check."""
+def _edited_json(data: bytes, changes: dict) -> bytes:
+    """The same document with some fields changed, serialized as the synthetic writers do."""
+    obj = json.loads(data.decode("utf-8"))
+    obj.update(changes)
+    return json.dumps(obj, sort_keys=True, ensure_ascii=False).encode("utf-8")
+
+
+def r1_tree_carrying_the_r1a_output(tree, monkeypatch, verbatim=None):
+    """An R1 real-mode tree whose R0, procedure, R1a receipt and R1a result are the bytes that the R1a run actually
+    wrote (verbatim). The harness computes the approval, permit and trust hashes from those bytes, so a mistake in
+    the R1a generator reaches R1 unchanged. R1 is configured by the test: its pins come from the R1a tree, its owner
+    key is OWNER_PIN_HEX, and its core-limit call is stubbed (the real call is tested in the R1 file)."""
     out = tree.paths["out"]
-    literals = (out / A.RESULT_FILE).read_bytes()
-    receipt = json.loads((out / A.RECEIPT_FILE).read_text(encoding="utf-8"))
-    r1a = {"r1a_script_sha256": receipt["r1a_script_sha256"], "result_sha256": receipt["result_sha256"],
-           "date_utc": receipt["date_utc"]}
-    r1a.update(r1a_overrides or {})
-    r0 = {"owner_x25519_public_key_hex": OWNER_PIN_HEX}
-    r0.update(r0_overrides or {})
-    fx = H.build_real_fixture(tree.root / "r1", DEMO_LITERAL_PROJECTS, overrides={
-        "procedure": {"allowed_r1a_script_sha256": _own_sha()},
-        "r0": r0,
-        "r1a": r1a,
-    })
-    fx.paths["r1a_result"].write_bytes(literals)
+    docs = {
+        "r0": tree.paths["r0"].read_bytes(),
+        "procedure": tree.paths["procedure"].read_bytes(),
+        "r1a": (out / A.RECEIPT_FILE).read_bytes(),
+        "r1a_result": (out / A.RESULT_FILE).read_bytes(),
+    }
+    docs.update(verbatim or {})
+    fx = H.build_real_fixture(tree.root / "r1", DEMO_LITERAL_PROJECTS, verbatim=docs)
     fx.install(monkeypatch)
     monkeypatch.setattr(r1, "REAL_OWNER_PUBLIC_KEY_HEX", OWNER_PIN_HEX)
     monkeypatch.setattr(r1, "disable_core_dumps", lambda: True)
     return fx
 
 
-def test_r1_load_real_accepts_the_r0_procedure_and_receipt_that_r1a_reads(tmp_path, monkeypatch):
+def test_r1_load_real_accepts_the_r1a_output_byte_for_byte(tmp_path, monkeypatch):
     tree = build_tree(tmp_path / "tree", DEMO_LITERAL_PROJECTS)
     tree.install(monkeypatch)
     assert _run(tree) == 0
     fx = r1_tree_carrying_the_r1a_output(tree, monkeypatch)
+    out = tree.paths["out"]
     assert fx.paths["r0"].read_bytes() == tree.paths["r0"].read_bytes()
     assert fx.paths["procedure"].read_bytes() == tree.paths["procedure"].read_bytes()
+    assert fx.paths["r1a"].read_bytes() == (out / A.RECEIPT_FILE).read_bytes()
     inputs = r1.load_real(fx.permit, trust_path=fx.trust)
-    assert inputs.input_sha256["chain/r1a_result"] == H.sha((tree.paths["out"] / A.RESULT_FILE).read_bytes())
+    assert inputs.input_sha256["chain/r1a_receipt"] == H.sha((out / A.RECEIPT_FILE).read_bytes())
+    assert inputs.input_sha256["chain/r1a_result"] == H.sha((out / A.RESULT_FILE).read_bytes())
 
 
 @pytest.mark.parametrize("field, value, label", [
@@ -999,34 +1005,33 @@ def test_r1_refuses_an_r0_whose_pin_or_link_is_well_formed_and_wrong(field, valu
     tree = build_tree(tmp_path / "tree", DEMO_LITERAL_PROJECTS)
     tree.install(monkeypatch)
     assert _run(tree) == 0
-    fx = r1_tree_carrying_the_r1a_output(tree, monkeypatch, r0_overrides={field: value})
+    r0 = _edited_json(tree.paths["r0"].read_bytes(), {field: value})
+    fx = r1_tree_carrying_the_r1a_output(tree, monkeypatch, verbatim={"r0": r0})
     with pytest.raises(r1.PinRefused) as info:
         r1.load_real(fx.permit, trust_path=fx.trust)
     assert re.search(label, getattr(info.value, "check", "")), getattr(info.value, "check", "")
 
 
 @pytest.mark.parametrize("field, value, label", [
+    ("r0_receipt_sha256", "0" * 64, "R1a link to R0"),
+    ("r1a_procedure_sha256", "0" * 64, "R1a link to the procedure"),
+    ("snapshot_manifest_sha256", "0" * 64, "R1a snapshot manifest pin"),
+    ("snapshot_page_digest", "0" * 64, "R1a snapshot page digest pin"),
     ("r1a_script_sha256", "0" * 64, "R1a script against the procedure"),
     ("result_sha256", "0" * 64, "R1a result bytes"),
+    ("result_kind", "literals_with_counts", "R1a result kind against the procedure"),
 ])
-def test_r1_refuses_an_r1a_receipt_link_that_is_wrong(field, value, label, tmp_path, monkeypatch):
+def test_r1_refuses_an_r1a_receipt_field_the_r1a_run_would_write_wrong(field, value, label, tmp_path, monkeypatch):
+    """The receipt is the R1a run's own bytes with one field changed; the permit, approval and trust are recomputed
+    from them by the harness, so only the field itself is the defect."""
     tree = build_tree(tmp_path / "tree", DEMO_LITERAL_PROJECTS)
     tree.install(monkeypatch)
     assert _run(tree) == 0
-    fx = r1_tree_carrying_the_r1a_output(tree, monkeypatch, r1a_overrides={field: value})
+    receipt = _edited_json((tree.paths["out"] / A.RECEIPT_FILE).read_bytes(), {field: value})
+    fx = r1_tree_carrying_the_r1a_output(tree, monkeypatch, verbatim={"r1a": receipt})
     with pytest.raises(r1.PinRefused) as info:
         r1.load_real(fx.permit, trust_path=fx.trust)
     assert re.search(label, getattr(info.value, "check", "")), getattr(info.value, "check", "")
-
-
-def test_the_r0_document_carries_exactly_the_r1_fields(tmp_path):
-    tree = build_tree(tmp_path / "tree")
-    assert set(json.loads(tree.paths["r0"].read_bytes())) == set(r1.R0_FIELDS)
-    assert set(json.loads(tree.paths["procedure"].read_bytes())) == set(r1.PROCEDURE_FIELDS)
-
-
-def test_the_fixed_result_kind_is_one_r1_accepts():
-    assert A.RESULT_KIND in r1.R1A_RESULT_KINDS
 
 
 def _failing_rename(monkeypatch):
@@ -1036,12 +1041,15 @@ def _failing_rename(monkeypatch):
 
 
 @pytest.mark.parametrize("mode", ["raises", "leaves"])
-def test_a_failed_cleanup_is_cleanup_failed_and_the_leftover_is_reported(mode, tmp_path, monkeypatch, capsys):
-    """Review P2: the literals are written, the rename fails, and the removal of <out>.partial also fails. The run
-    must say so (exit 5, cleanup_failed) and leave the leftover where the owner can see it: no silent success."""
+def test_a_failed_cleanup_is_cleanup_failed_and_the_leftover_is_reported(mode, tmp_path, monkeypatch, capsys,
+                                                                       file_opens):
+    """Review P2 and spec 9.5: the literals are written, the rename fails, and the removal of <out>.partial also
+    fails. The run exits 5 with cleanup_failed, the leftover stays inside <out>.partial and nothing else is written,
+    and a second run refuses before any data read (exit 3)."""
     tree = build_tree(tmp_path / "tree", DEMO_LITERAL_PROJECTS)
     tree.install(monkeypatch)
     _failing_rename(monkeypatch)
+    before = _tree_files(tree.root)
 
     def failing_rmtree(path, *args, **kwargs):
         if mode == "raises":
@@ -1055,6 +1063,49 @@ def test_a_failed_cleanup_is_cleanup_failed_and_the_leftover_is_reported(mode, t
     assert partial.exists(), "the leftover must stay on disk, not be reported as clean"
     assert (partial / A.RESULT_FILE).read_bytes() == EXPECTED_LITERALS
     assert not tree.paths["out"].exists()
+    created = _tree_files(tree.root) - before
+    assert created and all(partial in f.parents for f in created), "a file was written outside <out>.partial"
+    file_opens.clear()
+    assert A.main(tree.argv()) == 3
+    assert file_opens == [], "the next run must refuse before reading any data"
+
+
+def test_every_code_the_script_prints_is_an_allowed_code(tmp_path, monkeypatch, capsys):
+    """Spec 6 as amended by 9.5: stdout and stderr carry only the ALLOWED_CODES, one per run."""
+    assert A.ALLOWED_CODES == ("ok", "refused", "integrity_error", "result_limit_exceeded", "cleanup_failed")
+    printed = []
+
+    assert A.main([]) == 3
+    printed.append(capsys.readouterr().err)
+
+    bad = build_tree(tmp_path / "bad", world_hook=_manifest_replaced(b'{"datasets": []}'))
+    bad.install(monkeypatch)
+    assert _run(bad) == 5
+    printed.append(capsys.readouterr().err)
+
+    good = build_tree(tmp_path / "good", DEMO_LITERAL_PROJECTS)
+    good.install(monkeypatch)
+    monkeypatch.setattr(A, "RESULT_LIMIT", 1)
+    assert _run(good) == 5
+    printed.append(capsys.readouterr().err)
+    monkeypatch.setattr(A, "RESULT_LIMIT", 1048576)
+
+    ok = build_tree(tmp_path / "ok", DEMO_LITERAL_PROJECTS)
+    ok.install(monkeypatch)
+    assert _run(ok) == 0
+    printed.append(capsys.readouterr().out)
+
+    cleanup = build_tree(tmp_path / "cleanup", DEMO_LITERAL_PROJECTS)
+    cleanup.install(monkeypatch)
+    _failing_rename(monkeypatch)
+    monkeypatch.setattr(A.shutil, "rmtree", lambda path, *a, **k: None)
+    assert _run(cleanup) == 5
+    printed.append(capsys.readouterr().err)
+
+    codes = [line for text in printed for line in text.splitlines()]
+    assert set(codes) == {"refused", "integrity_error", "result_limit_exceeded", "ok", "cleanup_failed"}, codes
+    for code in codes:
+        assert code in A.ALLOWED_CODES, code
 
 
 def test_the_cleanup_does_not_suppress_its_own_errors(tmp_path, monkeypatch):

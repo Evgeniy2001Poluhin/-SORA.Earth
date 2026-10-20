@@ -304,7 +304,7 @@ def replace_page(world, name: str, data: bytes):
     return world
 
 
-def build_real_fixture(root, projects=None, overrides=None, world_hook=None) -> RealFixture:
+def build_real_fixture(root, projects=None, overrides=None, world_hook=None, verbatim=None) -> RealFixture:
     """Write a complete real-mode tree under root with every hash correct.
 
     overrides maps a document name (r0, procedure, r1a, approval, permit, trust) to field changes (REMOVE drops
@@ -369,6 +369,19 @@ def build_real_fixture(root, projects=None, overrides=None, world_hook=None) -> 
         "owner_decision": "разрешаю R1a",
         "date_utc": SYNTH_ISO,
     }, ov.get("r1a")))
+    # verbatim (optional): bytes of a document written by another producer, used as they are. The hashes of the
+    # approval, permit and trust are then computed from them, so a generator mistake in those bytes is what R1 sees.
+    for key, data in (verbatim or {}).items():
+        if key == "procedure":
+            proc_bytes = data
+        elif key == "r0":
+            r0_bytes = data
+        elif key == "r1a":
+            r1a_bytes = data
+        elif key == "r1a_result":
+            result_bytes = data
+        else:
+            raise AssertionError(key)
     appr_bytes = _json_bytes(_patched({
         "r0_receipt_sha256": sha(r0_bytes),
         "r1a_receipt_sha256": sha(r1a_bytes),
