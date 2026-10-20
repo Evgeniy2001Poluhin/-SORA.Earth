@@ -1610,6 +1610,46 @@ def test_blocked_diagnostics_hold_the_unknown_literals_and_counts_across_both_wi
     assert b"Excellent" not in res.files["blocked_receipt.json"]
 
 
+# ---------------------------------------------------------------- spec 9.2: bool and float are not counts
+
+def _one_record_world():
+    """One project, one record, one page: api_total, count and records are all 1, so True and 1.0 would equal them."""
+    return H.make_world([_proj("P000001", "ARG", _rec(2012, "Satisfactory"))])
+
+
+def _manifest_edit(world, fn):
+    """Change the snapshot manifest and re-pin it. The page digest depends only on page hashes, so it is unchanged."""
+    manifest = json.loads(world.blobs[r1.K_SNAP_MANIFEST].decode("utf-8"))
+    fn(manifest)
+    data = json.dumps(manifest, sort_keys=True, indent=1).encode("utf-8")
+    world.blobs[r1.K_SNAP_MANIFEST] = data
+    world.pins = replace(world.pins, snapshot_manifest_sha=H.sha(data))
+    return world
+
+
+@pytest.mark.parametrize("value", [True, False, 1.0, 1.5], ids=["true", "false", "float-1.0", "float-1.5"])
+@pytest.mark.parametrize("field", ["count", "records", "api_total"])
+def test_a_bool_or_float_snapshot_count_is_refused(field, value):
+    world = _one_record_world()
+    name = "ieg/page-00000.json"
+    if field == "count":
+        page = json.loads(world.blobs[f"snapshot/{name}"].decode("utf-8"))
+        page["count"] = value
+        H.replace_page(world, name, json.dumps(page, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+    elif field == "records":
+        _manifest_edit(world, lambda m: m["datasets"]["ieg"]["pages"][0].__setitem__("records", value))
+    else:
+        _manifest_edit(world, lambda m: m["datasets"]["ieg"].__setitem__("api_total", value))
+    with pytest.raises(r1.IntegrityError):
+        r1.validate_bytes(world.blobs, world.pins)
+
+
+def test_the_integer_one_is_accepted_in_the_same_positions():
+    world = _one_record_world()
+    _manifest_edit(world, lambda m: m["datasets"]["ieg"].__setitem__("api_total", 1))
+    r1.validate_bytes(world.blobs, world.pins)
+
+
 # ---------------------------------------------------------------- guard against any research read
 
 def test_the_research_root_guard_recognises_a_research_path():
