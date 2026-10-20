@@ -35,10 +35,17 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
+
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 RULE_VERSION = "1"
 STATEMENT = "R1 target-only: ieg_outcome_satisfactory per structural candidate; not a model-quality result"
@@ -141,6 +148,9 @@ REAL_SNAPSHOT_DIR = f"{ROOT}/worldbank-snapshots/2026-10-15-sorted"
 REAL_STRUCTURAL_DIR = None
 REAL_VOCABULARY_PATH = None
 REAL_D1_PATH = None
+# The owner's X25519 public key lives in R0 (13.5) and is pinned here (13.8). None until it is
+# written into the signed R0; while it is None, a real run refuses before any page is read.
+REAL_OWNER_PUBLIC_KEY_HEX = None
 
 
 @dataclass(frozen=True)
@@ -186,6 +196,7 @@ class Inputs:
     vocabulary: Vocabulary
     d1: D1Policy
     run_meta: Mapping = field(default_factory=dict)
+    seal: "SealParams | None" = None
 
 
 @dataclass(frozen=True)
@@ -550,6 +561,125 @@ def validate_bytes(blobs: Mapping[str, bytes], pins: Pins) -> Inputs:
     )
 
 
+# ---------------------------------------------------------------- sealing (13.2, 13.9)
+
+SEAL_MAGIC = b"SORA-R1-SEAL"
+SEAL_VERSION = 1
+PURPOSE_HOLDOUT = 1
+PURPOSE_BLOCKED = 2
+SEAL_HEADER_BYTES = len(SEAL_MAGIC) + 2 + 32 + 12
+SEAL_INFO = b"SORA-R1-SEAL v1"
+INNER_NAME = "inner_sha256.txt"
+SEALED_HOLDOUT = "sealed/holdout.r1.enc"
+SEALED_BLOCKED = "sealed/blocked_diagnostics.enc"
+FIELD_LIMIT = "field_limit_exceeded"
+TAR_RECORDSIZE = 10240
+
+
+@dataclass(frozen=True)
+class SealParams:
+    """Everything the seal needs: the owner's public key (from R0), the permit bytes (salt) and the
+    plaintext capacity (permit.sealed_plaintext_bytes). The private key is never here."""
+    recipient_public: bytes
+    permit_bytes: bytes
+    capacity: int
+
+
+def inner_sha256(files: Mapping[str, bytes]) -> str:
+    """13.10.4: sha256 over name || 0x00 || 8-byte big-endian length || data, names ascending, inner file excluded."""
+    h = hashlib.sha256()
+    for name in sorted(n for n in files if n != INNER_NAME):
+        data = files[name]
+        h.update(name.encode("utf-8") + b"\x00" + len(data).to_bytes(8, "big") + data)
+    return h.hexdigest()
+
+
+def _tar_bytes(files: Mapping[str, bytes]) -> bytes:
+    """Deterministic USTAR archive: inner_sha256.txt first, the rest by name (14.13)."""
+    order = [INNER_NAME] + sorted(n for n in files if n != INNER_NAME)
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tar:
+        for name in order:
+            if not (name.isascii() and 0 < len(name) <= 100 and "/" not in name):
+                raise IntegrityError(FIELD_LIMIT)
+            data = files[name]
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.mtime = 0
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            info.mode = 0o644
+            info.type = tarfile.REGTYPE
+            tar.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+def _seal_key(shared: bytes, purpose: int, recipient_public: bytes, permit_bytes: bytes) -> bytes:
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=hashlib.sha256(permit_bytes).digest(),
+        info=SEAL_INFO + bytes([purpose]) + recipient_public,
+    ).derive(shared)
+
+
+def _require_seal(inputs: Inputs) -> SealParams:
+    if inputs.seal is None:
+        raise PinRefused("no sealing parameters: the recipient key and the permit are not set")
+    return inputs.seal
+
+
+def seal_package(files: Mapping[str, bytes], purpose: int, seal: SealParams) -> bytes:
+    """Pack the files into a USTAR archive padded to seal.capacity, then encrypt it (X25519 + HKDF + AES-GCM).
+
+    The plaintext exists only in memory. The header is the AAD; ephemeral key and nonce are fresh."""
+    files = dict(files)
+    files[INNER_NAME] = (inner_sha256(files) + "\n").encode("ascii")
+    tar = _tar_bytes(files)
+    if len(tar) > seal.capacity:
+        raise IntegrityError(FIELD_LIMIT)
+    plain = tar + b"\0" * (seal.capacity - len(tar))
+    eph = X25519PrivateKey.generate()
+    eph_pub = eph.public_key().public_bytes(encoding=serialization.Encoding.Raw,
+                                            format=serialization.PublicFormat.Raw)
+    nonce = os.urandom(12)
+    header = SEAL_MAGIC + bytes([SEAL_VERSION, purpose]) + eph_pub + nonce
+    key = _seal_key(eph.exchange(X25519PublicKey.from_public_bytes(seal.recipient_public)),
+                    purpose, seal.recipient_public, seal.permit_bytes)
+    return header + AESGCM(key).encrypt(nonce, plain, header)
+
+
+def open_seal(blob: bytes, purpose: int, private_key: X25519PrivateKey, permit_bytes: bytes) -> bytes:
+    """Owner-side decryption: returns the padded plaintext. Any header, tag or key mismatch refuses."""
+    if len(blob) < SEAL_HEADER_BYTES + 16 or blob[:len(SEAL_MAGIC)] != SEAL_MAGIC:
+        raise IntegrityError("seal does not open")
+    version, got_purpose = blob[len(SEAL_MAGIC)], blob[len(SEAL_MAGIC) + 1]
+    if version != SEAL_VERSION or got_purpose != purpose:
+        raise IntegrityError("seal does not open")
+    header = blob[:SEAL_HEADER_BYTES]
+    eph_pub = blob[SEAL_HEADER_BYTES - 44:SEAL_HEADER_BYTES - 12]
+    nonce = blob[SEAL_HEADER_BYTES - 12:SEAL_HEADER_BYTES]
+    recipient_public = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw)
+    try:
+        shared = private_key.exchange(X25519PublicKey.from_public_bytes(eph_pub))
+        key = _seal_key(shared, purpose, recipient_public, permit_bytes)
+        return AESGCM(key).decrypt(nonce, blob[SEAL_HEADER_BYTES:], header)
+    except (ValueError, InvalidTag):
+        raise IntegrityError("seal does not open") from None
+
+
+def read_package(plain: bytes) -> dict:
+    """Parse a decrypted package and verify its inner hash (13.10.4)."""
+    files = {}
+    with tarfile.open(fileobj=io.BytesIO(plain), mode="r:") as tar:
+        for member in tar.getmembers():
+            files[member.name] = tar.extractfile(member).read()
+    if files.get(INNER_NAME) != (inner_sha256(files) + "\n").encode("ascii"):
+        raise IntegrityError("inner hash does not match the package")
+    return files
+
+
 # ---------------------------------------------------------------- build
 
 def _cohort_stats(countries: list) -> dict:
@@ -630,10 +760,12 @@ def build(inputs: Inputs) -> Result:
     """
     vocab = inputs.vocabulary
     unknown_count = 0
+    unknown_seen: Counter = Counter()
     for cand in inputs.candidates:
         for rec in cand.records:
             if classify(rec.canon, vocab)[0] == "unknown":
                 unknown_count += 1
+                unknown_seen[(_type_label(rec.canon), _canonical_sha(rec.canon))] += 1
 
     decisions = {}
     for cand in inputs.candidates:
@@ -647,6 +779,20 @@ def build(inputs: Inputs) -> Result:
 
     run_meta = dict(inputs.run_meta)
     if unknown_count > 0:
+        # 13.4: counts, types, literal hashes and frequencies go only into the sealed diagnostics,
+        # summed over both windows (13.12.3).
+        rule_counts = Counter(decisions[c.project_id][0] for c in inputs.candidates)
+        detail = {
+            "statement": STATEMENT,
+            "rule_version": RULE_VERSION,
+            "projects_by_rule": {code: rule_counts.get(code, 0) for code in ("T1", "T2", "T3", "T4", "kept")},
+            "unknown_count": unknown_count,
+            "unknown_values": [
+                {"type": label, "sha256": digest, "count": n}
+                for (label, digest), n in sorted(unknown_seen.items())
+            ],
+        }
+        blob = seal_package({"blocked_detail.json": _json_bytes(detail)}, PURPOSE_BLOCKED, _require_seal(inputs))
         receipt = {
             "status": "blocked",
             "reason": "unknown_outcome_values",
@@ -654,10 +800,11 @@ def build(inputs: Inputs) -> Result:
             "rule_version": RULE_VERSION,
             "pins": _pins_dict(inputs.pins),
             "inputs_sha256": dict(inputs.input_sha256),
+            "sealed": {SEALED_BLOCKED: {"bytes": len(blob), "sha256": sha256_bytes(blob)}},
             "run": run_meta,
         }
-        return Result("blocked", {"blocked_receipt.json": _json_bytes(receipt)}, {},
-                      inputs.input_sha256, run_meta)
+        return Result("blocked", {"blocked_receipt.json": _json_bytes(receipt)},
+                      {SEALED_BLOCKED: blob}, inputs.input_sha256, run_meta)
 
     acc = {w: _window_accumulator() for w in WINDOWS}
     for cand in sorted(inputs.candidates, key=lambda c: c.project_id):
@@ -753,7 +900,8 @@ def build(inputs: Inputs) -> Result:
         "cohort": dict(stats["holdout"], passes=hold_pass,
                        failed_thresholds=_failed_thresholds(stats["holdout"], inputs.d1)),
     })
-    return Result("ok", files, sealed, inputs.input_sha256, run_meta)
+    blob = seal_package(sealed, PURPOSE_HOLDOUT, _require_seal(inputs))
+    return Result("ok", files, {SEALED_HOLDOUT: blob}, inputs.input_sha256, run_meta)
 
 
 def _typed_json_list(distinct) -> str:
@@ -762,9 +910,25 @@ def _typed_json_list(distinct) -> str:
 
 # ---------------------------------------------------------------- output
 
+CORE_DUMPS_DISABLED: bool | None = None
+
+
+def disable_core_dumps() -> bool:
+    """13.2: real runs set the core size limit to zero; the outcome is recorded in the run metadata."""
+    global CORE_DUMPS_DISABLED
+    try:
+        import resource
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        CORE_DUMPS_DISABLED = True
+    except (ImportError, ValueError, OSError):
+        CORE_DUMPS_DISABLED = False
+    return CORE_DUMPS_DISABLED
+
+
 def make_run_meta(mode: str, permit_sha256: str | None = None, git: bool = True) -> dict:
     meta = {
         "mode": mode,
+        "core_dumps_disabled": CORE_DUMPS_DISABLED,
         "builder_path": "scripts/ieg_target_r1.py",
         "builder_sha256": sha256_bytes(BUILDER_PATH.read_bytes()),
         "permit_sha256": permit_sha256,
@@ -797,7 +961,9 @@ def check_output_free(out) -> None:
 
 
 def write_outputs(result: Result, out) -> Path:
-    """Write into <out>.partial, then rename. Blocked results go to <out>.blocked, holding only the receipt."""
+    """Write into <out>.partial, then rename. Blocked results go to <out>.blocked.
+
+    Plaintext is never passed here: the sealed entries are ciphertext (13.2)."""
     final_plain, partial, blocked = output_paths(out)
     check_output_free(out)
     if result.status == "ok":
@@ -807,20 +973,24 @@ def write_outputs(result: Result, out) -> Path:
     else:
         raise IntegrityError(f"unknown result status {result.status!r}")
     files = dict(result.files)
+    sealed = dict(result.sealed)
     if result.status == "ok":
+        everything = {**files, **sealed}
         manifest = {
             "statement": STATEMENT,
             "rule_version": RULE_VERSION,
             "run": dict(result.run_meta),
             "inputs": dict(result.input_sha256),
             "outputs": {name: {"bytes": len(data), "sha256": sha256_bytes(data)}
-                        for name, data in sorted(files.items())},
+                        for name, data in sorted(everything.items())},
         }
         files["manifest.json"] = _json_bytes(manifest)
     os.makedirs(partial)
     try:
-        for name, data in sorted(files.items()):
-            (partial / name).write_bytes(data)
+        for name, data in sorted({**files, **sealed}.items()):
+            target = partial / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
         os.rename(partial, final)
     except BaseException:
         shutil.rmtree(partial, ignore_errors=True)
@@ -910,6 +1080,10 @@ def load_real(permit_path, trust_path=TRUST_PATH) -> Inputs:
         raise PermitRefused("permit structural_receipt_manifest_sha256 does not match the pinned receipt")
     if REAL_STRUCTURAL_DIR is None or REAL_VOCABULARY_PATH is None or REAL_D1_PATH is None:
         raise PermitRefused("a real input path is not configured")
+    if REAL_OWNER_PUBLIC_KEY_HEX is None:
+        raise PermitRefused("owner public key is not configured")
+    # The signed R0 chain (13.5) and the permit's sealing parameters are not built yet.
+    raise PermitRefused("the signed R0 chain is not implemented yet")
     inputs = validate_bytes(_read_real_blobs(), REAL_PINS)
     return dataclasses.replace(inputs, run_meta=make_run_meta("real", permit_sha256=permit_sha))
 

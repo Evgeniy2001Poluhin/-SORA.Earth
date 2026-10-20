@@ -25,6 +25,9 @@ from dataclasses import dataclass, field
 from dataclasses import replace
 from pathlib import Path
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
 _BUILDER = Path(__file__).resolve().parents[1] / "scripts" / "ieg_target_r1.py"
 
 
@@ -63,10 +66,20 @@ DEFAULT_VOCAB = {
     "not_rated": ["Not Rated"],
 }
 DEFAULT_D1 = {"cohort": "development", "min_G": 2, "max_largest_share": 0.6, "min_G_eff": 2.0}
+SYNTH_PERMIT = b"synthetic permit: not a signed R1 permit"
+SYNTH_CAPACITY = 4 * 1024 * 1024
 
 
 def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def new_seal():
+    """A throwaway X25519 key pair in memory; the private key stays in the test process."""
+    private = X25519PrivateKey.generate()
+    public = private.public_key().public_bytes(encoding=serialization.Encoding.Raw,
+                                               format=serialization.PublicFormat.Raw)
+    return r1.SealParams(recipient_public=public, permit_bytes=SYNTH_PERMIT, capacity=SYNTH_CAPACITY), private
 
 
 @dataclass
@@ -76,6 +89,8 @@ class World:
     placed: list = field(default_factory=list)  # (pid, fy, page_file, index)
     rows: list = field(default_factory=list)
     split: dict = field(default_factory=dict)
+    seal: object = None
+    private_key: object = None
 
 
 def make_world(projects, *, page_size=2, shuffle_seed=None, vocab=None, d1=None, receipt_hook=None):
@@ -182,7 +197,8 @@ def make_world(projects, *, page_size=2, shuffle_seed=None, vocab=None, d1=None,
         vocabulary_sha=sha(vocab_bytes),
         d1_policy_sha=sha(d1_bytes),
     )
-    return World(blobs=blobs, pins=pins, placed=placed, rows=rows, split=split)
+    seal, private = new_seal()
+    return World(blobs=blobs, pins=pins, placed=placed, rows=rows, split=split, seal=seal, private_key=private)
 
 
 def run_pipeline(world_or_blobs, pins=None):
@@ -190,7 +206,8 @@ def run_pipeline(world_or_blobs, pins=None):
     blobs = world_or_blobs.blobs if isinstance(world_or_blobs, World) else world_or_blobs
     pins = world_or_blobs.pins if isinstance(world_or_blobs, World) else pins
     inputs = r1.validate_bytes(blobs, pins)
-    inputs = replace(inputs, run_meta=r1.make_run_meta("synthetic", git=False))
+    seal = world_or_blobs.seal if isinstance(world_or_blobs, World) else None
+    inputs = replace(inputs, run_meta=r1.make_run_meta("synthetic", git=False), seal=seal)
     return r1.build(inputs)
 
 
@@ -220,7 +237,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     world = demo_world(args.scenario)
     inputs = r1.validate_bytes(world.blobs, world.pins)
-    inputs = replace(inputs, run_meta=r1.make_run_meta("synthetic", git=False))
+    inputs = replace(inputs, run_meta=r1.make_run_meta("synthetic", git=False), seal=world.seal)
     result = r1.build(inputs)
     final = r1.write_outputs(result, Path(args.out))
     print(final)

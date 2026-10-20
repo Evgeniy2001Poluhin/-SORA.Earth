@@ -81,6 +81,28 @@ def _json(result, name):
     return json.loads(result.files[name].decode("utf-8"))
 
 
+SYNTH_PERMIT = H.SYNTH_PERMIT
+HOLDOUT_NAMES = {
+    "inner_sha256.txt", "target_rows_holdout.csv", "target_exclusions_holdout.csv",
+    "target_audit_holdout.csv", "final_ids_holdout.txt", "country_weights_holdout.json",
+    "d1_holdout_full.json", "qa_holdout.json",
+}
+
+
+def _open_holdout(res, world):
+    return r1.open_seal(res.sealed[r1.SEALED_HOLDOUT], r1.PURPOSE_HOLDOUT, world.private_key, SYNTH_PERMIT)
+
+
+def _diag(res, world):
+    """The decrypted blocked diagnostics, as a dict. Owner-side only; the test holds the private key."""
+    plain = r1.open_seal(res.sealed[r1.SEALED_BLOCKED], r1.PURPOSE_BLOCKED, world.private_key, SYNTH_PERMIT)
+    return json.loads(r1.read_package(plain)["blocked_detail.json"].decode("utf-8"))
+
+
+def _write_tree(final):
+    return {p.relative_to(final).as_posix(): p.read_bytes() for p in final.rglob("*") if p.is_file()}
+
+
 def _write(out, result):
     return r1.write_outputs(result, out)
 
@@ -183,12 +205,18 @@ def test_unknown_literal_blocks_and_stays_out_of_the_open_receipt(tmp_path):
     assert receipt["status"] == "blocked" and receipt["reason"] == "unknown_outcome_values"
     assert "unknown_count" not in receipt and "unknown_values" not in receipt
     assert b"Excellent" not in res.files["blocked_receipt.json"]
+    diag = _diag(res, world)
+    literal_sha = hashlib.sha256(b'["string","Excellent"]').hexdigest()
+    assert diag["unknown_count"] == 1
+    assert diag["unknown_values"] == [{"type": "string", "sha256": literal_sha, "count": 1}]
 
 
 def test_literal_case_is_not_normalised():
-    _, res = _run([_proj("P100001", "ARG", _rec(2012, "satisfactory"))])
+    world, res = _run([_proj("P100001", "ARG", _rec(2012, "satisfactory"))])
     assert res.status == "blocked"
     assert b'"satisfactory"' not in res.files["blocked_receipt.json"]
+    literal_sha = hashlib.sha256(b'["string","satisfactory"]').hexdigest()
+    assert _diag(res, world)["unknown_values"][0]["sha256"] == literal_sha
 
 
 def test_whitespace_is_collapsed_before_mapping():
@@ -242,8 +270,9 @@ def test_string_NULL_and_MISSING_are_not_the_absent_kinds():
     _, res_null = _run([_proj("P100001", "ARG", _rec(2012, None))])
     assert res_null.status == "ok"
     assert [r["rule"] for r in _csv(res_null, "target_exclusions.csv")] == ["T1"]
-    _, res_str = _run([_proj("P100001", "ARG", _rec(2012, "NULL"))])
+    world_str, res_str = _run([_proj("P100001", "ARG", _rec(2012, "NULL"))])
     assert res_str.status == "blocked"
+    assert _diag(res_str, world_str)["unknown_values"][0]["type"] == "string"
     _, res_miss = _run([_proj("P100001", "ARG", _rec(2012, "MISSING"))])
     assert res_miss.status == "blocked"
 
@@ -256,18 +285,26 @@ def test_each_json_type_is_nonstring_and_blocks():
         _proj("P100004", "ARG", _rec(2012, [1])),
         _proj("P100005", "ARG", _rec(2012, {"a": 1})),
     ]
-    _, res = _run(projects)
+    world, res = _run(projects)
     assert res.status == "blocked"
+    diag = _diag(res, world)
+    assert diag["unknown_count"] == 5
+    assert {v["type"] for v in diag["unknown_values"]} == {
+        "nonstring:bool", "nonstring:int", "nonstring:float", "nonstring:list", "nonstring:object"}
 
 
 def test_true_and_one_are_different_values():
-    _, res = _run([_proj("P100001", "ARG", _rec(2012, True)), _proj("P100002", "ARG", _rec(2012, 1))])
+    world, res = _run([_proj("P100001", "ARG", _rec(2012, True)), _proj("P100002", "ARG", _rec(2012, 1))])
     assert res.status == "blocked"
+    assert _diag(res, world)["unknown_count"] == 2
 
 
 def test_unknown_blocks_even_when_the_project_is_T4():
-    _, res = _run([_proj("P100001", "ARG", _rec(2018, "Foo"), _rec(2018, "Satisfactory"))])
+    world, res = _run([_proj("P100001", "ARG", _rec(2018, "Foo"), _rec(2018, "Satisfactory"))])
     assert res.status == "blocked"
+    diag = _diag(res, world)
+    assert diag["projects_by_rule"]["T4"] == 1
+    assert diag["unknown_count"] == 1
 
 
 def test_records_below_the_maximum_fy_are_superseded_and_ignored():
@@ -358,12 +395,13 @@ def test_blocked_folder_holds_only_the_receipt_and_no_project_id(tmp_path):
     assert res.status == "blocked"
     final = _write(tmp_path / "out", res)
     assert final == tmp_path / "out.blocked"
-    assert sorted(p.name for p in final.iterdir()) == ["blocked_receipt.json"]
+    tree = _write_tree(final)
+    assert sorted(tree) == ["blocked_receipt.json", r1.SEALED_BLOCKED]
     assert not (tmp_path / "out").exists() and not (tmp_path / "out.partial").exists()
-    blob = (final / "blocked_receipt.json").read_bytes()
-    for proj in projects:
-        assert proj["pid"].encode("ascii") not in blob
-    assert b"Excellent" not in blob
+    for name, blob in tree.items():
+        for proj in projects:
+            assert proj["pid"].encode("ascii") not in blob, name
+        assert b"Excellent" not in blob, name
 
 
 # ---------------------------------------------------------------- section 10.5: receipt consistency
@@ -687,9 +725,9 @@ def test_forbidden_keys_never_reach_parsed_objects_or_outputs(tmp_path):
         for marker in MARKERS:
             assert marker.encode("ascii") not in data, (name, marker)
     final = _write(tmp_path / "out", res)
-    for path in final.iterdir():
+    for name, data in _write_tree(final).items():
         for marker in MARKERS:
-            assert marker.encode("ascii") not in path.read_bytes(), (path.name, marker)
+            assert marker.encode("ascii") not in data, (name, marker)
 
 
 def test_projection_hook_drops_non_whitelisted_keys_during_parsing():
@@ -772,6 +810,8 @@ def test_harness_cli_runs_twice_with_identical_analytic_outputs(tmp_path):
     man_b = json.loads((tmp_path / "b" / "manifest.json").read_text(encoding="utf-8"))
     man_a["run"].pop("utc_time")
     man_b["run"].pop("utc_time")
+    # The ciphertext (fresh randomness, 13.2) is the only output that may differ.
+    assert man_a["outputs"].pop(r1.SEALED_HOLDOUT)["sha256"] != man_b["outputs"].pop(r1.SEALED_HOLDOUT)["sha256"]
     assert man_a == man_b
 
 
@@ -779,8 +819,146 @@ def test_harness_blocked_scenario_exits_4_and_writes_only_the_receipt(tmp_path):
     proc = subprocess.run([sys.executable, str(_HARNESS), "--out", str(tmp_path / "x"), "--scenario", "blocked"],
                           capture_output=True, text=True)
     assert proc.returncode == 4, proc.stderr
-    assert sorted(p.name for p in (tmp_path / "x.blocked").iterdir()) == ["blocked_receipt.json"]
+    assert sorted(_write_tree(tmp_path / "x.blocked")) == ["blocked_receipt.json", r1.SEALED_BLOCKED]
     assert not (tmp_path / "x").exists()
+
+
+
+# ---------------------------------------------------------------- section 13.2 and 13.9: sealed packages
+
+def _seal_with(world, **changes):
+    return replace(world.seal, **changes)
+
+
+def _run_with_seal(world, seal):
+    inputs = r1.validate_bytes(world.blobs, world.pins)
+    inputs = replace(inputs, run_meta=r1.make_run_meta("synthetic", git=False), seal=seal)
+    return r1.build(inputs)
+
+
+def test_holdout_package_holds_the_eight_holdout_files_and_nothing_open():
+    world, res = _run(ALL_PROJECTS)
+    assert res.status == "ok"
+    assert set(res.sealed) == {r1.SEALED_HOLDOUT}
+    files = r1.read_package(_open_holdout(res, world))
+    assert set(files) == HOLDOUT_NAMES
+    assert b"P000005" in files["target_rows_holdout.csv"]
+    assert b"P000005" not in b"".join(res.files.values())
+
+
+def test_plaintext_is_padded_to_the_permit_capacity():
+    world, res = _run(ALL_PROJECTS)
+    assert len(_open_holdout(res, world)) == world.seal.capacity
+    blocked_world, blocked = _run(ALL_PROJECTS + [_proj("P999111", "PER", _rec(2024, "Excellent"))])
+    plain = r1.open_seal(blocked.sealed[r1.SEALED_BLOCKED], r1.PURPOSE_BLOCKED, blocked_world.private_key,
+                         SYNTH_PERMIT)
+    assert len(plain) == blocked_world.seal.capacity
+
+
+def test_ciphertext_is_fresh_on_every_seal():
+    world, first = _run(ALL_PROJECTS)
+    second = H.run_pipeline(world)
+    a, b = first.sealed[r1.SEALED_HOLDOUT], second.sealed[r1.SEALED_HOLDOUT]
+    assert a != b
+    assert a[14:46] != b[14:46], "ephemeral public key repeated"
+    assert a[46:58] != b[46:58], "nonce repeated"
+
+
+def test_ciphertext_matches_the_specified_construction():
+    """Re-derives the key from 13.9 and decrypts with the header as AAD; a mutant that drops the AAD fails here."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    from cryptography.hazmat.primitives import serialization
+
+    world, res = _run(ALL_PROJECTS)
+    blob = res.sealed[r1.SEALED_HOLDOUT]
+    header, body = blob[:58], blob[58:]
+    assert header[:12] == b"SORA-R1-SEAL" and header[12] == 1 and header[13] == 1
+    eph_pub, nonce = header[14:46], header[46:58]
+    public = world.private_key.public_key().public_bytes(encoding=serialization.Encoding.Raw,
+                                                         format=serialization.PublicFormat.Raw)
+    shared = world.private_key.exchange(X25519PublicKey.from_public_bytes(eph_pub))
+    key = HKDF(algorithm=hashes.SHA256(), length=32, salt=hashlib.sha256(SYNTH_PERMIT).digest(),
+               info=b"SORA-R1-SEAL v1" + bytes([1]) + public).derive(shared)
+    plain = AESGCM(key).decrypt(nonce, body, header)
+    assert plain == _open_holdout(res, world)
+
+
+@pytest.mark.parametrize("offset", [0, 12, 13, 14, 46, 58, -1])
+def test_any_header_or_tag_byte_change_refuses(offset):
+    world, res = _run(ALL_PROJECTS)
+    blob = bytearray(res.sealed[r1.SEALED_HOLDOUT])
+    blob[offset] ^= 0x01
+    with pytest.raises(r1.IntegrityError):
+        r1.open_seal(bytes(blob), r1.PURPOSE_HOLDOUT, world.private_key, SYNTH_PERMIT)
+
+
+def test_wrong_purpose_wrong_key_and_wrong_permit_refuse():
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+    world, res = _run(ALL_PROJECTS)
+    blob = res.sealed[r1.SEALED_HOLDOUT]
+    with pytest.raises(r1.IntegrityError):
+        r1.open_seal(blob, r1.PURPOSE_BLOCKED, world.private_key, SYNTH_PERMIT)
+    with pytest.raises(r1.IntegrityError):
+        r1.open_seal(blob, r1.PURPOSE_HOLDOUT, X25519PrivateKey.generate(), SYNTH_PERMIT)
+    with pytest.raises(r1.IntegrityError):
+        r1.open_seal(blob, r1.PURPOSE_HOLDOUT, world.private_key, b"another permit")
+
+
+def test_overflowing_the_capacity_is_exit_5_and_writes_nothing(tmp_path):
+    world = H.make_world(ALL_PROJECTS)
+    with pytest.raises(r1.IntegrityError, match="field_limit_exceeded"):
+        _run_with_seal(world, _seal_with(world, capacity=1000))
+
+
+def test_holdout_plaintext_is_never_written_to_disk(tmp_path, monkeypatch):
+    world, res = _run(ALL_PROJECTS)
+    written = []
+    real_write = Path.write_bytes
+
+    def recording_write(self, data):
+        written.append(bytes(data))
+        return real_write(self, data)
+
+    monkeypatch.setattr(Path, "write_bytes", recording_write)
+    final = _write(tmp_path / "out", res)
+    joined = b"".join(written)
+    assert b"P000005" not in joined and b"ustar" not in joined
+    for name, data in _write_tree(final).items():
+        assert b"P000005" not in data and b"ustar" not in data, name
+
+
+def test_manifest_holds_only_the_ciphertext_hash(tmp_path):
+    world, res = _run(ALL_PROJECTS)
+    final = _write(tmp_path / "out", res)
+    manifest = json.loads((final / "manifest.json").read_text(encoding="utf-8"))
+    names = set(manifest["outputs"])
+    assert r1.SEALED_HOLDOUT in names
+    assert not (HOLDOUT_NAMES & names)
+    cipher = (final / r1.SEALED_HOLDOUT).read_bytes()
+    assert manifest["outputs"][r1.SEALED_HOLDOUT]["sha256"] == hashlib.sha256(cipher).hexdigest()
+
+
+
+def test_blocked_diagnostics_are_sealed_and_not_split_by_window():
+    projects = ALL_PROJECTS + [_proj("P999111", "PER", _rec(2024, "Excellent"))]
+    world, res = _run(projects)
+    assert res.status == "blocked"
+    diag = _diag(res, world)
+    assert set(diag) == {"statement", "rule_version", "projects_by_rule", "unknown_count", "unknown_values"}
+    text = json.dumps(diag)
+    assert "development" not in text and "holdout" not in text
+    assert diag["unknown_count"] == 1
+
+
+def test_blocked_receipt_names_the_digest_of_the_sealed_diagnostics():
+    world, res = _run([_proj("P100001", "ARG", _rec(2012, "Excellent"))])
+    receipt = _json(res, "blocked_receipt.json")
+    entry = receipt["sealed"][r1.SEALED_BLOCKED]
+    assert entry["sha256"] == hashlib.sha256(res.sealed[r1.SEALED_BLOCKED]).hexdigest()
+    assert entry["bytes"] == len(res.sealed[r1.SEALED_BLOCKED])
 
 
 # ---------------------------------------------------------------- guard against any research read
