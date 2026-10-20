@@ -11,12 +11,12 @@ class ForecastResult:
     """Standardized forecast output with uncertainty quantification."""
     dates: List[str]           # ISO format dates (YYYY-MM-DD)
     yhat: List[float]          # Point predictions
-    yhat_lower: List[float]    # Lower 90% CI
-    yhat_upper: List[float]    # Upper 90% CI
+    yhat_lower: List[float]    # Lower bound of the model's nominal interval
+    yhat_upper: List[float]    # Upper bound of the model's nominal interval; level in metadata.interval_level
     model_name: str            # Model identifier
     model_version: str         # Model version
     confidence: str            # "high" | "medium" | "low"
-    metadata: Dict             # Additional model-specific info
+    metadata: Dict             # Additional model-specific info; metadata["interval_level"] is the nominal level (0.90, 0.95) or None
 
 
 class BaseForecastModel(ABC):
@@ -52,7 +52,7 @@ class BaseForecastModel(ABC):
             horizon: Number of periods (days) to forecast ahead
 
         Returns:
-            ForecastResult with predictions and confidence intervals
+            ForecastResult with predictions and the model's nominal interval
 
         Raises:
             ValueError: If model not fitted or horizon invalid

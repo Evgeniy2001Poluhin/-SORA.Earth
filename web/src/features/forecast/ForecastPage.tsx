@@ -6,7 +6,7 @@ import {
   Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { api } from "@/api/client";
-import { BAND_LABEL, historySpan, lastObservationLabel } from "./forecastLabels";
+import { bandLabel, historySpan, lastObservationLabel } from "./forecastLabels";
 
 /** Model-specific extras returned alongside a forecast; see app/services/forecasting. */
 type ForecastMetadata = {
@@ -17,6 +17,7 @@ type ForecastMetadata = {
   avg_ci_width?: number;
   slope_per_day?: number;
   autoregressive?: boolean;
+  interval_level?: number | null;
 };
 
 type HistPoint = { ds: string; y: number };
@@ -53,6 +54,8 @@ export default function ForecastPage() {
     queryFn: () =>
       api<ForecastResponse>(`/forecast?horizon=${horizon}&metric=${metric}&model=${model}`),
   });
+
+  const band = bandLabel(data?.metadata?.interval_level);
 
   const rows = data ? [
     ...data.history.map(h => ({
@@ -213,7 +216,7 @@ export default function ForecastPage() {
                 labelFormatter={(l) => `Date: ${l}`}
                 formatter={(value: unknown, name: unknown) => {
                   const label = String(name ?? "");
-                  if (label === BAND_LABEL && Array.isArray(value))
+                  if (label === band && Array.isArray(value))
                     return [`${Number(value[0]).toFixed(2)} — ${Number(value[1]).toFixed(2)}`, label];
                   if (typeof value === "number") return [value.toFixed(3), label];
                   return [String(value ?? ""), label];
@@ -233,7 +236,7 @@ export default function ForecastPage() {
                 stroke="none"
                 fill="#16a34a"
                 fillOpacity={0.12}
-                name={BAND_LABEL}
+                name={band}
                 connectNulls={false}
               />
               <Line

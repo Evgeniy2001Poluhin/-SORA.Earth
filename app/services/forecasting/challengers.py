@@ -48,7 +48,7 @@ class XGBoostLagForecaster(BaseForecastModel):
 
     Deterministic: fixed random_state and n_jobs=1.
 
-    Intervals: the 90% interval comes from the empirical 5th/95th percentiles of
+    Intervals: the nominal 90% interval (metadata["interval_level"] = 0.90) comes from the empirical 5th/95th percentiles of
     the in-sample one-step residuals. This is an approximation that ignores error
     growth over the horizon -- a real quantile regression would model that, but
     this is the baseline approximation every tabular model gets until a better one
@@ -214,6 +214,7 @@ class XGBoostLagForecaster(BaseForecastModel):
                 "season_length": self.season_length,
                 "max_lag": 2 * self.season_length,
                 "interval_method": "empirical_percentiles_5_95",
+                "interval_level": 0.90,
                 "interval_note": "approximation ignoring error growth over horizon",
                 "recursive": True,
             },

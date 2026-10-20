@@ -39,8 +39,8 @@ import pandas as pd
 
 from app.services.forecasting.base import BaseForecastModel, ForecastResult
 
-#: 1.645 sigma is the 90% two-sided normal interval, matching the 90% that
-#: `ForecastResult` documents for yhat_lower/yhat_upper.
+#: 1.645 sigma is the 90% two-sided normal interval; the level is reported as
+#: metadata["interval_level"] = 0.90.
 Z_90 = 1.6448536269514722
 
 #: Below this many one-step errors the spread is estimated from too little to be
@@ -162,6 +162,7 @@ class _Baseline(BaseForecastModel):
                 "observations": int(len(self._values)),
                 #: So a report cannot present a baseline as a trained model.
                 "interval_method": "random_walk_sqrt_h",
+                "interval_level": 0.90,
             },
         )
 

@@ -100,18 +100,24 @@ describe("ForecastPage: what the numbers and labels claim", () => {
     expect(container.textContent).not.toMatch(/\bnow\b/);
   });
 
-  // F066: the response has no coverage, level or method field, so the band may
-  // only be called a nominal interval.
-  it("names the band a nominal interval whose coverage is not validated", async () => {
+  // F066 and C16: the band is named from the level the server states in
+  // metadata.interval_level. A level is named only when stated; otherwise the
+  // band is a neutral model interval. The coverage caveat stays in every case.
+  it.each([
+    ["0.9", { interval_level: 0.9 }, "nominal 90% interval (model-based, coverage not validated)"],
+    ["0.95", { interval_level: 0.95 }, "nominal 95% interval (model-based, coverage not validated)"],
+    ["null", { interval_level: null }, "model interval (model-based, coverage not validated)"],
+    ["absent", {}, "model interval (model-based, coverage not validated)"],
+    ["no metadata at all", null, "model interval (model-based, coverage not validated)"],
+  ])("names the band from the stated level (%s)", async (_case, metadata, expected) => {
     stubJson({
       history: historyOf([1, 2, 3, 4, 5]), forecast: forecastOf([6, 7, 8]),
-      model: "ensemble", metric: "score", confidence: "medium", metadata: null,
+      model: "ensemble", metric: "score", confidence: "medium", metadata,
     });
     const { container } = renderPage();
-    await waitFor(() =>
-      expect(container.textContent).toContain("nominal 90% interval (model-based, coverage not validated)"),
-    );
+    await waitFor(() => expect(container.textContent).toContain(expected));
     expect(container.textContent).not.toContain("90% CI");
+    if (expected.startsWith("model interval")) expect(container.textContent).not.toMatch(/nominal \d+%/);
   });
 
   // F067: the backend's avg_ci_width is upper minus lower, the full width.

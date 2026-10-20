@@ -3,6 +3,8 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import OnboardingTour from "./OnboardingTour";
 import { useTheme } from "./theme-context";
 import { ModelBadge } from "../components/ModelBadge";
+import { HealthPill } from "../features/evaluate/HealthPill";
+import { useServiceSnapshot } from "../features/evaluate/useServiceHealth";
 import "./shell.css";
 
 const NAV = [ { to:"/", label:"Home" }, { to:"/evaluate", label:"Evaluate" }, { to:"/compare", label:"Compare" }, { to:"/drift", label:"Drift" }, { to:"/explain", label:"Explain" }, { to:"/copilot", label:"✨ Co-Pilot" }, { to:"/calibration", label:"Calibration" }, { to:"/mlops", label:"MLOps" }, { to:"/history", label:"History" }, { to:"/map", label:"Map" }, { to:"/forecast", label:"Forecast" }, { to:"/webhooks", label:"Webhooks" }, { to:"/status", label:"Status" }, { to:"/compliance", label:"Compliance" } ];
@@ -12,6 +14,9 @@ export function Shell() {
   const [tour, setTour] = useState(0);
   const navRef = useRef<HTMLElement>(null);
   const { pathname } = useLocation();
+  // The header pill reads the service's own answer, the same shared query the
+  // Evaluate hero uses (one request, not one per page).
+  const { status } = useServiceSnapshot();
 
   // Bring the active link inside the nav's own scroll box, on load and on each
   // route change. scrollLeft is set directly: scrollIntoView would also scroll
@@ -48,7 +53,7 @@ export function Shell() {
           </button>
           <button onClick={()=>setTour(t=>t+1)} className="theme-toggle" title="Take the tour" aria-label="Take the tour">?</button>
           <ModelBadge />
-          <span className="status-pill">Operational</span>
+          <HealthPill status={status} />
         </div>
       </header>
       <main className="shell-main"><Outlet/></main>

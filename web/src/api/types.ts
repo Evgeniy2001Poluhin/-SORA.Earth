@@ -204,6 +204,22 @@ export interface MlopsHealth {
   monitoring: { prometheus?: string; mlflow?: string; drift?: string };
 }
 
+// === service health: GET /api/v1/health ===
+// Every field is optional on purpose. The payload is data from the server, and
+// a field that is absent must render as "unknown", never as a default.
+export interface ServiceHealth {
+  status?: string;
+  model_provenance?: { source?: string; model_version?: string };
+  checks?: {
+    models?: {
+      status?: string;
+      loaded?: boolean;
+      xgboost_loaded?: boolean;
+      neural_network_loaded?: boolean;
+    };
+  };
+}
+
 export interface ModelMeta {
   retrained_at: string;
   algorithm: string;

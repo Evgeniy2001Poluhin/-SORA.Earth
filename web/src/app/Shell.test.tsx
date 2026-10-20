@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { renderWithQuery } from "@/test/utils";
 
-// ModelBadge needs a query client, and the tour is a separate concern; neither
-// is under test here.
+// ModelBadge is a separate concern; the tour is too. The header pill now reads
+// the health query, so the render goes through a query client.
 vi.mock("../components/ModelBadge", () => ({ ModelBadge: () => null }));
 vi.mock("./OnboardingTour", () => ({ default: () => null }));
 
@@ -12,7 +13,7 @@ import { Shell } from "./Shell";
 describe("Shell nav", () => {
   it("renders on a route with no matching link, without throwing", () => {
     expect(() =>
-      render(
+      renderWithQuery(
         <MemoryRouter initialEntries={["/no-such-page"]}>
           <Shell />
         </MemoryRouter>,

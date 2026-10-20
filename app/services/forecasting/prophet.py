@@ -114,8 +114,8 @@ class ProphetForecaster(BaseForecastModel):
             horizon: Number of days ahead to forecast
 
         Returns:
-            ForecastResult with predictions and 80% confidence intervals
-                (Prophet uses 80% by default, we'll map to 90% for consistency)
+            ForecastResult with predictions and the nominal 90% interval
+                (Prophet's 80% band widened to 90%; metadata["interval_level"] = 0.90)
 
         Raises:
             ValueError: If model not fitted
@@ -159,7 +159,8 @@ class ProphetForecaster(BaseForecastModel):
             confidence=confidence,
             metadata={
                 "avg_ci_width": float(avg_ci_width),
-                "uncertainty_samples": 1000
+                "uncertainty_samples": 1000,
+                "interval_level": 0.90,
             }
         )
 

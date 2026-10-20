@@ -1,7 +1,9 @@
 """Time series forecasting API with model caching and async execution."""
 
 import asyncio
+import hashlib
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from functools import partial
@@ -29,6 +31,22 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["forecast"])
 
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="forecast")
+
+# The last ensemble fit made for GET /lstm-status, remembered against the series
+# it was fitted on. The fit is the expensive part of that handler, and its
+# outcome is a function of the series alone, so the outcome is reused while the
+# series is unchanged and refitted when it changes.
+#
+# It never answers for different data: the key is a fingerprint over every
+# value the fit reads (see `_series_fingerprint`), so a change to a date, a
+# value, an observed flag or the row count is a miss. The cache is per process;
+# each worker keeps its own copy, so each fits at most once per data change.
+#
+# The lock is held across the fit on purpose: two requests for the same new
+# series must not both fit, and a request for another series waits for the fit
+# in flight rather than racing it.
+_lstm_fit_lock = threading.Lock()
+_lstm_fit_cache: dict = {}  # {"fingerprint": tuple, "outcome": dict}, or empty
 
 
 def _get_db():
@@ -243,7 +261,7 @@ def _linear_forecast(
         model="LinearTrend",
         metric=metric,
         confidence="low",
-        metadata={"slope_per_day": round(float(coeffs[0]), 5), "ci95": round(ci, 3)}
+        metadata={"slope_per_day": round(float(coeffs[0]), 5), "ci95": round(ci, 3), "interval_level": 0.95}
     )
 
 
@@ -469,26 +487,111 @@ def get_latest_forecast_metrics(
     return result
 
 
+def _series_fingerprint(df: pd.DataFrame) -> tuple:
+    """Identify the exact frame the ensemble fit would be given.
+
+    Row count, first and last `ds`, and a SHA-256 over the column names, the row
+    order and every value of `ds`, `y` and `is_observed` (when present). The
+    digest is what makes the key exact: two frames of the same length and the
+    same endpoints but a different value in the middle are different series.
+    """
+    digest = hashlib.sha256()
+    digest.update(repr(tuple(str(c) for c in df.columns)).encode())
+    if len(df) == 0:
+        return (0, None, None, digest.hexdigest())
+    ds = pd.to_datetime(df["ds"]).to_numpy(dtype="datetime64[ns]").view("int64")
+    digest.update(ds.tobytes())
+    digest.update(df["y"].to_numpy(dtype="float64").tobytes())
+    if "is_observed" in df.columns:
+        digest.update(df["is_observed"].astype(bool).to_numpy().tobytes())
+    return (len(df), int(ds[0]), int(ds[-1]), digest.hexdigest())
+
+
+def _fit_ensemble_outcome(df: pd.DataFrame) -> dict:
+    """Fit the ensemble on `df` and report what the fit measured.
+
+    A failed fit is an outcome, not an error: nothing was fitted, so nothing is
+    reported as measured -- no weights and no active models. The row-count facts
+    the handler reports are measured separately and are not part of this.
+    """
+    from app.services.forecasting.ensemble import EnsembleForecaster
+
+    ensemble = EnsembleForecaster()
+    try:
+        ensemble.fit(df, "y")
+        active = [name for name, _model in ensemble._active_models]
+        return {
+            "weights": dict(ensemble.weights),
+            "models_active": [name.title() for name in active],
+            "lstm_in_ensemble": "lstm" in active,
+            "reason_code": None,
+        }
+    except Exception as e:
+        log.warning(f"Could not fit ensemble for status check: {e}")
+        return {
+            "weights": {},
+            "models_active": [],
+            "lstm_in_ensemble": None,
+            "reason_code": "ensemble_fit_failed",
+        }
+
+
+def _lstm_fit_outcome(df: pd.DataFrame) -> dict:
+    """The fit outcome for `df`: the remembered one if the series is unchanged.
+
+    A failed fit is remembered too, for the same series, so a deterministic
+    failure is not retried on every poll. A change to the series retries it.
+    """
+    fingerprint = _series_fingerprint(df)
+    with _lstm_fit_lock:
+        if _lstm_fit_cache.get("fingerprint") != fingerprint:
+            outcome = _fit_ensemble_outcome(df)
+            _lstm_fit_cache["outcome"] = outcome
+            _lstm_fit_cache["fingerprint"] = fingerprint
+        outcome = _lstm_fit_cache["outcome"]
+    # A copy, so a caller cannot edit what the next request will read.
+    return {
+        **outcome,
+        "weights": dict(outcome["weights"]),
+        "models_active": list(outcome["models_active"]),
+    }
+
+
 @router.get(
     "/lstm-status",
     response_model=LstmStatusOk,
     responses={503: {"model": LstmStatusUnavailable, "description": "Status could not be determined."}},
-    summary="LSTM activation status and progress towards its threshold",
+    summary="LSTM fitted membership and observed-data training eligibility",
 )
-async def get_lstm_status(db: Session = Depends(_get_db)):
+def get_lstm_status(db: Session = Depends(_get_db)):
     """Get LSTM activation status and progress towards threshold.
 
     Returns:
-        - active: bool - Whether LSTM is currently active in ensemble
-        - samples: int - Current number of unique days in dataset
-        - threshold: int - Required samples for LSTM activation
-        - days_remaining: int - Days until threshold (if not active)
-        - next_activation_date: str - Estimated date when LSTM will activate
-        - models_active: list - Currently active models in ensemble
-        - weights: dict - Current ensemble weights
+        - active: bool - Eligible by row count (samples >= threshold). It does
+          not say whether the fitted ensemble includes the LSTM; see
+          lstm_in_ensemble for that.
+        - samples: int - Rows in the forecast series
+        - threshold: int - Required observed points for training eligibility
+        - observed_samples: int - Recorded points, excluding interpolated dates
+        - eligible_for_training: bool - Observation count reaches threshold
+        - observations_remaining: int - Missing observed points, not days
+        - days_remaining: int - Legacy row-count deficit, not a time forecast
+        - next_activation_date: str - Legacy estimate; not an activation promise
+        - models_active: list - Models in the fitted ensemble ([] if the fit failed)
+        - weights: dict - Weights of the fitted ensemble ({} if the fit failed)
+        - lstm_in_ensemble: bool | None - Whether the fitted ensemble includes
+          the LSTM; None if the fit failed
     """
+    # Plain `def`, not `async def`, on purpose. The body is a database query and
+    # a model fit, both synchronous, and has no `await`. As `async def` they ran
+    # on the event loop and held up every other request on the worker for the
+    # length of the fit; as `def` FastAPI runs the handler in its threadpool.
     from datetime import datetime, timedelta
-    from app.services.forecasting.ensemble import LSTM_MIN_ROWS
+    from app.services.forecasting.ensemble import LSTM_MIN_ROWS, observed_sample_count
+    from app.prom_metrics import sora_forecast_lstm_active
+
+    # A request that fails must not leave the previous successful fit green.
+    sora_forecast_lstm_active.set(float("nan"))
 
     # Query current data volume
     from sqlalchemy import text
@@ -513,8 +616,11 @@ async def get_lstm_status(db: Session = Depends(_get_db)):
     try:
         df = _query_time_series(db, "score")
         n_samples = len(df)
+        n_observed = observed_sample_count(df)
+        eligible_for_training = n_observed >= LSTM_MIN_ROWS
+        observations_remaining = max(0, LSTM_MIN_ROWS - n_observed)
 
-        # Check if LSTM would activate with current data
+        # Preserve legacy dense-row eligibility; it is not fitted membership.
         lstm_active = n_samples >= LSTM_MIN_ROWS
 
         # Calculate days remaining
@@ -525,26 +631,35 @@ async def get_lstm_status(db: Session = Depends(_get_db)):
         if not lstm_active and days_remaining > 0:
             next_activation_date = (last_date + timedelta(days=days_remaining)).isoformat()
 
-        # Get current ensemble weights by simulating fit
-        from app.services.forecasting.ensemble import EnsembleForecaster
-        ensemble = EnsembleForecaster()
-        try:
-            ensemble.fit(df, "y")
-            weights = ensemble.weights
-            models_active = [name.title() for name, model in ensemble._active_models]
-        except Exception as e:
-            log.warning(f"Could not fit ensemble for status check: {e}")
-            weights = {"lstm": 0.0, "prophet": 0.9, "linear": 0.1}
-            models_active = ["Prophet", "LinearTrend"]
+        # The ensemble's weights and active models. Refitted only when the
+        # series has changed since the last call; see `_lstm_fit_outcome`.
+        outcome = (_lstm_fit_outcome(df) if n_observed else {
+            "weights": {}, "models_active": [], "lstm_in_ensemble": None,
+            "reason_code": "no_observations",
+        })
+        weights = outcome["weights"]
+        models_active = outcome["models_active"]
+        lstm_in_ensemble = outcome["lstm_in_ensemble"]
+        reason_code = outcome["reason_code"]
+
+        if lstm_in_ensemble is True:
+            message = "LSTM is in the fitted ensemble."
+        elif lstm_in_ensemble is False:
+            message = "LSTM is not in the fitted ensemble."
+        elif reason_code == "no_observations":
+            message = "No observations are available; ensemble fitting was not attempted."
+        else:
+            message = "Ensemble could not be fitted, so no weights or active models are reported."
 
         # Export metrics to Prometheus
         from app.prom_metrics import (
             sora_forecast_samples_total,
-            sora_forecast_lstm_active,
             sora_forecast_days_remaining,
         )
         sora_forecast_samples_total.set(n_samples)
-        sora_forecast_lstm_active.set(1.0 if lstm_active else 0.0)
+        sora_forecast_lstm_active.set(
+            float("nan") if lstm_in_ensemble is None else float(lstm_in_ensemble)
+        )
         sora_forecast_days_remaining.set(days_remaining)
 
         return LstmStatusOk(
@@ -556,10 +671,14 @@ async def get_lstm_status(db: Session = Depends(_get_db)):
             next_activation_date=next_activation_date,
             models_active=models_active,
             weights=weights,
+            lstm_in_ensemble=lstm_in_ensemble,
+            observed_samples=n_observed,
+            eligible_for_training=eligible_for_training,
+            observations_remaining=observations_remaining,
             unique_days_raw=unique_days,
             last_evaluation_date=last_date.isoformat(),
-            message="LSTM active" if lstm_active else f"Need {days_remaining} more days of data",
-            reason_code=None,
+            message=message,
+            reason_code=reason_code,
         )
     except Exception as e:
         # 503 rather than a 200 saying `active: false`. That was a verdict

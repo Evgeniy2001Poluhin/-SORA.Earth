@@ -19,6 +19,11 @@ LSTM_MIN_ROWS = 33  # seq_length(14) + max_lag(14) + buffer(5) = 33
 # Currently: 13 unique days → ~28 after interpolation → below threshold (correct behavior)
 
 
+def observed_sample_count(df: pd.DataFrame) -> int:
+    """Count evidence, not interpolated dates; legacy frames have no mask."""
+    return int(df["is_observed"].sum()) if "is_observed" in df.columns else len(df)
+
+
 class EnsembleForecaster(BaseForecastModel):
     """Ensemble model with intelligent auto-weighting and cold-start strategy.
 
@@ -111,8 +116,7 @@ class EnsembleForecaster(BaseForecastModel):
         # `len(df)` remains the fallback for a frame carrying no provenance --
         # a caller building one by hand, or a test -- so anything that never
         # went through the loader reads exactly as before.
-        n_samples = (int(df["is_observed"].sum())
-                     if "is_observed" in df.columns else len(df))
+        n_samples = observed_sample_count(df)
 
         # What each model is given, decided per model rather than left to
         # whatever the loader happened to return (#132).
@@ -314,7 +318,7 @@ class EnsembleForecaster(BaseForecastModel):
                 continue
             try:
                 forecast = model.predict(horizon)
-                predictions.append((weight, forecast))
+                predictions.append((weight, name, forecast))
                 log.debug(f"{name} predict success, weight={weight}")
             except Exception as e:
                 log.warning(f"{name} predict failed: {e}")
@@ -323,20 +327,27 @@ class EnsembleForecaster(BaseForecastModel):
             raise RuntimeError("All ensemble models failed during prediction")
 
         # Weighted average of predictions
-        total_weight = sum(w for w, _ in predictions)
-        yhat = sum(w * np.array(f.yhat) for w, f in predictions) / total_weight
-        yhat_lower = sum(w * np.array(f.yhat_lower) for w, f in predictions) / total_weight
-        yhat_upper = sum(w * np.array(f.yhat_upper) for w, f in predictions) / total_weight
+        total_weight = sum(w for w, _, _ in predictions)
+        yhat = sum(w * np.array(f.yhat) for w, _, f in predictions) / total_weight
+        yhat_lower = sum(w * np.array(f.yhat_lower) for w, _, f in predictions) / total_weight
+        yhat_upper = sum(w * np.array(f.yhat_upper) for w, _, f in predictions) / total_weight
 
         # Use dates from first available forecast
-        dates = predictions[0][1].dates
+        dates = predictions[0][2].dates
 
         # Weighted confidence score
         confidence_map = {"high": 3, "medium": 2, "low": 1}
-        conf_score = sum(w * confidence_map[f.confidence] for w, f in predictions) / total_weight
+        conf_score = sum(w * confidence_map[f.confidence] for w, _, f in predictions) / total_weight
         confidence = "high" if conf_score >= 2.5 else "medium" if conf_score >= 1.5 else "low"
 
-        models_used = [f.model_name for _, f in predictions]
+        models_used = [f.model_name for _, _, f in predictions]
+        # The bounds are averaged across components built for different nominal
+        # levels (0.90 and 0.95), so the mix has no level of its own. Report the
+        # level of each component that contributed, and do not average them.
+        component_levels = {
+            name: f.metadata.get("interval_level")
+            for _, name, f in predictions
+        }
         log.info(f"Ensemble prediction: models={models_used}, confidence={confidence}")
 
         return ForecastResult(
@@ -350,7 +361,10 @@ class EnsembleForecaster(BaseForecastModel):
             metadata={
                 "weights": self.weights,
                 "models_used": models_used,
-                "total_weight": float(total_weight)
+                "total_weight": float(total_weight),
+                "interval_level": None,
+                "interval_method": "weighted_bounds",
+                "component_interval_levels": component_levels,
             }
         )
 

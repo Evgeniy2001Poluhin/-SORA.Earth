@@ -63,6 +63,7 @@ class LinearTrendForecaster(BaseForecastModel):
             metadata={
                 "slope_per_day": round(float(self._coeffs[0]), 5),
                 "ci95": round(ci, 3),
+                "interval_level": 0.95,
             }
         )
 
