@@ -12,6 +12,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -791,6 +792,7 @@ def test_a_chain_that_is_not_the_trusted_one_refuses_with_exit_3(tmp_path, monke
     ["--synthetic", "d"],
     ["--real", "--r1a-permit", "p.json", "--out", "d", "--extra"],
     ["--scenario", "blocked", "--out", "d"],
+    ["-h"],
 ])
 def test_any_other_command_line_exits_3_and_opens_nothing(argv, file_opens, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
@@ -945,38 +947,76 @@ def test_a_refusal_prints_only_refused(tmp_path, monkeypatch, capsys):
 
 # ---------------------------------------------------------------- section 9.1: compatibility with R1
 
-def test_the_r0_procedure_and_receipt_pass_the_checks_of_ieg_target_r1(tmp_path, monkeypatch):
+OWNER_PIN_HEX = "ab" * 32
+
+
+def r1_tree_carrying_the_r1a_output(tree, monkeypatch, r0_overrides=None, r1a_overrides=None):
+    """A real-mode R1 tree that holds the R1a output: the R0 and procedure bytes R1a read, the R1a literals as the
+    R1a result, and an R1a receipt whose fields are the ones R1a wrote. R1 is configured by the test: its pins and
+    its owner key are set from the R1a tree, and its core limit is not changed. load_real then runs every check."""
+    out = tree.paths["out"]
+    literals = (out / A.RESULT_FILE).read_bytes()
+    receipt = json.loads((out / A.RECEIPT_FILE).read_text(encoding="utf-8"))
+    r1a = {"r1a_script_sha256": receipt["r1a_script_sha256"], "result_sha256": receipt["result_sha256"],
+           "date_utc": receipt["date_utc"]}
+    r1a.update(r1a_overrides or {})
+    r0 = {"owner_x25519_public_key_hex": OWNER_PIN_HEX}
+    r0.update(r0_overrides or {})
+    fx = H.build_real_fixture(tree.root / "r1", DEMO_LITERAL_PROJECTS, overrides={
+        "procedure": {"allowed_r1a_script_sha256": _own_sha()},
+        "r0": r0,
+        "r1a": r1a,
+    })
+    fx.paths["r1a_result"].write_bytes(literals)
+    fx.install(monkeypatch)
+    monkeypatch.setattr(r1, "REAL_OWNER_PUBLIC_KEY_HEX", OWNER_PIN_HEX)
+    monkeypatch.setattr(r1, "disable_core_dumps", lambda: True)
+    return fx
+
+
+def test_r1_load_real_accepts_the_r0_procedure_and_receipt_that_r1a_reads(tmp_path, monkeypatch):
     tree = build_tree(tmp_path / "tree", DEMO_LITERAL_PROJECTS)
     tree.install(monkeypatch)
     assert _run(tree) == 0
-    out = tree.paths["out"]
-    r0_bytes = tree.paths["r0"].read_bytes()
-    proc_bytes = tree.paths["procedure"].read_bytes()
-    receipt_bytes = (out / A.RECEIPT_FILE).read_bytes()
-    result_bytes = (out / A.RESULT_FILE).read_bytes()
+    fx = r1_tree_carrying_the_r1a_output(tree, monkeypatch)
+    assert fx.paths["r0"].read_bytes() == tree.paths["r0"].read_bytes()
+    assert fx.paths["procedure"].read_bytes() == tree.paths["procedure"].read_bytes()
+    inputs = r1.load_real(fx.permit, trust_path=fx.trust)
+    assert inputs.input_sha256["chain/r1a_result"] == H.sha((tree.paths["out"] / A.RESULT_FILE).read_bytes())
 
-    r0 = r1._document(r0_bytes, r1.R0_FIELDS, "R0 receipt")
-    assert r0["stage"] == "R0" and r0["owner_decision"] == r1.R0_OWNER_DECISION
-    r1._utc(r0, "R0")
-    r1._hashes(r0, ("snapshot_manifest_sha256", "snapshot_page_digest", "structural_receipt_manifest_sha256",
-                    "d1_policy_sha256", "r1a_procedure_sha256"), "R0")
 
-    proc = r1._document(proc_bytes, r1.PROCEDURE_FIELDS, "R1a procedure")
-    r1._hashes(proc, ("allowed_r1a_script_sha256",), "R1a procedure")
-    assert proc["allowed_result_kind"] in r1.R1A_RESULT_KINDS
+@pytest.mark.parametrize("field, value, label", [
+    ("snapshot_manifest_sha256", "0" * 64, "R0 snapshot manifest pin"),
+    ("snapshot_page_digest", "0" * 64, "R0 snapshot page digest pin"),
+    ("structural_receipt_manifest_sha256", "0" * 64, "R0 structural pin"),
+    ("d1_policy_sha256", "0" * 64, "R0 D1 pin"),
+    ("d1_policy_sha256", "1" * 64, "R0 D1 pin"),
+    ("owner_x25519_public_key_hex", "0" * 64, "R0 owner public key pin"),
+    ("owner_x25519_public_key_hex", "1" * 64, "R0 owner public key pin"),
+    ("r1a_procedure_sha256", "0" * 64, "R1a procedure bytes"),
+])
+def test_r1_refuses_an_r0_whose_pin_or_link_is_well_formed_and_wrong(field, value, label, tmp_path, monkeypatch):
+    tree = build_tree(tmp_path / "tree", DEMO_LITERAL_PROJECTS)
+    tree.install(monkeypatch)
+    assert _run(tree) == 0
+    fx = r1_tree_carrying_the_r1a_output(tree, monkeypatch, r0_overrides={field: value})
+    with pytest.raises(r1.PinRefused) as info:
+        r1.load_real(fx.permit, trust_path=fx.trust)
+    assert re.search(label, getattr(info.value, "check", "")), getattr(info.value, "check", "")
 
-    rc = r1._document(receipt_bytes, r1.R1A_FIELDS, "R1a receipt")
-    assert rc["stage"] == "R1a" and rc["owner_decision"] == r1.R1A_OWNER_DECISION
-    r1._utc(rc, "R1a")
-    r1._hashes(rc, ("r0_receipt_sha256", "r1a_procedure_sha256", "snapshot_manifest_sha256",
-                    "snapshot_page_digest", "r1a_script_sha256", "result_sha256"), "R1a receipt")
-    r1._same(rc["r0_receipt_sha256"], H.sha(r0_bytes), "R1a link to R0")
-    r1._same(rc["r1a_procedure_sha256"], r0["r1a_procedure_sha256"], "R1a link to the procedure")
-    r1._same(rc["snapshot_manifest_sha256"], tree.pins.snapshot_manifest_sha, "R1a snapshot manifest pin")
-    r1._same(rc["snapshot_page_digest"], tree.pins.snapshot_page_digest, "R1a snapshot page digest pin")
-    r1._same(rc["r1a_script_sha256"], proc["allowed_r1a_script_sha256"], "R1a script against the procedure")
-    r1._same(rc["result_kind"], proc["allowed_result_kind"], "R1a result kind against the procedure")
-    r1._same(H.sha(result_bytes), rc["result_sha256"], "R1a result bytes")
+
+@pytest.mark.parametrize("field, value, label", [
+    ("r1a_script_sha256", "0" * 64, "R1a script against the procedure"),
+    ("result_sha256", "0" * 64, "R1a result bytes"),
+])
+def test_r1_refuses_an_r1a_receipt_link_that_is_wrong(field, value, label, tmp_path, monkeypatch):
+    tree = build_tree(tmp_path / "tree", DEMO_LITERAL_PROJECTS)
+    tree.install(monkeypatch)
+    assert _run(tree) == 0
+    fx = r1_tree_carrying_the_r1a_output(tree, monkeypatch, r1a_overrides={field: value})
+    with pytest.raises(r1.PinRefused) as info:
+        r1.load_real(fx.permit, trust_path=fx.trust)
+    assert re.search(label, getattr(info.value, "check", "")), getattr(info.value, "check", "")
 
 
 def test_the_r0_document_carries_exactly_the_r1_fields(tmp_path):
@@ -987,6 +1027,85 @@ def test_the_r0_document_carries_exactly_the_r1_fields(tmp_path):
 
 def test_the_fixed_result_kind_is_one_r1_accepts():
     assert A.RESULT_KIND in r1.R1A_RESULT_KINDS
+
+
+def _failing_rename(monkeypatch):
+    def refused(src, dst):
+        raise OSError("rename refused")
+    monkeypatch.setattr(A.os, "rename", refused)
+
+
+@pytest.mark.parametrize("mode", ["raises", "leaves"])
+def test_a_failed_cleanup_is_cleanup_failed_and_the_leftover_is_reported(mode, tmp_path, monkeypatch, capsys):
+    """Review P2: the literals are written, the rename fails, and the removal of <out>.partial also fails. The run
+    must say so (exit 5, cleanup_failed) and leave the leftover where the owner can see it: no silent success."""
+    tree = build_tree(tmp_path / "tree", DEMO_LITERAL_PROJECTS)
+    tree.install(monkeypatch)
+    _failing_rename(monkeypatch)
+
+    def failing_rmtree(path, *args, **kwargs):
+        if mode == "raises":
+            raise OSError("removal refused")
+        return None
+    monkeypatch.setattr(A.shutil, "rmtree", failing_rmtree)
+    assert _run(tree) == 5
+    captured = capsys.readouterr()
+    assert captured.err == "cleanup_failed\n" and captured.out == ""
+    partial = _partial(tree.paths["out"])
+    assert partial.exists(), "the leftover must stay on disk, not be reported as clean"
+    assert (partial / A.RESULT_FILE).read_bytes() == EXPECTED_LITERALS
+    assert not tree.paths["out"].exists()
+
+
+def test_the_cleanup_does_not_suppress_its_own_errors(tmp_path, monkeypatch):
+    """The removal is called without ignore_errors, so a removal error reaches the caller (review P2)."""
+    tree = build_tree(tmp_path / "tree", DEMO_LITERAL_PROJECTS)
+    tree.install(monkeypatch)
+    _failing_rename(monkeypatch)
+    calls = []
+    real_rmtree = shutil.rmtree
+
+    def recording_rmtree(path, *args, **kwargs):
+        calls.append(kwargs)
+        return real_rmtree(path)
+    monkeypatch.setattr(A.shutil, "rmtree", recording_rmtree)
+    assert _run(tree) == 5
+    assert calls == [{}]
+
+
+def test_a_rename_failure_with_a_clean_removal_is_integrity_error(tmp_path, monkeypatch, capsys):
+    tree = build_tree(tmp_path / "tree", DEMO_LITERAL_PROJECTS)
+    tree.install(monkeypatch)
+    _failing_rename(monkeypatch)
+    assert _run(tree) == 5
+    captured = capsys.readouterr()
+    assert captured.err == "integrity_error\n"
+    assert not _partial(tree.paths["out"]).exists()
+
+
+def test_a_missing_parent_of_the_output_refuses_before_any_data_read(tmp_path, monkeypatch, file_opens):
+    tree = build_tree(tmp_path / "tree")
+    tree.install(monkeypatch)
+    out = tmp_path / "missing" / "out"
+    file_opens.clear()
+    assert A.main(["--real", "--r1a-permit", str(tree.permit), "--out", str(out)]) == 3
+    assert file_opens == []
+    assert not (tmp_path / "missing").exists()
+
+
+def test_a_lone_surrogate_outcome_is_integrity_error_with_no_file_and_no_value(tmp_path, monkeypatch, capsys):
+    """Review P3: the page holds the escape \\ud800, which parses to a lone surrogate. The UTF-8 encoding of the
+    result fails before any file is created."""
+    raw = b'{"count": 1, "data": [{"project_id": "P000001", "outcome": "\\ud800"}]}'
+    one = [_proj("P000001", "ARG", _rec(2012, "Satisfactory"))]
+    tree = build_tree(tmp_path / "tree", one, world_hook=lambda w: H.replace_page(w, "ieg/page-00000.json", raw))
+    tree.install(monkeypatch)
+    before = _tree_files(tree.root)
+    assert _run(tree) == 5
+    captured = capsys.readouterr()
+    assert captured.err == "integrity_error\n" and captured.out == ""
+    assert not tree.paths["out"].exists() and not _partial(tree.paths["out"]).exists()
+    assert _tree_files(tree.root) == before
 
 
 def test_the_research_root_guard_recognises_a_research_path():
