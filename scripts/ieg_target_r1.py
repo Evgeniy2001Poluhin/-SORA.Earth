@@ -79,16 +79,17 @@ INNER_BYTES = 65         # inner_sha256.txt: 64 hex digits and a newline
 TAR_RECORDSIZE = 10240   # USTAR archives are padded to this (13.12.4)
 
 def _at_boundary(fn):
-    """The loader boundary raises fixed-message errors only. Detail (page names, values, paths) is dropped
-    here and never kept in an exception argument; unexpected errors become integrity_error (13.1, review)."""
+    """The loader boundary: a fixed message per exception class, no dynamic text in any argument (13.1, review)."""
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
         except (PinRefused, PermitRefused, OutputRefused, IntegrityError) as exc:
-            raise type(exc)(str(exc)) from None
+            raise _fixed_error(exc) from None
         except Exception:
-            raise IntegrityError("integrity_error") from None
+            err = IntegrityError(BOUNDARY_TEXT[IntegrityError])
+            err.check = "unexpected error"
+            raise err from None
     return wrapper
 
 
@@ -125,6 +126,25 @@ class OutputRefused(RuntimeError):
 
 class IntegrityError(RuntimeError):
     """An input is internally inconsistent or holds a value the builder cannot place."""
+
+
+BOUNDARY_TEXT = {
+    PinRefused: "pin_refused",
+    PermitRefused: "permit_refused",
+    OutputRefused: "output_refused",
+    IntegrityError: "integrity_error",
+}
+
+
+def _fixed_error(exc):
+    """Error that leaves the loader: its argument is the fixed text of its class (or the field-limit code).
+    The static check label written at the raise site travels as the attribute `check`; no data is in it."""
+    if isinstance(exc, IntegrityError) and exc.args == (FIELD_LIMIT,):
+        return IntegrityError(FIELD_LIMIT)
+    new = type(exc)(BOUNDARY_TEXT[type(exc)])
+    # An inner boundary already set the label; keep it rather than the fixed text.
+    new.check = getattr(exc, "check", None) or (str(exc.args[0]) if exc.args else "unlabelled refusal")
+    return new
 
 
 @dataclass(frozen=True)
@@ -485,9 +505,7 @@ def validate_bytes(blobs: Mapping[str, bytes], pins: Pins) -> Inputs:
         if not isinstance(obj, dict) or not isinstance(obj.get("data"), list) or "count" not in obj:
             raise IntegrityError("page lacks the count or data keys")
         if obj["count"] != ieg["api_total"] or len(obj["data"]) != page.get("records"):
-            raise IntegrityError(
-                f"{name}: count {obj['count']} (api_total {ieg['api_total']}), data {len(obj['data'])}, "
-                f"manifest {page.get('records')}")
+            raise IntegrityError("page count or record number differs from the manifest")
         for index, item in enumerate(obj["data"]):
             if not isinstance(item, dict):
                 raise IntegrityError("page record is not an object")
@@ -1012,7 +1030,7 @@ def write_outputs(result: Result, out) -> Path:
     elif result.status == "blocked":
         final = blocked
     else:
-        raise IntegrityError(f"unknown result status {result.status!r}")
+        raise IntegrityError("unknown result status")
     files = dict(result.files)
     sealed = dict(result.sealed)
     everything = {**files, **sealed}
@@ -1079,18 +1097,20 @@ def _document(data: bytes, fields, label: str) -> dict:
         raise PermitRefused(f"{label} is not a JSON object")
     missing = [f for f in fields if f not in obj]
     extra = sorted(set(obj) - set(fields))
-    if missing or extra:
-        raise PermitRefused(f"{label} fields: missing {missing}, unexpected {extra}")
+    if missing:
+        raise PermitRefused(f"{label} has a missing field")
+    if extra:
+        raise PermitRefused(f"{label} has an unexpected field")
     for f in fields:
         if f not in _PERMIT_NON_STRING and not isinstance(obj[f], str):
-            raise PermitRefused(f"{label} field {f} is not a string")
+            raise PermitRefused(f"{label} has a field that is not a string")
     return obj
 
 
 def _hashes(obj: dict, names, label: str) -> None:
     for name in names:
         if not isinstance(obj[name], str) or not HEX64_RE.fullmatch(obj[name]):
-            raise PermitRefused(f"{label} field {name} is not a sha256")
+            raise PermitRefused(f"{label} has a field that is not a sha256")
 
 
 def _utc(obj: dict, label: str) -> None:
@@ -1123,12 +1143,12 @@ def _read_trust(path) -> dict:
     for key in TRUST_KEYS:
         value = obj[key]
         if value is None:
-            raise PermitRefused(f"trust file holds null for {key}: no R1 permit is trusted")
+            raise PermitRefused("trust file holds null for a chain path: no R1 permit is trusted")
         if key == "r1_permit_sha256":
             if not isinstance(value, str) or not HEX64_RE.fullmatch(value):
                 raise PermitRefused("trust file r1_permit_sha256 is not a sha256")
         elif not isinstance(value, str) or not value:
-            raise PermitRefused(f"trust file {key} is not a path")
+            raise PermitRefused("trust file has a chain entry that is not a path")
     return obj
 
 
@@ -1152,7 +1172,7 @@ def _read_real_structural(blobs: dict) -> None:
     struct = Path(REAL_STRUCTURAL_DIR)
     blobs[K_STRUCT_MANIFEST] = _read(struct / "manifest.json", "structural manifest")
     for name in STRUCT_FILES:
-        blobs[f"structural/{name}"] = _read(struct / name, f"structural {name}")
+        blobs[f"structural/{name}"] = _read(struct / name, "structural file")
 
 
 def _structural_bytes_pinned(blobs: dict, pins: Pins) -> None:
@@ -1173,7 +1193,7 @@ def _read_real_snapshot(blobs: dict) -> None:
     manifest = _read(snap / "manifest.json", "snapshot manifest")
     blobs[K_SNAP_MANIFEST] = manifest
     for name in ieg_page_names(manifest):
-        blobs[f"snapshot/{name}"] = _read(snap / name, f"snapshot page {name}")
+        blobs[f"snapshot/{name}"] = _read(snap / name, "snapshot page")
 
 
 @_at_boundary
@@ -1308,6 +1328,9 @@ def main(argv=None) -> int:
     except (PinRefused, OutputRefused):
         print(REFUSED_CODE, file=sys.stderr)
         return 3
+    except IntegrityError as exc:
+        print(FIELD_LIMIT if exc.args == (FIELD_LIMIT,) else INTEGRITY_CODE, file=sys.stderr)
+        return 5
     except Exception:
         print(INTEGRITY_CODE, file=sys.stderr)
         return 5

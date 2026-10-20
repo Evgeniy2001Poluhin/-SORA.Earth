@@ -8,6 +8,8 @@ research data root.
 from __future__ import annotations
 
 import builtins
+import contextlib
+import re
 import csv
 import hashlib
 import importlib.util
@@ -97,6 +99,15 @@ def _diag(res, world):
     """The decrypted blocked diagnostics, as a dict. Owner-side only; the test holds the private key."""
     plain = r1.open_seal(res.sealed[r1.SEALED_BLOCKED], r1.PURPOSE_BLOCKED, world.private_key, SYNTH_PERMIT)
     return json.loads(r1.read_package(plain)["blocked_detail.json"].decode("utf-8"))
+
+
+@contextlib.contextmanager
+def _raises(exc_type, pattern):
+    """Refusals now carry a fixed message; the static check label (no data) is what the pattern is matched to."""
+    with pytest.raises(exc_type) as info:
+        yield info
+    label = getattr(info.value, "check", "")
+    assert re.search(pattern, label), (pattern, label)
 
 
 def _write_tree(final):
@@ -385,7 +396,7 @@ def test_split_overlap_is_refused():
         dev = split["development"][0]
         split["holdout"] = sorted(split["holdout"] + [dev])
     world = H.make_world(ALL_PROJECTS, receipt_hook=hook)
-    with pytest.raises(r1.IntegrityError, match="both windows"):
+    with _raises(r1.IntegrityError, "both windows"):
         r1.validate_bytes(world.blobs, world.pins)
 
 
@@ -395,7 +406,7 @@ def test_row_window_disagreeing_with_split_file_is_refused():
         split["development"] = sorted(p for p in split["development"] if p != "P000001")
         split["holdout"] = sorted(split["holdout"] + ["P000001"])
     world = H.make_world(ALL_PROJECTS, receipt_hook=_hook_pid("P000001", mutate))
-    with pytest.raises(r1.IntegrityError, match="not listed"):
+    with _raises(r1.IntegrityError, "not listed"):
         r1.validate_bytes(world.blobs, world.pins)
 
 
@@ -411,14 +422,14 @@ def _move_to(pid, window):
 def test_development_candidate_above_2019_is_refused():
     projects = [_proj("P300001", "ARG", _rec(2020, "Satisfactory"))]
     world = H.make_world(projects, receipt_hook=_hook_pid("P300001", _move_to("P300001", "development")))
-    with pytest.raises(r1.IntegrityError, match="development"):
+    with _raises(r1.IntegrityError, "development"):
         r1.validate_bytes(world.blobs, world.pins)
 
 
 def test_holdout_candidate_below_2020_is_refused():
     projects = [_proj("P300001", "ARG", _rec(2018, "Satisfactory"))]
     world = H.make_world(projects, receipt_hook=_hook_pid("P300001", _move_to("P300001", "holdout")))
-    with pytest.raises(r1.IntegrityError, match="holdout"):
+    with _raises(r1.IntegrityError, "holdout"):
         r1.validate_bytes(world.blobs, world.pins)
 
 
@@ -426,7 +437,7 @@ def test_authoritative_records_must_match_the_snapshot():
     def mutate(row, split):
         row["authoritative_records"] = row["authoritative_records"] + ";ieg/page-00009.json#0"
     world = H.make_world(ALL_PROJECTS, receipt_hook=_hook_pid("P000002", mutate))
-    with pytest.raises(r1.IntegrityError, match="authoritative records"):
+    with _raises(r1.IntegrityError, "authoritative records"):
         r1.validate_bytes(world.blobs, world.pins)
 
 
@@ -434,7 +445,7 @@ def test_receipt_maximum_fy_must_match_the_snapshot():
     def mutate(row, split):
         row["evaluation_fy"] = "2014"
     world = H.make_world(ALL_PROJECTS, receipt_hook=_hook_pid("P000002", mutate))
-    with pytest.raises(r1.IntegrityError, match="maximum evaluation_fy"):
+    with _raises(r1.IntegrityError, "maximum evaluation_fy"):
         r1.validate_bytes(world.blobs, world.pins)
 
 
@@ -444,7 +455,7 @@ def test_candidate_missing_from_the_snapshot_is_refused_not_dropped():
                      "wb_code": "ARG", "authoritative_records": "ieg/page-00000.json#0"})
         split["development"] = sorted(split["development"] + ["P999999"])
     world = H.make_world(ALL_PROJECTS, receipt_hook=hook)
-    with pytest.raises(r1.IntegrityError, match="not in the snapshot"):
+    with _raises(r1.IntegrityError, "not in the snapshot"):
         r1.validate_bytes(world.blobs, world.pins)
 
 
@@ -452,7 +463,7 @@ def test_duplicate_candidate_is_refused():
     def hook(rows, split):
         rows.append(dict(rows[0]))
     world = H.make_world(ALL_PROJECTS, receipt_hook=hook)
-    with pytest.raises(r1.IntegrityError, match="twice"):
+    with _raises(r1.IntegrityError, "twice"):
         r1.validate_bytes(world.blobs, world.pins)
 
 
@@ -460,7 +471,7 @@ def test_candidate_row_and_split_file_must_name_the_same_projects():
     def hook(rows, split):
         split["holdout"] = sorted(p for p in split["holdout"] if p != "P000005")
     world = H.make_world(ALL_PROJECTS, receipt_hook=hook)
-    with pytest.raises(r1.IntegrityError, match="not listed|different projects"):
+    with _raises(r1.IntegrityError, "not listed|different projects"):
         r1.validate_bytes(world.blobs, world.pins)
 
 
@@ -482,7 +493,7 @@ def test_every_input_byte_change_is_refused(demo):
 @pytest.mark.parametrize("field", ["snapshot_manifest_sha", "snapshot_page_digest", "structural_manifest_sha",
                                    "vocabulary_sha", "d1_policy_sha"])
 def test_unset_pin_refuses(demo, field):
-    with pytest.raises(r1.PinRefused, match="no pin is set"):
+    with _raises(r1.PinRefused, "no pin is set"):
         r1.validate_bytes(demo.blobs, replace(demo.pins, **{field: None}))
 
 
@@ -620,7 +631,7 @@ def test_each_chain_defect_refuses_before_any_page_is_read(tmp_path, monkeypatch
     if after_install is not None:
         after_install(fx, monkeypatch)
     file_opens.clear()
-    with pytest.raises(r1.PinRefused, match=expected):
+    with _raises(r1.PinRefused, expected):
         r1.load_real(fx.permit, trust_path=fx.trust)
     touched = [p for p in file_opens if str(fx.paths["snapshot"]) in p or str(fx.paths["structural"]) in p]
     assert touched == [], "a snapshot or structural file was read before the chain passed"
@@ -629,9 +640,9 @@ def test_each_chain_defect_refuses_before_any_page_is_read(tmp_path, monkeypatch
 def test_missing_trust_and_missing_permit_refuse(tmp_path, monkeypatch):
     fx = H.build_real_fixture(tmp_path / "tree")
     fx.install(monkeypatch)
-    with pytest.raises(r1.PermitRefused, match="trust file unreadable"):
+    with _raises(r1.PermitRefused, "trust file unreadable"):
         r1.load_real(fx.permit, trust_path=tmp_path / "missing-trust.json")
-    with pytest.raises(r1.PermitRefused, match="permit unreadable"):
+    with _raises(r1.PermitRefused, "permit unreadable"):
         r1.load_real(tmp_path / "missing-permit.json", trust_path=fx.trust)
 
 
@@ -727,7 +738,7 @@ def test_stale_receipt_against_a_shuffled_snapshot_is_refused():
         if key.startswith("structural/") or key in (r1.K_VOCAB, r1.K_D1):
             blobs[key] = value
     pins = replace(shuffled.pins, structural_manifest_sha=base.pins.structural_manifest_sha)
-    with pytest.raises(r1.IntegrityError, match="authoritative records"):
+    with _raises(r1.IntegrityError, "authoritative records"):
         r1.validate_bytes(blobs, pins)
 
 
@@ -1068,7 +1079,7 @@ def test_capacity_below_the_bound_refuses_before_any_page(tmp_path, monkeypatch,
     fx = H.build_real_fixture(tmp_path / "tree", overrides={"permit": {"sealed_plaintext_bytes": 1000}})
     fx.install(monkeypatch)
     file_opens.clear()
-    with pytest.raises(r1.PermitRefused, match="below the bound"):
+    with _raises(r1.PermitRefused, "below the bound"):
         r1.load_real(fx.permit, trust_path=fx.trust)
     assert not any(str(fx.paths["snapshot"]) in p for p in file_opens)
 
@@ -1222,12 +1233,13 @@ class _WriteGuard:
         try:
             yield
         finally:
+            # Runs on exceptions too: bytes written before a failure are scanned as well.
             self.stack.pop()
-        if outermost:
-            joined = b"".join(self.buffer)
-            self.buffer = []
-            if any(marker in joined for marker in HOLDOUT_MARKERS):
-                self._violate("write guard: a holdout marker reached a write")
+            if outermost:
+                joined = b"".join(self.buffer)
+                self.buffer = []
+                if any(marker in joined for marker in HOLDOUT_MARKERS):
+                    self._violate("write guard: a holdout marker reached a write")
 
 
 class _Handle:
@@ -1435,7 +1447,7 @@ def test_refused_core_dump_switch_refuses_with_zero_data_opens(tmp_path, monkeyp
 
     monkeypatch.setattr(resource, "setrlimit", refuse)
     file_opens.clear()
-    with pytest.raises(r1.PermitRefused, match="core dumps"):
+    with _raises(r1.PermitRefused, "core dumps"):
         r1.load_real(fx.permit, trust_path=fx.trust)
     assert file_opens == []
     out = tmp_path / "out"
@@ -1459,8 +1471,9 @@ def test_loader_boundary_raises_fixed_messages_only(tmp_path, monkeypatch):
     page.write_bytes(page.read_bytes() + b" ")
     with pytest.raises(r1.PinRefused) as info:
         r1.load_real(fx.permit, trust_path=fx.trust)
-    assert str(info.value) == "snapshot page sha256 does not match the manifest"
-    assert page.name not in str(info.value)
+    assert str(info.value) == "pin_refused"
+    assert info.value.check == "snapshot page sha256 does not match the manifest"
+    assert page.name not in str(info.value) + info.value.check
 
     def broken(blobs):
         raise KeyError("P000005")
@@ -1468,7 +1481,7 @@ def test_loader_boundary_raises_fixed_messages_only(tmp_path, monkeypatch):
     monkeypatch.setattr(r1, "_read_real_snapshot", broken)
     with pytest.raises(r1.IntegrityError) as info:
         r1.load_real(fx.permit, trust_path=fx.trust)
-    assert str(info.value) == "integrity_error" and "P000005" not in str(info.value)
+    assert str(info.value) == "integrity_error" and "P000005" not in info.value.check
 
 
 def _malformed_run(tmp_path, monkeypatch, capsys, name, digits, parse_calls):
@@ -1507,6 +1520,76 @@ def test_malformed_holdout_values_reach_the_parser_and_give_identical_output(tmp
     assert code == 5 and out == "" and err.strip() == "integrity_error"
     assert not made and not blocked
     assert "5000" not in err and "page" not in err
+
+
+def test_plaintext_written_into_partial_before_an_error_is_still_caught(tmp_path):
+    out = tmp_path / "out"
+    with pytest.raises(AssertionError, match="holdout marker"):
+        with _CURRENT_GUARD.scope(r1.output_paths(out)):
+            partial = out.with_name("out.partial")
+            partial.mkdir()
+            (partial / "leak.bin").write_bytes(b"P000005")
+            raise r1.IntegrityError("integrity_error")
+    _CURRENT_GUARD.violations.clear()
+
+
+def test_counter_mismatch_error_carries_no_page_name_and_no_number(tmp_path, monkeypatch):
+    def hook(world):
+        key = "snapshot/ieg/page-00000.json"
+        obj = json.loads(world.blobs[key].decode("utf-8"))
+        obj["count"] = 4242
+        H.replace_page(world, "ieg/page-00000.json", json.dumps(obj, sort_keys=True).encode("utf-8"))
+
+    fx = H.build_real_fixture(tmp_path / "tree", world_hook=hook)
+    fx.install(monkeypatch)
+    with pytest.raises(r1.IntegrityError) as info:
+        r1.load_real(fx.permit, trust_path=fx.trust)
+    assert str(info.value) == "integrity_error"
+    text = str(info.value) + " " + info.value.check
+    assert "4242" not in text and "page-00000" not in text and "ieg" not in text
+    assert re.search(r"[0-9]", text) is None
+
+
+def test_page_read_error_carries_no_page_name(tmp_path, monkeypatch):
+    fx = H.build_real_fixture(tmp_path / "tree")
+    fx.install(monkeypatch)
+    (fx.paths["snapshot"] / "ieg" / "page-00001.json").unlink()
+    with pytest.raises(r1.PermitRefused) as info:
+        r1.load_real(fx.permit, trust_path=fx.trust)
+    assert str(info.value) == "permit_refused"
+    assert info.value.check == "snapshot page unreadable"
+    assert "page-00001" not in str(info.value) + info.value.check
+
+
+def test_field_limit_violation_prints_field_limit_exceeded(tmp_path, monkeypatch, capsys):
+    literal = "L" * 17000
+    projects = [_proj("P100001", "ARG", _rec(2012, literal))]
+
+    def hook(world):
+        vocab = {"map": dict(H.DEFAULT_VOCAB["map"], **{literal: 1}), "not_rated": ["Not Rated"]}
+        raw = json.dumps(vocab, sort_keys=True, indent=1).encode("utf-8")
+        world.blobs[r1.K_VOCAB] = raw
+        world.pins = replace(world.pins, vocabulary_sha=H.sha(raw))
+
+    fx = H.build_real_fixture(tmp_path / "tree", projects=projects, world_hook=hook)
+    fx.install(monkeypatch)
+    capsys.readouterr()
+    code = r1.main(["--real", "--r1-permit", str(fx.permit), "--out", str(fx.paths["out"])])
+    captured = capsys.readouterr()
+    assert code == 5
+    assert captured.out == ""
+    assert captured.err.strip() == "field_limit_exceeded"
+    assert not fx.paths["out"].exists()
+
+
+def test_refusal_messages_in_the_builder_carry_no_dynamic_text():
+    """Every refusal raised with an f-string may interpolate only the static `label` argument."""
+    for line in _SCRIPT.read_text(encoding="utf-8").splitlines():
+        if re.search(r"(Refused|IntegrityError|OutputRefused)\(f\"", line):
+            fields = re.findall(r"\{([^}]*)\}", line)
+            assert set(fields) <= {"label"}, line
+
+
 
 
 def test_blocked_diagnostics_hold_the_unknown_literals_and_counts_across_both_windows():
