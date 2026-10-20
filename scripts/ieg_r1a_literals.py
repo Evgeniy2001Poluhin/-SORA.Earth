@@ -39,6 +39,7 @@ RECEIPT_FILE = "r1a_receipt.json"
 RESULT_LIMIT = 1048576                 # spec 3: 1 MiB, checked on the serialized file
 RESULT_LIMIT_CODE = "result_limit_exceeded"
 INTEGRITY_CODE = "integrity_error"
+CLEANUP_CODE = "cleanup_failed"
 REFUSED_CODE = "refused"
 OK_CODE = "ok"
 OUTCOME = "outcome"
@@ -358,10 +359,27 @@ def _partial_of(final: Path) -> Path:
 
 
 def check_output_free(out) -> None:
+    """Spec 6 and 8.3: the output's parent folder must exist, and neither <out> nor <out>.partial may exist.
+    Checked before any data read, so a missing parent is refused (exit 3) rather than created."""
     final = Path(out)
+    if not final.parent.is_dir():
+        raise OutputRefused("the parent of the output folder does not exist")
     for path in (final, _partial_of(final)):
         if path.exists() or path.is_symlink():
             raise OutputRefused("the output folder or its partial folder exists")
+
+
+def _remove_partial(partial: Path) -> None:
+    """Remove <out>.partial after a failure. No error is swallowed: a folder that is still there, or a removal
+    that raises, is reported as cleanup_failed (exit 5), with the leftover left on disk for the owner."""
+    try:
+        shutil.rmtree(partial)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        raise IntegrityError(CLEANUP_CODE) from None
+    if partial.exists() or partial.is_symlink():
+        raise IntegrityError(CLEANUP_CODE)
 
 
 def write_result(out, files: Mapping[str, bytes]) -> Path:
@@ -369,7 +387,7 @@ def write_result(out, files: Mapping[str, bytes]) -> Path:
     final = Path(out)
     partial = _partial_of(final)
     check_output_free(final)
-    os.makedirs(partial)
+    partial.mkdir()
     done = False
     try:
         for name in sorted(files):
@@ -379,7 +397,7 @@ def write_result(out, files: Mapping[str, bytes]) -> Path:
         done = True
     finally:
         if not done:
-            shutil.rmtree(partial, ignore_errors=True)
+            _remove_partial(partial)
     return final
 
 
@@ -423,6 +441,9 @@ def load_chain(permit_path, trust_path=None) -> dict:
     if r0["stage"] != "R0" or r0["owner_decision"] != R0_OWNER_DECISION:
         raise PinRefused("R0 receipt stage or owner decision is wrong")
     _utc(r0, "R0")
+    # d1_policy_sha256 and owner_x25519_public_key_hex are format-only here, by spec 8.1: R1a pins only the
+    # snapshot and the structural receipt. R1 pins both (ieg_target_r1.py load_real), so a substituted R0
+    # is refused there even though this script accepts a well-formed value.
     _hashes(r0, R0_HEX_FIELDS, "R0")
     _same(r0["snapshot_manifest_sha256"], REAL_PINS.snapshot_manifest_sha, "R0 snapshot manifest pin")
     _same(r0["snapshot_page_digest"], REAL_PINS.snapshot_page_digest, "R0 snapshot page digest pin")
@@ -472,7 +493,7 @@ scripts/ieg_r1a_literals_trust.json. --out must not exist. Exit codes: 0 ok,
 
 def main(argv=None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if args in (["--help"], ["-h"]):
+    if args == ["--help"]:
         print(HELP)
         return 0
     if len(args) != 5 or args[0] != "--real" or args[1] != "--r1a-permit" or args[3] != "--out":
@@ -485,7 +506,13 @@ def main(argv=None) -> int:
         print(REFUSED_CODE, file=sys.stderr)
         return 3
     except IntegrityError as exc:
-        print(RESULT_LIMIT_CODE if exc.args == (RESULT_LIMIT_CODE,) else INTEGRITY_CODE, file=sys.stderr)
+        if exc.args == (RESULT_LIMIT_CODE,):
+            code = RESULT_LIMIT_CODE
+        elif exc.args == (CLEANUP_CODE,):
+            code = CLEANUP_CODE
+        else:
+            code = INTEGRITY_CODE
+        print(code, file=sys.stderr)
         return 5
     except Exception:
         print(INTEGRITY_CODE, file=sys.stderr)
