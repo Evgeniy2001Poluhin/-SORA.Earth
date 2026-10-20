@@ -95,11 +95,13 @@ def test_a_bulk_upload_stamps_only_what_it_adds(dataset):
 def test_it_is_not_a_feature(dataset):
     """It describes when a row was filed, not the project. Training on it would
     let the model learn the upload schedule."""
-    import app.api.retrain as retrain
+    import app.services.retraining as retraining
 
-    with open(retrain.__file__, encoding="utf-8") as fh:
+    with open(retraining.__file__, encoding="utf-8") as fh:
         block = fh.read()
     block = block[block.index("feature_cols = ["):]
     block = block[:block.index("]")]
+
+    import app.api.retrain as retrain
 
     assert retrain.RECORDED_AT not in block

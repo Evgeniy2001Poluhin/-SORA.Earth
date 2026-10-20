@@ -49,7 +49,7 @@ def test_the_retrain_really_does_compute_them_per_run(text):
     If someone makes `year` a real observation year, this fails and the
     paragraph above has to be rewritten -- which is the point.
     """
-    with open(os.path.join(REPO_ROOT, "app", "api", "retrain.py"),
+    with open(os.path.join(REPO_ROOT, "app", "services", "retraining.py"),
               encoding="utf-8") as fh:
         body = fh.read()
 
@@ -59,7 +59,7 @@ def test_the_retrain_really_does_compute_them_per_run(text):
 
 def test_the_declared_order_matches_the_retrain(text):
     """The nine names, in order, as _do_retrain builds them."""
-    with open(os.path.join(REPO_ROOT, "app", "api", "retrain.py"),
+    with open(os.path.join(REPO_ROOT, "app", "services", "retraining.py"),
               encoding="utf-8") as fh:
         body = fh.read()
 
