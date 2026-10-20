@@ -932,7 +932,8 @@ def test_overflowing_the_capacity_is_exit_5_and_writes_nothing(tmp_path):
 
 
 def test_holdout_plaintext_is_never_written_to_disk(tmp_path, monkeypatch):
-    world, res = _run(ALL_PROJECTS)
+    """Every Path.write_bytes call is recorded from before the pipeline runs, so a write made inside
+    build() or the sealing step is seen as well as the writes of write_outputs()."""
     written = []
     real_write = Path.write_bytes
 
@@ -941,6 +942,7 @@ def test_holdout_plaintext_is_never_written_to_disk(tmp_path, monkeypatch):
         return real_write(self, data)
 
     monkeypatch.setattr(Path, "write_bytes", recording_write)
+    world, res = _run(ALL_PROJECTS)
     final = _write(tmp_path / "out", res)
     joined = b"".join(written)
     assert b"P000005" not in joined and b"ustar" not in joined
