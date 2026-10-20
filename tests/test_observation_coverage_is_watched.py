@@ -70,8 +70,8 @@ def test_the_job_publishes_through_the_endpoints_own_function(monkeypatch):
 
     called = {}
 
-    def fake_report(source, indicator, days):
-        called["args"] = (source, indicator, days)
+    def fake_report(source, indicator, days, not_before=None):
+        called["args"] = (source, indicator, days, not_before)
         return ObservationCoverage(
             source=source, indicator=indicator, required_per_day=19,
             days_examined=16, points_examined=21, complete_days=13,
@@ -104,7 +104,7 @@ def test_the_count_is_never_published_without_its_denominator(monkeypatch):
 
     monkeypatch.setattr(
         coverage, "coverage_report",
-        lambda source, indicator, days: ObservationCoverage(
+        lambda source, indicator, days, not_before=None: ObservationCoverage(
             source=source, indicator=indicator, required_per_day=19,
             days_examined=0, points_examined=0, complete_days=0,
             gap_count=0, gaps=[],
