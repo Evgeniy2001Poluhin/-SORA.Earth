@@ -27,11 +27,13 @@ from __future__ import annotations
 import csv
 import dataclasses
 import datetime as _dt
+import functools
 import hashlib
 import io
 import json
 import os
 import re
+import resource
 import shutil
 import subprocess
 import sys
@@ -75,6 +77,20 @@ ROW_MAX = 16384          # one serialized CSV record, newline included (13.12.1)
 JSON_MAX = 1048576       # one serialized JSON file (13.12.1)
 INNER_BYTES = 65         # inner_sha256.txt: 64 hex digits and a newline
 TAR_RECORDSIZE = 10240   # USTAR archives are padded to this (13.12.4)
+
+def _at_boundary(fn):
+    """The loader boundary raises fixed-message errors only. Detail (page names, values, paths) is dropped
+    here and never kept in an exception argument; unexpected errors become integrity_error (13.1, review)."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except (PinRefused, PermitRefused, OutputRefused, IntegrityError) as exc:
+            raise type(exc)(str(exc)) from None
+        except Exception:
+            raise IntegrityError("integrity_error") from None
+    return wrapper
+
 
 PID_RE = re.compile(r"P[0-9]{6}")
 EVAL_FY_RE = re.compile(r"[0-9]{4}")
@@ -303,12 +319,12 @@ def _pin(actual: str, pinned: str | None, label: str) -> None:
     if pinned is None:
         raise PinRefused(f"{label}: no pin is set")
     if actual != pinned:
-        raise PinRefused(f"{label}: sha256 {actual} does not match the pinned {pinned}")
+        raise PinRefused(f"{label}: does not match the pinned value")
 
 
 def _blob(blobs: Mapping[str, bytes], key: str) -> bytes:
     if key not in blobs:
-        raise IntegrityError(f"input {key} is missing")
+        raise IntegrityError("input is missing")
     return blobs[key]
 
 
@@ -323,10 +339,10 @@ def _parse_json(data: bytes, label: str, **kwargs):
 def _safe_name(name) -> str:
     """A relative path inside the snapshot folder: no absolute path, no '..' and no empty part."""
     if not isinstance(name, str) or not name or name.startswith("/") or "\\" in name:
-        raise IntegrityError(f"manifest names a file outside its folder: {name!r}")
+        raise IntegrityError("manifest names a file outside its folder")
     parts = name.split("/")
     if any(part in ("", ".", "..") for part in parts):
-        raise IntegrityError(f"manifest names a file outside its folder: {name!r}")
+        raise IntegrityError("manifest names a file outside its folder")
     return name
 
 
@@ -420,7 +436,7 @@ def _split_ids(data: bytes, label: str) -> list:
         if not PID_RE.fullmatch(pid):
             raise IntegrityError(f"{label} holds a line that is not a project_id")
         if pid in seen:
-            raise IntegrityError(f"{label} holds {pid} twice")
+            raise IntegrityError(f"{label} holds a project_id twice")
         seen.add(pid)
     return ids
 
@@ -432,6 +448,7 @@ def _candidate_rows(data: bytes) -> list:
     return list(reader)
 
 
+@_at_boundary
 def validate_bytes(blobs: Mapping[str, bytes], pins: Pins) -> Inputs:
     """Check every input's bytes against the pins and the cross-file links. No paths are used.
 
@@ -462,24 +479,24 @@ def validate_bytes(blobs: Mapping[str, bytes], pins: Pins) -> Inputs:
         data = _blob(blobs, f"snapshot/{name}")
         actual = sha256_bytes(data)
         if actual != page.get("sha256"):
-            raise PinRefused(f"snapshot: {name} sha256 {actual} does not match the manifest {page.get('sha256')}")
+            raise PinRefused("snapshot page sha256 does not match the manifest")
         input_sha[f"snapshot/{name}"] = actual
         obj = _parse_json(data, name, object_pairs_hook=_projection_hook)
         if not isinstance(obj, dict) or not isinstance(obj.get("data"), list) or "count" not in obj:
-            raise IntegrityError(f"{name} lacks the count or data keys")
+            raise IntegrityError("page lacks the count or data keys")
         if obj["count"] != ieg["api_total"] or len(obj["data"]) != page.get("records"):
             raise IntegrityError(
                 f"{name}: count {obj['count']} (api_total {ieg['api_total']}), data {len(obj['data'])}, "
                 f"manifest {page.get('records')}")
         for index, item in enumerate(obj["data"]):
             if not isinstance(item, dict):
-                raise IntegrityError(f"{name}#{index} is not an object")
+                raise IntegrityError("page record is not an object")
             total_records += 1
             rec = _valid_record(name, index, item)
             if rec is not None:
                 records_by_pid[rec.project_id].append(rec)
     if total_records != ieg["api_total"]:
-        raise IntegrityError(f"snapshot: {total_records} records read, api_total is {ieg['api_total']}")
+        raise IntegrityError("snapshot record count differs from api_total")
 
     # Structural receipt r2: manifest, then its three files.
     struct_manifest_bytes = _blob(blobs, K_STRUCT_MANIFEST)
@@ -494,7 +511,7 @@ def validate_bytes(blobs: Mapping[str, bytes], pins: Pins) -> Inputs:
         data = _blob(blobs, f"structural/{name}")
         actual = sha256_bytes(data)
         if name not in outputs or actual != outputs[name].get("sha256"):
-            raise PinRefused(f"structural receipt: {name} does not match its manifest")
+            raise PinRefused("structural receipt file does not match its manifest")
         struct_data[name] = data
         input_sha[f"structural/{name}"] = actual
     ids_dev = _split_ids(struct_data["split_ids_development.txt"], "split_ids_development.txt")
@@ -510,34 +527,34 @@ def validate_bytes(blobs: Mapping[str, bytes], pins: Pins) -> Inputs:
         if not PID_RE.fullmatch(pid or ""):
             raise IntegrityError("structural_candidates.csv holds a project_id that is not valid")
         if pid in seen_pids:
-            raise IntegrityError(f"candidate {pid} appears twice")
+            raise IntegrityError("candidate appears twice")
         seen_pids.add(pid)
         window = row["window"]
         if window not in WINDOWS:
-            raise IntegrityError(f"candidate {pid} has window {window!r}")
+            raise IntegrityError("candidate has an unknown window")
         fy = parse_eval_fy(row["evaluation_fy"]) if EVAL_FY_RE.fullmatch(row["evaluation_fy"] or "") else None
         if fy is None:
-            raise IntegrityError(f"candidate {pid} has no valid evaluation_fy")
+            raise IntegrityError("candidate has no valid evaluation_fy")
         if window == "development" and fy > DEVELOPMENT_MAX_EVAL_FY:
-            raise IntegrityError(f"candidate {pid} is development with evaluation_fy {fy}")
+            raise IntegrityError("candidate is development but its evaluation_fy is outside the development range")
         if window == "holdout" and not HOLDOUT_MIN_EVAL_FY <= fy <= HOLDOUT_MAX_EVAL_FY:
-            raise IntegrityError(f"candidate {pid} is holdout with evaluation_fy {fy}")
+            raise IntegrityError("candidate is holdout but its evaluation_fy is outside the holdout range")
         if pid not in split_ids[window]:
-            raise IntegrityError(f"candidate {pid} is not listed in the {window} split file")
+            raise IntegrityError("candidate is not listed in its split file")
         wb = (row["wb_code"] or "").strip()
         if not wb:
-            raise IntegrityError(f"candidate {pid} has no wb_code")
+            raise IntegrityError("candidate has no wb_code")
         recs = records_by_pid.get(pid)
         if not recs:
-            raise IntegrityError(f"candidate {pid} is not in the snapshot")
+            raise IntegrityError("candidate is not in the snapshot")
         max_fy = max(r.evaluation_fy for r in recs)
         if max_fy != fy:
-            raise IntegrityError(f"candidate {pid}: snapshot maximum evaluation_fy {max_fy}, receipt says {fy}")
+            raise IntegrityError("candidate: snapshot maximum evaluation_fy differs from the receipt")
         at_max = tuple(sorted((r for r in recs if r.evaluation_fy == max_fy), key=lambda r: (r.page, r.index)))
         expected = sorted(f"{r.page}#{r.index}" for r in at_max)
         declared = (row["authoritative_records"] or "").split(";")
         if len(set(declared)) != len(declared) or sorted(declared) != expected:
-            raise IntegrityError(f"candidate {pid}: authoritative records differ from the snapshot")
+            raise IntegrityError("candidate: authoritative records differ from the snapshot")
         candidates.append(Candidate(project_id=pid, window=window, evaluation_fy=fy, wb_code=wb, records=at_max))
     if seen_pids != split_ids["development"] | split_ids["holdout"]:
         raise IntegrityError("the split files and structural_candidates.csv name different projects")
@@ -942,12 +959,9 @@ def disable_core_dumps() -> bool:
     """13.2: real runs set the core size limit to zero; the outcome is recorded in the run metadata."""
     global CORE_DUMPS_DISABLED
     try:
-        import resource
-        # Soft limit zero: no core file is written. The hard limit is left alone, so it can be restored.
-        _soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
-        resource.setrlimit(resource.RLIMIT_CORE, (0, hard))
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
         CORE_DUMPS_DISABLED = True
-    except (ImportError, ValueError, OSError):
+    except (ValueError, OSError):
         CORE_DUMPS_DISABLED = False
     return CORE_DUMPS_DISABLED
 
@@ -984,7 +998,7 @@ def output_paths(out) -> tuple[Path, Path, Path]:
 def check_output_free(out) -> None:
     for path in output_paths(out):
         if path.exists() or path.is_symlink():
-            raise OutputRefused(f"refusing to write: {path} already exists")
+            raise OutputRefused("refusing to write: the output folder already exists")
 
 
 def write_outputs(result: Result, out) -> Path:
@@ -1096,14 +1110,14 @@ def _read(path, label: str) -> bytes:
     try:
         return Path(path).read_bytes()
     except (OSError, TypeError) as exc:
-        raise PermitRefused(f"{label} unreadable: {exc}") from None
+        raise PermitRefused(f"{label} unreadable") from None
 
 
 def _read_trust(path) -> dict:
     try:
         obj = json.loads(Path(path).read_bytes().decode("utf-8"))
     except (OSError, ValueError) as exc:
-        raise PermitRefused(f"trust file unreadable: {exc}") from None
+        raise PermitRefused("trust file unreadable") from None
     if not isinstance(obj, dict) or set(obj) != set(TRUST_KEYS):
         raise PermitRefused("trust file must hold exactly the six chain keys")
     for key in TRUST_KEYS:
@@ -1150,7 +1164,7 @@ def _structural_bytes_pinned(blobs: dict, pins: Pins) -> None:
         raise PinRefused("structural manifest has no outputs")
     for name in STRUCT_FILES:
         if name not in outputs or sha256_bytes(blobs[f"structural/{name}"]) != outputs[name].get("sha256"):
-            raise PinRefused(f"structural receipt: {name} does not match its manifest")
+            raise PinRefused("structural receipt file does not match its manifest")
 
 
 def _read_real_snapshot(blobs: dict) -> None:
@@ -1162,6 +1176,7 @@ def _read_real_snapshot(blobs: dict) -> None:
         blobs[f"snapshot/{name}"] = _read(snap / name, f"snapshot page {name}")
 
 
+@_at_boundary
 def load_real(permit_path, trust_path=None) -> Inputs:
     """The only reader of real data. Core dumps are disabled first (13.2); every chain check (13.5) runs
     before the first IEG page is read."""
@@ -1240,7 +1255,7 @@ def load_real(permit_path, trust_path=None) -> Inputs:
     _structural_bytes_pinned(blobs, REAL_PINS)
     needed = sealed_upper_bound(candidate_counts(blobs["structural/structural_candidates.csv"]))
     if permit["sealed_plaintext_bytes"] < needed:
-        raise PermitRefused(f"permit sealed_plaintext_bytes is below the bound of {needed} bytes")
+        raise PermitRefused("permit sealed_plaintext_bytes is below the bound")
     _read_real_snapshot(blobs)
     inputs = validate_bytes(blobs, REAL_PINS)
     chain = {

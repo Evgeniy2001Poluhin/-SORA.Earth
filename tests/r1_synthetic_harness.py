@@ -286,7 +286,25 @@ class RealFixture:
             encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw).hex()
 
 
-def build_real_fixture(root, projects=None, overrides=None) -> RealFixture:
+def replace_page(world, name: str, data: bytes):
+    """Replace one IEG page and rebuild everything that names it: the page's entry and the snapshot digest in
+    the manifest, the manifest hash and the snapshot pins. The chain built afterwards is consistent."""
+    world.blobs[f"snapshot/{name}"] = data
+    manifest = json.loads(world.blobs[r1.K_SNAP_MANIFEST].decode("utf-8"))
+    pages = manifest["datasets"]["ieg"]["pages"]
+    for entry in pages:
+        if entry["file"] == name:
+            entry["sha256"] = sha(data)
+    lines = sorted(f"{entry['sha256']}  {entry['file']}" for entry in pages)
+    digest = sha("".join(line + "\n" for line in lines).encode("utf-8"))
+    manifest["snapshot_digest"] = digest
+    snap = json.dumps(manifest, sort_keys=True, indent=1).encode("utf-8")
+    world.blobs[r1.K_SNAP_MANIFEST] = snap
+    world.pins = replace(world.pins, snapshot_manifest_sha=sha(snap), snapshot_page_digest=digest)
+    return world
+
+
+def build_real_fixture(root, projects=None, overrides=None, world_hook=None) -> RealFixture:
     """Write a complete real-mode tree under root with every hash correct.
 
     overrides maps a document name (r0, procedure, r1a, approval, permit, trust) to field changes (REMOVE drops
@@ -297,6 +315,8 @@ def build_real_fixture(root, projects=None, overrides=None) -> RealFixture:
     raw = {key[4:]: value for key, value in ov.items() if key.startswith("raw:")}
     root = Path(root)
     world = make_world(projects or DEMO_PROJECTS)
+    if world_hook is not None:
+        world_hook(world)
     paths = {
         "snapshot": root / "snapshot", "structural": root / "structural",
         "vocabulary": root / "vocabulary.json", "d1": root / "d1_policy.json",

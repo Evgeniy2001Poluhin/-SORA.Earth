@@ -1173,9 +1173,9 @@ def test_plaintext_is_exactly_the_expected_tar_then_zero_padding():
 # ---------------------------------------------------------------- review fixes: write guard, core dumps, stderr, diagnostics
 
 import contextlib
-import tempfile
-
 import resource
+import subprocess
+import tempfile
 
 HOLDOUT_MARKERS = (b"P000005", b"P000006", b"P000007", b"P000008", b"Excellent", b"ustar")
 _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
@@ -1183,54 +1183,51 @@ _CURRENT_GUARD = None
 
 
 class _WriteGuard:
-    """Watches every write API from the start of each test. Outside a pipeline scope nothing is checked.
+    """Watches the whole pipeline: loading, validation, build and writing, from the test's start.
 
-    Inside a scope (roots = the folders the pipeline may write to; () for build()), a write outside the roots
-    raises AssertionError at the call itself, so the write does not complete. At the end of the scope, a
-    holdout marker in the bytes written inside it fails the scope. Writes through handles whose path is
-    unknown inside a scope fail too."""
+    Every scope names the folders its writes may go to (() means none). A write, a file creation or an
+    os.write on a descriptor the pipeline did not open inside an allowed folder is a violation. Violations
+    are kept in `violations`, which the fixture checks at teardown, so a violation swallowed by main()'s
+    error handling still fails the test. Holdout markers inside the bytes written in a scope are violations."""
 
     def __init__(self):
-        self.roots = None
+        self.stack = []
         self.buffer = []
         self.fd_paths = {}
+        self.violations = []
 
-    def check(self, path, action):
-        if self.roots is None:
+    def _violate(self, message):
+        self.violations.append(message)
+        raise AssertionError(message)
+
+    def check_path(self, path, action):
+        if not self.stack:
             return
         real = os.path.realpath(os.fsdecode(path))
-        if not any(real == root or real.startswith(root + os.sep) for root in self.roots):
-            raise AssertionError(f"write guard: {action} outside the pipeline's folders")
+        if not any(real == root or real.startswith(root + os.sep) for root in self.stack[-1]):
+            self._violate(f"write guard: {action} outside the pipeline's folders")
 
     def record(self, path, data):
-        if self.roots is None:
+        if not self.stack:
             return
         if path is None:
-            raise AssertionError("write guard: a write through an unnamed handle inside the pipeline")
-        self.check(path, "write")
+            self._violate("write guard: write to a descriptor the pipeline did not open")
+        self.check_path(path, "write")
         self.buffer.append(data.encode("utf-8") if isinstance(data, str) else bytes(data))
-
-    def _leaked(self):
-        joined = b"".join(self.buffer)
-        return any(marker in joined for marker in HOLDOUT_MARKERS)
 
     @contextlib.contextmanager
     def scope(self, roots):
-        saved = (self.roots, self.buffer)
-        self.roots = [os.path.realpath(os.fsdecode(r)) for r in roots]
-        self.buffer = []
+        outermost = not self.stack
+        self.stack.append([os.path.realpath(os.fsdecode(r)) for r in roots])
         try:
             yield
-        except BaseException as exc:
-            leaked = self._leaked()
-            self.roots, self.buffer = saved
-            if leaked:
-                raise AssertionError("write guard: a holdout marker reached a write") from exc
-            raise
-        leaked = self._leaked()
-        self.roots, self.buffer = saved
-        if leaked:
-            raise AssertionError("write guard: a holdout marker reached a write")
+        finally:
+            self.stack.pop()
+        if outermost:
+            joined = b"".join(self.buffer)
+            self.buffer = []
+            if any(marker in joined for marker in HOLDOUT_MARKERS):
+                self._violate("write guard: a holdout marker reached a write")
 
 
 class _Handle:
@@ -1263,15 +1260,14 @@ class _Handle:
 
 @pytest.fixture(autouse=True)
 def write_guard(monkeypatch):
-    """Patches open/io.open, os.open/os.write/os.close, the tempfile creators, and the pipeline entry points
-    build() and write_outputs(). Installed before each test body, so it sees every write from the start."""
+    """Patches open/io.open, os.open/os.write/os.close, the tempfile creators, and the pipeline steps
+    load_real, validate_bytes, build and write_outputs. Installed before each test body."""
     global _CURRENT_GUARD
     guard = _WriteGuard()
     _CURRENT_GUARD = guard
     real_open, real_io_open = builtins.open, io.open
     real_os_open, real_os_write, real_os_close = os.open, os.write, os.close
     real_named, real_mkstemp, real_tmpfile = tempfile.NamedTemporaryFile, tempfile.mkstemp, tempfile.TemporaryFile
-    real_build, real_write_outputs = r1.build, r1.write_outputs
 
     def _open(file, mode="r", *args, **kwargs):
         writing = any(c in mode for c in "wax+")
@@ -1279,21 +1275,23 @@ def write_guard(monkeypatch):
             handle = real_io_open(file, mode, *args, **kwargs)
             return _Handle(handle, guard.fd_paths.get(file), guard) if writing else handle
         if writing:
-            guard.check(file, "open for writing")
-            return _Handle(real_open(file, mode, *args, **kwargs), file, guard)
+            guard.check_path(file, "open for writing")
+            handle = real_open(file, mode, *args, **kwargs)
+            guard.fd_paths[handle.fileno()] = file
+            return _Handle(handle, file, guard)
         return real_open(file, mode, *args, **kwargs)
 
     def _os_open(path, flags, *args, **kwargs):
         if flags & _WRITE_FLAGS:
-            guard.check(path, "create")
+            guard.check_path(path, "create")
             fd = real_os_open(path, flags, *args, **kwargs)
             guard.fd_paths[fd] = path
             return fd
         return real_os_open(path, flags, *args, **kwargs)
 
     def _os_write(fd, data):
-        if fd in guard.fd_paths:
-            guard.record(guard.fd_paths[fd], data)
+        if guard.stack:
+            guard.record(guard.fd_paths.get(fd), data)
         return real_os_write(fd, data)
 
     def _os_close(fd):
@@ -1301,26 +1299,26 @@ def write_guard(monkeypatch):
         return real_os_close(fd)
 
     def _named(*args, **kwargs):
-        guard.check(kwargs.get("dir") or tempfile.gettempdir(), "temporary file")
+        guard.check_path(kwargs.get("dir") or tempfile.gettempdir(), "temporary file")
         return real_named(*args, **kwargs)
 
     def _mkstemp(*args, **kwargs):
-        guard.check(kwargs.get("dir") or tempfile.gettempdir(), "temporary file")
+        guard.check_path(kwargs.get("dir") or tempfile.gettempdir(), "temporary file")
         return real_mkstemp(*args, **kwargs)
 
     def _tmpfile(*args, **kwargs):
-        if guard.roots is not None:
-            raise AssertionError("write guard: an unnamed temporary file inside the pipeline")
+        if guard.stack:
+            guard._violate("write guard: an unnamed temporary file inside the pipeline")
         return real_tmpfile(*args, **kwargs)
 
-    def _scoped_build(inputs):
-        with guard.scope(()):
-            return real_build(inputs)
+    def _step(fn, roots_for):
+        def scoped(*args, **kwargs):
+            with guard.scope(roots_for(*args, **kwargs)):
+                return fn(*args, **kwargs)
+        return scoped
 
-    def _scoped_write(result, out):
-        with guard.scope(r1.output_paths(out)):
-            return real_write_outputs(result, out)
-
+    real_load, real_validate = r1.load_real, r1.validate_bytes
+    real_build, real_write = r1.build, r1.write_outputs
     monkeypatch.setattr(builtins, "open", _open)
     monkeypatch.setattr(io, "open", _open)
     monkeypatch.setattr(os, "open", _os_open)
@@ -1329,17 +1327,22 @@ def write_guard(monkeypatch):
     monkeypatch.setattr(tempfile, "NamedTemporaryFile", _named)
     monkeypatch.setattr(tempfile, "mkstemp", _mkstemp)
     monkeypatch.setattr(tempfile, "TemporaryFile", _tmpfile)
-    monkeypatch.setattr(r1, "build", _scoped_build)
-    monkeypatch.setattr(r1, "write_outputs", _scoped_write)
+    monkeypatch.setattr(r1, "load_real", _step(real_load, lambda *a, **k: ()))
+    monkeypatch.setattr(r1, "validate_bytes", _step(real_validate, lambda *a, **k: ()))
+    monkeypatch.setattr(r1, "build", _step(real_build, lambda *a, **k: ()))
+    monkeypatch.setattr(r1, "write_outputs", _step(real_write, lambda result, out: r1.output_paths(out)))
     yield guard
     _CURRENT_GUARD = None
+    assert not guard.violations, guard.violations
 
 
 @pytest.fixture(autouse=True)
-def core_limit_restored():
-    soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
-    yield
-    resource.setrlimit(resource.RLIMIT_CORE, (soft, hard))
+def core_limit_stubbed(monkeypatch):
+    """Every test runs with setrlimit replaced by a recorder, so no test lowers pytest's own core limit.
+    The real (0, 0) call is checked in a child process (test_disable_core_dumps_in_a_child_process)."""
+    calls = []
+    monkeypatch.setattr(resource, "setrlimit", lambda which, limits: calls.append((which, limits)))
+    return calls
 
 
 def test_guard_refuses_a_write_outside_the_scope(tmp_path):
@@ -1347,6 +1350,7 @@ def test_guard_refuses_a_write_outside_the_scope(tmp_path):
     with pytest.raises(AssertionError, match="write guard"):
         with _CURRENT_GUARD.scope([tmp_path / "out"]):
             open(target, "wb").write(b"x")
+    _CURRENT_GUARD.violations.clear()
     assert not target.exists()
 
 
@@ -1354,11 +1358,19 @@ def test_guard_refuses_a_holdout_marker_inside_the_scope(tmp_path):
     with pytest.raises(AssertionError, match="holdout marker"):
         with _CURRENT_GUARD.scope([tmp_path]):
             (tmp_path / "a.bin").write_bytes(b"P000005")
+    _CURRENT_GUARD.violations.clear()
+
+
+def test_guard_refuses_os_write_on_a_descriptor_the_pipeline_did_not_open(tmp_path):
+    with pytest.raises(AssertionError, match="descriptor"):
+        with _CURRENT_GUARD.scope([tmp_path]):
+            os.write(1, b"P000005\n")
+    _CURRENT_GUARD.violations.clear()
 
 
 @pytest.mark.parametrize("api", ["open", "write_text", "tempfile", "mkstemp", "exception"])
 def test_guard_catches_each_api(tmp_path, api):
-    """A write to an unallowed folder through each API, and a write on an exception path, is refused."""
+    """A write to an unallowed folder through each API, and on an exception path, is refused."""
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
 
@@ -1382,9 +1394,26 @@ def test_guard_catches_each_api(tmp_path, api):
     with pytest.raises(AssertionError, match="write guard"):
         with _CURRENT_GUARD.scope([tmp_path / "out"]):
             leaky()
+    _CURRENT_GUARD.violations.clear()
 
 
-def test_core_dumps_are_disabled_before_the_first_page_is_read(tmp_path, monkeypatch):
+def test_disable_core_dumps_sets_zero_in_a_child_process():
+    """The real call, in a child process, so pytest's own limits are not touched."""
+    code = (
+        "import importlib.util, resource, sys\n"
+        f"spec = importlib.util.spec_from_file_location('r1', {str(_SCRIPT)!r})\n"
+        "m = importlib.util.module_from_spec(spec)\n"
+        "sys.modules['r1'] = m\n"
+        "spec.loader.exec_module(m)\n"
+        "result = m.disable_core_dumps()\n"
+        "print(result, resource.getrlimit(resource.RLIMIT_CORE))\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "True (0, 0)"
+
+
+def test_core_dumps_are_disabled_before_the_first_page_is_read(tmp_path, monkeypatch, core_limit_stubbed):
     fx = H.build_real_fixture(tmp_path / "tree")
     fx.install(monkeypatch)
     events = []
@@ -1394,12 +1423,17 @@ def test_core_dumps_are_disabled_before_the_first_page_is_read(tmp_path, monkeyp
     monkeypatch.setattr(r1, "_read_real_snapshot", lambda blobs: events.append("pages") or real_pages(blobs))
     r1.load_real(fx.permit, trust_path=fx.trust)
     assert events == ["core", "pages"]
+    assert core_limit_stubbed == [(resource.RLIMIT_CORE, (0, 0))]
 
 
 def test_refused_core_dump_switch_refuses_with_zero_data_opens(tmp_path, monkeypatch, file_opens, capsys):
     fx = H.build_real_fixture(tmp_path / "tree")
     fx.install(monkeypatch)
-    monkeypatch.setattr(r1, "disable_core_dumps", lambda: False)
+
+    def refuse(which, limits):
+        raise OSError("setrlimit refused")
+
+    monkeypatch.setattr(resource, "setrlimit", refuse)
     file_opens.clear()
     with pytest.raises(r1.PermitRefused, match="core dumps"):
         r1.load_real(fx.permit, trust_path=fx.trust)
@@ -1414,15 +1448,48 @@ def test_parse_error_carries_no_value_size_or_label():
     with pytest.raises(r1.IntegrityError) as info:
         r1._parse_json(b'{"count": ' + b"9" * 5000 + b"}", "ieg/page-00000.json")
     assert str(info.value) == "integrity_error"
+    assert info.value.__suppress_context__
 
 
-def _malformed_holdout_run(tmp_path, monkeypatch, capsys, name, digits):
-    fx = H.build_real_fixture(tmp_path / name)
-    page = next(p for p in fx.paths["snapshot"].rglob("*.json")
-                if b'"outcome": "Moderately Satisfactory"' in p.read_bytes())
-    page.write_bytes(page.read_bytes().replace(b'"outcome": "Moderately Satisfactory"',
-                                               b'"outcome": ' + digits.encode("ascii")))
+def test_loader_boundary_raises_fixed_messages_only(tmp_path, monkeypatch):
+    """A page whose sha256 is wrong, and an unexpected internal error, both leave load_real with no detail."""
+    fx = H.build_real_fixture(tmp_path / "tree")
     fx.install(monkeypatch)
+    page = fx.paths["snapshot"] / "ieg" / "page-00000.json"
+    page.write_bytes(page.read_bytes() + b" ")
+    with pytest.raises(r1.PinRefused) as info:
+        r1.load_real(fx.permit, trust_path=fx.trust)
+    assert str(info.value) == "snapshot page sha256 does not match the manifest"
+    assert page.name not in str(info.value)
+
+    def broken(blobs):
+        raise KeyError("P000005")
+
+    monkeypatch.setattr(r1, "_read_real_snapshot", broken)
+    with pytest.raises(r1.IntegrityError) as info:
+        r1.load_real(fx.permit, trust_path=fx.trust)
+    assert str(info.value) == "integrity_error" and "P000005" not in str(info.value)
+
+
+def _malformed_run(tmp_path, monkeypatch, capsys, name, digits, parse_calls):
+    """A synthetic real-mode tree whose holdout page carries a number of `digits` digits. The page's hashes and
+    the chain are rebuilt around it, so the run reaches the page parser and no earlier check."""
+    def hook(world):
+        page = next(k for k, v in world.blobs.items()
+                    if k.startswith("snapshot/ieg/") and b'"outcome": "Moderately Satisfactory"' in v)
+        data = world.blobs[page].replace(b'"outcome": "Moderately Satisfactory"',
+                                         b'"outcome": ' + digits.encode("ascii"))
+        H.replace_page(world, page[len("snapshot/"):], data)
+
+    fx = H.build_real_fixture(tmp_path / name, world_hook=hook)
+    fx.install(monkeypatch)
+    real_parse = r1._parse_json
+
+    def spy(data, label, **kwargs):
+        parse_calls.append(len(data))
+        return real_parse(data, label, **kwargs)
+
+    monkeypatch.setattr(r1, "_parse_json", spy)
     capsys.readouterr()
     code = r1.main(["--real", "--r1-permit", str(fx.permit), "--out", str(fx.paths["out"])])
     captured = capsys.readouterr()
@@ -1430,14 +1497,16 @@ def _malformed_holdout_run(tmp_path, monkeypatch, capsys, name, digits):
     return code, captured.out, captured.err, out.exists(), out.with_name("out.blocked").exists()
 
 
-def test_malformed_holdout_values_give_identical_stderr_and_no_output(tmp_path, monkeypatch, capsys):
-    first = _malformed_holdout_run(tmp_path, monkeypatch, capsys, "a", "1" * 5000)
-    second = _malformed_holdout_run(tmp_path, monkeypatch, capsys, "b", "2" * 6000)
+def test_malformed_holdout_values_reach_the_parser_and_give_identical_output(tmp_path, monkeypatch, capsys):
+    calls_a, calls_b = [], []
+    first = _malformed_run(tmp_path, monkeypatch, capsys, "a", "1" * 5000, calls_a)
+    second = _malformed_run(tmp_path, monkeypatch, capsys, "b", "2" * 6000, calls_b)
+    assert max(calls_a) > 5000 and max(calls_b) > 6000, "the page parser was not reached"
     assert first == second
     code, out, err, made, blocked = first
-    assert code == 3 and out == "" and err.strip() == "refused"
+    assert code == 5 and out == "" and err.strip() == "integrity_error"
     assert not made and not blocked
-    assert "5000" not in err and "6000" not in err and "page" not in err
+    assert "5000" not in err and "page" not in err
 
 
 def test_blocked_diagnostics_hold_the_unknown_literals_and_counts_across_both_windows():
@@ -1456,7 +1525,6 @@ def test_blocked_diagnostics_hold_the_unknown_literals_and_counts_across_both_wi
         {"canonical": ["string", "Foo"], "count": 1},
     ]
     assert b"Excellent" not in res.files["blocked_receipt.json"]
-
 
 
 # ---------------------------------------------------------------- guard against any research read
