@@ -14,8 +14,9 @@ Only this command line runs on real data:
 Any other command line exits 3 before any data file is opened. A real run also exits 3
 while scripts/ieg_r1a_literals_trust.json holds null.
 
-Exit codes: 0 ok; 3 refused before any data read; 5 integrity error, or the result is over
-RESULT_LIMIT. stdout and stderr carry only the fixed codes below, and --help prints its text.
+Exit codes: 0 ok; 3 refused before any data read; 5 integrity error, the result is over
+RESULT_LIMIT, or cleanup_failed (spec 9.5). stdout and stderr carry only the ALLOWED_CODES below,
+and --help prints its text.
 """
 
 from __future__ import annotations
@@ -40,6 +41,8 @@ RESULT_LIMIT = 1048576                 # spec 3: 1 MiB, checked on the serialize
 RESULT_LIMIT_CODE = "result_limit_exceeded"
 INTEGRITY_CODE = "integrity_error"
 CLEANUP_CODE = "cleanup_failed"
+# The only fixed codes stdout or stderr may carry (spec 6, as amended by 9.5). Tests enumerate this tuple.
+ALLOWED_CODES = ("ok", "refused", INTEGRITY_CODE, RESULT_LIMIT_CODE, CLEANUP_CODE)
 REFUSED_CODE = "refused"
 OK_CODE = "ok"
 OUTCOME = "outcome"
@@ -487,7 +490,7 @@ HELP = """usage:
 
 R1a literals-only script. --real needs an R1a permit whose sha256 is in
 scripts/ieg_r1a_literals_trust.json. --out must not exist. Exit codes: 0 ok,
-3 refused before any data read, 5 integrity error or result limit exceeded.
+3 refused before any data read, 5 integrity error, result limit exceeded or cleanup_failed.
 """
 
 
