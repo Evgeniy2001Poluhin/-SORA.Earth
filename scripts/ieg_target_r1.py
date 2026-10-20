@@ -366,11 +366,16 @@ def _safe_name(name) -> str:
     return name
 
 
+def _int_not_bool(value) -> bool:
+    """A JSON integer. bool is a subclass of int and 1.0 == 1, so neither may stand for a count (spec 9.2)."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _ieg_block(manifest) -> dict:
     if not isinstance(manifest, dict) or not isinstance(manifest.get("datasets"), dict):
         raise IntegrityError("snapshot manifest has no datasets")
     ieg = manifest["datasets"].get("ieg")
-    if not isinstance(ieg, dict) or not isinstance(ieg.get("pages"), list) or not isinstance(ieg.get("api_total"), int):
+    if not isinstance(ieg, dict) or not isinstance(ieg.get("pages"), list) or not _int_not_bool(ieg.get("api_total")):
         raise IntegrityError("snapshot manifest has no ieg dataset block")
     return ieg
 
@@ -504,7 +509,8 @@ def validate_bytes(blobs: Mapping[str, bytes], pins: Pins) -> Inputs:
         obj = _parse_json(data, name, object_pairs_hook=_projection_hook)
         if not isinstance(obj, dict) or not isinstance(obj.get("data"), list) or "count" not in obj:
             raise IntegrityError("page lacks the count or data keys")
-        if obj["count"] != ieg["api_total"] or len(obj["data"]) != page.get("records"):
+        if (not _int_not_bool(obj["count"]) or obj["count"] != ieg["api_total"]
+                or not _int_not_bool(page.get("records")) or len(obj["data"]) != page.get("records")):
             raise IntegrityError("page count or record number differs from the manifest")
         for index, item in enumerate(obj["data"]):
             if not isinstance(item, dict):
