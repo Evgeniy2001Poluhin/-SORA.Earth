@@ -7,6 +7,7 @@ research data root.
 
 from __future__ import annotations
 
+import ast
 import builtins
 import contextlib
 import re
@@ -1582,14 +1583,363 @@ def test_field_limit_violation_prints_field_limit_exceeded(tmp_path, monkeypatch
     assert not fx.paths["out"].exists()
 
 
-def test_refusal_messages_in_the_builder_carry_no_dynamic_text():
-    """Every refusal raised with an f-string may interpolate only the static `label` argument."""
-    for line in _SCRIPT.read_text(encoding="utf-8").splitlines():
-        if re.search(r"(Refused|IntegrityError|OutputRefused)\(f\"", line):
-            fields = re.findall(r"\{([^}]*)\}", line)
-            assert set(fields) <= {"label"}, line
+_CHECKED_SOURCES = (_SCRIPT, _REPO / "scripts" / "ieg_r1a_literals.py")
 
 
+def _refusal_classes(tree: ast.Module) -> set:
+    """The exception classes the module defines: each class that reaches RuntimeError or Exception through its bases."""
+    found: set = set()
+    grew = True
+    while grew:
+        grew = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name not in found:
+                roots = {"RuntimeError", "Exception", "BaseException"} | found
+                if any(isinstance(b, ast.Name) and b.id in roots for b in node.bases):
+                    found.add(node.name)
+                    grew = True
+    return found
+
+
+def _parent_map(tree) -> dict:
+    return {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+
+
+def _bindings(tree) -> dict:
+    """Every place a name is bound anywhere in the module, keyed by name."""
+    found: dict = {}
+
+    def add(name, node):
+        found.setdefault(name, []).append(node)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            add(node.id, node)
+        elif isinstance(node, ast.arg):
+            add(node.arg, node)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            add(node.name, node)
+        elif isinstance(node, ast.alias):
+            add((node.asname or node.name).split(".")[0], node)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            add(node.name, node)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            for name in node.names:
+                add(name, node)
+    return found
+
+
+def _module_value(tree, name):
+    """The value of `name` when the module binds it exactly once, as a plain module-level assignment; else None."""
+    if len(_bindings(tree).get(name, [])) != 1:
+        return None
+    for stmt in tree.body:
+        if (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Name) and stmt.targets[0].id == name):
+            return stmt.value
+    return None
+
+
+def _is_constant_str(node) -> bool:
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def _is_read_only_table(tree, name, parents) -> bool:
+    """Every use of the module name is a read `name[...]`. A store, a del, a mutating method, an alias or
+    passing it on all make it not read-only."""
+    module_assign = next((s for s in tree.body if isinstance(s, ast.Assign) and any(
+        isinstance(t, ast.Name) and t.id == name for t in s.targets)), None)
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Name) and node.id == name):
+            continue
+        parent = parents.get(node)
+        if module_assign is not None and node in module_assign.targets:
+            continue
+        if (isinstance(node.ctx, ast.Load) and isinstance(parent, ast.Subscript)
+                and parent.value is node and isinstance(parent.ctx, ast.Load)):
+            continue
+        return False
+    return True
+
+
+def _names_refusal(key, refusals) -> bool:
+    return ((isinstance(key, ast.Name) and key.id in refusals)
+            or (isinstance(key, ast.Attribute) and key.attr in refusals))
+
+
+def _is_type_call(node) -> bool:
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "type"
+
+
+def _string_argument(expr, tree, parents, refusals, dispatch_param):
+    """Return (problem, uses_label). Accepted, and nothing looser:
+    - a constant string;
+    - an f-string whose only interpolation is the bare name `label`;
+    - a name bound exactly once, at module level, to a constant string;
+    - a subscript of a module dict whose values are all constant strings and which is only ever read,
+      keyed by a refusal class, or by type(<exc>) inside a boundary wrapper that passes the dispatch check."""
+    if _is_constant_str(expr):
+        return None, False
+    if isinstance(expr, ast.Name) and expr.id == "label":
+        return None, True
+    if isinstance(expr, ast.Name):
+        value = _module_value(tree, expr.id)
+        if value is not None and _is_constant_str(value):
+            return None, False
+        return f"name {expr.id!r} is not the label or a module-level constant string", False
+    if isinstance(expr, ast.JoinedStr):
+        uses = False
+        for part in expr.values:
+            if isinstance(part, ast.Constant):
+                continue
+            if (isinstance(part, ast.FormattedValue) and part.format_spec is None
+                    and isinstance(part.value, ast.Name) and part.value.id == "label"):
+                uses = True
+                continue
+            return "f-string interpolates a value other than the label", uses
+        return None, uses
+    if isinstance(expr, ast.Subscript) and isinstance(expr.value, ast.Name):
+        table = _module_value(tree, expr.value.id)
+        key = expr.slice
+        ok_table = (isinstance(table, ast.Dict)
+                    and all(_is_constant_str(v) for v in table.values)
+                    and _is_read_only_table(tree, expr.value.id, parents))
+        if not ok_table:
+            return f"subscript of {expr.value.id!r}, which is not a read-only table of constant strings", False
+        if _names_refusal(key, refusals):
+            return None, False
+        if (dispatch_param and _is_type_call(key) and len(key.args) == 1
+                and isinstance(key.args[0], ast.Name) and key.args[0].id == dispatch_param):
+            return None, False
+        return "table key is not a refusal class", False
+    if isinstance(expr, ast.BinOp):
+        return "string built with an operator (+ or %)", False
+    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute) and expr.func.attr == "format":
+        return "str.format call", False
+    return f"argument is a {type(expr).__name__}, not a constant string", False
+
+
+def _enclosing_function(node, parents):
+    cur = parents.get(node)
+    while cur is not None and not isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        cur = parents.get(cur)
+    return cur
+
+
+def _param_names(func) -> list:
+    return [a.arg for a in func.args.posonlyargs + func.args.args + func.args.kwonlyargs]
+
+
+def _enclosing_statement(node, parents):
+    cur = parents.get(node)
+    while cur is not None and not isinstance(cur, ast.stmt):
+        cur = parents.get(cur)
+    return cur
+
+
+def _is_check_store(stmt) -> bool:
+    return (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+            and isinstance(stmt.targets[0], ast.Attribute) and stmt.targets[0].attr == "check")
+
+
+def _guarded_return_is_constant(cmp_node, tree, parents, refusals) -> bool:
+    """`exc.args == (<constants>,)` may only guard an `if` whose branches return refusals built from
+    constant strings (rules 1 and 2)."""
+    if not (len(cmp_node.ops) == 1 and isinstance(cmp_node.ops[0], ast.Eq)
+            and len(cmp_node.comparators) == 1 and isinstance(cmp_node.comparators[0], ast.Tuple)):
+        return False
+    for elt in cmp_node.comparators[0].elts:
+        problem, uses_label = _string_argument(elt, tree, parents, refusals, None)
+        if problem or uses_label:
+            return False
+    cur = parents.get(cmp_node)
+    while isinstance(cur, ast.BoolOp):
+        cur = parents.get(cur)
+    if not (isinstance(cur, ast.If) and cur.test is not None):
+        return False
+    for stmt in cur.body + cur.orelse:
+        for ret in ast.walk(stmt):
+            if isinstance(ret, ast.Return):
+                value = ret.value
+                if not isinstance(value, ast.Call):
+                    return False
+                for arg in value.args + [k.value for k in value.keywords]:
+                    problem, uses_label = _string_argument(arg, tree, parents, refusals, None)
+                    if problem or uses_label:
+                        return False
+    return True
+
+
+def _exc_read_allowed(node, tree, parents, refusals) -> bool:
+    """Rule 3a: `exc` may be read only (i) as an argument of isinstance()/type(), (ii) in an
+    `exc.args == (<constants>,)` comparison guarding constant returns, or (iii) inside the `.check` assignment."""
+    parent = parents.get(node)
+    if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) and parent.func.id in ("isinstance", "type"):
+        return True
+    if _is_check_store(_enclosing_statement(node, parents)):
+        return True
+    if (isinstance(parent, ast.Attribute) and parent.attr == "args"
+            and isinstance(parents.get(parent), ast.Compare)
+            and parents[parent].left is parent):
+        return _guarded_return_is_constant(parents[parent], tree, parents, refusals)
+    return False
+
+
+def _dispatch_violations(func, name, parents, tree, refusals) -> list:
+    """A boundary wrapper's first parameter is read only as rule 3a allows. Any other read (its message,
+    its attributes, a value put into an output) could carry data."""
+    params = _param_names(func)
+    if not params:
+        return []
+    problems = []
+    for node in ast.walk(func):
+        if isinstance(node, ast.Name) and node.id == params[0] and isinstance(node.ctx, ast.Load):
+            if not _exc_read_allowed(node, tree, parents, refusals):
+                problems.append(f"{name}:{node.lineno}: {params[0]!r} read outside rule 3a")
+    return problems
+
+
+def _string_discipline_violations(source: str, name: str) -> list:
+    """Every refusal argument must be accepted by _string_argument, and every label must be a constant string at
+    every call site of its function. A module function that a raise statement goes through is accepted as a
+    boundary wrapper only when its body passes _dispatch_violations. Returns `file:line: reason` strings."""
+    tree = ast.parse(source, filename=name)
+    refusals = _refusal_classes(tree)
+    parents = _parent_map(tree)
+    module_defs = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    problems = []
+    raised_through = {
+        n.exc.func.id for n in ast.walk(tree)
+        if isinstance(n, ast.Raise) and isinstance(n.exc, ast.Call)
+        and isinstance(n.exc.func, ast.Name) and n.exc.func.id in module_defs
+    }
+    clean = {}
+    for fname in sorted(raised_through):
+        found = _dispatch_violations(module_defs[fname], name, parents, tree, refusals)
+        clean[fname] = not found
+        problems.extend(found)
+    # Guard: a `.check` label is set on a refusal but never read anywhere in the builder. Its only read is
+    # the getattr inside a boundary wrapper's `.check` assignment (rule 3b).
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == "check" and isinstance(node.ctx, ast.Load):
+            problems.append(f"{name}:{node.lineno}: .check is read; a label may be set but never read")
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "getattr" \
+                and len(node.args) >= 2:
+            attr = node.args[1]
+            if not (isinstance(attr, ast.Constant) and isinstance(attr.value, str)):
+                problems.append(f"{name}:{node.lineno}: getattr with a name that is not a constant")
+            elif attr.value == "check":
+                func = _enclosing_function(node, parents)
+                if not (_is_check_store(_enclosing_statement(node, parents)) and func is not None and clean.get(func.name)):
+                    problems.append(f"{name}:{node.lineno}: .check is read; a label may be set but never read")
+    label_users = {}  # function name -> function node that builds a refusal from `label`
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        parent = parents.get(node)
+        raised = isinstance(parent, ast.Raise) and parent.exc is node
+        constructs = (isinstance(node.func, ast.Name) and node.func.id in refusals) or _is_type_call(node.func)
+        if not (raised or constructs):
+            continue
+        if raised and isinstance(node.func, ast.Name) and clean.get(node.func.id):
+            continue  # the wrapper's body is checked above; its argument is dispatch-only
+        where = f"{name}:{node.lineno}"
+        func = _enclosing_function(node, parents)
+        dispatch = None
+        if func is not None and clean.get(func.name) and _param_names(func):
+            dispatch = _param_names(func)[0]
+        for expr in list(node.args) + [kw.value for kw in node.keywords]:
+            if isinstance(expr, ast.Starred):
+                problems.append(f"{where}: starred argument")
+                continue
+            problem, uses_label = _string_argument(expr, tree, parents, refusals, dispatch)
+            if problem:
+                problems.append(f"{where}: {problem}")
+            if uses_label:
+                if func is None or "label" not in _param_names(func):
+                    problems.append(f"{where}: label is not a parameter of the enclosing function")
+                else:
+                    label_users[func.name] = func
+    for fname, func in label_users.items():
+        params = _param_names(func)
+        index = params.index("label")
+        is_method = bool(params) and params[0] in ("self", "cls") and isinstance(parents.get(func), ast.ClassDef)
+        offset = 1 if is_method else 0
+        callers = [
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and ((isinstance(n.func, ast.Name) and n.func.id == fname)
+                 or (isinstance(n.func, ast.Attribute) and n.func.attr == fname))
+        ]
+        if not callers:
+            problems.append(f"{name}:{func.lineno}: {fname} takes a label but no call site passes one")
+        for caller in callers:
+            where = f"{name}:{caller.lineno}"
+            if any(isinstance(a, ast.Starred) for a in caller.args) or any(k.arg is None for k in caller.keywords):
+                problems.append(f"{where}: call to {fname} unpacks its arguments")
+                continue
+            value = next((k.value for k in caller.keywords if k.arg == "label"), None)
+            if value is None:
+                pos = index - offset if isinstance(caller.func, ast.Attribute) else index
+                if 0 <= pos < len(caller.args):
+                    value = caller.args[pos]
+            if value is None:
+                problems.append(f"{where}: call to {fname} passes no label")
+            elif not _is_constant_str(value):
+                problems.append(f"{where}: call to {fname} passes a label that is not a constant string")
+    return problems
+
+
+def test_refusal_arguments_are_constant_strings_or_the_label():
+    problems = []
+    for path in _CHECKED_SOURCES:
+        if path.exists():
+            problems += _string_discipline_violations(path.read_text(encoding="utf-8"), str(path.relative_to(_REPO)))
+    assert not problems, "\n".join(problems)
+
+
+# Each mutation replaces one anchor in the builder text, in memory. The anchor must match exactly once,
+# so a mutation that did not apply cannot pass as one the check caught.
+_MUTATIONS = {
+    "a_multiline_fstring_with_data": (
+        'raise IntegrityError(f"{label} does not end with a newline")',
+        'raise IntegrityError(\n        f"bad {value}")',
+    ),
+    "b_string_concatenation": (
+        'raise IntegrityError(f"{label} does not end with a newline")',
+        'raise IntegrityError("bad " + str(x))',
+    ),
+    "c_str_format_call": (
+        'raise IntegrityError(f"{label} does not end with a newline")',
+        'raise IntegrityError("bad {}".format(x))',
+    ),
+    "d_module_constant_reassigned": (
+        'FIELD_LIMIT = "field_limit_exceeded"',
+        'FIELD_LIMIT = "field_limit_exceeded"\nFIELD_LIMIT = f"x {v}"',
+    ),
+    "e_table_value_not_constant": (
+        '    PermitRefused: "permit_refused",',
+        '    PermitRefused: f"permit {v}",',
+    ),
+    "f_wrapper_puts_exc_in_message": (
+        "return IntegrityError(FIELD_LIMIT)",
+        "return IntegrityError(str(exc))",
+    ),
+    "g_check_label_read_in_output": (
+        "print(FIELD_LIMIT if exc.args == (FIELD_LIMIT,) else INTEGRITY_CODE, file=sys.stderr)",
+        "print(exc.check, file=sys.stderr)\n        print(FIELD_LIMIT if exc.args == (FIELD_LIMIT,) else INTEGRITY_CODE, file=sys.stderr)",
+    ),
+}
+
+
+@pytest.mark.parametrize("mutation", sorted(_MUTATIONS))
+def test_the_string_check_catches_each_mutation(mutation):
+    anchor, replacement = _MUTATIONS[mutation]
+    text = _SCRIPT.read_text(encoding="utf-8")
+    assert text.count(anchor) == 1, f"anchor for {mutation} must match exactly once"
+    mutated = text.replace(anchor, replacement)
+    assert mutated != text
+    assert _string_discipline_violations(mutated, "mutant"), mutation
 
 
 def test_blocked_diagnostics_hold_the_unknown_literals_and_counts_across_both_windows():
