@@ -169,6 +169,13 @@ groups:
               expr: sora_observation_coverage_gap_days{job="sora-scheduler"} > 0
               intervalMs: 1000
               maxDataPoints: 43200
+        # Healthy is an empty result: a comparison filter returns nothing when
+        # the gap count is 0. Grafana treats any returned series as firing, so
+        # the expression cannot return a zero-valued series to mean healthy.
+        # NoData is therefore the healthy state, mapped to OK. An absent gauge is
+        # not healthy and is not this rule's to judge: the stale rule covers it.
+        noDataState: OK
+        execErrState: Alerting
         for: 30m
         labels:
           severity: warning
@@ -200,6 +207,13 @@ groups:
               expr: absent(sora_observation_coverage_last_success_timestamp_seconds{job="sora-scheduler"}) or time() - sora_observation_coverage_last_success_timestamp_seconds{job="sora-scheduler"} > 900
               intervalMs: 1000
               maxDataPoints: 43200
+        # Healthy is an empty result (the timestamp is fresh, so neither branch
+        # returns a series). Absence returns a series and fires. A stopped
+        # scheduler or a down target lets the series go stale, which makes absent()
+        # return one. noDataState OK is the healthy state; a failing query is not
+        # evidence of health, so it alerts.
+        noDataState: OK
+        execErrState: Alerting
         for: 45m
         labels:
           severity: warning

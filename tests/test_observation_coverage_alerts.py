@@ -88,3 +88,63 @@ def test_the_scheduler_writes_the_success_timestamp():
         text = fh.read()
 
     assert "sora_observation_coverage_last_success_timestamp_seconds.labels(" in text
+
+
+DATASOURCE_DIR = os.path.join(REPO_ROOT, "grafana", "provisioning", "datasources")
+MOUNTED_DATASOURCE_FILES = ("datasource.yml", "prometheus.yml")
+
+
+def _mounted_datasource_uids():
+    yaml = pytest.importorskip("yaml")
+    uids = {}
+    for name in MOUNTED_DATASOURCE_FILES:
+        with open(os.path.join(DATASOURCE_DIR, name), encoding="utf-8") as fh:
+            for ds in yaml.safe_load(fh)["datasources"]:
+                uids.setdefault(ds.get("uid"), []).append((name, ds["name"]))
+    return uids
+
+
+@pytest.mark.parametrize("uid", [GAP, STALE])
+def test_the_states_are_explicit_so_healthy_is_normal(rules, uid):
+    """Healthy returns an empty result, and Grafana's NoData must read as OK, not
+    as an alert. A failing query alerts rather than being taken for health."""
+    assert rules[uid]["noDataState"] == "OK"
+    assert rules[uid]["execErrState"] == "Alerting"
+
+
+def test_the_gap_expression_is_a_filter_so_healthy_is_empty(rules):
+    expr = _expr(rules, GAP)
+
+    assert expr.endswith("> 0")
+    assert "or vector(0)" not in expr
+
+
+def test_the_stale_expression_has_the_absence_branch_and_the_age_branch(rules):
+    expr = _expr(rules, STALE)
+
+    assert expr.startswith("absent(")
+    assert " or time() - " in expr
+    assert expr.endswith("> 900")
+
+
+def test_every_rule_names_a_datasource_the_provisioning_declares(rules):
+    """A datasourceUid that no mounted datasource declares is resolved by Grafana
+    to nothing: the rule evaluates against no backend and reports NoData forever.
+    Before this test the existing rules relied on `prometheus`, and no datasource
+    file declared it."""
+    declared = _mounted_datasource_uids()
+
+    for uid, rule in rules.items():
+        for query in rule["data"]:
+            ds = query["datasourceUid"]
+            assert ds in declared, (
+                f"rule {uid} uses datasourceUid {ds!r}, which no mounted datasource declares")
+
+
+def test_the_mounted_datasource_uid_is_unique_and_is_prometheus():
+    """Two files both provision a datasource named Prometheus. They must agree on
+    the uid, or the second silently replaces the first's identity."""
+    declared = _mounted_datasource_uids()
+
+    assert set(declared) == {"prometheus"}, declared
+    assert len(declared["prometheus"]) == 2
