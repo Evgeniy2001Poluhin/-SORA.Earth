@@ -81,6 +81,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(retrain, "MODELS_DIR", str(seed))
     monkeypatch.setattr(retrain, "DATA_DIR", str(data), raising=False)
     monkeypatch.setattr(retrain, "PROJECTS_CSV", str(csv))
+    monkeypatch.setattr("app.services.retraining.PROJECTS_CSV", str(csv))
     return {"retrain": retrain, "csv": csv}
 
 

@@ -45,8 +45,10 @@ def dataset(tmp_path, monkeypatch):
     models = tmp_path / "models"
     models.mkdir()
     monkeypatch.setattr(retrain, "PROJECTS_CSV", str(path))
+    monkeypatch.setattr("app.services.retraining.PROJECTS_CSV", str(path))
     monkeypatch.setattr(retrain, "MODELS_DIR", str(models))
     monkeypatch.setattr(retrain, "PRED_LOG", str(tmp_path / "absent.csv"))
+    monkeypatch.setattr("app.services.retraining.PRED_LOG", str(tmp_path / "absent.csv"))
     monkeypatch.setattr(retrain, "DATASET_LOCK", str(tmp_path / ".lock"))
     return lambda df: df.to_csv(path, index=False)
 
@@ -115,7 +117,7 @@ def test_the_code_no_longer_calls_it_temporal():
     import os
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(root, "app", "api", "retrain.py"), encoding="utf-8") as fh:
+    with open(os.path.join(root, "app", "services", "retraining.py"), encoding="utf-8") as fh:
         body = fh.read()
 
     assert "Temporal split — no shuffling" not in body

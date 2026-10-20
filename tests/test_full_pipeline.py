@@ -48,7 +48,7 @@ def test_full_pipeline_drift_and_promote():
     with patch("app.external_data.refresh_live_data") as mock_refresh, \
          patch("app.api.drift.compute_drift") as mock_drift, \
          patch("app.api.retrain._get_current_metrics") as mock_m, \
-         patch("app.api.retrain._do_retrain") as mock_retrain, \
+         patch("app.services.retraining._do_retrain") as mock_retrain, \
          patch("app.locks.RedisLock.acquire", return_value=True), \
          patch("app.locks.RedisLock.release"), \
          patch("app.scheduler._start_retrain_log", return_value=1), \

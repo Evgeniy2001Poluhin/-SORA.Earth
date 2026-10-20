@@ -71,7 +71,7 @@ def run_closed_loop(monkeypatch, new_metrics, old_auc=0.85):
     monkeypatch.setattr("app.api.drift.compute_drift", lambda window=50: _drift(True))
     monkeypatch.setattr("app.api.retrain._get_current_metrics", lambda: {"roc_auc": old_auc})
     monkeypatch.setattr(
-        "app.api.retrain._do_retrain",
+        "app.services.retraining._do_retrain",
         lambda **kwargs: {"status": "success", "metrics": dict(new_metrics)},
     )
 

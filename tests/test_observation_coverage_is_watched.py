@@ -64,7 +64,7 @@ def test_the_job_publishes_through_the_endpoints_own_function(monkeypatch):
     job carrying its own copy would have kept the old answer while the endpoint
     reported the new one, and nothing would have disagreed out loud.
     """
-    import app.api.infra as infra
+    import app.services.observation_coverage as coverage
     import app.scheduler as scheduler_module
     from app.schemas import ObservationCoverage
 
@@ -78,12 +78,12 @@ def test_the_job_publishes_through_the_endpoints_own_function(monkeypatch):
             gap_count=3, gaps=[],
         )
 
-    monkeypatch.setattr(infra, "coverage_report", fake_report)
+    monkeypatch.setattr(coverage, "coverage_report", fake_report)
 
     result = scheduler_module.scheduled_observation_coverage()
 
     assert called, (
-        "the job did not call app.api.infra.coverage_report; if it carries its "
+        "the job did not call app.services.observation_coverage.coverage_report; if it carries its "
         "own query, the published number and the served number can disagree"
     )
     assert result["gap_count"] == 3
@@ -97,13 +97,13 @@ def test_the_count_is_never_published_without_its_denominator(monkeypatch):
     the count for exactly this reason; publishing only the count would throw it
     away at the last step.
     """
-    import app.api.infra as infra
     import app.prom_metrics as prom
     import app.scheduler as scheduler_module
+    import app.services.observation_coverage as coverage
     from app.schemas import ObservationCoverage
 
     monkeypatch.setattr(
-        infra, "coverage_report",
+        coverage, "coverage_report",
         lambda source, indicator, days: ObservationCoverage(
             source=source, indicator=indicator, required_per_day=19,
             days_examined=0, points_examined=0, complete_days=0,

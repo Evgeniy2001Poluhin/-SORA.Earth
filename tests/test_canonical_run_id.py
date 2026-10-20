@@ -231,7 +231,7 @@ def test_the_closed_loop_gives_its_decision_the_training_run_id(monkeypatch, ses
     monkeypatch.setattr("app.locks.RedisLock", lambda **kwargs: _Lock())
     monkeypatch.setattr("app.api.drift.compute_drift", lambda window=50: _drift(True))
     monkeypatch.setattr("app.api.retrain._get_current_metrics", lambda: {"roc_auc": 0.85})
-    monkeypatch.setattr("app.api.retrain._do_retrain", fake_retrain)
+    monkeypatch.setattr("app.services.retraining._do_retrain", fake_retrain)
 
     sched.closed_loop_retrain(trigger_source="probe")
 

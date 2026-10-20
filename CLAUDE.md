@@ -683,7 +683,7 @@ Optional:
    to file a new one.
 
    **How a trained model gets there.** Whatever starts a retrain, the training
-   is `app/api/retrain.py` → `_do_retrain()`, and it writes the candidate to
+   is `app/services/retraining.py` → `_do_retrain()`, and it writes the candidate to
    `runtime/staged/<run_id>/`, which nothing serves -- after pruning the older
    candidates there with `app/model_source.py` → `prune_staged()`, which spares
    the one the champion was activated from (#326). The one way into

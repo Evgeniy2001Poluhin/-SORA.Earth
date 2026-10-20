@@ -258,9 +258,9 @@ def loop(monkeypatch):
         retrains.append(kwargs)
         return {"status": "ok", "metrics": {}}
 
-    import app.api.retrain as retrain_module
+    import app.services.retraining as retraining_module
 
-    monkeypatch.setattr(retrain_module, "_do_retrain", _no_retrain, raising=False)
+    monkeypatch.setattr(retraining_module, "_do_retrain", _no_retrain, raising=False)
     return types.SimpleNamespace(module=scheduler, retrains=retrains)
 
 

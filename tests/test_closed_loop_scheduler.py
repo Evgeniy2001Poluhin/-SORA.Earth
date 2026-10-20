@@ -33,7 +33,7 @@ def test_closed_loop_no_drift():
 def test_closed_loop_drift_promote():
     from app.scheduler import closed_loop_retrain
     from app.model_source import Baseline
-    with patch("app.api.drift.compute_drift") as mock_drift,          patch("app.api.retrain._do_retrain") as mock_retrain,          patch("app.model_source.serving_baseline") as mock_baseline,          patch("app.locks.RedisLock") as MockLock,          patch("app.scheduler._start_retrain_log", return_value=99),          patch("app.scheduler._finish_retrain_log"):
+    with patch("app.api.drift.compute_drift") as mock_drift,          patch("app.services.retraining._do_retrain") as mock_retrain,          patch("app.model_source.serving_baseline") as mock_baseline,          patch("app.locks.RedisLock") as MockLock,          patch("app.scheduler._start_retrain_log", return_value=99),          patch("app.scheduler._finish_retrain_log"):
         MockLock.return_value.acquire.return_value = True
         mock_drift.return_value = _drift(True)
         mock_baseline.return_value = Baseline(auc=0.95, source="active", ok=True)
@@ -48,7 +48,7 @@ def test_closed_loop_drift_promote():
 def test_closed_loop_drift_reject():
     from app.scheduler import closed_loop_retrain
     from app.model_source import Baseline
-    with patch("app.api.drift.compute_drift") as mock_drift,          patch("app.api.retrain._do_retrain") as mock_retrain,          patch("app.model_source.serving_baseline") as mock_baseline,          patch("app.locks.RedisLock") as MockLock,          patch("app.scheduler._start_retrain_log", return_value=99),          patch("app.scheduler._finish_retrain_log"):
+    with patch("app.api.drift.compute_drift") as mock_drift,          patch("app.services.retraining._do_retrain") as mock_retrain,          patch("app.model_source.serving_baseline") as mock_baseline,          patch("app.locks.RedisLock") as MockLock,          patch("app.scheduler._start_retrain_log", return_value=99),          patch("app.scheduler._finish_retrain_log"):
         MockLock.return_value.acquire.return_value = True
         mock_drift.return_value = _drift(True)
         mock_baseline.return_value = Baseline(auc=0.95, source="active", ok=True)

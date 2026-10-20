@@ -129,7 +129,7 @@ def _ensure_experiment_once(api=None) -> None:
     `tests/test_mlflow_import_makes_no_request.py`:
     `app/drift_detection.py`, `app/registry_retry.py`,
     `app/api/admin_snapshot.py`, `app/api/drift.py`, `app/api/evaluate.py`,
-    `app/api/infra.py`, `app/api/predict.py`, `app/api/retrain.py`.
+    `app/api/infra.py`, `app/api/predict.py`, `app/services/retraining.py`.
     None defers the import into a function, and `app.main` includes those
     routers, so application startup still reaches it -- one frame further away
     than it used to be, and no less blocked.
