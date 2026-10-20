@@ -436,7 +436,7 @@ def test_holdout_candidate_below_2020_is_refused():
 
 def test_authoritative_records_must_match_the_snapshot():
     def mutate(row, split):
-        row["authoritative_records"] = row["authoritative_records"] + ";ieg/page-00009.json#0"
+        row["authoritative_records"] = row["authoritative_records"] + f";ieg/page-00009.json#{0}"
     world = H.make_world(ALL_PROJECTS, receipt_hook=_hook_pid("P000002", mutate))
     with _raises(r1.IntegrityError, "authoritative records"):
         r1.validate_bytes(world.blobs, world.pins)
@@ -453,7 +453,7 @@ def test_receipt_maximum_fy_must_match_the_snapshot():
 def test_candidate_missing_from_the_snapshot_is_refused_not_dropped():
     def hook(rows, split):
         rows.append({"project_id": "P999999", "window": "development", "evaluation_fy": "2012",
-                     "wb_code": "ARG", "authoritative_records": "ieg/page-00000.json#0"})
+                     "wb_code": "ARG", "authoritative_records": f"ieg/page-00000.json#{0}"})
         split["development"] = sorted(split["development"] + ["P999999"])
     world = H.make_world(ALL_PROJECTS, receipt_hook=hook)
     with _raises(r1.IntegrityError, "not in the snapshot"):
