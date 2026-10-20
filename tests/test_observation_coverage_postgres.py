@@ -13,7 +13,7 @@ arrived leaves every run successful and every freshness check content.
 Against PostgreSQL, because the query is PostgreSQL's: `make_interval`,
 `at time zone`, and a date cast in the GROUP BY.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import text
@@ -318,3 +318,186 @@ def test_the_window_edges_are_utc_midnights_in_every_session(
         f"{result.days_examined}, complete_days={result.complete_days}, "
         f"gaps={_gaps(result)}"
     )
+
+
+# ---- the M3 window: clock start, rolling bound, today --------------------
+#
+# These call coverage_report directly with fixed dates, so each case states its
+# own calendar instead of depending on the day the suite happens to run.
+
+TODAY = date(2026, 10, 20)
+
+
+def _fill_on(engine, day, region, minutes):
+    """Observations at the given minute offsets within one UTC calendar day."""
+    base = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+    with engine.begin() as conn:
+        for index, minute in enumerate(minutes):
+            conn.execute(INSERT, {
+                "region": region,
+                "rid": f"{region}-{day.isoformat()}-{index}",
+                "event_time": base + timedelta(minutes=minute),
+            })
+
+
+def _report(url, session_timezone=None, **params):
+    """coverage_report against a database whose session is in one zone."""
+    import app.database as database
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.services.observation_coverage import coverage_report
+
+    connect_args = {}
+    if session_timezone is not None:
+        connect_args = {"options": "-c TimeZone=%s" % session_timezone}
+    engine = create_engine(url, connect_args=connect_args)
+    original = database.SessionLocal
+    database.SessionLocal = sessionmaker(bind=engine)
+    try:
+        return coverage_report(**params)
+    finally:
+        database.SessionLocal = original
+        engine.dispose()
+
+
+def _gap_keys(result):
+    return [(g.day, g.region_id, g.observations) for g in result.gaps]
+
+
+@requires_postgres
+def test_the_day_before_the_clock_is_excluded_when_bounded(scratch_db):
+    """2026-10-10: four hours on the restored deployment's first day."""
+    from app.services.observation_coverage import M3_CLOCK_START
+
+    engine, url = scratch_db
+    _fill_on(engine, date(2026, 10, 10), "RU-MOW", [h * 60 for h in range(4)])
+
+    bounded = _report(url, source="openmeteo", indicator="temperature",
+                      days=30, not_before=M3_CLOCK_START, today=TODAY)
+    assert (bounded.days_examined, bounded.gap_count) == (0, 0), (
+        f"2026-10-10 is before the clock, but the bounded report examined "
+        f"{bounded.days_examined} day(s) with gaps {_gap_keys(bounded)}"
+    )
+
+
+@requires_postgres
+def test_the_day_before_the_clock_is_reported_without_the_bound(scratch_db):
+    """The same data, unbounded: the API's behaviour is unchanged.
+
+    Without this, the exclusion above could be a window that drops everything.
+    """
+    engine, url = scratch_db
+    _fill_on(engine, date(2026, 10, 10), "RU-MOW", [h * 60 for h in range(4)])
+
+    plain = _report(url, source="openmeteo", indicator="temperature",
+                    days=30, today=TODAY)
+    assert _gap_keys(plain) == [("2026-10-10", "RU-MOW", 4)]
+
+
+@requires_postgres
+def test_a_short_day_on_the_clock_start_is_counted(scratch_db):
+    from app.services.observation_coverage import M3_CLOCK_START
+
+    engine, url = scratch_db
+    _fill_on(engine, date(2026, 10, 11), "RU-MOW", [h * 60 for h in range(18)])
+
+    result = _report(url, source="openmeteo", indicator="temperature",
+                     days=30, not_before=M3_CLOCK_START, today=TODAY)
+
+    assert _gap_keys(result) == [("2026-10-11", "RU-MOW", 18)]
+
+
+@requires_postgres
+def test_after_thirty_days_the_rolling_bound_wins_over_the_clock(scratch_db):
+    """From 2026-11-20 the window is 2026-10-21 onward; the clock is earlier."""
+    from app.services.observation_coverage import M3_CLOCK_START
+
+    engine, url = scratch_db
+    later = date(2026, 11, 20)
+    _fill_on(engine, date(2026, 10, 15), "RU-MOW", [h * 60 for h in range(18)])
+    _fill_on(engine, date(2026, 10, 25), "RU-MOW", [h * 60 for h in range(18)])
+
+    result = _report(url, source="openmeteo", indicator="temperature",
+                     days=30, not_before=M3_CLOCK_START, today=later)
+
+    assert _gap_keys(result) == [("2026-10-25", "RU-MOW", 18)], (
+        "the 2026-10-15 day lies inside the clock but outside the last 30 days, "
+        "so it must not be examined"
+    )
+
+
+@requires_postgres
+def test_today_is_excluded_even_with_rows_on_it(scratch_db):
+    from app.services.observation_coverage import M3_CLOCK_START
+
+    engine, url = scratch_db
+    _fill_on(engine, TODAY, "RU-MOW", [0, 60, 120])
+    # 23:50 UTC is still today in UTC: the upper bound is UTC midnight.
+    _fill_on(engine, TODAY, "RU-SPE", [23 * 60 + 50])
+
+    result = _report(url, source="openmeteo", indicator="temperature",
+                     days=30, not_before=M3_CLOCK_START, today=TODAY)
+
+    assert (result.days_examined, result.gap_count) == (0, 0)
+
+
+@requires_postgres
+@pytest.mark.parametrize("session_timezone", ZONES)
+def test_the_bounded_window_is_utc_in_every_session(scratch_db, session_timezone):
+    """Complete day, short day, and today, under each session zone.
+
+    The clock bound is applied in UTC too: 2026-10-11 00:10 UTC is in the window,
+    and it stays in the window in Kolkata, where it is 05:40 local.
+    """
+    from app.services.observation_coverage import M3_CLOCK_START
+
+    engine, url = scratch_db
+    _fill_on(engine, date(2026, 10, 11), "RU-MOW", TWICE_AN_HOUR)              # complete
+    _fill_on(engine, date(2026, 10, 13), "RU-MOW",
+             [h * 60 + m for h in range(18) for m in (10, 40)])                # short
+    _fill_on(engine, TODAY, "RU-MOW", [23 * 60 + 50])                           # excluded
+
+    result = _report(url, session_timezone, source="openmeteo",
+                     indicator="temperature", days=30,
+                     not_before=M3_CLOCK_START, today=TODAY)
+
+    assert (result.days_examined, result.complete_days) == (2, 1), (
+        f"with the session in {session_timezone}: days_examined="
+        f"{result.days_examined}, complete_days={result.complete_days}, "
+        f"gaps={_gap_keys(result)}"
+    )
+    assert _gap_keys(result) == [("2026-10-13", "RU-MOW", 18)], (
+        f"with the session in {session_timezone}: gaps {_gap_keys(result)}"
+    )
+
+
+# ---- the missing-day probe: deliberately not fixed ---------------------------
+#
+# GROUP BY sees only the (day, point) pairs that have at least one row. A point
+# that supplied nothing on a day produces no group, so no gap is reported for
+# it, however long it was silent. Zero gaps therefore means no *incomplete*
+# group existed, not that every point was present every day. Whether and how to
+# count a wholly absent point-day is pending a decision; this test records the
+# gap so it cannot be forgotten, and is strict so that a fix must remove the
+# marker.
+
+@requires_postgres
+@pytest.mark.xfail(
+    strict=True,
+    reason="GROUP BY cannot see a point-day with no rows; decision pending",
+)
+def test_a_point_day_with_no_rows_is_counted_as_a_gap(scratch_db):
+    """RU-MOW supplies all of 2026-10-18 and nothing on 2026-10-19.
+
+    Gap detection should count 2026-10-19 for RU-MOW with zero observations.
+    """
+    from app.services.observation_coverage import M3_CLOCK_START
+
+    engine, url = scratch_db
+    _fill_on(engine, date(2026, 10, 18), "RU-MOW", list(range(0, 24 * 60, 60)))
+
+    result = _report(url, source="openmeteo", indicator="temperature",
+                     days=30, not_before=M3_CLOCK_START, today=TODAY)
+
+    assert ("2026-10-19", "RU-MOW", 0) in _gap_keys(result)
