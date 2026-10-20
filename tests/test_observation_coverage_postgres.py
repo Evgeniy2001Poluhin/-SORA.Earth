@@ -590,3 +590,25 @@ def test_the_api_and_the_scheduler_report_the_same_window(scratch_db, monkeypatc
         source="openmeteo", indicator="temperature", days=30,
         not_before=M3_CLOCK_START)
     assert _gap_keys(scheduler_report) == _gap_keys(api)
+
+
+@requires_postgres
+def test_exactly_nineteen_hours_is_complete_and_eighteen_is_a_gap(scratch_db):
+    """The threshold, at its own boundary: 19 of 24 hours passes, 18 does not.
+
+    Two points on two different days of a full 7-day grid. RU-MOW has exactly 19
+    distinct UTC hours and must not be a gap; RU-SPE has exactly 18 and must be
+    the one and only gap. A comparison written `<=` instead of `<` fails here.
+    """
+    engine, url = scratch_db
+    nineteen_day, eighteen_day = _day(2), _day(4)
+    _grid(engine, _window_days(7), overrides={
+        (nineteen_day, "RU-MOW"): [h * 60 for h in range(19)],
+        (eighteen_day, "RU-SPE"): [h * 60 for h in range(18)],
+    })
+
+    result = _report(url, source="openmeteo", indicator="temperature",
+                     days=7, today=TODAY)
+
+    assert _gap_keys(result) == [(eighteen_day.isoformat(), "RU-SPE", 18)]
+    assert _counts(result) == (7, 21, 146, 1)
