@@ -192,6 +192,7 @@ class Inputs:
 class Result:
     status: str
     files: Mapping[str, bytes]
+    sealed: Mapping[str, bytes]
     input_sha256: Mapping[str, str]
     run_meta: Mapping
 
@@ -574,86 +575,119 @@ def _policy_passes(stats: dict, policy: D1Policy) -> bool:
             and stats["G_eff"] >= policy.min_g_eff)
 
 
+def _pins_dict(pins: Pins) -> dict:
+    return {
+        "snapshot_manifest_sha256": pins.snapshot_manifest_sha,
+        "snapshot_page_digest": pins.snapshot_page_digest,
+        "structural_receipt_manifest_sha256": pins.structural_manifest_sha,
+        "vocabulary_sha256": pins.vocabulary_sha,
+        "d1_policy_sha256": pins.d1_policy_sha,
+    }
+
+
+def _public_stats(stats: dict) -> dict:
+    return {k: stats[k] for k in ("n_projects", "G", "largest_country_share", "G_eff")}
+
+
+def _failed_thresholds(stats: dict, policy: D1Policy) -> list:
+    failed = []
+    if stats["n_projects"] == 0:
+        return ["empty_cohort"]
+    if stats["G"] < policy.min_g:
+        failed.append("min_G")
+    if stats["largest_country_share"] > policy.max_largest_share:
+        failed.append("max_largest_country_share")
+    if stats["G_eff"] < policy.min_g_eff:
+        failed.append("min_G_eff")
+    return failed
+
+
+# Window -> names of the analytic files. Only development is written in the open folder (13.3).
+WINDOW_FILES = {
+    "development": {
+        "rows": "target_rows.csv", "excl": "target_exclusions.csv", "audit": "target_audit.csv",
+        "ids": "final_ids_development.txt", "weights": "country_weights.json", "qa": "target_qa.json",
+    },
+    "holdout": {
+        "rows": "target_rows_holdout.csv", "excl": "target_exclusions_holdout.csv",
+        "audit": "target_audit_holdout.csv", "ids": "final_ids_holdout.txt",
+        "weights": "country_weights_holdout.json", "qa": "qa_holdout.json",
+    },
+}
+
+
+def _window_accumulator() -> dict:
+    return {"rows": [], "excl": [], "audit": [], "ids": [], "countries": [],
+            "classes": {"1": 0, "0": 0}, "excluded": {"T1": 0, "T2": 0, "T3": 0, "T4": 0},
+            "records": 0, "candidates": 0}
+
+
 def build(inputs: Inputs) -> Result:
-    """Pure: decides every candidate and returns the bytes of the outputs. Reads no file."""
+    """Pure: decides every candidate and returns the outputs. Reads no file.
+
+    Open files hold development only, plus holdout_d1 in d1_verdict.json (13.1, 13.3).
+    The holdout package is returned in `sealed` as plaintext; it is sealed in a later step.
+    """
     vocab = inputs.vocabulary
     unknown_count = 0
-    unknown_seen: Counter = Counter()
     for cand in inputs.candidates:
         for rec in cand.records:
             if classify(rec.canon, vocab)[0] == "unknown":
                 unknown_count += 1
-                unknown_seen[(_type_label(rec.canon), _canonical_sha(rec.canon))] += 1
 
     decisions = {}
-    counts: Counter = Counter()
     for cand in inputs.candidates:
         distinct = sorted({rec.canon for rec in cand.records}, key=_typed_json)
         if len(distinct) > 1:
             decisions[cand.project_id] = ("T4", None, distinct)
-        else:
-            kind, value = classify(distinct[0], vocab)
-            if kind == "absent":
-                decisions[cand.project_id] = ("T1", None, distinct)
-            elif kind == "not_rated":
-                decisions[cand.project_id] = ("T2", None, distinct)
-            elif kind == "unknown":
-                decisions[cand.project_id] = ("T3", None, distinct)
-            else:
-                decisions[cand.project_id] = ("kept", value, distinct)
-        counts[decisions[cand.project_id][0]] += 1
+            continue
+        kind, value = classify(distinct[0], vocab)
+        rule = {"absent": "T1", "not_rated": "T2", "unknown": "T3"}.get(kind)
+        decisions[cand.project_id] = (rule, None, distinct) if rule else ("kept", value, distinct)
 
     run_meta = dict(inputs.run_meta)
     if unknown_count > 0:
         receipt = {
             "status": "blocked",
+            "reason": "unknown_outcome_values",
             "statement": STATEMENT,
             "rule_version": RULE_VERSION,
-            "candidates": len(inputs.candidates),
-            "projects_by_rule": {code: counts.get(code, 0) for code in ("T1", "T2", "T3", "T4", "kept")},
-            "unknown_count": unknown_count,
-            "unknown_values": [
-                {"type": label, "sha256": digest, "count": n}
-                for (label, digest), n in sorted(unknown_seen.items())
-            ],
+            "pins": _pins_dict(inputs.pins),
             "inputs_sha256": dict(inputs.input_sha256),
             "run": run_meta,
         }
-        return Result("blocked", {"blocked_receipt.json": _json_bytes(receipt)}, inputs.input_sha256, run_meta)
+        return Result("blocked", {"blocked_receipt.json": _json_bytes(receipt)}, {},
+                      inputs.input_sha256, run_meta)
 
-    target_rows, exclusions, audit = [], [], []
-    final_ids = {"development": [], "holdout": []}
-    countries = {"development": [], "holdout": []}
-    class_counts = {w: {"1": 0, "0": 0} for w in WINDOWS}
-    excluded_by_rule = {w: {"T1": 0, "T2": 0, "T3": 0, "T4": 0} for w in WINDOWS}
-    records_total = 0
+    acc = {w: _window_accumulator() for w in WINDOWS}
     for cand in sorted(inputs.candidates, key=lambda c: c.project_id):
         rule, value, distinct = decisions[cand.project_id]
+        a = acc[cand.window]
+        a["candidates"] += 1
+        a["records"] += len(cand.records)
         kept = rule == "kept"
-        records_total += len(cand.records)
         if kept:
-            target_rows.append({
+            a["rows"].append({
                 "project_id": cand.project_id,
                 "split": cand.window,
                 "ieg_outcome_satisfactory": value,
                 "outcome_raw_canonical": distinct[0][1],
                 "n_source_records": len(cand.records),
             })
-            final_ids[cand.window].append(cand.project_id)
-            countries[cand.window].append(cand.wb_code)
-            class_counts[cand.window][str(value)] += 1
+            a["ids"].append(cand.project_id)
+            a["countries"].append(cand.wb_code)
+            a["classes"][str(value)] += 1
         else:
-            excluded_by_rule[cand.window][rule] += 1
-            literals = _typed_json_list(distinct) if rule in ("T3", "T4") else ""
-            exclusions.append({
+            a["excluded"][rule] += 1
+            a["excl"].append({
                 "project_id": cand.project_id,
                 "split": cand.window,
                 "rule": rule,
                 "reason": DISPOSITION_REASON[rule],
-                "literals": literals,
+                "literals": _typed_json_list(distinct) if rule in ("T3", "T4") else "",
             })
         for rec in cand.records:
-            audit.append({
+            a["audit"].append({
                 "project_id": cand.project_id,
                 "ieg_page_file": rec.page,
                 "ieg_index": rec.index,
@@ -663,55 +697,63 @@ def build(inputs: Inputs) -> Result:
                 "used": 1 if kept else 0,
             })
 
-    audit.sort(key=lambda r: (r["project_id"], r["ieg_page_file"], r["ieg_index"]))
-    cohort_stats = {w: _cohort_stats(countries[w]) for w in WINDOWS}
-    policy_pass = _policy_passes(cohort_stats[inputs.d1.cohort], inputs.d1)
-    d1 = {
+    thresholds = {
+        "min_G": inputs.d1.min_g,
+        "max_largest_country_share": inputs.d1.max_largest_share,
+        "min_G_eff": inputs.d1.min_g_eff,
+    }
+    stats = {w: _cohort_stats(acc[w]["countries"]) for w in WINDOWS}
+    files: dict[str, bytes] = {}
+    sealed: dict[str, bytes] = {}
+    for w in WINDOWS:
+        a = acc[w]
+        names = WINDOW_FILES[w]
+        a["audit"].sort(key=lambda r: (r["project_id"], r["ieg_page_file"], r["ieg_index"]))
+        tables = {
+            names["rows"]: _csv_bytes(
+                ("project_id", "split", "ieg_outcome_satisfactory", "outcome_raw_canonical", "n_source_records"),
+                sorted(a["rows"], key=lambda r: r["project_id"])),
+            names["excl"]: _csv_bytes(
+                ("project_id", "split", "rule", "reason", "literals"),
+                sorted(a["excl"], key=lambda r: r["project_id"])),
+            names["audit"]: _csv_bytes(
+                ("project_id", "ieg_page_file", "ieg_index", "outcome_present", "outcome_original_json",
+                 "outcome_canonical", "used"),
+                a["audit"]),
+            names["ids"]: "".join(f"{pid}\n" for pid in sorted(a["ids"])).encode("utf-8"),
+            names["weights"]: _json_bytes({"statement": "structural country weights of the cohort; carries no outcome field",
+                                           "cohort": stats[w]}),
+        }
+        qa_block = {
+            "kept": len(a["ids"]), "excluded_by_rule": a["excluded"], "class_counts": a["classes"],
+            "records_at_max_evaluation_fy": a["records"], "unknown_count": 0}
+        if w == "development":
+            files.update(tables)
+            files["target_qa.json"] = _json_bytes({
+                "statement": STATEMENT, "rule_version": RULE_VERSION, "status": "ok",
+                "candidates": {"development": a["candidates"], "holdout": acc["holdout"]["candidates"],
+                               "total": len(inputs.candidates)},
+                "development": qa_block})
+        else:
+            sealed.update(tables)
+            sealed[names["qa"]] = _json_bytes(dict(qa_block, statement=STATEMENT, rule_version=RULE_VERSION))
+
+    dev_pass = _policy_passes(stats["development"], inputs.d1)
+    hold_pass = _policy_passes(stats["holdout"], inputs.d1)
+    files["d1_verdict.json"] = _json_bytes({
         "statement": D1_STATEMENT,
         "policy_cohort": inputs.d1.cohort,
-        "thresholds": {
-            "min_G": inputs.d1.min_g,
-            "max_largest_country_share": inputs.d1.max_largest_share,
-            "min_G_eff": inputs.d1.min_g_eff,
-        },
-        "policy_cohort_passes": policy_pass,
-        "cohorts": {w: {k: cohort_stats[w][k] for k in ("n_projects", "G", "largest_country_share", "G_eff")}
-                    for w in WINDOWS},
-    }
-    country_weights = {
-        "statement": "structural country weights of the final cohort; carries no outcome field",
-        "cohorts": {w: cohort_stats[w] for w in WINDOWS},
-    }
-    qa = {
-        "statement": STATEMENT,
-        "rule_version": RULE_VERSION,
-        "status": "ok",
-        "candidates": {w: sum(1 for c in inputs.candidates if c.window == w) for w in WINDOWS}
-        | {"total": len(inputs.candidates)},
-        "kept": {w: len(final_ids[w]) for w in WINDOWS} | {"total": sum(len(v) for v in final_ids.values())},
-        "excluded_by_rule": excluded_by_rule,
-        "class_counts": class_counts,
-        "records_at_max_evaluation_fy": records_total,
-        "unknown_count": 0,
-    }
-    files = {
-        "target_rows.csv": _csv_bytes(
-            ("project_id", "split", "ieg_outcome_satisfactory", "outcome_raw_canonical", "n_source_records"),
-            sorted(target_rows, key=lambda r: r["project_id"])),
-        "target_exclusions.csv": _csv_bytes(
-            ("project_id", "split", "rule", "reason", "literals"),
-            sorted(exclusions, key=lambda r: r["project_id"])),
-        "target_audit.csv": _csv_bytes(
-            ("project_id", "ieg_page_file", "ieg_index", "outcome_present", "outcome_original_json",
-             "outcome_canonical", "used"),
-            audit),
-        "final_ids_development.txt": "".join(f"{pid}\n" for pid in sorted(final_ids["development"])).encode("utf-8"),
-        "final_ids_holdout.txt": "".join(f"{pid}\n" for pid in sorted(final_ids["holdout"])).encode("utf-8"),
-        "country_weights.json": _json_bytes(country_weights),
-        "d1_verdict.json": _json_bytes(d1),
-        "target_qa.json": _json_bytes(qa),
-    }
-    return Result("ok", files, inputs.input_sha256, run_meta)
+        "thresholds": thresholds,
+        "development": dict(_public_stats(stats["development"]), passes=dev_pass),
+        "holdout_d1": "pass" if hold_pass else "fail",
+    })
+    sealed["d1_holdout_full.json"] = _json_bytes({
+        "statement": D1_STATEMENT,
+        "thresholds": thresholds,
+        "cohort": dict(stats["holdout"], passes=hold_pass,
+                       failed_thresholds=_failed_thresholds(stats["holdout"], inputs.d1)),
+    })
+    return Result("ok", files, sealed, inputs.input_sha256, run_meta)
 
 
 def _typed_json_list(distinct) -> str:

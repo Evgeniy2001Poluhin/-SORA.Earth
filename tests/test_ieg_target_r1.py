@@ -32,11 +32,11 @@ sys.modules[_spec_h.name] = H
 _spec_h.loader.exec_module(H)
 r1 = H.r1
 
+# Open analytic files: development only (13.3). Holdout content is sealed (13.1, 13.2).
 ANALYTIC = (
     "target_rows.csv",
     "target_exclusions.csv",
     "final_ids_development.txt",
-    "final_ids_holdout.txt",
     "country_weights.json",
     "d1_verdict.json",
     "target_qa.json",
@@ -71,6 +71,10 @@ def _run(projects, **kwargs):
 
 def _csv(result, name):
     return list(csv.DictReader(io.StringIO(result.files[name].decode("utf-8"), newline="")))
+
+
+def _columns(result, name):
+    return next(csv.reader(io.StringIO(result.files[name].decode("utf-8"), newline="")))
 
 
 def _json(result, name):
@@ -171,22 +175,20 @@ def test_missing_null_and_empty_are_T1():
     assert [r["project_id"] for r in _csv(res, "target_rows.csv")] == ["P100005"]
 
 
-def test_unknown_literal_blocks_and_is_hashed_in_the_receipt(tmp_path):
+def test_unknown_literal_blocks_and_stays_out_of_the_open_receipt(tmp_path):
     world, res = _run([_proj("P100001", "ARG", _rec(2012, "Excellent")), _proj("P100002", "ARG", _rec(2012, "Satisfactory"))])
     assert res.status == "blocked"
     assert set(res.files) == {"blocked_receipt.json"}
     receipt = _json(res, "blocked_receipt.json")
-    literal_sha = hashlib.sha256(b'["string","Excellent"]').hexdigest()
-    assert receipt["unknown_count"] == 1
-    assert receipt["unknown_values"] == [{"type": "string", "sha256": literal_sha, "count": 1}]
+    assert receipt["status"] == "blocked" and receipt["reason"] == "unknown_outcome_values"
+    assert "unknown_count" not in receipt and "unknown_values" not in receipt
     assert b"Excellent" not in res.files["blocked_receipt.json"]
 
 
 def test_literal_case_is_not_normalised():
     _, res = _run([_proj("P100001", "ARG", _rec(2012, "satisfactory"))])
     assert res.status == "blocked"
-    receipt = _json(res, "blocked_receipt.json")
-    assert receipt["unknown_values"][0]["sha256"] == hashlib.sha256(b'["string","satisfactory"]').hexdigest()
+    assert b'"satisfactory"' not in res.files["blocked_receipt.json"]
 
 
 def test_whitespace_is_collapsed_before_mapping():
@@ -242,7 +244,6 @@ def test_string_NULL_and_MISSING_are_not_the_absent_kinds():
     assert [r["rule"] for r in _csv(res_null, "target_exclusions.csv")] == ["T1"]
     _, res_str = _run([_proj("P100001", "ARG", _rec(2012, "NULL"))])
     assert res_str.status == "blocked"
-    assert _json(res_str, "blocked_receipt.json")["unknown_values"][0]["type"] == "string"
     _, res_miss = _run([_proj("P100001", "ARG", _rec(2012, "MISSING"))])
     assert res_miss.status == "blocked"
 
@@ -257,24 +258,16 @@ def test_each_json_type_is_nonstring_and_blocks():
     ]
     _, res = _run(projects)
     assert res.status == "blocked"
-    receipt = _json(res, "blocked_receipt.json")
-    assert receipt["unknown_count"] == 5
-    assert {v["type"] for v in receipt["unknown_values"]} == {
-        "nonstring:bool", "nonstring:int", "nonstring:float", "nonstring:list", "nonstring:object"}
 
 
 def test_true_and_one_are_different_values():
     _, res = _run([_proj("P100001", "ARG", _rec(2012, True)), _proj("P100002", "ARG", _rec(2012, 1))])
     assert res.status == "blocked"
-    assert _json(res, "blocked_receipt.json")["unknown_count"] == 2
 
 
 def test_unknown_blocks_even_when_the_project_is_T4():
     _, res = _run([_proj("P100001", "ARG", _rec(2018, "Foo"), _rec(2018, "Satisfactory"))])
     assert res.status == "blocked"
-    receipt = _json(res, "blocked_receipt.json")
-    assert receipt["projects_by_rule"]["T4"] == 1
-    assert receipt["unknown_count"] == 1
 
 
 def test_records_below_the_maximum_fy_are_superseded_and_ignored():
@@ -310,17 +303,20 @@ def test_audit_records_original_json_and_typed_canonical_value():
 
 def test_outputs_have_the_documented_columns_and_split_counts():
     _, res = _run(ALL_PROJECTS)
-    assert set(_csv(res, "target_rows.csv")[0]) == {
+    assert set(_columns(res, "target_rows.csv")) == {
         "project_id", "split", "ieg_outcome_satisfactory", "outcome_raw_canonical", "n_source_records"}
-    assert set(_csv(res, "target_exclusions.csv")[0]) == {"project_id", "split", "rule", "reason", "literals"}
+    assert set(_columns(res, "target_exclusions.csv")) == {"project_id", "split", "rule", "reason", "literals"}
     # The audit carries no country, FY or other feature: its column set is closed.
-    assert set(_csv(res, "target_audit.csv")[0]) == {
+    assert set(_columns(res, "target_audit.csv")) == {
         "project_id", "ieg_page_file", "ieg_index", "outcome_present",
         "outcome_original_json", "outcome_canonical", "used"}
     qa = _json(res, "target_qa.json")
     assert qa["candidates"] == {"development": 4, "holdout": 3, "total": 7}
-    assert qa["class_counts"]["development"] == {"1": 2, "0": 2}
-    assert qa["class_counts"]["holdout"] == {"1": 1, "0": 1}
+    assert qa["development"]["class_counts"] == {"1": 2, "0": 2}
+    # 13.3: the open qa holds the holdout candidate count and nothing else about the holdout.
+    assert "holdout" not in qa and "class_counts" not in qa
+    assert all(r["split"] == "development" for r in _csv(res, "target_rows.csv"))
+    assert all(r["split"] == "development" for r in _csv(res, "target_exclusions.csv"))
 
 
 def test_final_ids_are_sorted_with_trailing_newline():
@@ -728,16 +724,19 @@ def test_country_weights_and_d1_on_a_hand_example():
     d1 = {"cohort": "development", "min_G": 3, "max_largest_share": 0.5, "min_G_eff": 2.5}
     _, res = _run(projects, d1=d1)
     weights = _json(res, "country_weights.json")
-    dev = weights["cohorts"]["development"]
+    dev = weights["cohort"]
     assert dev["G"] == 3 and dev["n_projects"] == 4
     assert dev["largest_country_share"] == pytest.approx(0.5)
     assert dev["G_eff"] == pytest.approx(1 / (0.5 ** 2 + 0.25 ** 2 + 0.25 ** 2))
     assert dev["countries"] == [["AAA", 2], ["BBB", 1], ["CCC", 1]]
     text = json.dumps(weights)
-    assert "Satisfactory" not in text and "Unsatisfactory" not in text
+    assert "Satisfactory" not in text and "Unsatisfactory" not in text and "XXX" not in text
     verdict = _json(res, "d1_verdict.json")
-    assert verdict["policy_cohort_passes"] is True
-    assert verdict["cohorts"]["holdout"]["G"] == 2
+    assert verdict["development"]["passes"] is True
+    # 13.1: the open verdict gives the holdout one word, and no holdout figure.
+    assert verdict["holdout_d1"] == "fail"
+    assert "holdout" not in verdict and "cohorts" not in verdict
+    assert "XXX" not in json.dumps(verdict) and "YYY" not in json.dumps(verdict)
 
 
 def test_d1_fails_when_g_eff_threshold_is_not_met():
@@ -749,15 +748,15 @@ def test_d1_fails_when_g_eff_threshold_is_not_met():
     ]
     d1 = {"cohort": "development", "min_G": 3, "max_largest_share": 0.5, "min_G_eff": 3.0}
     _, res = _run(projects, d1=d1)
-    assert _json(res, "d1_verdict.json")["policy_cohort_passes"] is False
+    assert _json(res, "d1_verdict.json")["development"]["passes"] is False
 
 
 def test_d1_on_an_empty_policy_cohort_fails_without_dividing_by_zero():
     _, res = _run([_proj("P500001", "AAA", _rec(2010, "Satisfactory"))],
                   d1={"cohort": "holdout", "min_G": 1, "max_largest_share": 1, "min_G_eff": 1})
     verdict = _json(res, "d1_verdict.json")
-    assert verdict["policy_cohort_passes"] is False
-    assert verdict["cohorts"]["holdout"]["largest_country_share"] is None
+    assert verdict["holdout_d1"] == "fail"
+    assert "holdout" not in verdict and "cohorts" not in verdict
 
 
 # ---------------------------------------------------------------- subprocess runs of the harness
