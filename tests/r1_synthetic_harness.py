@@ -277,9 +277,8 @@ class RealFixture:
         monkeypatch.setattr(r1, "REAL_PINS", self.world.pins)
         monkeypatch.setattr(r1, "REAL_OWNER_PUBLIC_KEY_HEX", self.owner_hex)
         monkeypatch.setattr(r1, "TRUST_PATH", self.trust)
-        # The test process keeps its core limit: the stub records the flag the real run would have set.
-        monkeypatch.setattr(r1, "CORE_DUMPS_DISABLED", True)
-        monkeypatch.setattr(r1, "disable_core_dumps", lambda: True)
+        # No stub: load_real calls the real disable_core_dumps(), and the tests check that it did (13.2).
+        monkeypatch.setattr(r1, "CORE_DUMPS_DISABLED", None)
 
     @property
     def owner_hex(self):

@@ -315,8 +315,9 @@ def _blob(blobs: Mapping[str, bytes], key: str) -> bytes:
 def _parse_json(data: bytes, label: str, **kwargs):
     try:
         return json.loads(data.decode("utf-8"), **kwargs)
-    except (UnicodeDecodeError, ValueError) as exc:
-        raise IntegrityError(f"{label} is not valid JSON: {exc}") from None
+    except (UnicodeDecodeError, ValueError):
+        # Fixed text: neither the parser's message (which can carry a value's size) nor the label is kept.
+        raise IntegrityError("integrity_error") from None
 
 
 def _safe_name(name) -> str:
@@ -792,7 +793,7 @@ def build(inputs: Inputs) -> Result:
         for rec in cand.records:
             if classify(rec.canon, vocab)[0] == "unknown":
                 unknown_count += 1
-                unknown_seen[(_type_label(rec.canon), _canonical_sha(rec.canon))] += 1
+                unknown_seen[_typed_json(rec.canon)] += 1
 
     decisions = {}
     for cand in inputs.candidates:
@@ -814,10 +815,9 @@ def build(inputs: Inputs) -> Result:
             "rule_version": RULE_VERSION,
             "projects_by_rule": {code: rule_counts.get(code, 0) for code in ("T1", "T2", "T3", "T4", "kept")},
             "unknown_count": unknown_count,
-            "unknown_values": [
-                {"type": label, "sha256": digest, "count": n}
-                for (label, digest), n in sorted(unknown_seen.items())
-            ],
+            # The typed canonical values themselves, so the owner can add each one to not_rated (13.10.1).
+            "unknown_values": [{"canonical": json.loads(text), "count": n}
+                               for text, n in sorted(unknown_seen.items())],
         }
         blob = seal_package({"blocked_detail.json": _json_bytes(detail)}, PURPOSE_BLOCKED, _require_seal(inputs))
         receipt = {
@@ -827,8 +827,6 @@ def build(inputs: Inputs) -> Result:
             "rule_version": RULE_VERSION,
             "pins": _pins_dict(inputs.pins),
             "inputs_sha256": dict(inputs.input_sha256),
-            "sealed": {SEALED_BLOCKED: {"bytes": len(blob), "sha256": sha256_bytes(blob)}},
-            "run": run_meta,
         }
         return Result("blocked", {"blocked_receipt.json": _json_bytes(receipt)},
                       {SEALED_BLOCKED: blob}, inputs.input_sha256, run_meta)
@@ -945,7 +943,9 @@ def disable_core_dumps() -> bool:
     global CORE_DUMPS_DISABLED
     try:
         import resource
-        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        # Soft limit zero: no core file is written. The hard limit is left alone, so it can be restored.
+        _soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
+        resource.setrlimit(resource.RLIMIT_CORE, (0, hard))
         CORE_DUMPS_DISABLED = True
     except (ImportError, ValueError, OSError):
         CORE_DUMPS_DISABLED = False
@@ -955,7 +955,7 @@ def disable_core_dumps() -> bool:
 def make_run_meta(mode: str, permit_sha256: str | None = None, git: bool = True) -> dict:
     meta = {
         "mode": mode,
-        "core_dumps_disabled": CORE_DUMPS_DISABLED,
+        "core_dumps_disabled": CORE_DUMPS_DISABLED if mode == "real" else None,
         "builder_path": "scripts/ieg_target_r1.py",
         "builder_sha256": sha256_bytes(BUILDER_PATH.read_bytes()),
         "permit_sha256": permit_sha256,
@@ -1001,17 +1001,16 @@ def write_outputs(result: Result, out) -> Path:
         raise IntegrityError(f"unknown result status {result.status!r}")
     files = dict(result.files)
     sealed = dict(result.sealed)
-    if result.status == "ok":
-        everything = {**files, **sealed}
-        manifest = {
-            "statement": STATEMENT,
-            "rule_version": RULE_VERSION,
-            "run": dict(result.run_meta),
-            "inputs": dict(result.input_sha256),
-            "outputs": {name: {"bytes": len(data), "sha256": sha256_bytes(data)}
-                        for name, data in sorted(everything.items())},
-        }
-        files["manifest.json"] = _json_bytes(manifest)
+    everything = {**files, **sealed}
+    manifest = {
+        "statement": STATEMENT,
+        "rule_version": RULE_VERSION,
+        "run": dict(result.run_meta),
+        "inputs": dict(result.input_sha256),
+        "outputs": {name: {"bytes": len(data), "sha256": sha256_bytes(data)}
+                    for name, data in sorted(everything.items())},
+    }
+    files["manifest.json"] = _json_bytes(manifest)
     os.makedirs(partial)
     try:
         for name, data in sorted({**files, **sealed}.items()):
@@ -1164,7 +1163,10 @@ def _read_real_snapshot(blobs: dict) -> None:
 
 
 def load_real(permit_path, trust_path=None) -> Inputs:
-    """The only reader of real data. Every chain check (13.5) runs before the first IEG page is read."""
+    """The only reader of real data. Core dumps are disabled first (13.2); every chain check (13.5) runs
+    before the first IEG page is read."""
+    if not disable_core_dumps():
+        raise PermitRefused("core dumps could not be disabled; nothing is read")
     trust = _read_trust(TRUST_PATH if trust_path is None else trust_path)
     permit_bytes = _read(permit_path, "permit")
     _same(sha256_bytes(permit_bytes), trust["r1_permit_sha256"], "permit against the trust file")
@@ -1268,29 +1270,34 @@ scripts/ieg_target_r1_trust.json. --out must not exist. Exit codes: 0 ok,
 """
 
 
+REFUSED_CODE = "refused"
+INTEGRITY_CODE = "integrity_error"
+BLOCKED_CODE = "blocked"
+
+
 def main(argv=None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args in (["--help"], ["-h"]):
         print(HELP)
         return 0
     if len(args) != 5 or args[0] != "--real" or args[1] != "--r1-permit" or args[3] != "--out":
-        print("refused: the accepted command lines are --help and --real --r1-permit FILE --out DIR",
-              file=sys.stderr)
+        print(REFUSED_CODE, file=sys.stderr)
         return 3
     permit, out = args[2], args[4]
+    # Errors print a fixed code only: no message, locator or value of any input (13.1, review P2).
     try:
         check_output_free(out)
         inputs = load_real(permit)
         result = build(inputs)
         write_outputs(result, out)
-    except (PinRefused, OutputRefused) as exc:
-        print(f"refused: {exc}", file=sys.stderr)
+    except (PinRefused, OutputRefused):
+        print(REFUSED_CODE, file=sys.stderr)
         return 3
-    except IntegrityError as exc:
-        print(f"integrity error: {exc}", file=sys.stderr)
+    except Exception:
+        print(INTEGRITY_CODE, file=sys.stderr)
         return 5
     if result.status == "blocked":
-        print("blocked: see the receipt in the .blocked folder", file=sys.stderr)
+        print(BLOCKED_CODE, file=sys.stderr)
         return 4
     return 0
 

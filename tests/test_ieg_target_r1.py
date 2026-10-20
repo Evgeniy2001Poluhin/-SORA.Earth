@@ -173,7 +173,7 @@ def test_unknown_literal_blocks_and_stays_out_of_the_open_receipt(tmp_path):
     diag = _diag(res, world)
     literal_sha = hashlib.sha256(b'["string","Excellent"]').hexdigest()
     assert diag["unknown_count"] == 1
-    assert diag["unknown_values"] == [{"type": "string", "sha256": literal_sha, "count": 1}]
+    assert diag["unknown_values"] == [{"canonical": ["string", "Excellent"], "count": 1}]
 
 
 def test_literal_case_is_not_normalised():
@@ -181,7 +181,7 @@ def test_literal_case_is_not_normalised():
     assert res.status == "blocked"
     assert b'"satisfactory"' not in res.files["blocked_receipt.json"]
     literal_sha = hashlib.sha256(b'["string","satisfactory"]').hexdigest()
-    assert _diag(res, world)["unknown_values"][0]["sha256"] == literal_sha
+    assert _diag(res, world)["unknown_values"][0]["canonical"] == ["string", "satisfactory"]
 
 
 def test_whitespace_is_collapsed_before_mapping():
@@ -237,7 +237,7 @@ def test_string_NULL_and_MISSING_are_not_the_absent_kinds():
     assert [r["rule"] for r in _csv(res_null, "target_exclusions.csv")] == ["T1"]
     world_str, res_str = _run([_proj("P100001", "ARG", _rec(2012, "NULL"))])
     assert res_str.status == "blocked"
-    assert _diag(res_str, world_str)["unknown_values"][0]["type"] == "string"
+    assert _diag(res_str, world_str)["unknown_values"][0]["canonical"][0] == "string"
     _, res_miss = _run([_proj("P100001", "ARG", _rec(2012, "MISSING"))])
     assert res_miss.status == "blocked"
 
@@ -254,8 +254,9 @@ def test_each_json_type_is_nonstring_and_blocks():
     assert res.status == "blocked"
     diag = _diag(res, world)
     assert diag["unknown_count"] == 5
-    assert {v["type"] for v in diag["unknown_values"]} == {
-        "nonstring:bool", "nonstring:int", "nonstring:float", "nonstring:list", "nonstring:object"}
+    assert {tuple(v["canonical"]) for v in diag["unknown_values"]} == {
+        ("nonstring", "bool"), ("nonstring", "int"), ("nonstring", "float"),
+        ("nonstring", "list"), ("nonstring", "object")}
 
 
 def test_true_and_one_are_different_values():
@@ -361,7 +362,7 @@ def test_blocked_folder_holds_only_the_receipt_and_no_project_id(tmp_path):
     final = _write(tmp_path / "out", res)
     assert final == tmp_path / "out.blocked"
     tree = _write_tree(final)
-    assert sorted(tree) == ["blocked_receipt.json", r1.SEALED_BLOCKED]
+    assert sorted(tree) == ["blocked_receipt.json", "manifest.json", r1.SEALED_BLOCKED]
     assert not (tmp_path / "out").exists() and not (tmp_path / "out.partial").exists()
     for name, blob in tree.items():
         for proj in projects:
@@ -837,7 +838,8 @@ def test_harness_blocked_scenario_exits_4_and_writes_only_the_receipt(tmp_path):
     proc = subprocess.run([sys.executable, str(_HARNESS), "--out", str(tmp_path / "x"), "--scenario", "blocked"],
                           capture_output=True, text=True)
     assert proc.returncode == 4, proc.stderr
-    assert sorted(_write_tree(tmp_path / "x.blocked")) == ["blocked_receipt.json", r1.SEALED_BLOCKED]
+    assert sorted(_write_tree(tmp_path / "x.blocked")) == ["blocked_receipt.json", "manifest.json",
+                                                           r1.SEALED_BLOCKED]
     assert not (tmp_path / "x").exists()
 
 
@@ -931,23 +933,15 @@ def test_overflowing_the_capacity_is_exit_5_and_writes_nothing(tmp_path):
         _run_with_seal(world, _seal_with(world, capacity=1000))
 
 
-def test_holdout_plaintext_is_never_written_to_disk(tmp_path, monkeypatch):
-    """Every Path.write_bytes call is recorded from before the pipeline runs, so a write made inside
-    build() or the sealing step is seen as well as the writes of write_outputs()."""
-    written = []
-    real_write = Path.write_bytes
 
-    def recording_write(self, data):
-        written.append(bytes(data))
-        return real_write(self, data)
-
-    monkeypatch.setattr(Path, "write_bytes", recording_write)
+def test_holdout_plaintext_is_never_written_to_disk(tmp_path):
+    """The write guard scopes build() to no writes and write_outputs() to the output folders, and fails any
+    holdout marker written inside those scopes. Every write API is covered (see test_guard_catches_each_api)."""
     world, res = _run(ALL_PROJECTS)
     final = _write(tmp_path / "out", res)
-    joined = b"".join(written)
-    assert b"P000005" not in joined and b"ustar" not in joined
     for name, data in _write_tree(final).items():
-        assert b"P000005" not in data and b"ustar" not in data, name
+        for marker in HOLDOUT_MARKERS:
+            assert marker not in data, (name, marker)
 
 
 def test_manifest_holds_only_the_ciphertext_hash(tmp_path):
@@ -973,12 +967,17 @@ def test_blocked_diagnostics_are_sealed_and_not_split_by_window():
     assert diag["unknown_count"] == 1
 
 
-def test_blocked_receipt_names_the_digest_of_the_sealed_diagnostics():
+
+def test_blocked_manifest_names_the_digest_of_the_sealed_diagnostics(tmp_path):
     world, res = _run([_proj("P100001", "ARG", _rec(2012, "Excellent"))])
-    receipt = _json(res, "blocked_receipt.json")
-    entry = receipt["sealed"][r1.SEALED_BLOCKED]
+    final = _write(tmp_path / "out", res)
+    manifest = json.loads((final / "manifest.json").read_text(encoding="utf-8"))
+    entry = manifest["outputs"][r1.SEALED_BLOCKED]
     assert entry["sha256"] == hashlib.sha256(res.sealed[r1.SEALED_BLOCKED]).hexdigest()
     assert entry["bytes"] == len(res.sealed[r1.SEALED_BLOCKED])
+    assert manifest["run"]["mode"] == "synthetic"
+    receipt = _json(res, "blocked_receipt.json")
+    assert set(receipt) == {"status", "reason", "statement", "rule_version", "pins", "inputs_sha256"}
 
 
 # ---------------------------------------------------------------- sections 13.11-13.13: ceilings, bound, USTAR
@@ -1021,16 +1020,17 @@ def test_a_256_control_character_literal_passes():
 
 
 def test_json_max_boundary_is_exact(monkeypatch):
-    projects = [_proj(f"P1{i:05d}", "ARG", _rec(2012, f"Unknown {i}")) for i in range(40)]
+    projects = [_proj(f"P1{i:05d}", "ARG", _rec(2012, f"Unknown {i}")) for i in range(400)]
     monkeypatch.setattr(r1, "JSON_MAX", 10 ** 9)
     world, res = _run(projects)
     plain = r1.open_seal(res.sealed[r1.SEALED_BLOCKED], r1.PURPOSE_BLOCKED, world.private_key, SYNTH_PERMIT)
     size = len(r1.read_package(plain)["blocked_detail.json"])
-    # The receipt is also a JSON file under the ceiling, so the diagnostic must be the larger one here.
-    assert len(res.files["blocked_receipt.json"]) < size
-    monkeypatch.setattr(r1, "JSON_MAX", size)
+    # The open receipt is also a JSON file under the same ceiling (it lists every input hash), so the
+    # exact boundary is the larger of the two files.
+    limit = max(size, len(res.files["blocked_receipt.json"]))
+    monkeypatch.setattr(r1, "JSON_MAX", limit)
     assert H.run_pipeline(H.make_world(projects)).status == "blocked"
-    monkeypatch.setattr(r1, "JSON_MAX", size - 1)
+    monkeypatch.setattr(r1, "JSON_MAX", limit - 1)
     with pytest.raises(r1.IntegrityError, match="field_limit_exceeded"):
         H.run_pipeline(H.make_world(projects))
 
@@ -1108,6 +1108,22 @@ def test_open_outputs_do_not_depend_on_the_holdout_contents():
     assert res_a.input_sha256 != res_b.input_sha256
 
 
+
+# 13.9: the only fields of blocked_receipt.json that may differ between runs are the named input hashes.
+INPUT_HASH_PINS = ("snapshot_manifest_sha256", "snapshot_page_digest", "structural_receipt_manifest_sha256",
+                   "vocabulary_sha256", "d1_policy_sha256")
+
+
+def _receipt_bytes_without_input_hashes(res):
+    receipt = _json(res, "blocked_receipt.json")
+    assert set(receipt) == {"status", "reason", "statement", "rule_version", "pins", "inputs_sha256"}
+    receipt.pop("inputs_sha256")
+    for key in INPUT_HASH_PINS:
+        receipt["pins"].pop(key)
+    assert receipt["pins"] == {}
+    return r1._json_bytes(receipt)
+
+
 def test_blocked_receipt_does_not_say_which_window_holds_the_unknown_value():
     unknown_in_holdout = DEV_COMMON + [_proj("P000005", "ARG", _rec(2021, "Excellent"))]
     unknown_in_dev = [_proj("P000001", "ARG", _rec(2012, "Excellent"))] + DEV_COMMON[1:] + [
@@ -1115,11 +1131,7 @@ def test_blocked_receipt_does_not_say_which_window_holds_the_unknown_value():
     _, res_h = _run(unknown_in_holdout)
     _, res_d = _run(unknown_in_dev)
     assert res_h.status == res_d.status == "blocked"
-    receipt_h, receipt_d = _json(res_h, "blocked_receipt.json"), _json(res_d, "blocked_receipt.json")
-    # Input hashes, pins, run metadata and the ciphertext digest are per run; the rest must be equal.
-    volatile = ("inputs_sha256", "pins", "run", "sealed")
-    assert {k: v for k, v in receipt_h.items() if k not in volatile} == {
-        k: v for k, v in receipt_d.items() if k not in volatile}
+    assert _receipt_bytes_without_input_hashes(res_h) == _receipt_bytes_without_input_hashes(res_d)
 
 
 def test_audit_content_is_the_same_after_a_reordering_though_locators_move():
@@ -1156,6 +1168,295 @@ def test_plaintext_is_exactly_the_expected_tar_then_zero_padding():
     with tarfile.open(fileobj=io.BytesIO(plain), mode="r:") as tar:
         names = tar.getnames()
     assert names == ["inner_sha256.txt"] + sorted(n for n in HOLDOUT_NAMES if n != "inner_sha256.txt")
+
+
+# ---------------------------------------------------------------- review fixes: write guard, core dumps, stderr, diagnostics
+
+import contextlib
+import tempfile
+
+import resource
+
+HOLDOUT_MARKERS = (b"P000005", b"P000006", b"P000007", b"P000008", b"Excellent", b"ustar")
+_WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
+_CURRENT_GUARD = None
+
+
+class _WriteGuard:
+    """Watches every write API from the start of each test. Outside a pipeline scope nothing is checked.
+
+    Inside a scope (roots = the folders the pipeline may write to; () for build()), a write outside the roots
+    raises AssertionError at the call itself, so the write does not complete. At the end of the scope, a
+    holdout marker in the bytes written inside it fails the scope. Writes through handles whose path is
+    unknown inside a scope fail too."""
+
+    def __init__(self):
+        self.roots = None
+        self.buffer = []
+        self.fd_paths = {}
+
+    def check(self, path, action):
+        if self.roots is None:
+            return
+        real = os.path.realpath(os.fsdecode(path))
+        if not any(real == root or real.startswith(root + os.sep) for root in self.roots):
+            raise AssertionError(f"write guard: {action} outside the pipeline's folders")
+
+    def record(self, path, data):
+        if self.roots is None:
+            return
+        if path is None:
+            raise AssertionError("write guard: a write through an unnamed handle inside the pipeline")
+        self.check(path, "write")
+        self.buffer.append(data.encode("utf-8") if isinstance(data, str) else bytes(data))
+
+    def _leaked(self):
+        joined = b"".join(self.buffer)
+        return any(marker in joined for marker in HOLDOUT_MARKERS)
+
+    @contextlib.contextmanager
+    def scope(self, roots):
+        saved = (self.roots, self.buffer)
+        self.roots = [os.path.realpath(os.fsdecode(r)) for r in roots]
+        self.buffer = []
+        try:
+            yield
+        except BaseException as exc:
+            leaked = self._leaked()
+            self.roots, self.buffer = saved
+            if leaked:
+                raise AssertionError("write guard: a holdout marker reached a write") from exc
+            raise
+        leaked = self._leaked()
+        self.roots, self.buffer = saved
+        if leaked:
+            raise AssertionError("write guard: a holdout marker reached a write")
+
+
+class _Handle:
+    """Proxy for a write-mode file object: every write goes through the guard first."""
+
+    def __init__(self, handle, path, guard):
+        self._handle, self._path, self._guard = handle, path, guard
+
+    def write(self, data):
+        self._guard.record(self._path, data)
+        return self._handle.write(data)
+
+    def writelines(self, lines):
+        for line in lines:
+            self.write(line)
+
+    def __enter__(self):
+        self._handle.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        return self._handle.__exit__(*exc)
+
+    def __iter__(self):
+        return iter(self._handle)
+
+    def __getattr__(self, name):
+        return getattr(self._handle, name)
+
+
+@pytest.fixture(autouse=True)
+def write_guard(monkeypatch):
+    """Patches open/io.open, os.open/os.write/os.close, the tempfile creators, and the pipeline entry points
+    build() and write_outputs(). Installed before each test body, so it sees every write from the start."""
+    global _CURRENT_GUARD
+    guard = _WriteGuard()
+    _CURRENT_GUARD = guard
+    real_open, real_io_open = builtins.open, io.open
+    real_os_open, real_os_write, real_os_close = os.open, os.write, os.close
+    real_named, real_mkstemp, real_tmpfile = tempfile.NamedTemporaryFile, tempfile.mkstemp, tempfile.TemporaryFile
+    real_build, real_write_outputs = r1.build, r1.write_outputs
+
+    def _open(file, mode="r", *args, **kwargs):
+        writing = any(c in mode for c in "wax+")
+        if isinstance(file, int):
+            handle = real_io_open(file, mode, *args, **kwargs)
+            return _Handle(handle, guard.fd_paths.get(file), guard) if writing else handle
+        if writing:
+            guard.check(file, "open for writing")
+            return _Handle(real_open(file, mode, *args, **kwargs), file, guard)
+        return real_open(file, mode, *args, **kwargs)
+
+    def _os_open(path, flags, *args, **kwargs):
+        if flags & _WRITE_FLAGS:
+            guard.check(path, "create")
+            fd = real_os_open(path, flags, *args, **kwargs)
+            guard.fd_paths[fd] = path
+            return fd
+        return real_os_open(path, flags, *args, **kwargs)
+
+    def _os_write(fd, data):
+        if fd in guard.fd_paths:
+            guard.record(guard.fd_paths[fd], data)
+        return real_os_write(fd, data)
+
+    def _os_close(fd):
+        guard.fd_paths.pop(fd, None)
+        return real_os_close(fd)
+
+    def _named(*args, **kwargs):
+        guard.check(kwargs.get("dir") or tempfile.gettempdir(), "temporary file")
+        return real_named(*args, **kwargs)
+
+    def _mkstemp(*args, **kwargs):
+        guard.check(kwargs.get("dir") or tempfile.gettempdir(), "temporary file")
+        return real_mkstemp(*args, **kwargs)
+
+    def _tmpfile(*args, **kwargs):
+        if guard.roots is not None:
+            raise AssertionError("write guard: an unnamed temporary file inside the pipeline")
+        return real_tmpfile(*args, **kwargs)
+
+    def _scoped_build(inputs):
+        with guard.scope(()):
+            return real_build(inputs)
+
+    def _scoped_write(result, out):
+        with guard.scope(r1.output_paths(out)):
+            return real_write_outputs(result, out)
+
+    monkeypatch.setattr(builtins, "open", _open)
+    monkeypatch.setattr(io, "open", _open)
+    monkeypatch.setattr(os, "open", _os_open)
+    monkeypatch.setattr(os, "write", _os_write)
+    monkeypatch.setattr(os, "close", _os_close)
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", _named)
+    monkeypatch.setattr(tempfile, "mkstemp", _mkstemp)
+    monkeypatch.setattr(tempfile, "TemporaryFile", _tmpfile)
+    monkeypatch.setattr(r1, "build", _scoped_build)
+    monkeypatch.setattr(r1, "write_outputs", _scoped_write)
+    yield guard
+    _CURRENT_GUARD = None
+
+
+@pytest.fixture(autouse=True)
+def core_limit_restored():
+    soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
+    yield
+    resource.setrlimit(resource.RLIMIT_CORE, (soft, hard))
+
+
+def test_guard_refuses_a_write_outside_the_scope(tmp_path):
+    target = tmp_path / "leak.bin"
+    with pytest.raises(AssertionError, match="write guard"):
+        with _CURRENT_GUARD.scope([tmp_path / "out"]):
+            open(target, "wb").write(b"x")
+    assert not target.exists()
+
+
+def test_guard_refuses_a_holdout_marker_inside_the_scope(tmp_path):
+    with pytest.raises(AssertionError, match="holdout marker"):
+        with _CURRENT_GUARD.scope([tmp_path]):
+            (tmp_path / "a.bin").write_bytes(b"P000005")
+
+
+@pytest.mark.parametrize("api", ["open", "write_text", "tempfile", "mkstemp", "exception"])
+def test_guard_catches_each_api(tmp_path, api):
+    """A write to an unallowed folder through each API, and a write on an exception path, is refused."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    def leaky():
+        if api == "open":
+            open(elsewhere / "x.bin", "wb").write(b"ustar")
+        elif api == "write_text":
+            Path(elsewhere / "x.txt").write_text("P000005")
+        elif api == "tempfile":
+            tempfile.NamedTemporaryFile(dir=elsewhere, delete=False).close()
+        elif api == "mkstemp":
+            fd, _ = tempfile.mkstemp(dir=elsewhere)
+            os.close(fd)
+        else:
+            try:
+                raise r1.IntegrityError(r1.FIELD_LIMIT)
+            except r1.IntegrityError:
+                open(elsewhere / "x.bin", "wb").write(b"ustar")
+                raise
+
+    with pytest.raises(AssertionError, match="write guard"):
+        with _CURRENT_GUARD.scope([tmp_path / "out"]):
+            leaky()
+
+
+def test_core_dumps_are_disabled_before_the_first_page_is_read(tmp_path, monkeypatch):
+    fx = H.build_real_fixture(tmp_path / "tree")
+    fx.install(monkeypatch)
+    events = []
+    real_core = r1.disable_core_dumps
+    real_pages = r1._read_real_snapshot
+    monkeypatch.setattr(r1, "disable_core_dumps", lambda: events.append("core") or real_core())
+    monkeypatch.setattr(r1, "_read_real_snapshot", lambda blobs: events.append("pages") or real_pages(blobs))
+    r1.load_real(fx.permit, trust_path=fx.trust)
+    assert events == ["core", "pages"]
+
+
+def test_refused_core_dump_switch_refuses_with_zero_data_opens(tmp_path, monkeypatch, file_opens, capsys):
+    fx = H.build_real_fixture(tmp_path / "tree")
+    fx.install(monkeypatch)
+    monkeypatch.setattr(r1, "disable_core_dumps", lambda: False)
+    file_opens.clear()
+    with pytest.raises(r1.PermitRefused, match="core dumps"):
+        r1.load_real(fx.permit, trust_path=fx.trust)
+    assert file_opens == []
+    out = tmp_path / "out"
+    assert r1.main(["--real", "--r1-permit", str(fx.permit), "--out", str(out)]) == 3
+    assert file_opens == [] and not out.exists()
+    assert capsys.readouterr().err.strip() == "refused"
+
+
+def test_parse_error_carries_no_value_size_or_label():
+    with pytest.raises(r1.IntegrityError) as info:
+        r1._parse_json(b'{"count": ' + b"9" * 5000 + b"}", "ieg/page-00000.json")
+    assert str(info.value) == "integrity_error"
+
+
+def _malformed_holdout_run(tmp_path, monkeypatch, capsys, name, digits):
+    fx = H.build_real_fixture(tmp_path / name)
+    page = next(p for p in fx.paths["snapshot"].rglob("*.json")
+                if b'"outcome": "Moderately Satisfactory"' in p.read_bytes())
+    page.write_bytes(page.read_bytes().replace(b'"outcome": "Moderately Satisfactory"',
+                                               b'"outcome": ' + digits.encode("ascii")))
+    fx.install(monkeypatch)
+    capsys.readouterr()
+    code = r1.main(["--real", "--r1-permit", str(fx.permit), "--out", str(fx.paths["out"])])
+    captured = capsys.readouterr()
+    out = fx.paths["out"]
+    return code, captured.out, captured.err, out.exists(), out.with_name("out.blocked").exists()
+
+
+def test_malformed_holdout_values_give_identical_stderr_and_no_output(tmp_path, monkeypatch, capsys):
+    first = _malformed_holdout_run(tmp_path, monkeypatch, capsys, "a", "1" * 5000)
+    second = _malformed_holdout_run(tmp_path, monkeypatch, capsys, "b", "2" * 6000)
+    assert first == second
+    code, out, err, made, blocked = first
+    assert code == 3 and out == "" and err.strip() == "refused"
+    assert not made and not blocked
+    assert "5000" not in err and "6000" not in err and "page" not in err
+
+
+def test_blocked_diagnostics_hold_the_unknown_literals_and_counts_across_both_windows():
+    projects = [
+        _proj("P100001", "ARG", _rec(2012, "Excellent")),
+        _proj("P100002", "ARG", _rec(2012, "Satisfactory")),
+        _proj("P700001", "ARG", _rec(2021, "Excellent")),
+        _proj("P700002", "ARG", _rec(2022, "Foo")),
+    ]
+    world, res = _run(projects)
+    assert res.status == "blocked"
+    diag = _diag(res, world)
+    assert diag["unknown_count"] == 3
+    assert diag["unknown_values"] == [
+        {"canonical": ["string", "Excellent"], "count": 2},
+        {"canonical": ["string", "Foo"], "count": 1},
+    ]
+    assert b"Excellent" not in res.files["blocked_receipt.json"]
+
 
 
 # ---------------------------------------------------------------- guard against any research read
