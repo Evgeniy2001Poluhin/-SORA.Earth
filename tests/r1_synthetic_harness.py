@@ -230,6 +230,163 @@ def demo_world(scenario="ok"):
     return make_world(projects)
 
 
+
+# ---------------------------------------------------------------- synthetic real-mode tree
+
+REMOVE = object()
+SYNTH_ISO = "2026-10-20T10:00:00Z"
+SYNTH_ALLOWED = {"status": ["blocked", "ok"], "holdout_d1": ["fail", "pass"]}
+
+
+def _json_bytes(obj) -> bytes:
+    return json.dumps(obj, ensure_ascii=False, sort_keys=True).encode("utf-8")
+
+
+def _patched(obj: dict, changes) -> dict:
+    for key, value in (changes or {}).items():
+        if value is REMOVE:
+            obj.pop(key, None)
+        else:
+            obj[key] = value
+    return obj
+
+
+class RealFixture:
+    """A complete synthetic real-mode tree in a temporary folder, and the private key that opens its seal."""
+
+    def __init__(self, root, world, owner_private, paths):
+        self.root = root
+        self.world = world
+        self.owner = owner_private
+        self.paths = paths
+
+    @property
+    def permit(self):
+        return self.paths["permit"]
+
+    @property
+    def trust(self):
+        return self.paths["trust"]
+
+    def install(self, monkeypatch):
+        """Point the real-mode constants at this tree. Snapshot pages stay under root, never under the research folder."""
+        monkeypatch.setattr(r1, "REAL_SNAPSHOT_DIR", str(self.paths["snapshot"]))
+        monkeypatch.setattr(r1, "REAL_STRUCTURAL_DIR", str(self.paths["structural"]))
+        monkeypatch.setattr(r1, "REAL_VOCABULARY_PATH", str(self.paths["vocabulary"]))
+        monkeypatch.setattr(r1, "REAL_D1_PATH", str(self.paths["d1"]))
+        monkeypatch.setattr(r1, "REAL_PINS", self.world.pins)
+        monkeypatch.setattr(r1, "REAL_OWNER_PUBLIC_KEY_HEX", self.owner_hex)
+        monkeypatch.setattr(r1, "TRUST_PATH", self.trust)
+        # The test process keeps its core limit: the stub records the flag the real run would have set.
+        monkeypatch.setattr(r1, "CORE_DUMPS_DISABLED", True)
+        monkeypatch.setattr(r1, "disable_core_dumps", lambda: True)
+
+    @property
+    def owner_hex(self):
+        return self.owner.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw).hex()
+
+
+def build_real_fixture(root, projects=None, overrides=None) -> RealFixture:
+    """Write a complete real-mode tree under root with every hash correct.
+
+    overrides maps a document name (r0, procedure, r1a, approval, permit, trust) to field changes (REMOVE drops
+    a field). Documents that refer to another take its hash from the bytes written, so a single override is a
+    single defect: correct bytes around a wrong pin. A key "raw:<doc>" replaces the written bytes after the fact,
+    which breaks the permit's hash of that document."""
+    ov = dict(overrides or {})
+    raw = {key[4:]: value for key, value in ov.items() if key.startswith("raw:")}
+    root = Path(root)
+    world = make_world(projects or DEMO_PROJECTS)
+    paths = {
+        "snapshot": root / "snapshot", "structural": root / "structural",
+        "vocabulary": root / "vocabulary.json", "d1": root / "d1_policy.json",
+        "r0": root / "r0.json", "procedure": root / "procedure.json", "r1a": root / "r1a.json",
+        "r1a_result": root / "r1a_result.txt", "approval": root / "approval.json",
+        "permit": root / "permit.json", "trust": root / "trust.json", "out": root / "out",
+    }
+    for key, data in world.blobs.items():
+        if key.startswith("snapshot/"):
+            target = paths["snapshot"] / key[len("snapshot/"):]
+        elif key.startswith("structural/"):
+            target = paths["structural"] / key[len("structural/"):]
+        elif key == r1.K_VOCAB:
+            target = paths["vocabulary"]
+        elif key == r1.K_D1:
+            target = paths["d1"]
+        else:
+            raise AssertionError(key)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    vocab_bytes = world.blobs[r1.K_VOCAB]
+    d1_bytes = world.blobs[r1.K_D1]
+    owner = X25519PrivateKey.generate()
+    owner_hex = owner.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw).hex()
+
+    result_bytes = b"literal list: Satisfactory\n"
+    proc_bytes = _json_bytes(_patched({"allowed_r1a_script_sha256": "d" * 64,
+                                       "allowed_result_kind": "literals_only"}, ov.get("procedure")))
+    r0_bytes = _json_bytes(_patched({
+        "stage": "R0",
+        "snapshot_manifest_sha256": world.pins.snapshot_manifest_sha,
+        "snapshot_page_digest": world.pins.snapshot_page_digest,
+        "structural_receipt_manifest_sha256": world.pins.structural_manifest_sha,
+        "d1_policy_sha256": world.pins.d1_policy_sha,
+        "owner_x25519_public_key_hex": owner_hex,
+        "r1a_procedure_sha256": sha(proc_bytes),
+        "owner_decision": "подписываю R0",
+        "date_utc": SYNTH_ISO,
+    }, ov.get("r0")))
+    r1a_bytes = _json_bytes(_patched({
+        "stage": "R1a",
+        "r0_receipt_sha256": sha(r0_bytes),
+        "r1a_procedure_sha256": sha(proc_bytes),
+        "snapshot_manifest_sha256": world.pins.snapshot_manifest_sha,
+        "snapshot_page_digest": world.pins.snapshot_page_digest,
+        "r1a_script_sha256": "d" * 64,
+        "result_sha256": sha(result_bytes),
+        "result_kind": "literals_only",
+        "owner_decision": "разрешаю R1a",
+        "date_utc": SYNTH_ISO,
+    }, ov.get("r1a")))
+    appr_bytes = _json_bytes(_patched({
+        "r0_receipt_sha256": sha(r0_bytes),
+        "r1a_receipt_sha256": sha(r1a_bytes),
+        "vocabulary_sha256": sha(vocab_bytes),
+        "owner_decision": "утверждаю словарь",
+        "date_utc": SYNTH_ISO,
+    }, ov.get("approval")))
+    permit_bytes = _json_bytes(_patched({
+        "stage": "R1",
+        "r0_receipt_sha256": sha(r0_bytes),
+        "vocabulary_approval_sha256": sha(appr_bytes),
+        "vocabulary_sha256": sha(vocab_bytes),
+        "r1a_receipt_sha256": sha(r1a_bytes),
+        "d1_policy_sha256": sha(d1_bytes),
+        "builder_sha256": sha(r1.BUILDER_PATH.read_bytes()),
+        "structural_receipt_manifest_sha256": world.pins.structural_manifest_sha,
+        "sealed_plaintext_bytes": SYNTH_CAPACITY,
+        "allowed_public_outcomes": SYNTH_ALLOWED,
+        "owner_decision": "разрешаю R1",
+        "date_utc": SYNTH_ISO,
+    }, ov.get("permit")))
+    trust_bytes = _json_bytes(_patched({
+        "r1_permit_sha256": sha(permit_bytes),
+        "r0_receipt_path": str(paths["r0"]),
+        "vocabulary_approval_path": str(paths["approval"]),
+        "r1a_receipt_path": str(paths["r1a"]),
+        "r1a_procedure_path": str(paths["procedure"]),
+        "r1a_result_path": str(paths["r1a_result"]),
+    }, ov.get("trust")))
+    written = {"r0": r0_bytes, "procedure": proc_bytes, "r1a": r1a_bytes, "r1a_result": result_bytes,
+               "approval": appr_bytes, "permit": permit_bytes, "trust": trust_bytes}
+    for key, data in written.items():
+        paths[key].write_bytes(data)
+    for key, data in raw.items():
+        paths[key].write_bytes(data)
+    return RealFixture(root, world, owner, paths)
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Synthetic R1 run. Never reads real data.")
     parser.add_argument("--out", required=True)

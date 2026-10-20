@@ -59,23 +59,6 @@ DEVELOPMENT_MAX_EVAL_FY = 2019
 HOLDOUT_MIN_EVAL_FY = 2020
 HOLDOUT_MAX_EVAL_FY = 2026
 OWNER_DECISION = "разрешаю R1"
-PERMIT_FIELDS = (
-    "stage",
-    "r0_receipt_sha256",
-    "builder_sha256",
-    "vocabulary_sha256",
-    "d1_policy_sha256",
-    "structural_receipt_manifest_sha256",
-    "owner_decision",
-    "date_utc",
-)
-HASH_PERMIT_FIELDS = (
-    "r0_receipt_sha256",
-    "builder_sha256",
-    "vocabulary_sha256",
-    "d1_policy_sha256",
-    "structural_receipt_manifest_sha256",
-)
 DISPOSITION_REASON = {
     "T1": "outcome_missing",
     "T2": "outcome_not_rated",
@@ -998,94 +981,221 @@ def write_outputs(result: Result, out) -> Path:
     return final
 
 
-# ---------------------------------------------------------------- real mode only
+# ---------------------------------------------------------------- real mode only (13.5, 13.9-13.11)
 
-def _read_trust(path) -> str | None:
+R0_OWNER_DECISION = "подписываю R0"
+APPROVAL_OWNER_DECISION = "утверждаю словарь"
+R1A_OWNER_DECISION = "разрешаю R1a"
+R1A_RESULT_KINDS = ("literals_only", "literals_with_counts")
+ALLOWED_PUBLIC_OUTCOMES = {"status": ["blocked", "ok"], "holdout_d1": ["fail", "pass"]}
+TRUST_KEYS = ("r1_permit_sha256", "r0_receipt_path", "vocabulary_approval_path",
+              "r1a_receipt_path", "r1a_procedure_path", "r1a_result_path")
+PERMIT_FIELDS = (
+    "stage", "r0_receipt_sha256", "vocabulary_approval_sha256", "vocabulary_sha256",
+    "r1a_receipt_sha256", "d1_policy_sha256", "builder_sha256", "structural_receipt_manifest_sha256",
+    "sealed_plaintext_bytes", "allowed_public_outcomes", "owner_decision", "date_utc",
+)
+PERMIT_HASH_FIELDS = (
+    "r0_receipt_sha256", "vocabulary_approval_sha256", "vocabulary_sha256", "r1a_receipt_sha256",
+    "d1_policy_sha256", "builder_sha256", "structural_receipt_manifest_sha256",
+)
+R0_FIELDS = (
+    "stage", "snapshot_manifest_sha256", "snapshot_page_digest", "structural_receipt_manifest_sha256",
+    "d1_policy_sha256", "owner_x25519_public_key_hex", "r1a_procedure_sha256", "owner_decision", "date_utc",
+)
+APPROVAL_FIELDS = ("r0_receipt_sha256", "r1a_receipt_sha256", "vocabulary_sha256", "owner_decision", "date_utc")
+R1A_FIELDS = (
+    "stage", "r0_receipt_sha256", "r1a_procedure_sha256", "snapshot_manifest_sha256", "snapshot_page_digest",
+    "r1a_script_sha256", "result_sha256", "result_kind", "owner_decision", "date_utc",
+)
+PROCEDURE_FIELDS = ("allowed_r1a_script_sha256", "allowed_result_kind")
+_PERMIT_NON_STRING = ("sealed_plaintext_bytes", "allowed_public_outcomes")
+
+
+def _document(data: bytes, fields, label: str) -> dict:
+    """A JSON object with exactly the given keys. Every key is a string except the non-string permit fields."""
+    try:
+        obj = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise PermitRefused(f"{label} is not valid JSON") from None
+    if not isinstance(obj, dict):
+        raise PermitRefused(f"{label} is not a JSON object")
+    missing = [f for f in fields if f not in obj]
+    extra = sorted(set(obj) - set(fields))
+    if missing or extra:
+        raise PermitRefused(f"{label} fields: missing {missing}, unexpected {extra}")
+    for f in fields:
+        if f not in _PERMIT_NON_STRING and not isinstance(obj[f], str):
+            raise PermitRefused(f"{label} field {f} is not a string")
+    return obj
+
+
+def _hashes(obj: dict, names, label: str) -> None:
+    for name in names:
+        if not isinstance(obj[name], str) or not HEX64_RE.fullmatch(obj[name]):
+            raise PermitRefused(f"{label} field {name} is not a sha256")
+
+
+def _utc(obj: dict, label: str) -> None:
+    if not isinstance(obj["date_utc"], str) or not ISO_UTC_RE.fullmatch(obj["date_utc"]):
+        raise PermitRefused(f"{label} date_utc is not an ISO-8601 UTC time")
+
+
+def _same(actual, expected, label: str) -> None:
+    """Every link and pin of the chain: an unset expectation refuses, a mismatch refuses (exit 3)."""
+    if expected is None:
+        raise PinRefused(f"{label}: no pin is set")
+    if actual != expected:
+        raise PinRefused(f"{label}: does not match")
+
+
+def _read(path, label: str) -> bytes:
+    try:
+        return Path(path).read_bytes()
+    except (OSError, TypeError) as exc:
+        raise PermitRefused(f"{label} unreadable: {exc}") from None
+
+
+def _read_trust(path) -> dict:
     try:
         obj = json.loads(Path(path).read_bytes().decode("utf-8"))
     except (OSError, ValueError) as exc:
         raise PermitRefused(f"trust file unreadable: {exc}") from None
-    if not isinstance(obj, dict) or set(obj) != {"r1_permit_sha256"}:
-        raise PermitRefused("trust file must hold exactly r1_permit_sha256")
-    value = obj["r1_permit_sha256"]
-    if value is None:
-        return None
-    if not isinstance(value, str) or not HEX64_RE.fullmatch(value):
-        raise PermitRefused("trust file r1_permit_sha256 is not a sha256")
-    return value
+    if not isinstance(obj, dict) or set(obj) != set(TRUST_KEYS):
+        raise PermitRefused("trust file must hold exactly the six chain keys")
+    for key in TRUST_KEYS:
+        value = obj[key]
+        if value is None:
+            raise PermitRefused(f"trust file holds null for {key}: no R1 permit is trusted")
+        if key == "r1_permit_sha256":
+            if not isinstance(value, str) or not HEX64_RE.fullmatch(value):
+                raise PermitRefused("trust file r1_permit_sha256 is not a sha256")
+        elif not isinstance(value, str) or not value:
+            raise PermitRefused(f"trust file {key} is not a path")
+    return obj
 
 
 def _parse_permit(data: bytes) -> dict:
-    try:
-        obj = json.loads(data.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
-        raise PermitRefused("permit is not valid JSON") from None
-    if not isinstance(obj, dict):
-        raise PermitRefused("permit is not a JSON object")
-    missing = [f for f in PERMIT_FIELDS if f not in obj]
-    extra = sorted(set(obj) - set(PERMIT_FIELDS))
-    if missing or extra:
-        raise PermitRefused(f"permit fields: missing {missing}, unexpected {extra}")
-    for f in PERMIT_FIELDS:
-        if not isinstance(obj[f], str):
-            raise PermitRefused(f"permit field {f} is not a string")
+    obj = _document(data, PERMIT_FIELDS, "permit")
     if obj["stage"] != "R1":
         raise PermitRefused("permit stage is not R1")
     if obj["owner_decision"] != OWNER_DECISION:
         raise PermitRefused("permit owner_decision is not the approved phrase")
-    if not ISO_UTC_RE.fullmatch(obj["date_utc"]):
-        raise PermitRefused("permit date_utc is not an ISO-8601 UTC time")
-    for f in HASH_PERMIT_FIELDS:
-        if not HEX64_RE.fullmatch(obj[f]):
-            raise PermitRefused(f"permit field {f} is not a sha256")
+    _utc(obj, "permit")
+    _hashes(obj, PERMIT_HASH_FIELDS, "permit")
+    capacity = obj["sealed_plaintext_bytes"]
+    if isinstance(capacity, bool) or not isinstance(capacity, int) or capacity < 1:
+        raise PermitRefused("permit sealed_plaintext_bytes is not a positive integer")
+    if obj["allowed_public_outcomes"] != ALLOWED_PUBLIC_OUTCOMES:
+        raise PermitRefused("permit allowed_public_outcomes is not the approved set")
     return obj
 
 
-def _read_real_blobs() -> dict:
-    blobs = {}
+def _read_real_structural(blobs: dict) -> None:
+    struct = Path(REAL_STRUCTURAL_DIR)
+    blobs[K_STRUCT_MANIFEST] = _read(struct / "manifest.json", "structural manifest")
+    for name in STRUCT_FILES:
+        blobs[f"structural/{name}"] = _read(struct / name, f"structural {name}")
+
+
+def _read_real_snapshot(blobs: dict) -> None:
+    """The only reader of IEG pages. Called after every chain check has passed."""
     snap = Path(REAL_SNAPSHOT_DIR)
-    manifest = (snap / "manifest.json").read_bytes()
+    manifest = _read(snap / "manifest.json", "snapshot manifest")
     blobs[K_SNAP_MANIFEST] = manifest
     for name in ieg_page_names(manifest):
-        blobs[f"snapshot/{name}"] = (snap / name).read_bytes()
-    struct = Path(REAL_STRUCTURAL_DIR)
-    blobs[K_STRUCT_MANIFEST] = (struct / "manifest.json").read_bytes()
-    for name in STRUCT_FILES:
-        blobs[f"structural/{name}"] = (struct / name).read_bytes()
-    blobs[K_VOCAB] = Path(REAL_VOCABULARY_PATH).read_bytes()
-    blobs[K_D1] = Path(REAL_D1_PATH).read_bytes()
-    return blobs
+        blobs[f"snapshot/{name}"] = _read(snap / name, f"snapshot page {name}")
 
 
-def load_real(permit_path, trust_path=TRUST_PATH) -> Inputs:
-    """The only reader of real data. Every permit, trust and pin check runs before the first data read."""
-    trust = _read_trust(trust_path)
-    if trust is None:
-        raise PermitRefused("trust file holds null: no R1 permit is trusted")
-    try:
-        permit_bytes = Path(permit_path).read_bytes()
-    except OSError as exc:
-        raise PermitRefused(f"permit unreadable: {exc}") from None
-    permit_sha = sha256_bytes(permit_bytes)
-    if permit_sha != trust:
-        raise PermitRefused("permit sha256 does not match the trust file")
+def load_real(permit_path, trust_path=None) -> Inputs:
+    """The only reader of real data. Every chain check (13.5) runs before the first IEG page is read."""
+    trust = _read_trust(TRUST_PATH if trust_path is None else trust_path)
+    permit_bytes = _read(permit_path, "permit")
+    _same(sha256_bytes(permit_bytes), trust["r1_permit_sha256"], "permit against the trust file")
     permit = _parse_permit(permit_bytes)
-    if permit["builder_sha256"] != sha256_bytes(BUILDER_PATH.read_bytes()):
-        raise PermitRefused("permit builder_sha256 does not match this script")
-    if REAL_PINS.vocabulary_sha is None or permit["vocabulary_sha256"] != REAL_PINS.vocabulary_sha:
-        raise PermitRefused("vocabulary pin is not set or does not match the permit")
-    if REAL_PINS.d1_policy_sha is None or permit["d1_policy_sha256"] != REAL_PINS.d1_policy_sha:
-        raise PermitRefused("D1 policy pin is not set or does not match the permit")
-    if permit["structural_receipt_manifest_sha256"] != REAL_PINS.structural_manifest_sha:
-        raise PermitRefused("permit structural_receipt_manifest_sha256 does not match the pinned receipt")
-    if REAL_STRUCTURAL_DIR is None or REAL_VOCABULARY_PATH is None or REAL_D1_PATH is None:
+    _same(permit["builder_sha256"], sha256_bytes(BUILDER_PATH.read_bytes()), "permit builder_sha256")
+
+    r0_bytes = _read(trust["r0_receipt_path"], "R0 receipt")
+    _same(sha256_bytes(r0_bytes), permit["r0_receipt_sha256"], "R0 receipt bytes")
+    r0 = _document(r0_bytes, R0_FIELDS, "R0 receipt")
+    if r0["stage"] != "R0" or r0["owner_decision"] != R0_OWNER_DECISION:
+        raise PinRefused("R0 receipt stage or owner decision is wrong")
+    _utc(r0, "R0")
+    _hashes(r0, ("snapshot_manifest_sha256", "snapshot_page_digest", "structural_receipt_manifest_sha256",
+                 "d1_policy_sha256", "r1a_procedure_sha256"), "R0")
+    _hashes(r0, ("owner_x25519_public_key_hex",), "R0")
+    _same(r0["snapshot_manifest_sha256"], REAL_PINS.snapshot_manifest_sha, "R0 snapshot manifest pin")
+    _same(r0["snapshot_page_digest"], REAL_PINS.snapshot_page_digest, "R0 snapshot page digest pin")
+    _same(r0["structural_receipt_manifest_sha256"], REAL_PINS.structural_manifest_sha, "R0 structural pin")
+    _same(r0["structural_receipt_manifest_sha256"], permit["structural_receipt_manifest_sha256"],
+          "permit structural pin")
+    _same(r0["d1_policy_sha256"], REAL_PINS.d1_policy_sha, "R0 D1 pin")
+    _same(r0["d1_policy_sha256"], permit["d1_policy_sha256"], "permit D1 pin")
+    _same(r0["owner_x25519_public_key_hex"], REAL_OWNER_PUBLIC_KEY_HEX, "R0 owner public key pin")
+
+    proc_bytes = _read(trust["r1a_procedure_path"], "R1a procedure")
+    _same(sha256_bytes(proc_bytes), r0["r1a_procedure_sha256"], "R1a procedure bytes")
+    proc = _document(proc_bytes, PROCEDURE_FIELDS, "R1a procedure")
+    _hashes(proc, ("allowed_r1a_script_sha256",), "R1a procedure")
+    if proc["allowed_result_kind"] not in R1A_RESULT_KINDS:
+        raise PinRefused("R1a procedure allows an unknown result kind")
+
+    appr_bytes = _read(trust["vocabulary_approval_path"], "vocabulary approval")
+    _same(sha256_bytes(appr_bytes), permit["vocabulary_approval_sha256"], "vocabulary approval bytes")
+    appr = _document(appr_bytes, APPROVAL_FIELDS, "vocabulary approval")
+    if appr["owner_decision"] != APPROVAL_OWNER_DECISION:
+        raise PinRefused("vocabulary approval owner decision is wrong")
+    _utc(appr, "vocabulary approval")
+    _hashes(appr, ("r0_receipt_sha256", "r1a_receipt_sha256", "vocabulary_sha256"), "vocabulary approval")
+    _same(appr["r0_receipt_sha256"], sha256_bytes(r0_bytes), "approval link to R0")
+    _same(appr["r1a_receipt_sha256"], permit["r1a_receipt_sha256"], "approval link to R1a")
+    _same(appr["vocabulary_sha256"], permit["vocabulary_sha256"], "approval vocabulary hash")
+
+    r1a_bytes = _read(trust["r1a_receipt_path"], "R1a receipt")
+    _same(sha256_bytes(r1a_bytes), permit["r1a_receipt_sha256"], "R1a receipt bytes")
+    r1a = _document(r1a_bytes, R1A_FIELDS, "R1a receipt")
+    if r1a["stage"] != "R1a" or r1a["owner_decision"] != R1A_OWNER_DECISION:
+        raise PinRefused("R1a receipt stage or owner decision is wrong")
+    _utc(r1a, "R1a")
+    _hashes(r1a, ("r0_receipt_sha256", "r1a_procedure_sha256", "snapshot_manifest_sha256",
+                  "snapshot_page_digest", "r1a_script_sha256", "result_sha256"), "R1a receipt")
+    _same(r1a["r0_receipt_sha256"], sha256_bytes(r0_bytes), "R1a link to R0")
+    _same(r1a["r1a_procedure_sha256"], r0["r1a_procedure_sha256"], "R1a link to the procedure")
+    _same(r1a["snapshot_manifest_sha256"], REAL_PINS.snapshot_manifest_sha, "R1a snapshot manifest pin")
+    _same(r1a["snapshot_page_digest"], REAL_PINS.snapshot_page_digest, "R1a snapshot page digest pin")
+    _same(r1a["r1a_script_sha256"], proc["allowed_r1a_script_sha256"], "R1a script against the procedure")
+    _same(r1a["result_kind"], proc["allowed_result_kind"], "R1a result kind against the procedure")
+    result_bytes = _read(trust["r1a_result_path"], "R1a result")
+    _same(sha256_bytes(result_bytes), r1a["result_sha256"], "R1a result bytes")
+
+    if None in (REAL_SNAPSHOT_DIR, REAL_STRUCTURAL_DIR, REAL_VOCABULARY_PATH, REAL_D1_PATH):
         raise PermitRefused("a real input path is not configured")
-    if REAL_OWNER_PUBLIC_KEY_HEX is None:
-        raise PermitRefused("owner public key is not configured")
-    # The signed R0 chain (13.5) and the permit's sealing parameters are not built yet.
-    raise PermitRefused("the signed R0 chain is not implemented yet")
-    inputs = validate_bytes(_read_real_blobs(), REAL_PINS)
-    return dataclasses.replace(inputs, run_meta=make_run_meta("real", permit_sha256=permit_sha))
+    vocab_bytes = _read(REAL_VOCABULARY_PATH, "vocabulary")
+    _same(sha256_bytes(vocab_bytes), REAL_PINS.vocabulary_sha, "vocabulary pin")
+    _same(sha256_bytes(vocab_bytes), permit["vocabulary_sha256"], "vocabulary against the permit")
+    d1_bytes = _read(REAL_D1_PATH, "D1 policy")
+    _same(sha256_bytes(d1_bytes), REAL_PINS.d1_policy_sha, "D1 policy pin")
+    _same(sha256_bytes(d1_bytes), permit["d1_policy_sha256"], "D1 policy against the permit")
+
+    blobs = {K_VOCAB: vocab_bytes, K_D1: d1_bytes}
+    _read_real_structural(blobs)
+    _read_real_snapshot(blobs)
+    inputs = validate_bytes(blobs, REAL_PINS)
+    chain = {
+        "chain/r0_receipt": sha256_bytes(r0_bytes),
+        "chain/r1a_procedure": sha256_bytes(proc_bytes),
+        "chain/vocabulary_approval": sha256_bytes(appr_bytes),
+        "chain/r1a_receipt": sha256_bytes(r1a_bytes),
+        "chain/r1a_result": sha256_bytes(result_bytes),
+    }
+    seal = SealParams(recipient_public=bytes.fromhex(r0["owner_x25519_public_key_hex"]),
+                      permit_bytes=permit_bytes, capacity=permit["sealed_plaintext_bytes"])
+    return dataclasses.replace(
+        inputs,
+        input_sha256=dict(sorted({**inputs.input_sha256, **chain}.items())),
+        run_meta=make_run_meta("real", permit_sha256=sha256_bytes(permit_bytes)),
+        seal=seal,
+    )
 
 
 HELP = """usage:

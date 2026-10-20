@@ -107,41 +107,6 @@ def _write(out, result):
     return r1.write_outputs(result, out)
 
 
-def _permit(tmp_path, *, raw=None, remove=(), extra=None, **changes):
-    if raw is not None:
-        data = raw
-    else:
-        obj = {
-            "stage": "R1",
-            "r0_receipt_sha256": "a" * 64,
-            "builder_sha256": r1.sha256_bytes(r1.BUILDER_PATH.read_bytes()),
-            "vocabulary_sha256": "b" * 64,
-            "d1_policy_sha256": "c" * 64,
-            "structural_receipt_manifest_sha256": r1.REAL_PINS.structural_manifest_sha,
-            "owner_decision": "разрешаю R1",
-            "date_utc": "2026-10-20T10:00:00Z",
-        }
-        obj.update(changes)
-        for key in remove:
-            obj.pop(key)
-        if extra:
-            obj.update(extra)
-        data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-    path = tmp_path / "permit.json"
-    path.write_bytes(data)
-    return path
-
-
-def _trust(tmp_path, value):
-    path = tmp_path / "trust.json"
-    path.write_text(json.dumps({"r1_permit_sha256": value}), encoding="utf-8")
-    return path
-
-
-def _trusting(tmp_path, permit):
-    return _trust(tmp_path, r1.sha256_bytes(permit.read_bytes()))
-
-
 def _proj(pid, country, *records):
     return {"pid": pid, "country": country, "records": list(records)}
 
@@ -542,15 +507,16 @@ def test_real_pins_have_the_signed_receipt_and_unset_vocabulary_and_d1():
     assert r1.REAL_PINS.vocabulary_sha is None and r1.REAL_PINS.d1_policy_sha is None
 
 
-# ---------------------------------------------------------------- section 6, 11.6, 12.1: permit, trust, exit 3
+# ---------------------------------------------------------------- sections 6, 13.5, 13.9, 13.11.3: chain, trust, exit 3
 
-def test_shipped_trust_file_holds_null():
+def test_shipped_trust_file_holds_six_nulls():
     assert json.loads((_REPO / "scripts" / "ieg_target_r1_trust.json").read_text(encoding="utf-8")) == {
-        "r1_permit_sha256": None}
+        key: None for key in r1.TRUST_KEYS}
 
 
 def test_real_mode_refuses_with_the_shipped_trust_and_opens_only_the_trust(tmp_path, file_opens):
-    permit = _permit(tmp_path)
+    permit = tmp_path / "permit.json"
+    permit.write_bytes(b"{}")
     out = tmp_path / "out"
     file_opens.clear()
     code = r1.main(["--real", "--r1-permit", str(permit), "--out", str(out)])
@@ -559,14 +525,113 @@ def test_real_mode_refuses_with_the_shipped_trust_and_opens_only_the_trust(tmp_p
     assert set(file_opens) <= {str(r1.TRUST_PATH)}
 
 
-def test_real_mode_with_a_trusted_permit_still_refuses_before_any_data(tmp_path, file_opens):
-    permit = _permit(tmp_path)
-    trust = _trusting(tmp_path, permit)
+def test_real_chain_end_to_end_on_a_synthetic_tree(tmp_path, monkeypatch, file_opens):
+    fx = H.build_real_fixture(tmp_path / "tree")
+    fx.install(monkeypatch)
+    code = r1.main(["--real", "--r1-permit", str(fx.permit), "--out", str(fx.paths["out"])])
+    assert code == 0
+    manifest = json.loads((fx.paths["out"] / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["run"]["mode"] == "real"
+    assert manifest["run"]["permit_sha256"] == H.sha(fx.permit.read_bytes())
+    assert manifest["run"]["core_dumps_disabled"] is True
+    for key in ("chain/r0_receipt", "chain/r1a_procedure", "chain/vocabulary_approval", "chain/r1a_receipt",
+                "chain/r1a_result"):
+        assert key in manifest["inputs"]
+    blob = (fx.paths["out"] / r1.SEALED_HOLDOUT).read_bytes()
+    plain = r1.open_seal(blob, r1.PURPOSE_HOLDOUT, fx.owner, fx.permit.read_bytes())
+    assert len(plain) == H.SYNTH_CAPACITY
+    assert set(r1.read_package(plain)) == HOLDOUT_NAMES
+
+
+def _tamper_after_build(doc, suffix=b" "):
+    def hook(fx):
+        path = fx.paths[doc]
+        path.write_bytes(path.read_bytes() + suffix)
+    return hook
+
+
+def _pin_override(monkeypatch_attr, value):
+    def hook(fx, mp):
+        mp.setattr(r1, monkeypatch_attr, value)
+    return hook
+
+
+CHAIN_DEFECTS = [
+    # id, overrides for build_real_fixture, hook after build, hook after install, expected message
+    ("trust-permit-hash", {"trust": {"r1_permit_sha256": "0" * 64}}, None, None, "permit against the trust file"),
+    ("trust-null-path", {"trust": {"r1a_result_path": None}}, None, None, "trust file holds null"),
+    ("trust-extra-key", {"trust": {"note": "x"}}, None, None, "six chain keys"),
+    ("r0-bytes-changed", {}, _tamper_after_build("r0"), None, "R0 receipt bytes"),
+    ("r0-snapshot-manifest-pin", {"r0": {"snapshot_manifest_sha256": "0" * 64}}, None, None,
+     "R0 snapshot manifest pin"),
+    ("r0-snapshot-digest-pin", {"r0": {"snapshot_page_digest": "0" * 64}}, None, None,
+     "R0 snapshot page digest pin"),
+    ("r0-structural-pin", {"r0": {"structural_receipt_manifest_sha256": "0" * 64}}, None, None,
+     "R0 structural pin"),
+    ("r0-d1-pin", {"r0": {"d1_policy_sha256": "0" * 64}}, None, None, "R0 D1 pin"),
+    ("r0-owner-key-not-the-pinned-one", {"r0": {"owner_x25519_public_key_hex": "1" * 64}}, None, None,
+     "R0 owner public key pin"),
+    ("r0-owner-key-unset", {}, None, _pin_override("REAL_OWNER_PUBLIC_KEY_HEX", None),
+     "owner public key pin: no pin is set"),
+    ("r0-owner-decision", {"r0": {"owner_decision": "да"}}, None, None, "stage or owner decision"),
+    ("r0-procedure-hash", {"r0": {"r1a_procedure_sha256": "0" * 64}}, None, None, "R1a procedure bytes"),
+    ("procedure-bytes-changed", {}, _tamper_after_build("procedure"), None, "R1a procedure bytes"),
+    ("approval-link-to-r0", {"approval": {"r0_receipt_sha256": "0" * 64}}, None, None, "approval link to R0"),
+    ("approval-vocabulary", {"approval": {"vocabulary_sha256": "0" * 64}}, None, None, "approval vocabulary"),
+    ("approval-owner-decision", {"approval": {"owner_decision": "ок"}}, None, None,
+     "vocabulary approval owner decision"),
+    ("r1a-link-to-r0", {"r1a": {"r0_receipt_sha256": "0" * 64}}, None, None, "R1a link to R0"),
+    ("r1a-link-to-procedure", {"r1a": {"r1a_procedure_sha256": "0" * 64}}, None, None, "R1a link to the procedure"),
+    ("r1a-snapshot-digest", {"r1a": {"snapshot_page_digest": "0" * 64}}, None, None,
+     "R1a snapshot page digest pin"),
+    ("r1a-script-hash", {"r1a": {"r1a_script_sha256": "0" * 64}}, None, None, "R1a script against the procedure"),
+    ("r1a-result-kind", {"r1a": {"result_kind": "literals_with_counts"}}, None, None,
+     "R1a result kind against the procedure"),
+    ("r1a-result-bytes-changed", {}, _tamper_after_build("r1a_result", b"x"), None, "R1a result bytes"),
+    ("r1a-receipt-bytes-changed", {}, _tamper_after_build("r1a"), None, "R1a receipt bytes"),
+    ("permit-stage", {"permit": {"stage": "R2"}}, None, None, "permit stage"),
+    ("permit-owner-decision", {"permit": {"owner_decision": "yes"}}, None, None, "owner_decision"),
+    ("permit-date", {"permit": {"date_utc": "2026-10-20"}}, None, None, "date_utc"),
+    ("permit-builder-hash", {"permit": {"builder_sha256": "0" * 64}}, None, None, "permit builder_sha256"),
+    ("permit-vocabulary-hash", {"permit": {"vocabulary_sha256": "0" * 64}}, None, None, "vocabulary"),
+    ("permit-capacity-not-int", {"permit": {"sealed_plaintext_bytes": "4194304"}}, None, None,
+     "sealed_plaintext_bytes"),
+    ("permit-capacity-bool", {"permit": {"sealed_plaintext_bytes": True}}, None, None,
+     "sealed_plaintext_bytes"),
+    ("permit-outcomes", {"permit": {"allowed_public_outcomes": {"status": ["ok"], "holdout_d1": ["pass"]}}},
+     None, None, "allowed_public_outcomes"),
+    ("permit-extra-field", {"permit": {"note": "x"}}, None, None, "unexpected"),
+    ("permit-missing-field", {"permit": {"date_utc": H.REMOVE}}, None, None, "missing"),
+    ("permit-structural-hash", {"permit": {"structural_receipt_manifest_sha256": "0" * 64}}, None, None,
+     "permit structural pin"),
+    ("vocabulary-file-changed", {}, lambda fx: fx.paths["vocabulary"].write_bytes(b"{}"), None, "vocabulary pin"),
+    ("paths-not-configured", {}, None, _pin_override("REAL_VOCABULARY_PATH", None), "not configured"),
+]
+
+
+@pytest.mark.parametrize("case", CHAIN_DEFECTS, ids=[c[0] for c in CHAIN_DEFECTS])
+def test_each_chain_defect_refuses_before_any_page_is_read(tmp_path, monkeypatch, file_opens, case):
+    _, overrides, after_build, after_install, expected = case
+    fx = H.build_real_fixture(tmp_path / "tree", overrides=overrides)
+    if after_build is not None:
+        after_build(fx)
+    fx.install(monkeypatch)
+    if after_install is not None:
+        after_install(fx, monkeypatch)
     file_opens.clear()
-    with pytest.raises(r1.PermitRefused, match="vocabulary pin"):
-        r1.load_real(permit, trust_path=trust)
-    assert set(file_opens) <= {str(permit), str(trust), str(r1.BUILDER_PATH)}
-    assert not any("snapshot" in p or "structural" in p for p in file_opens)
+    with pytest.raises(r1.PinRefused, match=expected):
+        r1.load_real(fx.permit, trust_path=fx.trust)
+    touched = [p for p in file_opens if str(fx.paths["snapshot"]) in p or str(fx.paths["structural"]) in p]
+    assert touched == [], "a snapshot or structural file was read before the chain passed"
+
+
+def test_missing_trust_and_missing_permit_refuse(tmp_path, monkeypatch):
+    fx = H.build_real_fixture(tmp_path / "tree")
+    fx.install(monkeypatch)
+    with pytest.raises(r1.PermitRefused, match="trust file unreadable"):
+        r1.load_real(fx.permit, trust_path=tmp_path / "missing-trust.json")
+    with pytest.raises(r1.PermitRefused, match="permit unreadable"):
+        r1.load_real(tmp_path / "missing-permit.json", trust_path=fx.trust)
 
 
 @pytest.mark.parametrize("argv", [
@@ -596,58 +661,11 @@ def test_help_exits_0_and_opens_nothing(file_opens, capsys):
 def test_existing_output_folder_refuses_before_any_data_read(tmp_path, file_opens):
     out = tmp_path / "out"
     out.mkdir()
-    permit = _permit(tmp_path)
+    permit = tmp_path / "permit.json"
+    permit.write_bytes(b"{}")
     file_opens.clear()
     assert r1.main(["--real", "--r1-permit", str(permit), "--out", str(out)]) == 3
     assert file_opens == []
-
-
-def test_unconfigured_real_paths_refuse_before_any_data_read(tmp_path, file_opens, monkeypatch):
-    """With the pins and a trusted permit in place, an unset input path must still refuse before any read.
-    The snapshot directory is redirected to a folder that does not exist, so a broken guard cannot touch real data."""
-    monkeypatch.setattr(r1, "REAL_PINS", replace(r1.REAL_PINS, vocabulary_sha="b" * 64, d1_policy_sha="c" * 64))
-    monkeypatch.setattr(r1, "REAL_SNAPSHOT_DIR", str(tmp_path / "no-snapshot-here"))
-    permit = _permit(tmp_path)
-    trust = _trusting(tmp_path, permit)
-    file_opens.clear()
-    with pytest.raises(r1.PermitRefused, match="not configured"):
-        r1.load_real(permit, trust_path=trust)
-    assert set(file_opens) <= {str(trust), str(permit), str(r1.BUILDER_PATH)}
-
-
-@pytest.mark.parametrize("trust_value", ["0" * 64, "not-a-hash"])
-def test_trust_mismatch_or_malformed_refuses(tmp_path, trust_value):
-    permit = _permit(tmp_path)
-    trust = _trust(tmp_path, trust_value)
-    with pytest.raises(r1.PermitRefused):
-        r1.load_real(permit, trust_path=trust)
-
-
-def test_missing_permit_refuses(tmp_path):
-    trust = _trust(tmp_path, "0" * 64)
-    with pytest.raises(r1.PermitRefused, match="unreadable"):
-        r1.load_real(tmp_path / "missing.json", trust_path=trust)
-
-
-@pytest.mark.parametrize("case", [
-    dict(raw=b"not json"),
-    dict(remove=("date_utc",)),
-    dict(extra={"note": "x"}),
-    dict(stage="R2"),
-    dict(owner_decision="yes"),
-    dict(date_utc="2026-10-20"),
-    dict(builder_sha256="0" * 64),
-    dict(vocabulary_sha256="a" * 64),
-    dict(d1_policy_sha256="a" * 64),
-    dict(structural_receipt_manifest_sha256="0" * 64),
-    dict(r0_receipt_sha256="xyz"),
-    dict(stage=1),
-])
-def test_each_permit_field_is_checked(tmp_path, case):
-    permit = _permit(tmp_path, **case)
-    trust = _trusting(tmp_path, permit)
-    with pytest.raises(r1.PermitRefused):
-        r1.load_real(permit, trust_path=trust)
 
 
 def test_builder_is_not_coupled_to_the_trust_file():
