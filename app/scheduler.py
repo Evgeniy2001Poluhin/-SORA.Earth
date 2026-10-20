@@ -1071,12 +1071,16 @@ def scheduled_observation_coverage():
     fell short" or "nothing was looked at", and one gauge cannot tell those
     apart -- the denominator is what makes the zero readable.
     """
-    from app.services.observation_coverage import coverage_report
+    from app.services.observation_coverage import M3_CLOCK_START, coverage_report
 
     source, indicator = COVERAGE_WATCH
     try:
+        # Counted from the M3 clock, not from thirty days back: a day before the
+        # clock is not one the gate uses, and a rolling window kept reporting the
+        # restored deployment's first four-hour day until it aged out.
         report = coverage_report(
-            source=source, indicator=indicator, days=COVERAGE_WATCH_DAYS)
+            source=source, indicator=indicator, days=COVERAGE_WATCH_DAYS,
+            not_before=M3_CLOCK_START)
     except Exception as e:
         # Left unset rather than published as zero. A zero written here would be
         # indistinguishable from a healthy window, which is the failure this job
