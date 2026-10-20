@@ -185,7 +185,7 @@ def _utc(obj: dict, label: str) -> None:
     value = obj["date_utc"]
     try:
         if not ISO_UTC_RE.fullmatch(value):
-            raise ValueError(value)
+            raise ValueError
         _dt.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
     except ValueError:
         raise PermitRefused(f"{label} date_utc is not an ISO-8601 UTC time") from None
