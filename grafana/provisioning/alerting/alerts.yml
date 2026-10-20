@@ -1,5 +1,19 @@
 apiVersion: 1
 
+# Every rule below has the same three-node shape, and it is the shape Grafana's
+# evaluator needs in order to hand back one number per series:
+#
+#   A  prometheus query, instant: true      -- one sample per series, no range
+#   B  reduce (last) over A                 -- a single value, never a series
+#   C  threshold over B, condition: C       -- 1 = Alerting, 0 = Normal
+#
+# Without `instant` and the reduce, a range query returns a series of points, and
+# a threshold over that is "invalid format of evaluation results" (or it fires on
+# any point). A healthy value of 0 is a real Normal, not an empty result: the
+# expression says what it measured and the threshold decides.
+#
+# noDataState is explicit on every rule. OK means "nothing to report is healthy";
+# Alerting means "the absence of this series is itself the problem".
 groups:
   - orgId: 1
     name: SORA MLOps Alerts
@@ -8,13 +22,13 @@ groups:
     rules:
       - uid: sora-drift-detected
         title: Drift Detected
-        condition: A
+        condition: C
         data:
           - refId: A
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: PBFA97CFB590B2093
             model:
               # Deliberately NOT job-pinned. `sora_drift_detected_total` is
               # incremented in closed_loop_retrain (app/scheduler.py), which
@@ -22,9 +36,50 @@ groups:
               # (app/agents/ai_teammate.py, registered in app/main.py). Pinning
               # either job would drop drift detected from the other process
               # (#284). Leave unnamed, or use sum by (...).
-              expr: increase(sora_drift_detected_total[5m]) > 0
+              expr: increase(sora_drift_detected_total[5m])
+              instant: true
               intervalMs: 1000
               maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              settings:
+                mode: dropNN
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
         for: 0s
         labels:
           severity: warning
@@ -45,15 +100,20 @@ groups:
       # drift, so a quiet fortnight can be legitimate -- the summary therefore
       # says "check whether it tried", not "it is broken". -1 means no
       # successful run has ever been recorded, which is never legitimate.
+      #
+      # The expression is a sum of two booleans, so that it is 0 when healthy and
+      # at least 1 when either condition holds; the threshold then needs no
+      # knowledge of the -1 sentinel. Both comparisons use `bool`: a plain
+      # comparison would drop the series instead of returning 0.
       - uid: sora-retrain-stale
         title: No Successful Retrain
-        condition: A
+        condition: C
         data:
           - refId: A
             relativeTimeRange:
               from: 600
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: PBFA97CFB590B2093
             model:
               # job named because this gauge has a single writer: the backend,
               # in app/metrics_endpoint.py, recomputed on each /metrics scrape.
@@ -64,9 +124,53 @@ groups:
               # writes it -- and pinned to sora-app, not the sora-scheduler a
               # naive reading would choose, which is exactly what would break
               # this alert (#284).
-              expr: sora_retrain_seconds_since_success{job="sora-app"} > 1209600 or sora_retrain_seconds_since_success{job="sora-app"} == -1
+              expr: (sora_retrain_seconds_since_success{job="sora-app"} > bool 1209600) + (sora_retrain_seconds_since_success{job="sora-app"} == bool -1)
+              instant: true
               intervalMs: 1000
               maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              settings:
+                mode: dropNN
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+        # The gauge is recomputed by the backend on every scrape, so its absence
+        # means the backend is not being scraped at all. That is sora-app-down's
+        # question, and it pages there, so absence is not paged twice here.
+        noDataState: OK
+        execErrState: Alerting
         for: 15m
         labels:
           severity: warning
@@ -81,21 +185,64 @@ groups:
 
       - uid: sora-retrain-failed
         title: Retrain Failed
-        condition: A
+        condition: C
         data:
           - refId: A
             relativeTimeRange:
               from: 600
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: PBFA97CFB590B2093
             model:
               # Deliberately NOT job-pinned. `sora_model_rejected_total` is
               # incremented in the scheduler (app/scheduler.py) AND in the
               # backend (app/api/infra.py, POST /mlops/auto-retrain). Pinning
               # one job would hide rejections made through the other (#284).
-              expr: increase(sora_model_rejected_total[10m]) > 0
+              expr: increase(sora_model_rejected_total[10m])
+              instant: true
               intervalMs: 1000
               maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              settings:
+                mode: dropNN
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+        # A counter that has never been incremented is absent, and that is the
+        # healthy state: no rejection has happened.
+        noDataState: OK
+        execErrState: Alerting
         for: 0s
         labels:
           severity: critical
@@ -104,40 +251,130 @@ groups:
 
       - uid: sora-high-latency
         title: High Prediction Latency
-        condition: A
+        condition: C
         data:
           - refId: A
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: PBFA97CFB590B2093
             model:
               # job named: prediction latency is observed only in the backend
               # (app/api/predict.py); the scheduler serves no predictions, so
               # its bucket series are all empty. Naming the job keeps the p95
               # from being computed across an empty second series.
-              expr: histogram_quantile(0.95, rate(sora_prediction_latency_ms_bucket{job="sora-app"}[5m])) > 500
+              expr: histogram_quantile(0.95, rate(sora_prediction_latency_ms_bucket{job="sora-app"}[5m]))
+              instant: true
               intervalMs: 1000
               maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              settings:
+                mode: dropNN
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [500]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+        # No predictions means no latency to measure, which is quiet, not slow.
+        noDataState: OK
+        execErrState: Alerting
         for: 2m
         labels:
           severity: warning
         annotations:
           summary: "P95 prediction latency exceeds 500ms"
 
+      # Prometheus writes `up` = 0 when a scrape fails, and keeps the series, so
+      # a down target is a sample of 0 and the threshold is `lt 1`. The earlier
+      # form (`up == 0`) returned that 0 as the value, which Grafana reads as
+      # Normal: the rule could never fire.
+      #
+      # If the job is removed from prometheus.yml the series is absent. That is
+      # not healthy, so NoData alerts too.
       - uid: sora-app-down
         title: App Unreachable
-        condition: A
+        condition: C
         data:
           - refId: A
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: PBFA97CFB590B2093
             model:
-              expr: up{job="sora-app"} == 0
+              expr: up{job="sora-app"}
+              instant: true
               intervalMs: 1000
               maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              settings:
+                mode: dropNN
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+        noDataState: Alerting
+        execErrState: Alerting
         for: 1m
         labels:
           severity: critical
@@ -156,24 +393,62 @@ groups:
       #
       # job named: the gauge is written only by the scheduler, and both processes
       # export the same name (#284).
+      #
+      # Healthy is a real 0, which the threshold reads as Normal. An absent gauge
+      # is NoData, mapped to OK: it is not this rule's to judge, and the stale
+      # rule below covers it.
       - uid: sora-observation-coverage-gap
         title: M3 Observation Coverage Gap
-        condition: A
+        condition: C
         data:
           - refId: A
             relativeTimeRange:
               from: 900
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: PBFA97CFB590B2093
             model:
-              expr: sora_observation_coverage_gap_days{job="sora-scheduler"} > 0
+              expr: sora_observation_coverage_gap_days{job="sora-scheduler"}
+              instant: true
               intervalMs: 1000
               maxDataPoints: 43200
-        # Healthy is an empty result: a comparison filter returns nothing when
-        # the gap count is 0. Grafana treats any returned series as firing, so
-        # the expression cannot return a zero-valued series to mean healthy.
-        # NoData is therefore the healthy state, mapped to OK. An absent gauge is
-        # not healthy and is not this rule's to judge: the stale rule covers it.
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              settings:
+                mode: dropNN
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
         noDataState: OK
         execErrState: Alerting
         for: 30m
@@ -194,25 +469,67 @@ groups:
       # (the job runs every 15 minutes, so a healthy run keeps the age below
       # that), or when the series is absent. Absence after a restart lasts up to
       # one 15-minute cycle, which the 45-minute hold covers.
+      #
+      # The value is the age in seconds. When the gauge is absent, the absence
+      # branch is multiplied by 1e9 so that it reads as a very large age and
+      # crosses the threshold; a bare absent() would read as 1 and stay Normal.
       - uid: sora-observation-coverage-stale
         title: M3 Observation Coverage Not Reporting
-        condition: A
+        condition: C
         data:
           - refId: A
             relativeTimeRange:
               from: 900
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: PBFA97CFB590B2093
             model:
-              expr: absent(sora_observation_coverage_last_success_timestamp_seconds{job="sora-scheduler"}) or time() - sora_observation_coverage_last_success_timestamp_seconds{job="sora-scheduler"} > 900
+              expr: absent(sora_observation_coverage_last_success_timestamp_seconds{job="sora-scheduler"}) * 1e9 or time() - sora_observation_coverage_last_success_timestamp_seconds{job="sora-scheduler"}
+              instant: true
               intervalMs: 1000
               maxDataPoints: 43200
-        # Healthy is an empty result (the timestamp is fresh, so neither branch
-        # returns a series). Absence returns a series and fires. A stopped
-        # scheduler or a down target lets the series go stale, which makes absent()
-        # return one. noDataState OK is the healthy state; a failing query is not
-        # evidence of health, so it alerts.
-        noDataState: OK
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              settings:
+                mode: dropNN
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [900]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+        # A fresh timestamp gives an age well under 900, which is Normal. The
+        # expression always yields a value while Prometheus answers, so NoData
+        # can only mean the query returned nothing at all; that is not evidence
+        # of health, and it alerts.
+        noDataState: Alerting
         execErrState: Alerting
         for: 45m
         labels:

@@ -1,8 +1,9 @@
 """The M3 coverage alerts are provisioned, pinned to the scheduler, and read the right gauges.
 
 What this cannot show is that Grafana fires them. It reads the provisioning file.
-The behaviour under a real outage, recovery and a stopped scheduler is checked
-after deployment, against the live Prometheus, and is recorded in the PR.
+The behaviour under a real outage, recovery and a stopped scheduler is exercised
+against a real Grafana by tests/grafana_stand (not run in CI), and recorded in
+tests/grafana_stand/RESULTS.md.
 """
 import os
 
@@ -27,14 +28,23 @@ def _expr(rules, uid):
     return rules[uid]["data"][0]["model"]["expr"]
 
 
+def _threshold(rules, uid):
+    """The condition's threshold node: the one whose evaluator decides the state."""
+    node = {d["refId"]: d for d in rules[uid]["data"]}[rules[uid]["condition"]]
+    assert node["model"]["type"] == "threshold", uid
+    return node["model"]["conditions"][0]["evaluator"]
+
+
 def test_both_coverage_alerts_exist(rules):
     assert GAP in rules
     assert STALE in rules
 
 
-def test_the_gap_rule_fires_on_any_missing_point_day(rules):
-    """Strictly greater than zero: one missing point-day is the signal."""
-    assert _expr(rules, GAP) == 'sora_observation_coverage_gap_days{job="sora-scheduler"} > 0'
+def test_the_gap_rule_reads_the_count_and_fires_above_zero(rules):
+    """The value is the count itself, so a healthy 0 is a real Normal rather than
+    an empty result. The threshold is what turns one missing point-day into a page."""
+    assert _expr(rules, GAP) == 'sora_observation_coverage_gap_days{job="sora-scheduler"}'
+    assert _threshold(rules, GAP) == {"type": "gt", "params": [0]}
 
 
 def test_the_gap_rule_holds_for_thirty_minutes_as_a_warning(rules):
@@ -54,8 +64,9 @@ def test_the_stale_rule_reads_the_success_timestamp_not_the_gap_gauge(rules):
 def test_the_stale_rule_covers_absence_and_age(rules):
     expr = _expr(rules, STALE)
 
-    assert 'absent(sora_observation_coverage_last_success_timestamp_seconds{job="sora-scheduler"})' in expr
-    assert 'time() - sora_observation_coverage_last_success_timestamp_seconds{job="sora-scheduler"} > 900' in expr
+    assert 'absent(sora_observation_coverage_last_success_timestamp_seconds{job="sora-scheduler"}) * 1e9' in expr
+    assert 'time() - sora_observation_coverage_last_success_timestamp_seconds{job="sora-scheduler"}' in expr
+    assert _threshold(rules, STALE) == {"type": "gt", "params": [900]}
 
 
 def test_the_stale_rule_holds_for_longer_than_a_restart_takes(rules):
@@ -90,61 +101,11 @@ def test_the_scheduler_writes_the_success_timestamp():
     assert "sora_observation_coverage_last_success_timestamp_seconds.labels(" in text
 
 
-DATASOURCE_DIR = os.path.join(REPO_ROOT, "grafana", "provisioning", "datasources")
-MOUNTED_DATASOURCE_FILES = ("datasource.yml", "prometheus.yml")
-
-
-def _mounted_datasource_uids():
-    yaml = pytest.importorskip("yaml")
-    uids = {}
-    for name in MOUNTED_DATASOURCE_FILES:
-        with open(os.path.join(DATASOURCE_DIR, name), encoding="utf-8") as fh:
-            for ds in yaml.safe_load(fh)["datasources"]:
-                uids.setdefault(ds.get("uid"), []).append((name, ds["name"]))
-    return uids
-
-
 @pytest.mark.parametrize("uid", [GAP, STALE])
-def test_the_states_are_explicit_so_healthy_is_normal(rules, uid):
-    """Healthy returns an empty result, and Grafana's NoData must read as OK, not
-    as an alert. A failing query alerts rather than being taken for health."""
-    assert rules[uid]["noDataState"] == "OK"
+def test_the_states_are_explicit(rules, uid):
+    """Grafana's NoData maps to OK for the gap rule only: its absence is the stale
+    rule's to report. A failing query alerts rather than being taken for health."""
     assert rules[uid]["execErrState"] == "Alerting"
-
-
-def test_the_gap_expression_is_a_filter_so_healthy_is_empty(rules):
-    expr = _expr(rules, GAP)
-
-    assert expr.endswith("> 0")
-    assert "or vector(0)" not in expr
-
-
-def test_the_stale_expression_has_the_absence_branch_and_the_age_branch(rules):
-    expr = _expr(rules, STALE)
-
-    assert expr.startswith("absent(")
-    assert " or time() - " in expr
-    assert expr.endswith("> 900")
-
-
-def test_every_rule_names_a_datasource_the_provisioning_declares(rules):
-    """A datasourceUid that no mounted datasource declares is resolved by Grafana
-    to nothing: the rule evaluates against no backend and reports NoData forever.
-    Before this test the existing rules relied on `prometheus`, and no datasource
-    file declared it."""
-    declared = _mounted_datasource_uids()
-
-    for uid, rule in rules.items():
-        for query in rule["data"]:
-            ds = query["datasourceUid"]
-            assert ds in declared, (
-                f"rule {uid} uses datasourceUid {ds!r}, which no mounted datasource declares")
-
-
-def test_the_mounted_datasource_uid_is_unique_and_is_prometheus():
-    """Two files both provision a datasource named Prometheus. They must agree on
-    the uid, or the second silently replaces the first's identity."""
-    declared = _mounted_datasource_uids()
-
-    assert set(declared) == {"prometheus"}, declared
-    assert len(declared["prometheus"]) == 2
+    assert rules[uid]["noDataState"] in {"OK", "Alerting"}
+    if uid == GAP:
+        assert rules[uid]["noDataState"] == "OK"

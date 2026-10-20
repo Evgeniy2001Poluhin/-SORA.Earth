@@ -45,7 +45,7 @@ def test_never_having_succeeded_also_fires(rules):
     threshold alone would miss it, since -1 is below any positive bound."""
     expr = rules["sora-retrain-stale"]["data"][0]["model"]["expr"]
 
-    assert "== -1" in expr
+    assert "== bool -1" in expr
 
 
 def test_the_metric_it_alerts_on_is_declared(rules):
