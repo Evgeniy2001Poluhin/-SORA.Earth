@@ -2,25 +2,37 @@
 
 Serves /app/metrics (job sora-app) and /scheduler/metrics (job sora-scheduler).
 The state is changed over HTTP by /control?key=value&..., so one container can
-produce every scenario the alert rules must answer:
+produce every scenario the alert rules must answer. Counters and histogram
+buckets are real: they only grow, and they grow on each scrape while a switch is
+on, so rate() and increase() see genuine increments.
 
   app=ok|down                 down makes the scrape fail (HTTP 500), so Prometheus
                               writes up=0 for sora-app
+  drift_on=0|1                each sora-app scrape adds 1 to sora_drift_detected_total
+  rejected_on=0|1             each sora-app scrape adds 1 to sora_model_rejected_total
+  lat_ms=<float>              latency of the observations recorded per scrape
+  lat_n=<int>                 observations recorded per scrape (0 = no traffic)
   gap=<int>                   value of sora_observation_coverage_gap_days
   gap_present=0|1             0 omits the gap gauge entirely
   ts_present=0|1              0 omits the success-timestamp gauge entirely
-  ts_lag=<seconds>            the timestamp is now - ts_lag (a value of 1000 is a
-                              scheduler that stopped reporting 1000 seconds ago)
-  retrain_since=<seconds>     sora_retrain_seconds_since_success on sora-app
+  ts_lag=<seconds>            the timestamp is now - ts_lag (1000 = a scheduler that
+                              last reported 1000 seconds ago)
+  retrain_since=<seconds>     sora_retrain_seconds_since_success on sora-app; -1 is
+                              the never-succeeded sentinel
 
 Standard library only, so it runs in a stock python image with no install.
 """
 import http.server
+import threading
 import time
 import urllib.parse
 
 STATE = {
     "app": "ok",
+    "drift_on": 0,
+    "rejected_on": 0,
+    "lat_ms": 50.0,
+    "lat_n": 10,
     "gap": 0,
     "gap_present": 1,
     "ts_present": 1,
@@ -28,13 +40,54 @@ STATE = {
     "retrain_since": 3600,
 }
 
+#: Upper bounds of the latency histogram, in milliseconds.
+BUCKETS = [10.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0]
+
+COUNTERS = {
+    "drift_total": 0,
+    "rejected_total": 0,
+    "lat_count": 0,
+    "lat_sum": 0.0,
+    "lat_buckets": {le: 0 for le in BUCKETS},
+}
+LOCK = threading.Lock()
+
+
+def _record_scrape():
+    """Advance the counters for one sora-app scrape. Called under LOCK."""
+    if STATE["drift_on"]:
+        COUNTERS["drift_total"] += 1
+    if STATE["rejected_on"]:
+        COUNTERS["rejected_total"] += 1
+    n = int(STATE["lat_n"])
+    if n > 0:
+        value = float(STATE["lat_ms"])
+        COUNTERS["lat_count"] += n
+        COUNTERS["lat_sum"] += n * value
+        for le in BUCKETS:
+            if value <= le:
+                COUNTERS["lat_buckets"][le] += n
+
 
 def _app_metrics():
-    return (
-        f"sora_retrain_seconds_since_success {STATE['retrain_since']}\n"
-        "sora_drift_detected_total 0\n"
-        "sora_model_rejected_total 0\n"
-    )
+    with LOCK:
+        _record_scrape()
+        lines = [
+            "# TYPE sora_drift_detected_total counter",
+            f"sora_drift_detected_total {COUNTERS['drift_total']}",
+            "# TYPE sora_model_rejected_total counter",
+            f"sora_model_rejected_total {COUNTERS['rejected_total']}",
+            f"sora_retrain_seconds_since_success {STATE['retrain_since']}",
+            "# TYPE sora_prediction_latency_ms histogram",
+        ]
+        for le in BUCKETS:
+            lines.append(
+                f'sora_prediction_latency_ms_bucket{{le="{le}"}} {COUNTERS["lat_buckets"][le]}')
+        lines.append(
+            f'sora_prediction_latency_ms_bucket{{le="+Inf"}} {COUNTERS["lat_count"]}')
+        lines.append(f"sora_prediction_latency_ms_sum {COUNTERS['lat_sum']}")
+        lines.append(f"sora_prediction_latency_ms_count {COUNTERS['lat_count']}")
+    return "\n".join(lines) + "\n"
 
 
 def _scheduler_metrics():
@@ -62,7 +115,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             for key, value in urllib.parse.parse_qsl(url.query):
                 if key not in STATE:
                     return self._send(400, f"unknown key {key}\n")
-                STATE[key] = type(STATE[key])(value) if key != "app" else value
+                STATE[key] = value if key == "app" else type(STATE[key])(float(value))
+                if key in ("ts_lag", "lat_ms"):
+                    STATE[key] = float(value)
             return self._send(200, repr(STATE) + "\n")
         if url.path == "/state":
             return self._send(200, repr(STATE) + "\n")

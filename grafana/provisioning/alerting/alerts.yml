@@ -470,6 +470,11 @@ groups:
       # that), or when the series is absent. Absence after a restart lasts up to
       # one 15-minute cycle, which the 45-minute hold covers.
       #
+      # The hold starts at the first evaluation that sees the age over 15
+      # minutes, so from the last successful report the alert takes about an
+      # hour, plus up to one evaluation interval. The summary says "about an
+      # hour" for that reason.
+      #
       # The value is the age in seconds. When the gauge is absent, the absence
       # branch is multiplied by 1e9 so that it reads as a very large age and
       # crosses the threshold; a bare absent() would read as 1 and stay Normal.
@@ -535,7 +540,7 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "M3 coverage has not reported successfully for 45 minutes"
+          summary: "M3 coverage has not reported successfully for about an hour"
           description: >-
             The coverage gauges are not being refreshed, so the gap alert above
             is reading an old value. Check the scheduler container and its

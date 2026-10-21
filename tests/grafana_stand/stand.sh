@@ -49,11 +49,25 @@ up_base() {
     -p 127.0.0.1:18080:8000 \
     -v "$REPO/tests/grafana_stand/metrics_server.py:/app/metrics_server.py:ro" \
     "$PY_IMAGE" python -I /app/metrics_server.py >/dev/null
+  mkdir -p "$WORK/targets"
+  targets restore
   docker rm -f "$PROM" >/dev/null 2>&1 || true
   docker run -d --name "$PROM" --network "$NET" --network-alias prometheus \
     -p 127.0.0.1:19090:9090 \
     -v "$REPO/tests/grafana_stand/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+    -v "$WORK/targets:/etc/prometheus/targets:ro" \
     "$PROM_IMAGE" >/dev/null
+}
+
+# sora-app's target list, read by Prometheus through file_sd. `vanish` empties
+# the list so the job has no targets; `restore` lists the metrics server again.
+targets() {
+  case "$1" in
+    vanish) printf '[]\n' > "$WORK/targets/sora-app.json" ;;
+    restore) printf '[{"targets": ["%s:8000"]}]\n' "$METRICS" > "$WORK/targets/sora-app.json" ;;
+    *) echo "usage: targets vanish|restore" >&2; exit 2 ;;
+  esac
+  echo "sora-app targets: $(cat "$WORK/targets/sora-app.json")"
 }
 
 grafana() {
@@ -111,6 +125,7 @@ teardown() {
 case "${1:-}" in
   up-base) up_base ;;
   grafana) grafana "$2" "$3" "$4" ;;
+  targets) targets "$2" ;;
   stop) stop "$2" ;;
   rm) rm_one "$2" ;;
   override) override "$2" ;;

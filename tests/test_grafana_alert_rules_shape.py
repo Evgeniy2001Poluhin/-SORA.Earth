@@ -115,3 +115,12 @@ def test_the_retrain_stale_expression_is_zero_when_healthy_and_fires_on_both_bra
     assert "> bool 1209600" in expr
     assert "== bool -1" in expr
     assert evaluator == {"type": "gt", "params": [0]}
+
+
+def test_the_stale_summary_states_the_real_delay(doc):
+    """The hold is 45 minutes after the age passes 15, so from the last successful
+    report the alert takes about an hour. A summary of "45 minutes" misstates it."""
+    rule = next(r for g in doc["groups"] for r in g["rules"]
+                if r["uid"] == "sora-observation-coverage-stale")
+    assert "45 minutes" not in rule["annotations"]["summary"]
+    assert "hour" in rule["annotations"]["summary"]
