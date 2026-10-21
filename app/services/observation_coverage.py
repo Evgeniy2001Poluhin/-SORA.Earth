@@ -55,6 +55,8 @@ def coverage_window(days: int, not_before: date | None, today: date) -> tuple[da
     `days` back from today, or `not_before` if that is later. The rolling bound
     and the clock bound both apply, and whichever is later wins.
     """
+    if not_before is not None and not_before > today:
+        raise ValueError("not_before is after today")
     lower = today - timedelta(days=days)
     if not_before is not None and not_before > lower:
         lower = not_before

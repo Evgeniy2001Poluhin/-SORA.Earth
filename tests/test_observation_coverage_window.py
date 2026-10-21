@@ -137,3 +137,19 @@ def test_the_gauges_publish_the_report_they_were_given(monkeypatch, gap_count):
     assert result["gap_count"] == gap_count
     assert result["days_examined"] == 16
     assert result["points_examined"] == 21
+
+
+def test_not_before_after_today_raises():
+    """A reversed window is not silently served as `lower > upper`.
+
+    `coverage_window(30, date(2026, 10, 25), date(2026, 10, 20))` would return
+    (2026-10-25, 2026-10-20), and the SQL would then walk a window whose lower
+    edge is after its upper edge and answer nothing. Fail loudly instead.
+    """
+    with pytest.raises(ValueError, match="^not_before is after today$"):
+        coverage_window(30, date(2026, 10, 25), date(2026, 10, 20))
+
+
+def test_not_before_equal_to_today_is_allowed():
+    """`not_before == today` is the degenerate window and is not an error."""
+    assert coverage_window(30, TODAY, TODAY) == (TODAY, TODAY)
