@@ -151,7 +151,7 @@ def test_the_alert_condition_holds_on_the_signal_produced(broken_write, log_db):
 
     # The expression, read from the rule rather than restated here: a copy
     # would keep passing after someone edited the rule.
-    threshold = int(re.search(r"> (\d+)", expr).group(1))
+    threshold = int(re.search(r"> bool (\d+)", expr).group(1))
     fires = value > threshold or value == -1
 
     assert fires, (

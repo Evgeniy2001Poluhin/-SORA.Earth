@@ -22,6 +22,8 @@ EXPECTED_OPERATIONAL_ALERTS = {
     "sora-retrain-failed",
     "sora-high-latency",
     "sora-app-down",
+    "sora-observation-coverage-gap",
+    "sora-observation-coverage-stale",
 }
 
 
