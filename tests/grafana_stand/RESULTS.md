@@ -199,3 +199,63 @@ not referenced by any dashboard JSON in the repository.
    The real-interval first evaluation (A1, A2) used the repository values.
 8. **No contact point was configured**, so no notification delivery was tested. That is
    outside the stand's scope and remains open.
+
+## Round 2: original interval and holds, no shortening (scenario C)
+
+Run on a fresh volume with the repository provisioning exactly as committed
+(`group interval 5m`, real `for:` holds, no override). Evaluations ran at the
+5-minute group interval, aligned to 05:29:30, 05:34:30 and so on, UTC.
+
+Starting conditions, t0 = 05:26:43Z: sora-app up; `drift_on=1`,
+`rejected_on=1` (each sora-app scrape adds one to the counter);
+latency histogram receiving 10 observations per scrape at 900 ms;
+coverage success timestamp 1000 s old; `retrain_since=1300000` (over 1209600).
+
+Timeline (driver log, `timeline-c.log`):
+
+| UTC | event |
+|---|---|
+| 05:26:43 | t0: conditions above |
+| 05:41:43 | t0+15m: counters stop; latency back to 50 ms |
+| 06:26:43 | t0+60m: sora-app target removed from file_sd (no targets listed) |
+| 06:51:43 | t0+85m: driver done |
+| 06:51:52 | target restored |
+| 06:54:30 | the three firing rules recovered (see below) |
+
+Transitions (watcher log, `watch-c.log`, from the evaluator, one line per change):
+
+| rule | Pending | Alerting / firing | Normal again | Notes |
+|---|---|---|---|---|
+| sora-drift-detected | (none, 0s hold) | 05:29:30 (first eval) | 05:49:30 | counter stopped 05:41:43; Normal 8 min later when the 5 min `increase` window cleared |
+| sora-retrain-failed | (none, 0s hold) | 05:29:30 (first eval) | 05:54:30 | same counter mechanism, rejected |
+| sora-high-latency | 05:29:30 | 05:34:30 | 05:49:30 | 2 min hold; next eval after Pending. Normal 8 min after switching to 50 ms, once the p95 window cleared |
+| sora-observation-coverage-stale | 05:29:30 | 06:14:30 | 06:54:30 (after ts restored) | Pending to Alerting = 45 min exactly, the real hold. Stale timestamp present and old (age 1000 s) |
+| sora-retrain-stale | 05:29:30 | 05:44:30 | 06:54:30 (after retrain value restored) | Pending to Alerting = 15 min, the real hold. Present value 1300000 > 1209600 |
+| sora-app-down | 06:29:30 (NoData) | 06:34:30 (NoData) | 06:54:30 (after restore) | Pending to Alerting = 5 min (1 min hold, next eval). Vanished target: no `up` series, so NoData, which is Alerting |
+| sora-observation-coverage-gap | never | never | - | gap stayed 0 throughout; Normal |
+
+Wall times of the Pending to Alerting transitions on the original interval and
+holds: coverage-stale 45 min, retrain-stale 15 min, high-latency 5 min,
+app-down 5 min. The hold for latency and app-down is shorter than the interval,
+so the next evaluation sets Alerting.
+
+Post-vanish states (06:49:30 eval, before restore): app-down Alerting (NoData);
+drift, latency, retrain-failed and retrain-stale Normal (NoData), because their
+series are no longer scraped and NoData resolves to OK for those rules by design.
+
+Post-restore states (06:54:30 eval): every rule Normal, `lastError` empty.
+
+### Interrupted attempt, not used for any result
+
+The first round-two attempt ran at 00:11:55 UTC. The Mac slept during the first
+900-second wait. The driver did not progress, Grafana's evaluation clock and the
+host clock diverged, and the watcher exited early, so the timeline is not a
+valid measurement. It was stopped and the stand was torn down. The rerun above
+used `caffeinate` to keep the host awake and started from a clean stand.
+
+### Reproduction
+
+The timeline driver was a shell script kept outside the repository, with the
+timeline above as its sleeps and `stand.sh control` calls. It is not committed:
+it hard-codes the worktree path. The stand files in the repo (`stand.sh`,
+`metrics_server.py`, `prometheus.yml`, `check.py`) are what it drove.
