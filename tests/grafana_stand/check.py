@@ -1,7 +1,7 @@
 """Read-only probes of the stand's Grafana API, printed as JSON or compact tables.
 
-Used to record RESULTS.md. Reads the throwaway admin password from the file that
-stand.sh writes outside the repository; never prints it.
+Used to record RESULTS.md. Reads the disposable admin password from the private run directory;
+never prints it. See SAFETY.md for the initialization contract.
 
   check.py datasources
   check.py rules             provisioned rules: uid, condition, nodata/exec states
@@ -9,7 +9,6 @@ stand.sh writes outside the repository; never prints it.
 """
 import base64
 import json
-import os
 import sys
 import urllib.request
 
@@ -17,13 +16,10 @@ GRAFANA = "http://127.0.0.1:13000"
 
 
 def _password():
-    path = os.path.join(os.environ.get("GSTAND_WORK", os.path.expanduser("~/.sora-gstand")),
-                        "admin.env")
-    with open(path, encoding="utf-8") as fh:
-        for line in fh:
-            if line.startswith("GSTAND_PW="):
-                return line.strip().split("=", 1)[1]
-    raise SystemExit("no admin password in " + path)
+    # Validate the private stand root; this read-only probe never creates a key.
+    from path_guard import password, session
+    work, _run_id = session()
+    return password(work)
 
 
 def get(path):
