@@ -208,12 +208,17 @@ class CoverageGap(BaseModel):
 
 
 class ObservationCoverage(BaseModel):
-    """Days that fall short, and what was asked to find them.
+    """Point-days that fall short, and what was asked to find them.
 
-    `complete_days` is reported beside `gaps` on purpose. A response holding an
-    empty list means either "nothing fell short" or "nothing was looked at",
-    and those are different facts about a deployment -- the denominator tells
-    them apart.
+    The grid is every UTC day in the window crossed with every declared point
+    due that day, so `gap_count` and `complete_days` both count point-days and
+    together make up the expected number. A point with no rows on a day is a
+    gap. `days_examined` counts calendar days and `points_examined` counts the
+    declared points due in the window.
+
+    The denominators sit beside `gaps` on purpose. A response holding an empty
+    list means either "nothing fell short" or "nothing was looked at", and those
+    are different facts about a deployment -- the denominator tells them apart.
     """
 
     source: str

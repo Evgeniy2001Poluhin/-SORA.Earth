@@ -12,38 +12,14 @@ from datetime import datetime, timezone
 from typing import List
 
 from app.ingesters.base import BaseIngester, Signal
+from app.services.environmental.regions import OPENMETEO_POINTS_V1
 
 log = logging.getLogger(__name__)
 
-# Same regions as OpenAQ for consistency
-REGION_CAPITALS = [
-    # Europe
-    ("DEU", 52.5200, 13.4050),   # Berlin
-    ("GBR", 51.5074, -0.1278),   # London
-    ("FRA", 48.8566, 2.3522),    # Paris
-    ("ESP", 40.4168, -3.7038),   # Madrid
-    ("ITA", 41.9028, 12.4964),   # Rome
-    ("NLD", 52.3676, 4.9041),    # Amsterdam
-    ("POL", 52.2297, 21.0122),   # Warsaw
-    # Asia
-    ("IND", 28.6139, 77.2090),   # New Delhi
-    ("CHN", 39.9042, 116.4074),  # Beijing
-    ("JPN", 35.6762, 139.6503),  # Tokyo
-    ("KOR", 37.5665, 126.9780),  # Seoul
-    ("IDN", -6.2088, 106.8456),  # Jakarta
-    # Americas
-    ("USA", 38.9072, -77.0369),  # Washington DC
-    ("BRA", -15.7975, -47.8919), # Brasilia
-    ("MEX", 19.4326, -99.1332),  # Mexico City
-    ("CAN", 45.4215, -75.6972),  # Ottawa
-    # Africa
-    ("NGA", 9.0579, 7.4951),     # Abuja
-    ("ZAF", -25.7479, 28.2293),  # Pretoria
-    ("KEN", -1.2921, 36.8219),   # Nairobi
-    # Russia
-    ("RU-MOW", 55.7558, 37.6173),  # Moscow
-    ("RU-SPE", 59.9343, 30.3351),  # St. Petersburg
-]
+# Same regions as OpenAQ for consistency. The declared set (codes, coordinates and
+# order) lives in app/services/environmental/regions.py, shared with observation
+# coverage. This is its (code, lat, lon) view, in the same order as before.
+REGION_CAPITALS = [(p.code, p.lat, p.lon) for p in OPENMETEO_POINTS_V1]
 
 # Weather variables to fetch
 # https://open-meteo.com/en/docs#current=temperature_2m,relative_humidity_2m,...
