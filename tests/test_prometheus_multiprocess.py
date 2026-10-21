@@ -232,6 +232,37 @@ def test_the_hook_does_nothing_when_multiprocess_is_off(monkeypatch):
 # --- the application's own metrics -----------------------------------------
 
 
+def _gauges_without_explicit_mode(source: str) -> list[tuple[int, str]]:
+    """Find direct Gauge declarations, including annotated assignments."""
+    missing = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        if not isinstance(node.value, ast.Call):
+            continue
+        if getattr(node.value.func, "id", None) != "Gauge":
+            continue
+        if any(k.arg == "multiprocess_mode" for k in node.value.keywords):
+            continue
+        target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+        missing.append((node.lineno, ast.unparse(target)))
+    return missing
+
+
+@pytest.mark.parametrize("source, expected", [
+    ("metric = Gauge('x', 'd')", [(1, "metric")]),
+    ("metric: object = Gauge('x', 'd')", [(1, "metric")]),
+    ("metric = Gauge('x', 'd', multiprocess_mode='mostrecent')", []),
+    ("metric: object = Gauge('x', 'd', multiprocess_mode='mostrecent')", []),
+    ("metric: object", []),
+    ("other = Counter('x', 'd')", []),
+    ("\nmetric: object = Gauge('x', 'd')", [(2, "metric")]),
+    ("metric: object = Gauge('x', 'd', **options)", [(1, "metric")]),
+])
+def test_gauge_mode_guard_handles_assignment_forms(source, expected):
+    assert _gauges_without_explicit_mode(source) == expected
+
+
 def test_every_gauge_declares_a_multiprocess_mode():
     """Point 5, structurally.
 
@@ -239,15 +270,9 @@ def test_every_gauge_declares_a_multiprocess_mode():
     four series where an alert expects one, which is worse than the
     undercounting this change is fixing.
     """
-    tree = ast.parse((ROOT / "app" / "prom_metrics.py").read_text())
-    missing = [
-        (node.lineno, ast.unparse(node.targets[0]))
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Assign)
-        and isinstance(node.value, ast.Call)
-        and getattr(node.value.func, "id", None) == "Gauge"
-        and not any(k.arg == "multiprocess_mode" for k in node.value.keywords)
-    ]
+    missing = _gauges_without_explicit_mode(
+        (ROOT / "app" / "prom_metrics.py").read_text()
+    )
 
     assert missing == [], f"Gauge without a declared multiprocess_mode: {missing}"
 
