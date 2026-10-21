@@ -143,10 +143,10 @@ def test_not_before_after_today_raises():
     """A reversed window is not silently served as `lower > upper`.
 
     `coverage_window(30, date(2026, 10, 25), date(2026, 10, 20))` would return
-    (2026-09-25, 2026-10-20), and the SQL would then walk a window whose lower
+    (2026-10-25, 2026-10-20), and the SQL would then walk a window whose lower
     edge is after its upper edge and answer nothing. Fail loudly instead.
     """
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^not_before is after today$"):
         coverage_window(30, date(2026, 10, 25), date(2026, 10, 20))
 
 
