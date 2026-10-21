@@ -54,7 +54,7 @@ up_base() {
   docker rm -f "$PROM" >/dev/null 2>&1 || true
   docker run -d --name "$PROM" --network "$NET" --network-alias prometheus \
     -p 127.0.0.1:19090:9090 \
-    -v "$REPO/tests/grafana_stand/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+    -v "$REPO/tests/grafana_stand/stand-prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
     -v "$WORK/targets:/etc/prometheus/targets:ro" \
     "$PROM_IMAGE" >/dev/null
 }
