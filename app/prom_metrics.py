@@ -221,7 +221,8 @@ sora_observation_coverage_points_examined = Gauge(
 )
 #: Unix time of the last coverage report that computed successfully. The gap
 #: gauges above keep their last value when a run fails, so a stopped scheduler
-#: looks healthy through them; this one does not, and the staleness alert reads it.
+#: looks healthy through them; this one does not, so a staleness check can read it.
+#: The check itself is in the separate Grafana alert work, not in this change.
 sora_observation_coverage_last_success_timestamp_seconds = Gauge(
     "sora_observation_coverage_last_success_timestamp_seconds",
     "Unix time of the last successful observation coverage report",

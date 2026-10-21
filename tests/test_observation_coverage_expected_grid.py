@@ -112,3 +112,66 @@ def test_utc_today_is_a_function_a_test_can_state_the_calendar_with():
     import app.services.observation_coverage as coverage
 
     assert isinstance(coverage.utc_today(), date)
+
+
+class _FakeResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _FakeSession:
+    """Stands in for the database: returns the grid rows the SQL would return.
+
+    The SQL's job is the grid itself; the threshold comparison is the Python
+    filter in coverage_report. This lets that filter run without PostgreSQL.
+    """
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def execute(self, statement, params=None):
+        return _FakeResult(self._rows)
+
+    def close(self):
+        pass
+
+
+def test_the_threshold_boundary_is_exact_without_a_database(monkeypatch):
+    """19 hours of 24 is complete; 18 is a gap. The comparison is `<`, not `<=`.
+
+    The Postgres twin of this lives in test_observation_coverage_postgres.py. This
+    one runs anywhere: the grid rows come from a fake session, and the comparison
+    under test is coverage_report's own filter.
+    """
+    from datetime import timedelta
+
+    import app.database as database
+    from app.services.environmental.regions import OPENMETEO_POINTS_V1
+    from app.services.observation_coverage import coverage_report
+
+    today = date(2026, 10, 20)
+    nineteen_day = today - timedelta(days=2)
+    eighteen_day = today - timedelta(days=4)
+    rows = []
+    for back in range(7, 0, -1):
+        day = today - timedelta(days=back)
+        for point in OPENMETEO_POINTS_V1:
+            hours = 24
+            if day == nineteen_day and point.code == "RU-MOW":
+                hours = 19
+            if day == eighteen_day and point.code == "RU-SPE":
+                hours = 18
+            rows.append((day.isoformat(), point.code, hours))
+
+    monkeypatch.setattr(database, "SessionLocal", lambda: _FakeSession(rows))
+
+    result = coverage_report(source="openmeteo", indicator="temperature",
+                             days=7, today=today)
+
+    assert [(g.day, g.region_id, g.observations) for g in result.gaps] == [
+        (eighteen_day.isoformat(), "RU-SPE", 18),
+    ]
+    assert (result.gap_count, result.complete_days) == (1, 146)

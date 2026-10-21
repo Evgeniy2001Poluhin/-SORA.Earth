@@ -1076,9 +1076,10 @@ def scheduled_observation_coverage():
     rather than "nothing was looked at".
 
     If the report cannot be computed (no declared points, or the database fails),
-    the gauges are left as they were and the timestamp below is not advanced. The
-    alert on that timestamp is what notices a scheduler that has stopped
-    succeeding, because a gauge keeps its last value and would not show it.
+    the gauges are left as they were and the timestamp below is not advanced. A
+    gauge keeps its last value, so the timestamp is what would let a staleness
+    check notice a scheduler that has stopped succeeding. That check is not part
+    of this change; it is in the separate Grafana alert work.
     """
     from app.services.observation_coverage import M3_CLOCK_START, coverage_report
 
