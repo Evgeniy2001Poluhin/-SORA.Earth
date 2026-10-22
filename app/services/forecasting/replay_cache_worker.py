@@ -169,11 +169,17 @@ def initialize(root: Path, plan_raw: bytes, expected_pin: str, *, prior_units: i
 
 
 class CacheWorker:
-    def __init__(self, root: Path, recovery_pin=None):
+    def __init__(self, root: Path, recovery_pin=None, continuation_pin=None):
         self.root = root
         self.recovery_pin = recovery_pin
+        self.continuation_pin = continuation_pin
 
     def recovery_policy(self, state, now, requests):
+        if state.get("calendar_continuation"):
+            need(self.continuation_pin is not None, "explicit continuation pin required")
+            from .replay_cache_continuation import validate_active
+            return validate_active(self.root, state, self.continuation_pin,
+                                   self.recovery_pin, now, requests)
         if not state.get("manual_recovery"):
             return None
         need(self.recovery_pin is not None, "explicit recovery amendment pin required")
@@ -341,7 +347,8 @@ class CacheWorker:
             if recovery:
                 pending = [r for r in pending if r["issue_date"] in recovery["allowed_missing_dates"]]
                 if not pending:
-                    return {"status": "first_slice_complete", "count": len(state["completed"])}
+                    return {"status": recovery.get("completion_status", "first_slice_complete"),
+                            "count": len(state["completed"])}
                 need(len([e for e in state["events"] if e["kind"] == "attempt"]) <
                      recovery["max_total_attempts"], "amended attempt cap reached")
             if not pending:
@@ -362,6 +369,8 @@ class CacheWorker:
             if recovery and request["issue_date"] == recovery["failed_day"]:
                 state["events"][-1].update(attempt_ordinal=2,
                                           recovery_amendment_sha256=self.recovery_pin)
+            if state.get("calendar_continuation"):
+                state["events"][-1]["calendar_continuation_sha256"] = self.continuation_pin
             state["inflight"] = {"day": request["issue_date"], "source": {"kind": "reserved_http_attempt"}}
             save_state(self.root, state)  # Must finish durably BEFORE transport.
             completion_recorded = False
