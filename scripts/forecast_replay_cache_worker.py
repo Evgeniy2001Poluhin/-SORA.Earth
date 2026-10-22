@@ -29,9 +29,15 @@ def main(argv=None):
     init.add_argument("--plan", type=Path, required=True)
     init.add_argument("--plan-sha256", required=True)
     init.add_argument("--prior-reserved-units", type=int, required=True)
+    authorize = sub.add_parser("authorize-recovery")
+    authorize.add_argument("directory", type=Path)
+    authorize.add_argument("--amendment", type=Path, required=True)
+    authorize.add_argument("--amendment-sha256", required=True)
+    authorize.add_argument("--confirm-code-commit", required=True)
     for command in ("status", "audit", "fetch-one", "import-one"):
         part = sub.add_parser(command)
         part.add_argument("directory", type=Path)
+        part.add_argument("--recovery-sha256")
         if command == "fetch-one":
             part.add_argument("--confirm-code-commit", required=True)
         if command == "import-one":
@@ -41,11 +47,19 @@ def main(argv=None):
     args = parser.parse_args(argv)
     now = datetime.now(timezone.utc)
     try:
-        worker = CacheWorker(args.directory)
+        recovery_pin = getattr(args, "recovery_sha256", None)
+        worker = CacheWorker(args.directory, recovery_pin=recovery_pin) if recovery_pin else CacheWorker(args.directory)
         if args.command == "init":
             initialize(args.directory, read_regular(args.plan, 1_048_576), args.plan_sha256,
                        prior_units=args.prior_reserved_units, now=now, code_commit=frozen_head())
             result = {"status": "initialized", "network_requests": 0}
+        elif args.command == "authorize-recovery":
+            from app.services.forecasting.replay_cache_recovery import authorize_once
+            head = frozen_head()
+            if head != args.confirm_code_commit:
+                raise ValueError("recovery source differs")
+            result = authorize_once(args.directory, read_regular(args.amendment, 100000),
+                                    args.amendment_sha256, now=now, code_commit=head)
         elif args.command == "import-one":
             result = worker.import_one(args.day, args.source, args.manifest_sha256, now=now)
         elif args.command == "audit":

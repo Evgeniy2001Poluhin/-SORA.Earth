@@ -64,7 +64,7 @@ def export_snapshot(cache: Path, p0: Path, p0_protocol: Path, protocol: dict, ou
          not partial.exists() and not partial.is_symlink(), 'new export directory required')
     partial.mkdir(mode=0o700)
     entries = []
-    worker = CacheWorker(cache)
+    worker = CacheWorker(cache, recovery_pin=protocol.get("recovery_amendment_sha256"))
     with worker.locked(datetime.now(timezone.utc)) as (state, _, _):
         need(state['paused'] is None and state['inflight'] is None, 'cache not settled')
         need(state['code_commit'] == protocol['worker_commit'], 'cache execution commit differs')

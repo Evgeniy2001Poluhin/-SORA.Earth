@@ -169,8 +169,16 @@ def initialize(root: Path, plan_raw: bytes, expected_pin: str, *, prior_units: i
 
 
 class CacheWorker:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, recovery_pin=None):
         self.root = root
+        self.recovery_pin = recovery_pin
+
+    def recovery_policy(self, state, now, requests):
+        if not state.get("manual_recovery"):
+            return None
+        need(self.recovery_pin is not None, "explicit recovery amendment pin required")
+        from .replay_cache_recovery import validate_active
+        return validate_active(self.root, state, self.recovery_pin, now, requests)
 
     @contextmanager
     def locked(self, now):
@@ -206,7 +214,9 @@ class CacheWorker:
                 if event["kind"] == "attempt":
                     need(event["weight"] == 21 and event["day"] in requests, "invalid attempt reservation")
             attempt_days = [e["day"] for e in state["events"] if e["kind"] == "attempt"]
-            need(len(attempt_days) == len(set(attempt_days)), "duplicate attempt reservation")
+            recovery = self.recovery_policy(state, now, requests)
+            if recovery is None:
+                need(len(attempt_days) == len(set(attempt_days)), "duplicate attempt reservation")
             need(sum(e["kind"] == "prior_allowance" for e in state["events"]) == 1, "missing or duplicate quota seed")
             if state["inflight"]:
                 need(isinstance(state["inflight"], dict) and state["inflight"].get("day") in requests,
@@ -298,7 +308,9 @@ class CacheWorker:
     def step(self, *, now: datetime, fetch, code_commit: str, clock=None):
         """No sleeping or automatic retries. Transport is explicit; tests provide a fake."""
         with self.locked(now) as (state, plan, requests):
-            need(code_commit == state["code_commit"], "execution code differs from initialized commit")
+            recovery = self.recovery_policy(state, now, requests)
+            expected_code = recovery["execution_commit"] if recovery else state["code_commit"]
+            need(code_commit == expected_code, "execution code differs from initialized/amended commit")
             if state["paused"]:
                 return {"status": "paused", "reason": state["paused"]}
             if state["inflight"]:
@@ -322,6 +334,12 @@ class CacheWorker:
             if missing:
                 return {"status": "imports_required", "dates": missing}
             pending = [r for r in plan["requests"] if r["issue_date"] not in state["completed"]]
+            if recovery:
+                pending = [r for r in pending if r["issue_date"] in recovery["allowed_missing_dates"]]
+                if not pending:
+                    return {"status": "first_slice_complete", "count": len(state["completed"])}
+                need(len([e for e in state["events"] if e["kind"] == "attempt"]) <
+                     recovery["max_total_attempts"], "amended attempt cap reached")
             if not pending:
                 return {"status": "all_downloaded_pending_final_audit", "count": len(state["completed"])}
             if clock:
@@ -337,6 +355,9 @@ class CacheWorker:
             target = self.root / "raw" / request["file"]
             need(not target.exists() and not target.is_symlink(), "unreceipted response requires review")
             state["events"].append({"at": now.isoformat(), "weight": 21, "kind": "attempt", "day": request["issue_date"]})
+            if recovery and request["issue_date"] == recovery["failed_day"]:
+                state["events"][-1].update(attempt_ordinal=2,
+                                          recovery_amendment_sha256=self.recovery_pin)
             state["inflight"] = {"day": request["issue_date"], "source": {"kind": "reserved_http_attempt"}}
             save_state(self.root, state)  # Must finish durably BEFORE transport.
             try:
