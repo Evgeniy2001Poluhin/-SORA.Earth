@@ -7,7 +7,8 @@ from .replay_cache_worker import CacheWorker, need
 
 
 def run_batch(root: Path, *, recovery_pin, continuation_pin, code_commit,
-              max_requests, max_seconds, fetch, clock, monotonic, sleep, guard):
+              max_requests, max_seconds, fetch, clock, monotonic, sleep, guard,
+              calendar_retry_pin=None):
     need(type(max_requests) is int and 1 <= max_requests <= 40, 'batch request bound required')
     need(type(max_seconds) is int and 1 <= max_seconds <= 600, 'batch time bound required')
     need(root.is_dir() and not root.is_symlink(), 'owned cache root required')
@@ -17,7 +18,11 @@ def run_batch(root: Path, *, recovery_pin, continuation_pin, code_commit,
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise ValueError('controller already running') from exc
-        worker = CacheWorker(root, recovery_pin=recovery_pin, continuation_pin=continuation_pin)
+        if calendar_retry_pin:
+            from .replay_calendar_recovery import CalendarRecoveryWorker
+            worker = CalendarRecoveryWorker(root, recovery_pin, continuation_pin, calendar_retry_pin)
+        else:
+            worker = CacheWorker(root, recovery_pin=recovery_pin, continuation_pin=continuation_pin)
         start = monotonic()
         with worker.locked(clock()) as (state, _, _):
             need(state.get('calendar_continuation'), 'explicitly authorized continuation required')

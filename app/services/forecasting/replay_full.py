@@ -38,6 +38,14 @@ def validate_protocol(p):
         need(isinstance(p[field], str) and re.fullmatch(r'[0-9a-f]{64}', p[field]), 'external source pin required')
     for field in ('worker_commit', 'acquisition_execution_commit', 'analysis_commit'):
         need(isinstance(p[field], str) and re.fullmatch(r'[0-9a-f]{40}', p[field]), 'execution source required')
+    retry_fields = ('calendar_retry_sha256', 'calendar_retry_execution_commit')
+    if any(field in p for field in retry_fields):
+        need(all(field in p for field in retry_fields) and
+             isinstance(p['calendar_retry_sha256'], str) and
+             re.fullmatch(r'[0-9a-f]{64}', p['calendar_retry_sha256']) and
+             isinstance(p['calendar_retry_execution_commit'], str) and
+             re.fullmatch(r'[0-9a-f]{40}', p['calendar_retry_execution_commit']),
+             'explicit calendar retry pin/source required')
 
 
 def expected_members():
@@ -58,8 +66,13 @@ def export_snapshot(cache: Path, p0: Path, p0_protocol: Path, protocol: dict, ou
          not partial.exists() and not partial.is_symlink(), 'new full export directory required')
     partial.mkdir(mode=0o700)
     entries = []
-    worker = CacheWorker(cache, recovery_pin=protocol['recovery_amendment_sha256'],
-                         continuation_pin=protocol['continuation_sha256'])
+    if 'calendar_retry_sha256' in protocol:
+        from .replay_calendar_recovery import CalendarRecoveryWorker
+        worker = CalendarRecoveryWorker(cache, protocol['recovery_amendment_sha256'],
+                                        protocol['continuation_sha256'], protocol['calendar_retry_sha256'])
+    else:
+        worker = CacheWorker(cache, recovery_pin=protocol['recovery_amendment_sha256'],
+                             continuation_pin=protocol['continuation_sha256'])
     with worker.locked(datetime.now(timezone.utc)) as (state, _, requests):
         need(state['paused'] is None and state['inflight'] is None and
              set(state['completed']) == set(requests) == {str(d) for d in ISSUES}, 'full cache not settled/complete')
@@ -67,6 +80,12 @@ def export_snapshot(cache: Path, p0: Path, p0_protocol: Path, protocol: dict, ou
         policy = read_regular(cache/'calendar-continuation.json', 100000)
         need(digest(policy) == protocol['continuation_sha256'] and
              parse_json(policy)['execution_commit'] == protocol['acquisition_execution_commit'], 'acquisition source differs')
+        need(bool(state.get('calendar_retry')) == ('calendar_retry_sha256' in protocol),
+             'calendar retry must be disclosed in protocol')
+        if state.get('calendar_retry'):
+            retry = parse_json(read_regular(cache/'calendar-retry.json', 100000))
+            need(retry['execution_commit'] == protocol['calendar_retry_execution_commit'],
+                 'calendar retry execution source differs')
         for day in ISSUES:
             request = _request(day)
             raw = read_regular(cache/'raw'/request['file'], MAX_RAW)

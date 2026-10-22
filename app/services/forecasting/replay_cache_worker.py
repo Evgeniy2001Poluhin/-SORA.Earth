@@ -175,6 +175,7 @@ class CacheWorker:
         self.continuation_pin = continuation_pin
 
     def recovery_policy(self, state, now, requests):
+        need(not state.get("calendar_retry"), "explicit calendar retry worker and pin required")
         if state.get("calendar_continuation"):
             need(self.continuation_pin is not None, "explicit continuation pin required")
             from .replay_cache_continuation import validate_active
@@ -368,7 +369,7 @@ class CacheWorker:
             state["events"].append({"at": now.isoformat(), "weight": 21, "kind": "attempt", "day": request["issue_date"]})
             if recovery and request["issue_date"] == recovery["failed_day"]:
                 state["events"][-1].update(attempt_ordinal=2,
-                                          recovery_amendment_sha256=self.recovery_pin)
+                                          recovery_amendment_sha256=recovery.get("retry_pin", self.recovery_pin))
             if state.get("calendar_continuation"):
                 state["events"][-1]["calendar_continuation_sha256"] = self.continuation_pin
             state["inflight"] = {"day": request["issue_date"], "source": {"kind": "reserved_http_attempt"}}

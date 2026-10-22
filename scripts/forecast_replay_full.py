@@ -30,6 +30,7 @@ def main(argv=None):
     batch.add_argument('--cache',type=Path,required=True)
     batch.add_argument('--recovery-sha256',required=True)
     batch.add_argument('--continuation-sha256',required=True)
+    batch.add_argument('--calendar-retry-sha256')
     batch.add_argument('--confirm-code-commit',required=True)
     batch.add_argument('--max-requests',type=int,required=True)
     batch.add_argument('--max-seconds',type=int,required=True)
@@ -58,7 +59,9 @@ def main(argv=None):
                                continuation_pin=args.continuation_sha256,code_commit=head,
                                max_requests=args.max_requests,max_seconds=args.max_seconds,
                                fetch=bounded_fetch,clock=lambda:datetime.now(timezone.utc),
-                               monotonic=time.monotonic,sleep=time.sleep,guard=guard)
+                               monotonic=time.monotonic,sleep=time.sleep,guard=guard,
+                               **({'calendar_retry_pin':args.calendar_retry_sha256}
+                                  if args.calendar_retry_sha256 else {}))
             print(canonical(result).decode(),end='')
             return 4 if result['status'] == 'paused' else 3 if result['status'] == 'quota_wait' else 0
         raw = read_regular(args.protocol,100000)
