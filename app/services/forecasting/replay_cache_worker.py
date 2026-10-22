@@ -258,6 +258,10 @@ class CacheWorker:
         with self.locked(now) as (state, _, requests):
             need(not state["paused"] and not state["inflight"], "paused or uncertain ledger")
             need(day in requests, "undeclared import date")
+            # Recovery's ordered attempt budget permits HTTP only for new dates.
+            # Even an in-scope import could otherwise skip a required attempt.
+            need(not state.get("manual_recovery") or day in state["completed"],
+                 "new imports forbidden during active recovery")
             need(isinstance(manifest_pin, str) and SHA.fullmatch(manifest_pin), "source manifest pin required")
             manifest_raw = read_regular(source / "manifest.json", 1_048_576)
             need(digest(manifest_raw) == manifest_pin, "source manifest pin mismatch")
@@ -360,6 +364,7 @@ class CacheWorker:
                                           recovery_amendment_sha256=self.recovery_pin)
             state["inflight"] = {"day": request["issue_date"], "source": {"kind": "reserved_http_attempt"}}
             save_state(self.root, state)  # Must finish durably BEFORE transport.
+            completion_recorded = False
             try:
                 raw = fetch(request["url"], 40, MAX_RAW)
                 need(isinstance(raw, bytes) and len(raw) <= MAX_RAW, "response byte limit/type")
@@ -370,11 +375,24 @@ class CacheWorker:
                 state["events"][-1]["reserved_at"] = now.isoformat()
                 state["events"][-1]["at"] = finished.isoformat()
                 state["last_seen"] = finished.isoformat()
+                completion_recorded = True
                 state["inflight"]["response_sha256"] = digest(raw)
                 save_state(self.root, state)  # Pin received bytes before writing/recovery.
                 write_new(target, raw)
                 self.complete(state, request, raw, source={"kind": "reserved_http_attempt"})
             except Exception as exc:
+                if not completion_recorded:
+                    try:
+                        failed_at = utc(clock()) if clock else now
+                        need(failed_at >= now, "clock rollback during failed request")
+                    except Exception:
+                        # Unknown completion must not become an eligible manual retry.
+                        state["paused"] = "failure_completion_clock_uncertain; review required"
+                        save_state(self.root, state)
+                        return {"status": "paused", "reason": state["paused"]}
+                    state["events"][-1]["reserved_at"] = now.isoformat()
+                    state["events"][-1]["at"] = failed_at.isoformat()
+                    state["last_seen"] = failed_at.isoformat()
                 state["paused"] = "request_failed:" + type(exc).__name__
                 if isinstance(exc, TransportFailure):
                     state["failure_diagnostic"] = {
