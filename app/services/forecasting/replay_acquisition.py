@@ -28,6 +28,11 @@ def run_batch(root: Path, *, recovery_pin, continuation_pin, code_commit,
             if elapsed >= max_seconds:
                 return {'status':'batch_time_limit', 'downloaded':count, 'automatic_retries':0}
             guard()
+            # A source check can itself consume the remaining batch time.
+            elapsed = monotonic()-start
+            need(elapsed >= 0, 'monotonic clock rollback during source check')
+            if elapsed >= max_seconds:
+                return {'status':'batch_time_limit', 'downloaded':count, 'automatic_retries':0}
             def checked_fetch(*args):
                 guard()  # Also recheck at the transport boundary, after reservation.
                 return fetch(*args)

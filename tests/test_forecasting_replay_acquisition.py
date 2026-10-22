@@ -53,6 +53,15 @@ def test_time_bound_stops_before_next_request(completed):
     assert len(timing.calls) == 1
 
 
+def test_source_check_cannot_start_step_after_batch_deadline(completed):
+    f = completed; _, pin = authorize(f); current = [30]
+    def guard(): current[0] += 10
+    def forbidden(*args): pytest.fail('request started after deadline')
+    result,_ = run(f,pin,max_seconds=1,guard=guard,monotonic=lambda:current[0],fetch=forbidden)
+    assert result == {'status':'batch_time_limit','downloaded':0,'automatic_retries':0}
+    assert len(state(f)['events']) == 5
+
+
 @pytest.mark.parametrize('key,value',[('max_requests',0),('max_requests',41),('max_requests',True),
                                      ('max_seconds',0),('max_seconds',601),('max_seconds',True)])
 def test_invalid_batch_bounds_refuse_before_transport(completed,key,value):
