@@ -331,3 +331,42 @@ def test_transport_subprocess_is_bounded_and_sanitized_without_network(monkeypat
         assert exc.value.code==429
     else:
         with pytest.raises(cache.CacheRefusal,match="byte limit"):cache.bounded_fetch("unused",40,3)
+
+
+@pytest.mark.parametrize("error_class,expected", [
+    ("URLError", "URLError"), ("HTTPError", "HTTPError"),
+    ("secret=not-for-logs\nhttps://userinfo@host/path", None),
+    ({"payload": "not-for-logs"}, None),
+])
+def test_child_failure_metadata_is_bounded_and_allowlisted(monkeypatch, error_class, expected):
+    stderr = json.dumps({"error_class": error_class, "code": None,
+                         "message": "token=not-for-logs"}).encode()
+    monkeypatch.setattr(cache.subprocess, "run", lambda *a, **kw:
+                        SimpleNamespace(returncode=2, stdout=b"", stderr=stderr))
+    with pytest.raises(cache.TransportFailure) as exc:
+        cache.bounded_fetch("unused", 40, 3)
+    assert exc.value.child_error_class == expected
+    assert exc.value.child_returncode == 2
+    assert "not-for-logs" not in str(exc.value)
+
+
+def test_transport_diagnostic_persists_without_retry_or_secret_text(prepared):
+    root, worker, _ = prepared
+    def fail(*args):
+        raise cache.TransportFailure(error_class="URLError", returncode=2)
+    result = step(worker, fetch=fail)
+    assert result["status"] == "paused"
+    assert load(root)["failure_diagnostic"] == {"child_error_class": "URLError", "child_returncode": 2}
+    assert len(load(root)["events"]) == 2
+    assert step(worker, now=NOW+timedelta(seconds=60), fetch=forbidden)["status"] == "paused"
+    assert len(load(root)["events"]) == 2
+
+
+@pytest.mark.parametrize("stderr", [b"unstructured token=not-for-logs", b"x"*4097])
+def test_unstructured_child_errors_never_enter_metadata(monkeypatch, stderr):
+    monkeypatch.setattr(cache.subprocess, "run", lambda *a, **kw:
+                        SimpleNamespace(returncode=2, stdout=b"", stderr=stderr))
+    with pytest.raises(cache.TransportFailure) as exc:
+        cache.bounded_fetch("unused", 40, 3)
+    assert exc.value.child_error_class is None
+    assert "not-for-logs" not in str(exc.value)

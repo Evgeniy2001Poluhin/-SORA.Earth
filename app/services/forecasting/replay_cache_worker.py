@@ -32,10 +32,23 @@ class CacheRefusal(ValueError):
     pass
 
 
+TRANSPORT_ERROR_CLASSES = frozenset({
+    "HTTPError", "URLError", "TimeoutError", "SSLError", "RemoteDisconnected",
+    "ConnectionResetError", "ReplayRefusal", "ImportError", "ModuleNotFoundError",
+    "ValueError", "OSError", "JSONDecodeError",
+})
+
+
 class TransportFailure(CacheRefusal):
-    def __init__(self, status=None):
+    def __init__(self, status=None, *, error_class=None, returncode=None):
         super().__init__("bounded public transport failed")
         self.code = status
+        self.child_error_class = (
+            error_class if isinstance(error_class, str) and error_class in TRANSPORT_ERROR_CLASSES else None
+        )
+        self.child_returncode = (
+            returncode if type(returncode) is int and -255 <= returncode <= 255 else None
+        )
 
 
 def bounded_fetch(url, timeout, limit):
@@ -63,16 +76,18 @@ except Exception as exc:
         raise TimeoutError("public transport hard deadline") from exc
     need(len(result.stdout) <= limit, "transport output byte limit")
     if result.returncode:
-        status = None
+        status, child_class = None, None
         if len(result.stderr) <= 4096:
             try:
                 error = parse_json(result.stderr)
                 candidate = error.get("code") if isinstance(error, dict) else None
+                if isinstance(error, dict):
+                    child_class = error.get("error_class")
                 if type(candidate) is int and 100 <= candidate <= 599:
                     status = candidate
             except ValueError:
                 pass
-        raise TransportFailure(status)
+        raise TransportFailure(status, error_class=child_class, returncode=result.returncode)
     return result.stdout
 
 
@@ -340,6 +355,11 @@ class CacheWorker:
                 self.complete(state, request, raw, source={"kind": "reserved_http_attempt"})
             except Exception as exc:
                 state["paused"] = "request_failed:" + type(exc).__name__
+                if isinstance(exc, TransportFailure):
+                    state["failure_diagnostic"] = {
+                        "child_error_class": exc.child_error_class,
+                        "child_returncode": exc.child_returncode,
+                    }
                 if type(getattr(exc, "code", None)) is int:
                     state["paused"] += ":" + str(exc.code)
                 save_state(self.root, state)

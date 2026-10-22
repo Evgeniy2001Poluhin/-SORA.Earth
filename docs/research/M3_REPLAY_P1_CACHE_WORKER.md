@@ -97,3 +97,16 @@ The journal remains mutable acquisition state. A successful audit is readiness
 for independent review, not an immutable published research snapshot. Final
 export/pinning and the separate P1 evaluation protocol are still required before
 any fit/scoring. No success claim, deployment or change to live M3 follows.
+
+
+## Failure diagnostics, without retry
+
+A real first-slice request stopped after152/180 dates with TransportFailure and
+no HTTP status. The original child class was discarded by the parent, so its
+cause cannot be reconstructed honestly from that receipt. The failed attempt
+remains charged and paused; no re-request or ledger reset was made.
+
+Future failures retain only an allowlisted child exception class and a bounded
+integer process return code. URLs, messages, traceback and response contents are
+not retained as diagnostics. Unknown/unstructured classes remain null. This is
+an observability fix only: no retry, unpause, quota or recovery policy changes.

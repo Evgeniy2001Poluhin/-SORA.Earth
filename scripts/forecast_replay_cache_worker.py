@@ -55,6 +55,7 @@ def main(argv=None):
                 result = {"status": "local_status", "completed": len(state["completed"]),
                           "expected": len(requests), "paused": state["paused"],
                           "inflight": state["inflight"], "quota_events": len(state["events"]),
+                          "failure_diagnostic": state.get("failure_diagnostic"),
                           "network_requests": 0}
         else:
             head = frozen_head()
