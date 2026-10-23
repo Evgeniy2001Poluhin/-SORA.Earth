@@ -68,11 +68,12 @@ ensure_network() {
 ensure_volume() {
   local name="$1"
   local_name "$name"
-  if docker volume inspect "$name" >/dev/null 2>&1; then
-    owned volume "$name"
-  else
+  if ! docker volume inspect "$name" >/dev/null 2>&1; then
     docker volume create --label "$LABEL=$RUN_ID" "$name" >/dev/null
   fi
+  # Failed inspection does not establish absence. Docker volume create may
+  # return an existing foreign volume unchanged, so verify after either path.
+  owned volume "$name"
 }
 remove_container() {
   local name="$1"
@@ -109,7 +110,13 @@ control() {
   # Talk inside the owned metrics container, not to whichever process happens
   # to listen on the host's shared port. No arbitrary URL or Python is accepted.
   docker exec "$METRICS" python -I -c \
-    'import sys, urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/control?" + sys.argv[1], timeout=5).close()' \
+    'import sys, urllib.request
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+with opener.open("http://127.0.0.1:8000/control?" + sys.argv[1], timeout=5):
+    pass' \
     "$query"
   echo "stand controls applied"
 }

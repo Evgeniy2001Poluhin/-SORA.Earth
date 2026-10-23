@@ -22,6 +22,13 @@ Daemon operations accept only a local Unix-socket endpoint. A remote
 `DOCKER_HOST` is rejected before invoking Docker; context metadata is inspected
 locally and an SSH/TCP context is refused before contacting that daemon.
 
+Volume ownership is checked even after creation: an inspection error is not proof
+of absence, and Docker's idempotent volume create can return an existing volume.
+The label must match before replacing a container or mounting the volume writable.
+Both local HTTP probes and in-container metric controls ignore inherited proxies
+and refuse redirects. A loopback URL must not forward authorization or controls
+through a proxy or a redirect target.
+
 `grafana` now accepts a variant such as `a`, **not an arbitrary container and
 volume name**. The volume name is derived from this run and variant. `stop a`
 and `rm a` inspect ownership before acting. `teardown` preflights all resources

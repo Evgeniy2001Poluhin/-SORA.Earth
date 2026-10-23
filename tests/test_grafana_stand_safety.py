@@ -47,6 +47,11 @@ if kind in ("container", "volume", "network") and a[1] == "ls":
         names = state.get("listed_" + kind, [n for n, label in state.get(kind, {}).items() if label == owner])
     print("\n".join(names))
     sys.exit(0)
+if kind == "volume" and a[1] == "create":
+    label = a[a.index("--label") + 1].split("=", 1)[1]
+    state.setdefault("volume", {}).setdefault(a[-1], label)
+    Path(os.environ["DOCKER_STATE"]).write_text(json.dumps(state))
+    sys.exit(0)
 if kind in ("volume", "network") and a[1] in ("create", "rm"):
     sys.exit(0)
 if kind in ("run", "rm", "stop"):
@@ -352,3 +357,85 @@ def test_corrupt_markers_fail_without_operations(stand, marker):
     (stand.work / "owner.json").write_text(marker)
     stand.run("teardown", ok=False)
     assert stand.calls() == []
+
+
+@pytest.mark.parametrize("owner", [None, "other-run"])
+def test_inspect_error_cannot_adopt_an_existing_foreign_volume(stand, owner):
+    stub = Path(stand.env["PATH"].split(os.pathsep)[0]) / "docker"
+    code = stub.read_text()
+    code = code.replace('kind = a[0]', 'kind = a[0]\nif a[:2] == ["volume", "inspect"] and "--format" not in a:\n    sys.exit(1)')
+    stub.write_text(code)
+    volume = stand.prefix + "-a-data"
+    stand.state(network={stand.prefix + "-net": stand.owner},
+                volume={volume: owner}, container={stand.prefix + "-a": stand.owner})
+    stand.run("grafana", "a", str(ROOT / "grafana/provisioning"), ok=False)
+    assert any(a[:2] == ["volume", "create"] for a in stand.calls())
+    assert destructive(stand.calls()) == []
+    assert not any(a[0] == "run" for a in stand.calls())
+
+
+def test_a_new_volume_is_verified_after_creation_before_container_replacement(stand):
+    stand.state(network={stand.prefix + "-net": stand.owner})
+    stand.run("grafana", "a", str(ROOT / "grafana/provisioning"))
+    calls = stand.calls()
+    created = next(i for i, a in enumerate(calls) if a[:2] == ["volume", "create"])
+    verified = next(i for i, a in enumerate(calls)
+                    if a[:2] == ["volume", "inspect"] and "--format" in a)
+    started = next(i for i, a in enumerate(calls) if a[0] == "run")
+    assert created < verified < started
+
+
+def _fake_local_probe(monkeypatch, *, redirect=False):
+    """Use urllib's real proxy/redirect routing, with an in-memory transport."""
+    import io
+    from email.message import Message
+    import urllib.request
+    import urllib.response
+
+    for key in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY",
+                "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(key, raising=False)
+    if not redirect:
+        monkeypatch.setenv("http_proxy", "http://proxy.invalid:3128")
+    seen = []
+
+    class FakeHTTP(urllib.request.HTTPHandler):
+        def http_open(self, request):
+            seen.append(request)
+            headers = Message()
+            code = 302 if redirect and len(seen) == 1 else 200
+            if code == 302:
+                headers["Location"] = "http://remote.invalid/not-local"
+            response = urllib.response.addinfourl(io.BytesIO(b"{}"), headers,
+                                                  request.full_url, code)
+            response.msg = "Found" if code == 302 else "OK"
+            return response
+
+    build = urllib.request.build_opener
+    monkeypatch.setattr(urllib.request, "build_opener",
+                        lambda *handlers: build(*handlers, FakeHTTP()))
+    # Keep the old urlopen path offline too, so the regression can fail safely.
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda request, timeout: urllib.request.build_opener().open(request, timeout=timeout))
+    spec = importlib.util.spec_from_file_location("offline_stand_probe", STAND / "check.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "_password", lambda: "synthetic-disposable")
+    return module, seen
+
+
+def test_loopback_probe_ignores_inherited_proxy_without_real_http(monkeypatch):
+    module, seen = _fake_local_probe(monkeypatch)
+    assert module.get("/api/datasources") == {}
+    assert len(seen) == 1
+    assert seen[0].host == "127.0.0.1:13000"
+    assert seen[0].has_header("Authorization")
+
+
+def test_loopback_probe_never_follows_a_redirect_with_authorization(monkeypatch):
+    import urllib.error
+    module, seen = _fake_local_probe(monkeypatch, redirect=True)
+    with pytest.raises(urllib.error.HTTPError) as error:
+        module.get("/api/datasources")
+    assert error.value.code == 302
+    assert len(seen) == 1

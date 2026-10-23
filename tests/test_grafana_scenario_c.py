@@ -120,6 +120,30 @@ def test_control_positive_uses_only_owned_container_and_fixed_local_url(stand):
     assert calls[0][-1] == "gap=3&lat_ms=900"
 
 
+@pytest.mark.parametrize("redirect", [False, True])
+def test_in_container_controls_cannot_use_proxy_or_follow_redirect(stand, monkeypatch, redirect):
+    import urllib.error
+    # Capture the trusted inline code through the recording stub, then exercise
+    # urllib routing with an in-memory HTTP handler. No Docker/HTTP is performed.
+    stub = Path(stand.env["PATH"].split(":")[0]) / "docker"
+    stub.write_text(stub.read_text().replace('("run", "rm", "stop")', '("run", "rm", "stop", "exec")'))
+    stand.state(container={stand.prefix + "-metrics": stand.owner})
+    stand.run("control", "gap=3")
+    call = next(c for c in stand.calls() if c[0] == "exec")
+    _module, seen = safety._fake_local_probe(monkeypatch, redirect=redirect)
+    monkeypatch.setattr(sys, "argv", ["inline-control", call[-1]])
+    def execute():
+        exec(compile(call[5], "inline-control.py", "exec"), {"__name__": "__main__"})
+    if redirect:
+        with pytest.raises(urllib.error.HTTPError):
+            execute()
+    else:
+        execute()
+    assert len(seen) == 1
+    assert seen[0].host == "127.0.0.1:8000"
+    assert not seen[0].has_header("Authorization")
+
+
 def test_sanitized_states_do_not_copy_error_text_or_labels():
     row = {"uid": "sora-app-down", "state": "firing", "health": "error",
            "lastError": "token=private", "labels": {"password": "private"},

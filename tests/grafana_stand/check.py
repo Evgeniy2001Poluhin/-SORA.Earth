@@ -15,6 +15,11 @@ import urllib.request
 GRAFANA = "http://127.0.0.1:13000"
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
 def _password():
     # Validate the private stand root; this read-only probe never creates a key.
     from path_guard import password, session
@@ -26,7 +31,10 @@ def get(path):
     req = urllib.request.Request(GRAFANA + path)
     token = base64.b64encode(f"admin:{_password()}".encode()).decode()
     req.add_header("Authorization", "Basic " + token)
-    with urllib.request.urlopen(req, timeout=20) as resp:
+    # A loopback URL alone is insufficient: inherited proxies or a redirect
+    # could send the disposable Basic authorization to an unrelated endpoint.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+    with opener.open(req, timeout=20) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
