@@ -209,3 +209,20 @@ def test_time_jump_inside_blocking_operation_cannot_finish_successfully(operatio
                    clock=clock.read, wall=clock.read, sleep=clock.sleep)
     assert actions[-2:] == [("targets", "restore"), ("control", *driver.BASELINE)]
     assert not any(r["kind"] == "finished" for r in rows)
+
+
+def test_cumulative_delays_do_not_reset_observation_deadline():
+    clock = Clock()
+    rows, actions = [], []
+    def perform(cmd):
+        actions.append(cmd)
+        if cmd == driver.EVENTS[1][1]:
+            clock.now += 20
+    def observe():
+        clock.now += 20
+        return []
+    with pytest.raises(RuntimeError, match="observation interval"):
+        driver.run(perform, observe, rows.append,
+                   clock=clock.read, wall=clock.read, sleep=clock.sleep)
+    assert not any(r["kind"] == "finished" for r in rows)
+    assert actions[-2:] == [("targets", "restore"), ("control", *driver.BASELINE)]

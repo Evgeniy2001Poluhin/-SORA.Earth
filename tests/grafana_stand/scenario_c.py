@@ -40,13 +40,14 @@ def run(perform, observe, emit, *, clock=time.monotonic, wall=time.time, sleep=t
     """
     start, wall_start = clock(), wall()
     index, previous = 0, start
+    last_observation = start
     active_error = False
 
     def checked_elapsed():
         nonlocal previous
         now = clock()
         elapsed = now - start
-        if now < previous or now - previous > 30:
+        if now < previous or now - last_observation > 30:
             raise RuntimeError("observation interval was missed")
         if abs((wall() - wall_start) - elapsed) > 30:
             raise RuntimeError("clock discontinuity")
@@ -70,6 +71,7 @@ def run(perform, observe, emit, *, clock=time.monotonic, wall=time.time, sleep=t
             elapsed = checked_elapsed()
             emit({"kind": "observation", "elapsed_seconds": elapsed, "rules": rules})
             elapsed = checked_elapsed()
+            last_observation = clock()
             if elapsed >= DURATION:
                 if index != len(EVENTS):
                     raise RuntimeError("schedule incomplete")
