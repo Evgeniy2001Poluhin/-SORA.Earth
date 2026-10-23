@@ -168,68 +168,78 @@ def test_mark_process_dead_reaps_only_live_mode_gauges(mp_dir):
     assert "probe_events_total 9.0" in after, f"the counter was reaped: {after}"
 
 
-def test_the_child_exit_hook_actually_calls_mark_process_dead(monkeypatch, mp_dir):
-    """The hook reaps nothing today, and is wired anyway -- so it is tested.
+def test_the_child_exit_hook_actually_calls_mark_process_dead(mp_dir):
+    """Exercise the real hook in a process owning its own metric storage mode.
 
-    No gauge in this application uses a live mode, so `mark_process_dead` has
-    no file to delete right now. That makes the hook the kind of mechanism this
-    repository distrusts: present, plausible, and doing nothing observable. It
-    stays because the day someone picks `livesum` for a "requests in flight"
-    gauge, its absence means a dead worker's value is served forever -- and
-    that day nobody will be reading this file. What is not acceptable is
-    keeping it *untested*, so this runs it.
+    prometheus_client selects ValueClass on import, not on each metric creation.
+    Changing and then undoing the env in pytest's process polluted later tests.
+    A subprocess keeps both the enabled behavior and that global state isolated.
     """
-    import importlib
+    out = _run("""
+        import json
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        import gunicorn_conf as conf
+        from prometheus_client import multiprocess
 
-    monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", str(mp_dir))
-    conf = importlib.import_module("gunicorn_conf")
-
-    called = []
-    from prometheus_client import multiprocess
-
-    monkeypatch.setattr(multiprocess, "mark_process_dead", lambda pid: called.append(pid))
-
-    class _Worker:
-        pid = 4242
-
-    class _Server:
-        class log:
-            @staticmethod
-            def warning(*a, **k):
-                pass
-
-    conf.child_exit(_Server(), _Worker())
-
-    assert called == [4242]
+        called = []
+        server = SimpleNamespace(log=SimpleNamespace(warning=lambda *a, **k: None))
+        with patch.object(multiprocess, 'mark_process_dead', side_effect=called.append):
+            conf.child_exit(server, SimpleNamespace(pid=4242))
+        print(json.dumps(called))
+    """, mp_dir)
+    assert json.loads(out) == [4242]
 
 
-def test_the_hook_does_nothing_when_multiprocess_is_off(monkeypatch):
-    """A single-process deployment must not have files reaped under it."""
-    import importlib
+def test_the_hook_does_nothing_when_multiprocess_is_off(mp_dir):
+    """A fresh single-process interpreter must not reap any worker's files."""
+    out = _run("""
+        import os
+        os.environ.pop('PROMETHEUS_MULTIPROC_DIR', None)
+        import json
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        import gunicorn_conf as conf
+        from prometheus_client import multiprocess
 
-    monkeypatch.delenv("PROMETHEUS_MULTIPROC_DIR", raising=False)
-    conf = importlib.import_module("gunicorn_conf")
-
-    called = []
-    from prometheus_client import multiprocess
-
-    monkeypatch.setattr(multiprocess, "mark_process_dead", lambda pid: called.append(pid))
-
-    class _Worker:
-        pid = 4242
-
-    class _Server:
-        class log:
-            @staticmethod
-            def warning(*a, **k):
-                pass
-
-    conf.child_exit(_Server(), _Worker())
-
-    assert called == []
+        called = []
+        server = SimpleNamespace(log=SimpleNamespace(warning=lambda *a, **k: None))
+        with patch.object(multiprocess, 'mark_process_dead', side_effect=called.append):
+            conf.child_exit(server, SimpleNamespace(pid=4242))
+        print(json.dumps(called))
+    """, mp_dir)
+    assert json.loads(out) == []
 
 
 # --- the application's own metrics -----------------------------------------
+
+
+def test_hook_checks_leave_later_single_process_counters_usable(mp_dir):
+    """A fresh interpreter catches import-order contamination hidden by CI order.
+
+    Importing prometheus_client while a temporary multiprocess env is set picks
+    its process-global ValueClass. Undoing the env does not undo that choice.
+    Run both hook tests first, then actually use a single-process counter.
+    """
+    out = _run("""
+        import os
+        os.environ.pop('PROMETHEUS_MULTIPROC_DIR', None)
+        os.environ['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] = '1'
+        import pytest
+        result = pytest.main([
+            '-q', '-c', '/dev/null', '--noconftest', '-p', 'no:cacheprovider',
+            'tests/test_prometheus_multiprocess.py::test_the_child_exit_hook_actually_calls_mark_process_dead',
+            'tests/test_prometheus_multiprocess.py::test_the_hook_does_nothing_when_multiprocess_is_off',
+        ])
+        assert result == 0
+        from prometheus_client import Counter, CollectorRegistry, generate_latest
+        registry = CollectorRegistry()
+        metric = Counter('probe_after_hook', 'd', registry=registry)
+        metric.inc(7)
+        assert 'probe_after_hook_total 7.0' in generate_latest(registry).decode()
+        print('AFTER_HOOK_COUNTER_OK')
+    """, mp_dir)
+    assert 'AFTER_HOOK_COUNTER_OK' in out
 
 
 def _gauges_without_explicit_mode(source: str) -> list[tuple[int, str]]:
