@@ -32,7 +32,7 @@ docker() {
 
 case "${1:-}" in
   init) [ "$#" = 1 ] || die "init takes no arguments"; python3 "$GUARD" init; exit ;;
-  up-base|grafana|targets|stop|rm|override|provisioning-from-main|teardown|names) ;;
+  up-base|grafana|targets|control|verify|stop|rm|override|provisioning-from-main|teardown|names) ;;
   *) die "unknown command; see SAFETY.md" ;;
 esac
 RUN_ID="$(python3 "$GUARD" session)"
@@ -102,6 +102,17 @@ up_base() {
     -v "$REPO/tests/grafana_stand/stand-prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
     -v "$WORK/targets:/etc/prometheus/targets:ro" "$PROM_IMAGE" >/dev/null
 }
+control() {
+  local query
+  query="$(python3 "$REPO/tests/grafana_stand/control.py" "$@")"
+  owned container "$METRICS"
+  # Talk inside the owned metrics container, not to whichever process happens
+  # to listen on the host's shared port. No arbitrary URL or Python is accepted.
+  docker exec "$METRICS" python -I -c \
+    'import sys, urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/control?" + sys.argv[1], timeout=5).close()' \
+    "$query"
+  echo "stand controls applied"
+}
 grafana() {
   local variant="$1" name volume prov pw
   suffix "$variant"
@@ -158,6 +169,8 @@ case "$1" in
   up-base) [ "$#" = 1 ] || die "up-base takes no arguments"; up_base ;;
   grafana) [ "$#" = 3 ] || die "grafana <variant> <provisioning-dir>"; grafana "$2" "$3" ;;
   targets) [ "$#" = 2 ] || die "targets vanish|restore"; python3 "$GUARD" targets "$2" ;;
+  control) [ "$#" -gt 1 ] || die "control key=value ..."; shift; control "$@" ;;
+  verify) [ "$#" = 2 ] || die "verify <variant>"; suffix "$2"; owned container "$METRICS"; owned container "$PROM"; owned container "$PREFIX-$2" ;;
   stop) [ "$#" = 2 ] || die "stop <variant>"; suffix "$2"; owned container "$PREFIX-$2"; docker stop "$PREFIX-$2" >/dev/null ;;
   rm) [ "$#" = 2 ] || die "rm <variant>"; suffix "$2"; remove_container "$PREFIX-$2" ;;
   override) [ "$#" = 2 ] || die "override <new-output-name>"; override "$2" ;;

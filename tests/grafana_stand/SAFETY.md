@@ -39,9 +39,11 @@ its only permitted source outside this run's outputs.
 The old `admin.env` is not loaded or executed. The disposable password is now in
 `$GSTAND_WORK/admin-password`; `check.py` validates the initialized directory and
 only reads this file, never generating a missing password. Historical
-`RESULTS.md` describes the previous helper, including its missing `control`
-driver; these safety changes do **not** recreate or independently validate
-scenario C.
+`RESULTS.md` describes the previous helper. `control key=value ...` now validates
+all inputs before Docker and sends them only inside this run's owned metrics
+container; no endpoint argument is accepted. `verify c` checks ownership of
+metrics, Prometheus and Grafana variant c. See `SCENARIO_C.md` for the portable
+driver; offline tests do **not** validate the historical runtime scenario.
 
 This prevents accidental foreign-resource cleanup and existing symlink escapes.
 It is not a security boundary against a malicious process with the same user or
