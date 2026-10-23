@@ -40,43 +40,67 @@ def run(perform, observe, emit, *, clock=time.monotonic, wall=time.time, sleep=t
     """
     start, wall_start = clock(), wall()
     index, previous = 0, start
+    active_error = False
+
+    def checked_elapsed():
+        nonlocal previous
+        now = clock()
+        elapsed = now - start
+        if now < previous or now - previous > 30:
+            raise RuntimeError("observation interval was missed")
+        if abs((wall() - wall_start) - elapsed) > 30:
+            raise RuntimeError("clock discontinuity")
+        if index < len(EVENTS) and elapsed - EVENTS[index][0] > 30:
+            raise RuntimeError("scheduled action was missed")
+        previous = now
+        return elapsed
+
     try:
         while True:
-            elapsed = clock() - start
-            if clock() - previous > 30:
-                raise RuntimeError("observation interval was missed")
-            previous = clock()
-            if abs((wall() - wall_start) - elapsed) > 30:
-                raise RuntimeError("clock discontinuity")
-            if index < len(EVENTS) and elapsed - EVENTS[index][0] > 30:
-                raise RuntimeError("scheduled action was missed")
+            elapsed = checked_elapsed()
             while index < len(EVENTS) and elapsed >= EVENTS[index][0]:
                 at, command = EVENTS[index]
                 perform(command)
+                elapsed = checked_elapsed()
                 emit({"kind": "action", "scheduled_seconds": at,
-                      "elapsed_seconds": clock() - start, "command": command})
+                      "elapsed_seconds": elapsed, "command": command})
                 index += 1
-            emit({"kind": "observation", "elapsed_seconds": clock() - start,
-                  "rules": observe()})
-            if clock() - start >= DURATION:
+                elapsed = checked_elapsed()
+            rules = observe()
+            elapsed = checked_elapsed()
+            emit({"kind": "observation", "elapsed_seconds": elapsed, "rules": rules})
+            elapsed = checked_elapsed()
+            if elapsed >= DURATION:
+                if index != len(EVENTS):
+                    raise RuntimeError("schedule incomplete")
                 break
             next_event = EVENTS[index][0] if index < len(EVENTS) else DURATION
             sleep(max(0, min(10, next_event - (clock() - start))))
     except BaseException as error:
-        emit({"kind": "aborted", "error_class": type(error).__name__})
+        active_error = True
+        try:
+            emit({"kind": "aborted", "error_class": type(error).__name__})
+        except BaseException:
+            pass  # A failed evidence sink must never bypass restoration.
         raise
     finally:
-        failures = []
+        failures, log_failed = [], False
         for command in (("targets", "restore"), ("control", *BASELINE)):
             try:
                 perform(command)
-                emit({"kind": "restoration", "command": command, "ok": True})
+                row = {"kind": "restoration", "command": command, "ok": True}
             except BaseException as error:
                 failures.append(type(error).__name__)
-                emit({"kind": "restoration", "ok": False,
-                      "error_class": type(error).__name__})
+                row = {"kind": "restoration", "ok": False,
+                       "error_class": type(error).__name__}
+            try:
+                emit(row)
+            except BaseException:
+                log_failed = True
         if failures:
             raise RuntimeError("stand restoration incomplete")
+        if log_failed and not active_error:
+            raise OSError("restoration evidence could not be recorded")
     emit({"kind": "finished", "runtime_acceptance": "requires independent review"})
 
 

@@ -181,3 +181,31 @@ def test_verify_refuses_missing_owned_grafana(stand):
                            stand.prefix + "-prometheus": stand.owner})
     stand.run("verify", "c", ok=False)
     assert not safety.destructive(stand.calls())
+
+
+def test_persistent_log_failure_never_skips_either_restoration():
+    actions = []
+    def fail_log(_row):
+        raise OSError("disk full")
+    with pytest.raises(OSError):
+        driver.run(actions.append, lambda: [], fail_log)
+    assert actions[-2:] == [("targets", "restore"), ("control", *driver.BASELINE)]
+
+
+@pytest.mark.parametrize("operation", ["observe", "perform"])
+def test_time_jump_inside_blocking_operation_cannot_finish_successfully(operation):
+    clock = Clock()
+    rows, actions = [], []
+    def perform(cmd):
+        actions.append(cmd)
+        if operation == "perform":
+            clock.now += 6000
+    def observe():
+        if operation == "observe":
+            clock.now += 6000
+        return []
+    with pytest.raises(RuntimeError):
+        driver.run(perform, observe, rows.append,
+                   clock=clock.read, wall=clock.read, sleep=clock.sleep)
+    assert actions[-2:] == [("targets", "restore"), ("control", *driver.BASELINE)]
+    assert not any(r["kind"] == "finished" for r in rows)
