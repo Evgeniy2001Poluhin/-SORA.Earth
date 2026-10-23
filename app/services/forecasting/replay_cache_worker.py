@@ -9,6 +9,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 import fcntl
+import base64
+import binascii
 import hashlib
 import os
 from pathlib import Path
@@ -24,6 +26,7 @@ from .replay_cache_plan import build_plan, _request
 from .replay_p0 import canonical, parse_json, parse_payload
 
 MAX_STATE = 2_097_152
+MAX_ERROR_BODY = 1024  # Captured prefix only; never a weather payload.
 MAX_RAW = 262_144
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -40,7 +43,7 @@ TRANSPORT_ERROR_CLASSES = frozenset({
 
 
 class TransportFailure(CacheRefusal):
-    def __init__(self, status=None, *, error_class=None, returncode=None):
+    def __init__(self, status=None, *, error_class=None, returncode=None, http_error_body=None):
         super().__init__("bounded public transport failed")
         self.code = status
         self.child_error_class = (
@@ -49,13 +52,36 @@ class TransportFailure(CacheRefusal):
         self.child_returncode = (
             returncode if type(returncode) is int and -255 <= returncode <= 255 else None
         )
+        self.http_error_body = _error_body(http_error_body) if (
+            self.child_error_class == 'HTTPError' and type(status) is int and 400 <= status <= 599
+        ) else None
+
+
+def _error_body(value):
+    """Validate untrusted child metadata; never interpret or print response text."""
+    if not isinstance(value, dict) or set(value) != {'base64', 'bytes', 'sha256', 'truncated'}:
+        return None
+    if (type(value['bytes']) is not int or not 0 <= value['bytes'] <= MAX_ERROR_BODY or
+            type(value['truncated']) is not bool or not isinstance(value['base64'], str) or
+            len(value['base64']) > 4 * ((MAX_ERROR_BODY + 2) // 3)):
+        return None
+    try:
+        raw = base64.b64decode(value['base64'], validate=True)
+    except (ValueError, binascii.Error):
+        return None
+    if len(raw) != value['bytes'] or digest(raw) != value['sha256']:
+        return None
+    if value['truncated'] and len(raw) != MAX_ERROR_BODY:
+        return None
+    return dict(value)
 
 
 def bounded_fetch(url, timeout, limit):
     """One child, one allowlisted GET; hard deadline includes imports/read time."""
     need(type(limit) is int and 0 < limit <= MAX_RAW and
          type(timeout) is int and 0 < timeout <= 40, "transport limits refused")
-    child = """import json,sys
+    child = """import json,sys,base64,hashlib
+from urllib.error import HTTPError
 sys.path.insert(0,sys.argv[1])
 try:
     from app.services.forecasting.replay_p0 import _fetch
@@ -63,7 +89,21 @@ try:
     sys.stdout.buffer.write(raw)
 except Exception as exc:
     code=getattr(exc,'code',None)
-    sys.stderr.write(json.dumps({'error_class':type(exc).__name__,'code':code if type(code) is int else None}))
+    info={'error_class':type(exc).__name__,'code':code if type(code) is int else None}
+    if isinstance(exc,HTTPError) and type(code) is int and 400<=code<=599:
+        try:
+            body=exc.read(1025)
+            if isinstance(body,bytes):
+                prefix=body[:1024]
+                info['http_error_body']={'base64':base64.b64encode(prefix).decode('ascii'),
+                    'bytes':len(prefix),'sha256':hashlib.sha256(prefix).hexdigest(),
+                    'truncated':len(body)>1024}
+        except Exception:
+            pass  # Keep status/class even if reading the existing error response fails.
+        finally:
+            try: exc.close()
+            except Exception: pass
+    sys.stderr.write(json.dumps(info))
     sys.exit(2)
 """
     try:
@@ -76,18 +116,20 @@ except Exception as exc:
         raise TimeoutError("public transport hard deadline") from exc
     need(len(result.stdout) <= limit, "transport output byte limit")
     if result.returncode:
-        status, child_class = None, None
+        status, child_class, body = None, None, None
         if len(result.stderr) <= 4096:
             try:
                 error = parse_json(result.stderr)
                 candidate = error.get("code") if isinstance(error, dict) else None
                 if isinstance(error, dict):
                     child_class = error.get("error_class")
+                    body = error.get("http_error_body")
                 if type(candidate) is int and 100 <= candidate <= 599:
                     status = candidate
             except ValueError:
                 pass
-        raise TransportFailure(status, error_class=child_class, returncode=result.returncode)
+        raise TransportFailure(status, error_class=child_class, returncode=result.returncode,
+                               http_error_body=body)
     return result.stdout
 
 
@@ -409,6 +451,8 @@ class CacheWorker:
                         "child_error_class": exc.child_error_class,
                         "child_returncode": exc.child_returncode,
                     }
+                    if exc.http_error_body is not None:
+                        state["failure_diagnostic"]["http_error_body"] = exc.http_error_body
                 if type(getattr(exc, "code", None)) is int:
                     state["paused"] += ":" + str(exc.code)
                 save_state(self.root, state)
