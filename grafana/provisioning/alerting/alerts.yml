@@ -99,7 +99,7 @@ groups:
       # Each is compared by its last-run timestamp, and only the status of the
       # newest check is read. A measurement from the backend therefore cannot
       # hide a newer scheduler check that found nothing, and the reverse holds
-      # too (PR #491 review, P2).
+      # too (review of this change, P2).
       #
       # Unmeasured means any of: that check did not measure; its status is NaN
       # (the value before a process's first check); no check exists in either

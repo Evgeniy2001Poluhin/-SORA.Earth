@@ -114,7 +114,7 @@ def _drift_expr(rules):
 def test_the_drift_unmeasured_rule_treats_absence_as_unmeasured(rules):
     """A missing sample on the measured side must read as unmeasured. Without
     `vector(1) unless` it would be NoData, which Grafana maps to OK: an absent
-    drift series would then look healthy (PR #491 review, item 2)."""
+    drift series would then look healthy (review of this change, item 2)."""
     expr = _drift_expr(rules)
     assert expr.startswith("(vector(1) unless on() ("), expr
     assert ") and on() (sum(increase(" in expr, expr
@@ -123,7 +123,7 @@ def test_the_drift_unmeasured_rule_treats_absence_as_unmeasured(rules):
 def test_the_drift_unmeasured_rule_reads_the_latest_check_across_jobs(rules):
     """An old backend `measured=1` must not outvote a newer scheduler check. The
     expression selects the status of the newest check (by last-run timestamp),
-    across the two jobs that run the loop, and bounds its age (PR #491 review, P2)."""
+    across the two jobs that run the loop, and bounds its age (review of this change, P2)."""
     expr = _drift_expr(rules)
     assert 'job=~"sora-app|sora-scheduler"' in expr, expr
     assert "and on(job)" in expr and "group_left()" in expr, expr
