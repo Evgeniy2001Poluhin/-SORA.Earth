@@ -255,7 +255,14 @@ used `caffeinate` to keep the host awake and started from a clean stand.
 
 ### Reproduction
 
-The timeline driver was a shell script kept outside the repository, with the
+The historical timeline driver was a shell script kept outside the repository, with the
 timeline above as its sleeps and `stand.sh control` calls. It is not committed:
 it hard-codes the worktree path. The stand files in the repo (`stand.sh`,
-`metrics_server.py`, `prometheus.yml`, `check.py`) are what it drove.
+`metrics_server.py`, `stand-prometheus.yml`, `check.py`) are what it drove
+(the Prometheus file was subsequently renamed).
+
+A new portable driver and guarded `stand.sh control` operation are documented in
+`SCENARIO_C.md`. Their offline tests establish ordering and refusal, not a repeat
+of the runtime results above. The historical external driver remains unavailable;
+this follow-up does not retroactively make that original run fully reproducible
+or prove notification delivery.
