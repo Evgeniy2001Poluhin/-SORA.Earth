@@ -101,60 +101,75 @@ def test_no_success_is_recorded(broken_write, log_db):
         RetrainLog.status == "success").count() == 0
 
 
-def test_the_staleness_gauge_does_not_move(broken_write, log_db):
+def test_the_age_gauge_does_not_move_on_a_failed_run(broken_write, log_db):
     """The metric added in #192, under the failure it exists for.
 
-    A failed run must leave the age where it was. If it reset the gauge, the
-    month of silence would have looked recent throughout.
+    A failed run must leave the age where it was. With no success ever
+    recorded that is NaN -- not a sentinel, and not a fresh number.
     """
-    from app.api.infra import retrain_staleness_seconds
+    import math
+
+    from app.api.infra import read_retrain_history
 
     with pytest.raises(Exception):
         broken_write._do_retrain(min_samples=10)
 
+    age, readable = read_retrain_history()
+    assert math.isnan(age), age
 
-    # -1: this database has recorded a failed run and no successful one.
-    assert retrain_staleness_seconds() == -1
+
+def test_a_failed_run_is_not_an_unreadable_history(broken_write, log_db):
+    """Before the decision, this failure and an unreadable database produced the
+    same -1, and the same page. A failed run is a readable history that records
+    a failure; only the read path failing is a fault of the metrics path.
+    """
+    from app.api.infra import read_retrain_history
+
+    with pytest.raises(Exception):
+        broken_write._do_retrain(min_samples=10)
+
+    _, readable = read_retrain_history()
+    assert readable is True
 
 
 def test_a_success_afterwards_does_move_it(dataset, log_db):
     """Otherwise the assertion above is satisfied by a gauge that never moves,
     which is the defect wearing the shape of the fix."""
-    from app.api.infra import retrain_staleness_seconds
+    from app.api.infra import read_retrain_history
 
     dataset._do_retrain(min_samples=10)
 
-    value = retrain_staleness_seconds()
-    assert value >= 0 and value < 300
+    age, readable = read_retrain_history()
+    assert readable is True
+    assert age >= 0 and age < 300
 
 
-def test_the_alert_condition_holds_on_the_signal_produced(broken_write, log_db):
-    """Step five: the rule's own expression, evaluated against the value this
-    failure produces. A rule nobody has run against real output is a string.
+def test_the_unreadable_alert_does_not_fire_on_a_failed_run(broken_write, log_db):
+    """The rule that replaced the stale alert, evaluated on the value this
+    failure produces. A failed retrain is a fact about the retrain loop, and the
+    page is for a read that failed -- so this must stay quiet.
     """
     import os
-    import re
 
-    from app.api.infra import retrain_staleness_seconds
+    import yaml
 
-    yaml = pytest.importorskip("yaml")
+    from app.api.infra import read_retrain_history
+
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     with open(os.path.join(root, "grafana", "provisioning", "alerting",
                            "alerts.yml"), encoding="utf-8") as fh:
         doc = yaml.safe_load(fh)
     rules = {r["uid"]: r for g in doc["groups"] for r in g["rules"]}
-    expr = rules["sora-retrain-stale"]["data"][0]["model"]["expr"]
+    assert "sora-retrain-stale" not in rules
+    expr = rules["sora-retrain-history-unreadable"]["data"][0]["model"]["expr"]
+    assert expr == 'sora_retrain_history_readable{job="sora-app"} == bool 0'
 
     with pytest.raises(Exception):
         broken_write._do_retrain(min_samples=10)
-    value = retrain_staleness_seconds()
+    _, readable = read_retrain_history()
 
-    # The expression, read from the rule rather than restated here: a copy
-    # would keep passing after someone edited the rule.
-    threshold = int(re.search(r"> bool (\d+)", expr).group(1))
-    fires = value > threshold or value == -1
-
-    assert fires, (
-        f"the gauge reads {value} and the rule {expr!r} does not fire; the "
-        f"alert would have stayed silent through exactly this failure"
+    # The expression evaluated on this state: 1 when unreadable, 0 when readable.
+    unreadable_signal = 0 if readable else 1
+    assert unreadable_signal == 0, (
+        "a failed retrain must not page as an unreadable history"
     )

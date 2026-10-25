@@ -106,15 +106,41 @@ def test_the_drift_and_retrain_rules_treat_a_quiet_counter_as_healthy(rules):
         assert rules[uid]["noDataState"] == "OK", uid
 
 
-def test_the_retrain_stale_expression_is_zero_when_healthy_and_fires_on_both_branches(rules):
-    nodes = {d["refId"]: d for d in rules["sora-retrain-stale"]["data"]}
-    expr = nodes["A"]["model"]["expr"]
-    evaluator = nodes["C"]["model"]["conditions"][0]["evaluator"]
+def _drift_expr(rules):
+    return next(d["model"]["expr"] for d in rules["sora-drift-unmeasured-with-traffic"]["data"]
+                if "expr" in d["model"])
 
-    # The sum of two booleans: 0 when healthy, at least 1 when either holds.
-    assert "> bool 1209600" in expr
-    assert "== bool -1" in expr
-    assert evaluator == {"type": "gt", "params": [0]}
+
+def test_the_drift_unmeasured_rule_treats_absence_as_unmeasured(rules):
+    """A missing sample on the measured side must read as unmeasured. Without
+    `vector(1) unless` it would be NoData, which Grafana maps to OK: an absent
+    drift series would then look healthy (review of this change, item 2)."""
+    expr = _drift_expr(rules)
+    assert expr.startswith("(vector(1) unless on() ("), expr
+    assert ") and on() (sum(increase(" in expr, expr
+
+
+def test_the_drift_unmeasured_rule_reads_the_latest_check_across_jobs(rules):
+    """An old backend `measured=1` must not outvote a newer scheduler check. The
+    expression selects the status of the newest check (by last-run timestamp),
+    across the two jobs that run the loop, and bounds its age (review of this change, P2)."""
+    expr = _drift_expr(rules)
+    assert 'job=~"sora-app|sora-scheduler"' in expr, expr
+    assert "and on(job)" in expr and "group_left()" in expr, expr
+    assert "max(sora_drift_check_last_run_timestamp_seconds" in expr, expr
+    assert "== 1)" in expr, "measured must be exactly 1, not merely non-zero"
+    assert "< 93600" in expr, "26h freshness bound"
+    assert "!= bool 1" not in expr, "the single-max form that let an old measurement win"
+
+
+def test_the_drift_unmeasured_rule_pins_the_traffic_counter_to_the_backend(rules):
+    expr = _drift_expr(rules)
+    assert 'http_requests_total{job="sora-app",handler=~' in expr, expr
+
+
+def test_the_drift_unmeasured_rule_is_silent_without_traffic(rules):
+    """No traffic means no data, and no data is OK: nothing to say about drift."""
+    assert rules["sora-drift-unmeasured-with-traffic"]["noDataState"] == "OK"
 
 
 def test_the_stale_summary_states_the_real_delay(doc):
