@@ -86,45 +86,51 @@ groups:
         annotations:
           summary: "Data drift detected — consider retraining"
 
-      # The rule that did not fire for a month (#188).
+      # Drift has not been measured while the service was being used (decision
+      # 2026-10-21, GPT-RETRAIN-ALERT-DECISION).
       #
-      # `sora-retrain-failed` below counts failures, and there were none --
-      # because `models/` became root-owned on 17 July, and drift never fired,
-      # so the scheduler never attempted a retrain at all. No attempts, no
-      # failures, and no failures read as health.
+      # `no_log` means the closed loop found nothing to compare. A quiet service
+      # produces that legitimately, and so does a broken write path; the value
+      # alone cannot say which. The traffic term is what turns it into a question:
+      # silent when nothing has called /evaluate or /predict in 24h.
       #
-      # This asks the other question: how long since one *succeeded*. It is the
-      # only one of the two that can notice a system which has stopped trying.
+      # Which check counts: the most recent one across the two jobs that can run
+      # the closed loop (sora-scheduler, and sora-app via the AI-agent route).
+      # Each is compared by its last-run timestamp, and only the status of the
+      # newest check is read. A measurement from the backend therefore cannot
+      # hide a newer scheduler check that found nothing, and the reverse holds
+      # too (review of this change, P2).
       #
-      # 14 days, and deliberately not tighter. Retraining is triggered by
-      # drift, so a quiet fortnight can be legitimate -- the summary therefore
-      # says "check whether it tried", not "it is broken". -1 means no
-      # successful run has ever been recorded, which is never legitimate.
+      # Unmeasured means any of: that check did not measure; its status is NaN
+      # (the value before a process's first check); no check exists in either
+      # job; or the newest check is more than 26 hours old. All four produce no
+      # sample on the measured side, and `vector(1) unless` turns that into 1.
+      # Without it an absent series would be NoData and read as OK.
       #
-      # The expression is a sum of two booleans, so that it is 0 when healthy and
-      # at least 1 when either condition holds; the threshold then needs no
-      # knowledge of the -1 sentinel. Both comparisons use `bool`: a plain
-      # comparison would drop the series instead of returning 0.
-      - uid: sora-retrain-stale
-        title: No Successful Retrain
+      # Traffic is `http_requests_total` from prometheus_fastapi_instrumentator,
+      # not a /evaluate counter: `sora_predictions_total` covers /predict alone,
+      # and nothing in app/prom_metrics.py counts /evaluate. The handler regex
+      # covers /api/v1/evaluate and /api/v1/predict and their sub-paths; a test
+      # checks it against the real routes. `increase` is taken over 24h.
+      #
+      # After a restart the status reads unmeasured until that process's first
+      # check (the scheduler runs daily at 03:00 UTC). Under traffic that is an
+      # expected alert, not a fault by itself.
+      #
+      # The expression was evaluated with promtool on synthetic series, including
+      # every case above; the cases and output are in
+      # tests/promtool/drift_unmeasured_with_traffic_test.yml.
+      - uid: sora-drift-unmeasured-with-traffic
+        title: Drift Unmeasured With Traffic
         condition: C
         data:
           - refId: A
             relativeTimeRange:
-              from: 600
+              from: 300
               to: 0
             datasourceUid: PBFA97CFB590B2093
             model:
-              # job named because this gauge has a single writer: the backend,
-              # in app/metrics_endpoint.py, recomputed on each /metrics scrape.
-              # The scheduler exports the same name with the default 0 (it never
-              # sets it), so an unnamed selector would also match a series that
-              # is permanently 0 and can never carry the -1 this alert needs to
-              # see. "Always name the job" (CLAUDE.md), pinned to the one that
-              # writes it -- and pinned to sora-app, not the sora-scheduler a
-              # naive reading would choose, which is exactly what would break
-              # this alert (#284).
-              expr: (sora_retrain_seconds_since_success{job="sora-app"} > bool 1209600) + (sora_retrain_seconds_since_success{job="sora-app"} == bool -1)
+              expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"} == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})) < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -166,22 +172,100 @@ groups:
               intervalMs: 1000
               maxDataPoints: 43200
               refId: C
-        # The gauge is recomputed by the backend on every scrape, so its absence
-        # means the backend is not being scraped at all. That is sora-app-down's
-        # question, and it pages there, so absence is not paged twice here.
+        noDataState: OK
+        execErrState: Alerting
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Drift is not measured while the service receives traffic"
+          description: >-
+            The most recent closed-loop drift check (scheduler or backend) did not
+            produce a measurement, or no check has run within the last 26 hours,
+            and /evaluate or /predict answered requests in the last 24 hours.
+            Check retrain_log and the drift endpoint for the reason. Silence is
+            not evidence that drift is absent.
+
+      # The retrain history could not be read at the last scrape (decision
+      # 2026-10-21).
+      #
+      # This replaces "No Successful Retrain". That rule fired on the age of the
+      # last success, and an age of a few weeks is what an unneeded retrain looks
+      # like as well as a stopped one -- so it paged on a healthy quiet system.
+      # What is a fault is that the history cannot be read at all, which the
+      # endpoint reports separately from the age (see sora_retrain_history_readable).
+      #
+      # 0 when the last scrape read the table, 1 when the read failed. Absence
+      # means the backend is not being scraped, which App Unreachable already
+      # pages on, so NoData is OK here rather than a second page.
+      #
+      # The age is still exported as sora_retrain_seconds_since_success, for
+      # reading. No rule alerts on it.
+      - uid: sora-retrain-history-unreadable
+        title: Retrain History Unreadable
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              # job named: the gauge is set at scrape time by the backend, and the
+              # scheduler does not export it. Always name the job (CLAUDE.md).
+              expr: sora_retrain_history_readable{job="sora-app"} == bool 0
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              settings:
+                mode: dropNN
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
         noDataState: OK
         execErrState: Alerting
         for: 15m
         labels:
           severity: warning
         annotations:
-          summary: "No retrain has succeeded in over 14 days"
+          summary: "The retrain history could not be read by the metrics endpoint"
           description: >-
-            A quiet period can be legitimate: retraining is triggered by drift,
-            and no drift means no attempt. What this cannot distinguish is a
-            loop that stopped working, which is why it fires -- check whether a
-            retrain was attempted and what it reported, rather than assuming
-            either. A value of -1 means none has ever succeeded.
+            A database query behind the retrain-history gauge failed at the last
+            scrape. This is a fault in the read path, not a statement about
+            whether a retrain is needed. Check the database and the backend log.
 
       - uid: sora-retrain-failed
         title: Retrain Failed
