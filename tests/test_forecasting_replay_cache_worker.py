@@ -101,6 +101,49 @@ def test_real_clock_accounts_until_transport_completion(prepared):
     assert result=={"status":"quota_wait","not_before":(NOW+timedelta(seconds=34)).isoformat()}
 
 
+@pytest.mark.parametrize("kind", ["transport", "timeout", "429", "malformed", "oversize"])
+def test_failed_transport_charges_completion_before_recovery_spacing(prepared, kind):
+    root, worker, _ = prepared
+    clock = iter([NOW, NOW + timedelta(seconds=30)])
+    def fail(*args):
+        if kind == "transport":
+            raise cache.TransportFailure(error_class="URLError", returncode=2)
+        if kind == "timeout":
+            raise TimeoutError()
+        if kind == "429":
+            raise HTTPError("https://example.invalid", 429, "limited", {}, None)
+        return b"invalid" if kind == "malformed" else b"x" * (cache.MAX_RAW + 1)
+    result = worker.step(now=NOW, fetch=fail, code_commit=CODE, clock=lambda: next(clock))
+    assert result["status"] == "paused"
+    journal = load(root)
+    event = journal["events"][-1]
+    assert event["reserved_at"] == NOW.isoformat()
+    assert event["at"] == (NOW + timedelta(seconds=30)).isoformat()
+    assert journal["last_seen"] == event["at"]
+    assert worker.wait_until(journal, NOW + timedelta(seconds=31)) == NOW + timedelta(seconds=34)
+    assert len(journal["events"]) == 2 and journal["inflight"]
+
+
+@pytest.mark.parametrize("completion", ["rollback", "unavailable"])
+def test_failed_transport_with_uncertain_completion_stays_paused(prepared, completion):
+    root, worker, _ = prepared
+    moments = iter([NOW])
+    def clock():
+        try:
+            return next(moments)
+        except StopIteration:
+            if completion == "rollback":
+                return NOW - timedelta(seconds=1)
+            raise OSError("synthetic clock unavailable") from None
+    def fail(*args):
+        raise cache.TransportFailure(error_class="URLError", returncode=2)
+    result = worker.step(now=NOW, fetch=fail, code_commit=CODE, clock=clock)
+    assert result == {"status":"paused", "reason":"failure_completion_clock_uncertain; review required"}
+    journal = load(root)
+    assert journal["inflight"] and len(journal["events"]) == 2
+    assert step(worker, now=NOW+timedelta(days=2), fetch=forbidden)["status"] == "paused"
+
+
 def test_reservation_write_failure_never_calls_transport(prepared, monkeypatch):
     _, worker, _ = prepared
     def failed_save(*args): raise OSError("disk failure")

@@ -106,7 +106,7 @@ def export_toy(tmp_path,monkeypatch):
  for fname in ['verification.json','forecast-00.json']:
   (p0/fname).write_bytes(raw);manifest['entries'].append({'file':fname,'sha256':digest(raw),'bytes':len(raw)})
  class TinyWorker:
-  def __init__(self,root):pass
+  def __init__(self,root,**kwargs):pass
   @contextmanager
   def locked(self,now):yield state,None,None
   def validate(self,*args):pass
