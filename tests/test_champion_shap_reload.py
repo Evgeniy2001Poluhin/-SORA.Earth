@@ -14,6 +14,9 @@ from app import model_loader
 @pytest.fixture
 def serving(monkeypatch):
     running = ModuleType("app.main")
+    # conftest.clear_dependency_overrides imports `app` from app.main on teardown,
+    # and it runs before monkeypatch restores sys.modules.
+    running.app = SimpleNamespace(dependency_overrides={})
     running.rf_model = object()
     running.explainer_shap = object()
     running.make_features_base = lambda value: SimpleNamespace(columns=["budget"])
