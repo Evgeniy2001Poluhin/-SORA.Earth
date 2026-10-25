@@ -1,13 +1,17 @@
-"""There is an alert for a retrain loop that stopped, not only for one that failed.
+"""The retrain alerts ask two different questions, and neither asks "was a retrain needed".
 
-#188. `sora-retrain-failed` counts failures, and for a month there were none:
-`models/` became root-owned on 17 July, drift never fired, so the scheduler
-never attempted a retrain. No attempts, no failures, and no failures read as
-health.
+#188 added an alert on the age of the last successful retrain. Decision
+2026-10-21 (GPT-RETRAIN-ALERT-DECISION) removed it: a retrain that was never
+needed looks identical to one that stopped, and the page fired on the first.
+What a retrain loop can honestly be paged for is narrower:
 
-The two rules ask different questions and only one of them can notice a system
-that has stopped trying. This pins that both exist, and that the new one reads
-the gauge rather than a counter -- a counter cannot express absence.
+  sora-retrain-failed                a run that was started and failed (counter)
+  sora-retrain-history-unreadable    the history could not be read at all (gauge)
+
+and drift that has gone unmeasured while the service is used is paged by
+`sora-drift-unmeasured-with-traffic` (see test_drift_check_status_is_published).
+This file pins that the age is no longer alerted on, and that the two that
+remain read what they claim to.
 """
 import os
 
@@ -25,41 +29,51 @@ def rules():
     return {r["uid"]: r for g in doc["groups"] for r in g["rules"]}
 
 
-def test_both_questions_are_asked(rules):
-    """"Did one fail" and "has one succeeded lately" are not the same alert,
-    and the month of silence answered the first with yes-nothing-failed."""
-    assert "sora-retrain-failed" in rules
-    assert "sora-retrain-stale" in rules
+def _exprs(rule):
+    return [d["model"].get("expr", "") for d in rule["data"] if "expr" in d["model"]]
 
 
-def test_the_staleness_rule_reads_the_gauge(rules):
-    """A counter of failures cannot express "nothing ran". The gauge can."""
-    expr = rules["sora-retrain-stale"]["data"][0]["model"]["expr"]
-
-    assert "sora_retrain_seconds_since_success" in expr
-    assert "increase(" not in expr
+def test_the_stale_rule_is_gone(rules):
+    """The rule whose firing on a quiet history was the defect."""
+    assert "sora-retrain-stale" not in rules
+    assert not any("No Successful Retrain" == r["title"] for r in rules.values())
 
 
-def test_never_having_succeeded_also_fires(rules):
-    """-1 is the value the metric carries when no successful run exists. A
-    threshold alone would miss it, since -1 is below any positive bound."""
-    expr = rules["sora-retrain-stale"]["data"][0]["model"]["expr"]
-
-    assert "== -1" in expr
-
-
-def test_the_metric_it_alerts_on_is_declared(rules):
-    """An alert on a metric nothing publishes is a rule that cannot fire."""
-    with open(os.path.join(REPO_ROOT, "app", "prom_metrics.py"),
-              encoding="utf-8") as fh:
-        assert "sora_retrain_seconds_since_success" in fh.read()
+def test_no_rule_alerts_on_the_age_of_the_last_success(rules):
+    """A retrain that was never needed has an old last success. Nothing may page
+    on that age -- it is exported for reading, not for alerting."""
+    for uid, rule in rules.items():
+        for expr in _exprs(rule):
+            assert "sora_retrain_seconds_since_success" not in expr, uid
 
 
-def test_the_summary_does_not_claim_a_fault(rules):
-    """Retraining is triggered by drift, so a quiet fortnight can be
-    legitimate. An alert that asserts breakage where there may be none is one
-    people learn to dismiss."""
-    text = str(rules["sora-retrain-stale"]["annotations"])
+def test_retrain_failed_still_asks_whether_a_run_failed(rules):
+    """An actual failed run is a fault and stays as it was."""
+    expr = _exprs(rules["sora-retrain-failed"])[0]
+    assert expr == "increase(sora_model_rejected_total[10m])"
 
-    assert "can be legitimate" in text
-    assert "check whether a" in text
+
+def test_the_unreadable_history_rule_reads_the_readability_gauge(rules):
+    rule = rules["sora-retrain-history-unreadable"]
+    assert rule["title"] == "Retrain History Unreadable"
+    expr = _exprs(rule)[0]
+    assert expr == 'sora_retrain_history_readable{job="sora-app"} == bool 0'
+    assert "sora_retrain_seconds_since_success" not in expr
+
+
+def test_the_unreadable_history_rule_holds_for_fifteen_minutes(rules):
+    """A single failed read during a database restart should not page."""
+    assert rules["sora-retrain-history-unreadable"]["for"] == "15m"
+
+
+def test_the_unreadable_history_rule_treats_absence_as_ok(rules):
+    """Absent readability means the backend is not scraped; App Unreachable pages
+    for that, so this rule does not page it a second time."""
+    assert rules["sora-retrain-history-unreadable"]["noDataState"] == "OK"
+
+
+def test_the_summary_does_not_claim_a_retrain_fault(rules):
+    """It is a fault in the read path. Saying a retrain is broken would repeat the
+    conflation this change removes."""
+    text = str(rules["sora-retrain-history-unreadable"]["annotations"])
+    assert "not a statement about whether a retrain is needed" in text
