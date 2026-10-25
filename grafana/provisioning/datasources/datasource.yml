@@ -1,6 +1,21 @@
 apiVersion: 1
+
+# The only datasource file. It is the only declaration of the Prometheus
+# datasource. An earlier second file (prometheus.yml) declared the same name with
+# isDefault false, and the two applied in turn, so the second won the default
+# flag. Production had been left with isDefault false (measured).
+#
+# uid is the one production already has (PBFA97CFB590B2093, generated when the
+# datasource was first provisioned without a uid). It is kept, not renamed to
+# `prometheus`: on Grafana 13.2.3 a provisioned uid change does not update the
+# existing datasource in place -- provisioning looks it up by the new uid, does
+# not find it, and Grafana exits with "Datasource provisioning error: data source
+# not found" (measured on the local stand, scenario B). Keeping the uid lets the
+# same file apply to a fresh volume and to production with the same result: the
+# id is kept, isDefault is updated, and a restart changes nothing.
 datasources:
   - name: Prometheus
+    uid: PBFA97CFB590B2093
     type: prometheus
     access: proxy
     orgId: 1

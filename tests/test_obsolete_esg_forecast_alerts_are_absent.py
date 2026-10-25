@@ -18,10 +18,13 @@ OBSOLETE_ESG_FORECAST_ALERTS = {
 
 EXPECTED_OPERATIONAL_ALERTS = {
     "sora-drift-detected",
-    "sora-retrain-stale",
+    "sora-drift-unmeasured-with-traffic",
+    "sora-retrain-history-unreadable",
     "sora-retrain-failed",
     "sora-high-latency",
     "sora-app-down",
+    "sora-observation-coverage-gap",
+    "sora-observation-coverage-stale",
 }
 
 

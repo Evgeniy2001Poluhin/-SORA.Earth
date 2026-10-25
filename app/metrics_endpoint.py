@@ -55,13 +55,20 @@ def _refresh_collection_time_gauges() -> None:
     because one gauge could not be computed takes every other metric with it,
     and the scrape is how anyone would find out.
     """
-    try:
-        from app.api.infra import retrain_staleness_seconds
-        from app.prom_metrics import sora_retrain_seconds_since_success
+    from app.prom_metrics import sora_retrain_history_readable, sora_retrain_seconds_since_success
 
-        sora_retrain_seconds_since_success.set(retrain_staleness_seconds())
+    # One read sets both: the age, and whether the history could be read at all.
+    # A failure to compute either is itself a failed read, so it reports as
+    # unreadable -- the age stays NaN, never a stale number from before.
+    try:
+        from app.api.infra import read_retrain_history
+
+        age, readable = read_retrain_history()
     except Exception as exc:  # pragma: no cover - telemetry must not break the scrape
-        logger.warning("retrain staleness gauge not refreshed: %s", type(exc).__name__)
+        logger.warning("retrain history not refreshed: %s", type(exc).__name__)
+        age, readable = float("nan"), False
+    sora_retrain_seconds_since_success.set(age)
+    sora_retrain_history_readable.set(1.0 if readable else 0.0)
 
 
 def build_registry() -> CollectorRegistry:
