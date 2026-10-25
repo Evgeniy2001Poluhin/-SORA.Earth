@@ -7,6 +7,7 @@ ledgers; the weather bytes are synthetic.
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import base64
+import importlib.util
 import fcntl
 import json
 import shutil
@@ -34,6 +35,7 @@ GOOD = b'good'
 PROBE_DAY = '2025-08-05'
 HIST = '2025-08-06'
 _REAL = {'save_state': m.save_state, 'write_new': m.write_new}
+ORIGINAL_VALIDATE = CacheWorker.validate
 
 
 class UnexpectedGet(BaseException):
@@ -445,10 +447,9 @@ def test_clock_running_backwards_after_response_is_a_stop(w):
 
 def test_clock_running_backwards_before_reservation_refuses_without_state_change(w):
     w.init()
-    before = (w.root / 'state.json').read_bytes()
-    with pytest.raises(CacheRefusal):
-        w.c.step(fetch=forbidden, clock=Clock(NOW, NOW - timedelta(seconds=1)), guard=lambda: None)
-    assert (w.root / 'state.json').read_bytes() == before
+    result = w.c.step(fetch=forbidden, clock=Clock(NOW, NOW - timedelta(seconds=1)), guard=lambda: None)
+    assert result['status'] == 'paused' and result['network_requests'] == 0
+    assert w.state()['events'] == [] and w.state()['paused']
 
 
 def test_raw_bytes_that_do_not_reread_are_a_stop(w, monkeypatch):
@@ -467,13 +468,11 @@ def test_raw_bytes_that_do_not_reread_are_a_stop(w, monkeypatch):
 
 def test_first_guard_refuses_before_reservation_and_request(w):
     w.init()
-    before = (w.root / 'state.json').read_bytes()
-
     def guard():
         raise RuntimeError('not clean source')
-    with pytest.raises(RuntimeError):
-        w.c.step(fetch=forbidden, clock=clock_at(NOW), guard=guard)
-    assert (w.root / 'state.json').read_bytes() == before
+    result = w.c.step(fetch=forbidden, clock=clock_at(NOW), guard=guard)
+    assert result['status'] == 'paused' and result['network_requests'] == 0
+    assert w.state()['events'] == [] and w.state()['paused']
 
 
 def test_second_guard_after_reservation_stops_before_transport(w):
@@ -577,8 +576,13 @@ RESUME_DEFECTS = {
 def test_resume_refuses_damaged_or_inconsistent_census_without_a_request(w, defect):
     day = _completed_one(w)
     RESUME_DEFECTS[defect](w, day)
-    with pytest.raises((ValueError, OSError)):
-        step(w.c, forbidden, NOW + timedelta(minutes=10))
+    if defect == 'clock_ahead_of_now':
+        # The clock refusal now persists a sticky STOP at the last valid saved time.
+        assert step(w.c, forbidden, NOW + timedelta(minutes=10))['status'] == 'paused'
+        assert w.state()['paused'] and len(w.state()['events']) == 1
+    else:
+        with pytest.raises((ValueError, OSError)):
+            step(w.c, forbidden, NOW + timedelta(minutes=10))
 
 
 # ---------------------------------------------------------------- locks and concurrency
@@ -781,10 +785,117 @@ def test_altered_parent_receipt_refuses_initialization(w):
 
 
 def test_cli_refuses_a_wrong_commit_before_reading_inputs_or_requesting(tmp_path):
-    result = subprocess.run([sys.executable, '-B', str(SCRIPT), '--parent', str(tmp_path / 'p'),
+    result = subprocess.run([sys.executable, '-B', str(SCRIPT), '--preflight', '--parent', str(tmp_path / 'p'),
                              '--gap', str(tmp_path / 'g'), '--root', str(tmp_path / 'c'),
                              '--policy', str(tmp_path / 'missing'), '--policy-sha256', '0' * 64,
                              '--execution-commit', '0' * 40], capture_output=True)
     assert result.returncode == 2
     assert json.loads(result.stderr) == {'status': 'refused', 'error_class': 'CacheRefusal'}
     assert not (tmp_path / 'c').exists()
+
+
+@pytest.mark.parametrize('defect', [None, 'missing_point', 'missing_hour', 'wrong_unit'])
+def test_census_uses_original_weather_validator(w, monkeypatch, defect):
+    w.init()
+    monkeypatch.setattr(CacheWorker, 'validate', ORIGINAL_VALIDATE)
+    spec = importlib.util.spec_from_file_location('census_p0_fixture', Path(__file__).with_name(
+        'test_forecasting_replay_p0.py'))
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    request = w.requests[w.allowed[0]]
+    protocol = {'points': [{'code': p.code, 'lat': p.lat, 'lon': p.lon}
+                           for p in OPENMETEO_POINTS_V1],
+                'forecast_days': 8, 'forecast_min_hours': 24}
+    payload = fixture.payload(protocol, {'kind': 'forecast', 'origin': request['origin']})
+    if defect == 'missing_point':
+        payload.pop()
+    elif defect == 'missing_hour':
+        payload[0]['hourly']['time'].pop()
+        payload[0]['hourly']['temperature_2m'].pop()
+    elif defect == 'wrong_unit':
+        payload[0]['hourly_units']['temperature_2m'] = 'F'
+    fake = Fake(canonical(payload))
+    result = step(w.c, fake)
+    assert result['status'] == ('fetched_ok' if defect is None else 'paused')
+    assert len(fake.calls) == 1 and len(w.state()['events']) == 1
+    assert len(w.state()['terminal']) == (1 if defect is None else 0)
+    if defect is not None:
+        assert step(w.c, forbidden, NOW + timedelta(seconds=10))['status'] == 'paused'
+
+
+@pytest.mark.parametrize('field,value', [('http_status', 500), ('error_class', 'URLError'),
+                                       ('request_sha256', '0' * 64), ('body_bytes', 0),
+                                       ('model', 'other'), ('hour', '06'),
+                                       ('policy_sha256', '0' * 64)])
+def test_resume_checks_every_unavailable_diagnostic_field(w, field, value):
+    w.init()
+    day = w.allowed[0]
+    assert step(w.c, Fake(unavailable(day)))['status'] == 'recorded_run_unavailable'
+    path = w.root / 'failures' / (day + '.unavailable.json')
+    record = json.loads(path.read_bytes())
+    record[field] = value
+    path.write_bytes(canonical(record))
+    with pytest.raises(CacheRefusal):
+        step(w.c, forbidden, NOW + timedelta(seconds=10))
+
+
+def test_resume_revalidates_weather_even_if_raw_and_journal_hash_changed(w):
+    day = _completed_one(w)
+    raw = b'{}'
+    (w.root / 'raw' / ('ifs-' + day + '.json')).write_bytes(raw)
+    state = w.state()
+    state['terminal'][day].update(sha256=digest(raw), bytes=len(raw))
+    w.save(state)
+    with pytest.raises(CacheRefusal):
+        step(w.c, forbidden, NOW + timedelta(seconds=10))
+
+
+def test_offline_preflight_checks_existing_census_receipts(w):
+    day = _completed_one(w)
+    (w.root / 'raw' / ('ifs-' + day + '.json')).write_bytes(b'corrupt')
+    with pytest.raises(CacheRefusal):
+        w.c.preflight_offline(w.bundle, now=NOW + timedelta(seconds=10))
+
+
+def test_publication_refuses_unpinned_actuals(w):
+    w.init()
+    with pytest.raises(CacheRefusal):
+        w.c.publication(now=NOW, actuals={})
+
+
+@pytest.mark.parametrize('clock', [Clock(NOW, NOW - timedelta(seconds=1)),
+                                    Clock(NOW - timedelta(seconds=1)), Clock()])
+def test_clock_refusal_is_sticky_even_without_a_reservation(w, clock):
+    w.init()
+    result = w.c.step(fetch=forbidden, clock=clock, guard=lambda: None)
+    assert result['status'] == 'paused' and result['network_requests'] == 0
+    assert w.state()['events'] == []
+    assert step(w.c, forbidden, NOW + timedelta(seconds=10))['status'] == 'paused'
+
+
+def test_first_guard_failure_is_sticky_without_charging_or_get(w):
+    w.init()
+    def bad_guard():
+        raise RuntimeError('source changed')
+    result = step(w.c, forbidden, guard=bad_guard)
+    assert result['status'] == 'paused' and w.state()['events'] == []
+    assert step(w.c, forbidden, NOW + timedelta(seconds=10))['status'] == 'paused'
+
+
+@pytest.mark.parametrize('filename', sorted(m.BUNDLE_FILES))
+def test_existing_root_preflight_checks_saved_bundle_not_only_external(w, filename):
+    w.init()
+    (w.root / filename).write_bytes(b'changed')
+    with pytest.raises(CacheRefusal):
+        w.c.preflight_offline(w.bundle, now=NOW)
+
+
+def test_clearing_only_state_pause_does_not_lift_pre_reservation_stop(w):
+    w.init()
+    def bad_guard():
+        raise RuntimeError('source drift')
+    assert step(w.c, forbidden, guard=bad_guard)['status'] == 'paused'
+    state = w.state()
+    state['paused'] = None
+    w.save(state)
+    assert step(w.c, forbidden, NOW + timedelta(seconds=10))['status'] == 'paused'

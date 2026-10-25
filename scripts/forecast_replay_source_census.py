@@ -43,7 +43,7 @@ def main(argv=None):
     parser.add_argument('--bundle-dir', type=Path)
     args = parser.parse_args(argv)
     try:
-        if not args.publish:
+        if args.initialize or args.preflight:
             source_guard(args.execution_commit)
         collector = CensusCollector(args.parent, args.gap, args.root, _read(args.policy, MAX_STATE),
                                     args.policy_sha256, code_commit=args.execution_commit)

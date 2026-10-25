@@ -358,7 +358,8 @@ class CensusCollector:
     def _load_state(self, anc, now):
         root = self.root
         need(root.is_dir() and not root.is_symlink(), 'census directory refused')
-        need({p.name for p in root.iterdir()} == TOP_LEVEL, 'census top-level entries differ')
+        need({p.name for p in root.iterdir()} in (TOP_LEVEL, TOP_LEVEL | {'global-stop.json'}),
+             'census top-level entries differ')
         _need_dir(root / 'raw')
         _need_dir(root / 'failures')
         need(_file(root / 'execution-policy.json') == self.policy_raw, 'saved policy differs')
@@ -393,6 +394,13 @@ class CensusCollector:
             need(inflight is None, 'in-flight record without reservation')
         paused = state['paused']
         need(paused is None or (isinstance(paused, str) and paused != ''), 'invalid pause')
+        if os.path.lexists(root / 'global-stop.json'):
+            stopped = _load(_file(root / 'global-stop.json'))
+            need(type(stopped) is dict and set(stopped) == {'reason', 'at', 'policy_sha256'} and
+                 stopped['policy_sha256'] == self.policy_pin and
+                 isinstance(stopped['reason'], str) and stopped['reason'] and
+                 enabled <= stamp(stopped['at']) <= last, 'global stop marker differs')
+            state['paused'] = paused = stopped['reason']
         raw_names, failure_names = set(), set()
         for index, day in enumerate(allowed[:len(terminal)]):
             receipt, event = terminal[day], events[index]
@@ -403,6 +411,7 @@ class CensusCollector:
                 name = 'ifs-' + day + '.json'
                 raw = _file(root / 'raw' / name, MAX_RAW)
                 need(digest(raw) == receipt['sha256'] and len(raw) == receipt['bytes'], 'raw receipt differs')
+                CacheWorker(self.root).validate(raw, requests[day])
                 raw_names.add(name)
             elif receipt.get('status') == 'recorded_run_unavailable':
                 need(set(receipt) == UNAVAILABLE_FIELDS and receipt['http_status'] == 400 and
@@ -411,8 +420,23 @@ class CensusCollector:
                 need(digest(body) == receipt['sha256'] and len(body) == receipt['bytes'],
                      'unavailable body differs')
                 record = _load(_file(root / 'failures' / (day + '.unavailable.json')))
-                need(type(record) is dict and record.get('day') == day and
-                     record.get('body_sha256') == receipt['sha256'], 'unavailable diagnostic differs')
+                need(type(record) is dict and set(record) == {
+                    'day', 'http_status', 'error_class', 'returncode', 'body_bytes',
+                    'body_sha256', 'request_sha256', 'model', 'hour', 'policy_sha256'},
+                    'unavailable diagnostic fields differ')
+                expected = {'day': day, 'http_status': 400, 'error_class': 'HTTPError',
+                            'returncode': record['returncode'], 'body_bytes': len(body),
+                            'body_sha256': digest(body), 'request_sha256': _request_sha(requests[day]),
+                            'model': _model_hour(requests[day])[0], 'hour': _model_hour(requests[day])[1],
+                            'policy_sha256': self.policy_pin}
+                need(_same(record, expected) and (record['returncode'] is None or
+                     type(record['returncode']) is int and -255 <= record['returncode'] <= 255),
+                     'unavailable diagnostic differs')
+                replay = TransportFailure(400, error_class='HTTPError', returncode=record['returncode'],
+                    http_error_body={'base64': base64.b64encode(body).decode(), 'bytes': len(body),
+                                     'sha256': digest(body), 'truncated': False})
+                need(classify_unavailable(replay, day=day, request=requests[day]) == body,
+                     'unavailable body no longer classifies')
                 failure_names |= {day + '.unavailable.bin', day + '.unavailable.json'}
             else:
                 raise CacheRefusal('unknown terminal status')
@@ -512,11 +536,37 @@ class CensusCollector:
         return {'status': 'recorded_run_unavailable', 'day': day, 'network_requests': 1,
                 'automatic_retries': 0}
 
+    def _pause_before_reservation(self, reason):
+        """Persist a sticky STOP only after revalidating the saved namespace at its last time.
+
+        A broken clock cannot supply a new timestamp. Keep the recorded timestamp,
+        validate every inherited and census byte, and change only the pause. If
+        the namespace is corrupt or unwritable, refusal still prevents transport.
+        """
+        stored = _load(_file(self.root / 'state.json'))
+        need(type(stored) is dict and 'last_seen' in stored, 'cannot safely pause invalid state')
+        last = stamp(stored['last_seen'])
+        anc = self._preflight(self._root_bundle(), last)
+        state = self._load_state(anc, last)
+        state['paused'] = state['paused'] or reason
+        marker = self.root / 'global-stop.json'
+        if not os.path.lexists(marker):
+            write_new(marker, canonical({'reason': state['paused'], 'at': state['last_seen'],
+                                         'policy_sha256': self.policy_pin}))
+        save_state(self.root, state)
+        return {'status': 'paused', 'reason': state['paused'], 'network_requests': 0,
+                'automatic_retries': 0}
+
     def step(self, *, fetch, clock, guard):
         with self.locks():
-            now = utc(clock())
-            anc = self._preflight(self._root_bundle(), now)
-            state = self._load_state(anc, now)
+            try:
+                now = utc(clock())
+                anc = self._preflight(self._root_bundle(), now)
+                state = self._load_state(anc, now)
+            except Exception as exc:
+                # This can only persist a pause if the previously saved namespace
+                # is fully valid. Integrity failures remain refusals, never GETs.
+                return self._pause_before_reservation('preflight_failed:' + type(exc).__name__)
             if state['paused']:
                 return {'status': 'paused', 'reason': state['paused'], 'network_requests': 0}
             if state['inflight']:
@@ -526,15 +576,18 @@ class CensusCollector:
             n = len(state['events'])
             if n == len(allowed):
                 return {'status': COMPLETE, 'network_requests': 0, 'automatic_retries': 0}
-            fresh = utc(clock())
-            need(fresh >= now, 'clock rollback during preflight')
+            try:
+                fresh = utc(clock())
+                need(fresh >= now, 'clock rollback during preflight')
+                guard()
+            except Exception as exc:
+                return self._pause_before_reservation('clock_or_guard_failed:' + type(exc).__name__)
             now = fresh
             events = [*anc.parent_events, *anc.gap_events, *state['events']]
             combined_attempts = sum(e['kind'] == 'attempt' for e in events)
             combined_units = sum(e['weight'] for e in events)
             need(combined_attempts + 1 <= COMBINED_LIMIT['attempts'] and
                  combined_units + UNITS <= COMBINED_LIMIT['units'], 'combined budget exhausted')
-            guard()
             allowed_at = CacheWorker(self.root).wait_until({'events': events}, now)
             if allowed_at > now:
                 return {'status': 'quota_wait', 'not_before': allowed_at.isoformat(),
@@ -587,6 +640,11 @@ class CensusCollector:
     def preflight_offline(self, bundle, *, now):
         with self.locks():
             anc = self._preflight(bundle, now)
+            if os.path.lexists(self.root):
+                need(self._root_bundle() == bundle, 'saved bundle differs from pinned supplied bundle')
+                state = self._load_state(anc, now)
+                need(not state['paused'] and state['inflight'] is None,
+                     'existing census stopped or uncertain')
             return {'status': 'offline_preflight_passed', 'network_requests': 0, 'automatic_retries': 0,
                     'calendar_dates': len(anc.allowed), 'baseline': BASELINE,
                     'census_limit': CENSUS_LIMIT, 'combined_limit': COMBINED_LIMIT,
@@ -594,6 +652,7 @@ class CensusCollector:
 
     def publication(self, *, now, actuals=None):
         """Read-only publication: calendar provenance, valid-run count, pair counts or not_computed."""
+        need(actuals is None, 'census v1 does not bind an observed-actual archive')
         with self.locks():
             anc = self._preflight(self._root_bundle(), now)
             state = self._load_state(anc, now)

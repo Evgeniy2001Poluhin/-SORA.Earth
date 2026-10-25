@@ -72,4 +72,20 @@ requires HEAD to equal the execution commit and a clean worktree.
 - The HTTP 400 body must have exactly the two keys `reason` and `error`. §3 does
   not name extra keys; an extra key is refused.
 - Refusals that involve no state change (pins, schema, clock before reservation)
-  raise `CacheRefusal`. Every failure after a reservation is a persisted pause.
+  refuse without transport when the saved namespace cannot be safely validated. Clock or source-guard failures in an otherwise valid initialized run persist a sticky pause even before reservation, without charging a request. Every unfinished reservation remains non-repeatable.
+
+
+## Review hardening
+
+Resume revalidates fetched census payloads with the original weather parser,
+checks the full unavailable diagnostic schema and bindings, and reapplies the
+strict classifier to its saved body. Offline preflight also checks an existing
+namespace and refuses paused or uncertain state. Publication rejects caller-supplied
+actuals because v1 binds no actual archive; its output remains not_computed.
+A failed clock cannot create a timestamp: a sticky pre-reservation pause retains
+the last validated journal time. Corrupt or unwritable namespaces are refused.
+The raw/receipt manifest is intentionally kept alongside the contract in C and
+externally pinned. Extra JSON keys in HTTP400 fail closed. None of these checks
+attests scientific admissibility or gives permission to perform GET.
+
+Pre-reservation STOP also writes a durable global-stop.json marker; editing only state.paused cannot resume requests. Existing-root preflight verifies the saved bundle as well as the supplied bundle.
