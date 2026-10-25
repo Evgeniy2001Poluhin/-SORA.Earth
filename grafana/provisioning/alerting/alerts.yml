@@ -92,27 +92,34 @@ groups:
       # `no_log` means the closed loop found nothing to compare. A quiet service
       # produces that legitimately, and so does a broken write path; the value
       # alone cannot say which. The traffic term is what turns it into a question:
-      # the alert is silent when nothing has called /evaluate or /predict in 24h.
+      # silent when nothing has called /evaluate or /predict in 24h.
       #
-      # `max` over the status series ignores NaN, the value before a process's
-      # first check, and reads that as not measured. Not job-pinned: the closed
-      # loop also runs in the backend (AI-agent route), so either process may
-      # write the gauge (the same reasoning as sora-drift-detected). Summing
-      # across processes would not be meaningful; the max is only "measured if
-      # either measured last".
+      # Which check counts: the most recent one across the two jobs that can run
+      # the closed loop (sora-scheduler, and sora-app via the AI-agent route).
+      # Each is compared by its last-run timestamp, and only the status of the
+      # newest check is read. A measurement from the backend therefore cannot
+      # hide a newer scheduler check that found nothing, and the reverse holds
+      # too (PR #491 review, P2).
+      #
+      # Unmeasured means any of: that check did not measure; its status is NaN
+      # (the value before a process's first check); no check exists in either
+      # job; or the newest check is more than 26 hours old. All four produce no
+      # sample on the measured side, and `vector(1) unless` turns that into 1.
+      # Without it an absent series would be NoData and read as OK.
       #
       # Traffic is `http_requests_total` from prometheus_fastapi_instrumentator,
       # not a /evaluate counter: `sora_predictions_total` covers /predict alone,
       # and nothing in app/prom_metrics.py counts /evaluate. The handler regex
       # covers /api/v1/evaluate and /api/v1/predict and their sub-paths; a test
-      # checks it against the real routes.
+      # checks it against the real routes. `increase` is taken over 24h.
       #
-      # `and on()` keeps the not-measured value only where traffic exists. Both
-      # sides absent gives no data, which is OK: no traffic, nothing to say.
+      # After a restart the status reads unmeasured until that process's first
+      # check (the scheduler runs daily at 03:00 UTC). Under traffic that is an
+      # expected alert, not a fault by itself.
       #
-      # After each restart the value reads not measured until the next 03:00 UTC
-      # run, so an alert shortly after a deploy under traffic is expected, not a
-      # fault by itself.
+      # The expression was evaluated with promtool on synthetic series, including
+      # every case above; the cases and output are in
+      # tests/promtool/drift_unmeasured_with_traffic_test.yml.
       - uid: sora-drift-unmeasured-with-traffic
         title: Drift Unmeasured With Traffic
         condition: C
@@ -123,7 +130,7 @@ groups:
               to: 0
             datasourceUid: PBFA97CFB590B2093
             model:
-              expr: (max(sora_drift_check_status{status="measured"}) != bool 1) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
+              expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"} == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})) < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -173,11 +180,11 @@ groups:
         annotations:
           summary: "Drift is not measured while the service receives traffic"
           description: >-
-            The last closed-loop drift check produced no measurement (no_log,
-            insufficient_data or unavailable), or none has run since the
-            process started, and /evaluate or /predict answered requests in the
-            last 24 hours. Check retrain_log and the drift endpoint for the
-            reason. Silence is not evidence that drift is absent.
+            The most recent closed-loop drift check (scheduler or backend) did not
+            produce a measurement, or no check has run within the last 26 hours,
+            and /evaluate or /predict answered requests in the last 24 hours.
+            Check retrain_log and the drift endpoint for the reason. Silence is
+            not evidence that drift is absent.
 
       # The retrain history could not be read at the last scrape (decision
       # 2026-10-21).

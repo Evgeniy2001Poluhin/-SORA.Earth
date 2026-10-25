@@ -188,3 +188,45 @@ def test_the_traffic_term_matches_the_real_evaluate_and_predict_routes():
     # Not a catch-all: the drift and metrics routes are not traffic for this alert.
     assert not re.fullmatch(pattern, "/api/v1/drift")
     assert not re.fullmatch(pattern, "/api/v1/metrics")
+
+
+def test_the_promtool_cases_test_the_rules_own_expression():
+    """The promtool file evaluates a copy of the expression. This pins the copy to
+    the rule, and pins the cases the review asked for, so that neither can change
+    without the other.
+
+    The cases are run with promtool (see the header of the file), not by pytest,
+    because the CI image does not carry promtool. This test is what makes that
+    run meaningful: a case run against an expression that is no longer the rule's
+    would prove nothing about the rule.
+    """
+    import os
+
+    import yaml
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "grafana", "provisioning", "alerting", "alerts.yml"),
+              encoding="utf-8") as fh:
+        doc = yaml.safe_load(fh)
+    rule = next(r for g in doc["groups"] for r in g["rules"]
+                if r["uid"] == "sora-drift-unmeasured-with-traffic")
+    rule_expr = next(d["model"]["expr"] for d in rule["data"] if "expr" in d["model"])
+
+    path = os.path.join(root, "tests", "promtool", "drift_unmeasured_with_traffic_test.yml")
+    with open(path, encoding="utf-8") as fh:
+        cases = yaml.safe_load(fh)["tests"]
+
+    names = {t["name"] for t in cases}
+    for required in (
+        "old_backend_measured_then_new_scheduler_no_log",
+        "old_scheduler_no_log_then_new_backend_measured",
+        "absent_no_drift_series_with_traffic",
+        "nan_everywhere_with_traffic",
+        "nan_status_with_fresh_timestamp",
+        "measured_26h1m_old_is_stale",
+        "nan_semantics_in_promql",
+    ):
+        assert required in names, required
+
+    exprs = {e["expr"] for t in cases for e in t["promql_expr_test"]}
+    assert rule_expr in exprs, "promtool file does not evaluate the rule's expression"
