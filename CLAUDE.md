@@ -245,6 +245,27 @@ drift-check job: drift is checked inside `closed_loop_retrain`, once a day.
 
 **Manual triggers:** `/api/v1/model/retrain`, `/api/v1/mlops/full-pipeline` (admin only)
 
+### Observation coverage
+
+- `app/services/observation_coverage.py` owns `coverage_report` and
+  `coverage_window`; the scheduler calculates coverage without importing HTTP
+  authentication.
+- The scheduler examines `[max(today - 30 days, M3_CLOCK_START), today)` in UTC.
+  `M3_CLOCK_START` is `2026-10-11`; today is excluded because it is incomplete.
+  API calls without `not_before` use the rolling window. A bound after today
+  raises `ValueError`; a bound equal to today is an allowed empty window.
+- Expected point-days are calendar dates crossed with declared points due on
+  each date. A LEFT JOIN gives absent observations zero hours, so missing whole
+  days or points remain visible.
+- Complete point-days have at least 19 distinct observed UTC hours. `gap_count`
+  and `complete_days` count point-days; `days_examined` counts calendar dates;
+  `points_examined` counts declared points due in the examined window.
+- A source/indicator without declared points raises `CoverageNotSupported`;
+  unsupported input is not a report of zero gaps.
+- All scheduler coverage gauges come from one report. Its last-success timestamp
+  advances only after success; an old zero gauge alone does not prove the job is
+  currently running.
+
 ### Models
 
 Four models, loaded in `app/main.py` at import time. The heading said three
