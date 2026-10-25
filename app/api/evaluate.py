@@ -135,8 +135,12 @@ async def evaluate_project(request: Request, project: Project):
 
     if any(k in payload and payload.get(k) is not None for k in macro_keys):
         result = _macro_esg_from_payload(payload)
+        # No model computed this probability: it is a formula over the payload.
+        model_version = "formula:macro"
     else:
-        result = calculate_esg(project, region_name)
+        provenance = []
+        result = calculate_esg(project, region_name, provenance_out=provenance)
+        model_version = provenance[0] if provenance else "unknown"
 
     latency_ms = round((time.perf_counter() - start) * 1000, 2)
 
@@ -152,6 +156,7 @@ async def evaluate_project(request: Request, project: Project):
         project,
         result,
         latency_ms=latency_ms,
+        model_version=model_version,
     )
 
     try:

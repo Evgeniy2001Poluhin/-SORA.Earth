@@ -290,7 +290,7 @@ def assert_schema_ready(engine=None):
         )
 
 
-def log_prediction(endpoint, input_data, result, latency_ms=None):
+def log_prediction(endpoint, input_data, result, latency_ms=None, model_version="unknown"):
     try:
         from app.database import PredictionLog
         db = get_db_sync()
@@ -314,6 +314,7 @@ def log_prediction(endpoint, input_data, result, latency_ms=None):
             probability=probability,
             esg_total_score=result.get("total_score"),
             latency_ms=latency_ms,
+            model_version=model_version,
         )
         db.add(log)
         db.commit()
@@ -428,6 +429,32 @@ model_metrics = _champion.metrics
 
 #: Provenance of the serving model, for /health. Never a path.
 model_source = _champion.source
+
+#: The loaded set as one object. `rf_model` and `model_source` are assigned one
+#: after the other by `reload_champion`, so reading the two globals can pair a new
+#: model with the old provenance. `champion.model is rf_model` says they agree.
+champion = _champion
+
+
+def model_identity(model, current) -> str:
+    """What `predictions_log.model_version` records for a probability `model` computed.
+
+    `current` is the champion read at the same moment as `model`. If they are not
+    the same object -- a reload in progress, or a model swapped in by a test --
+    the provenance of `model` is not known, and the row says so rather than
+    borrowing the champion's. Never the old literal "v2.0".
+    """
+    if current is None or model is not current.model:
+        return "unknown"
+    source = current.source
+    if source.source == "active" and source.run_id:
+        identity = f"active:{source.run_id}"
+    elif source.version:
+        identity = f"{source.source}:{source.version}"
+    else:
+        return "unknown"
+    # The column is String(50); a value that does not fit is not recorded cut short.
+    return identity if len(identity) <= 50 else "unknown"
 
 # Different models, not parts of the champion: they are not retrained, have no
 # staged or active copy, and continue to load from the seed directory.
@@ -699,7 +726,13 @@ def _esg_components(budget, co2_reduction, social_impact, cb, rf):
     return (score_env, score_soc, score_eco)
 
 
-def calculate_esg(project, region_name: str = "Europe"):
+def calculate_esg(project, region_name: str = "Europe", provenance_out=None):
+    """ESG score and the champion's success probability.
+
+    `provenance_out`, when a list, receives the identity of the model that
+    computed `success_probability`, taken together with the model itself before
+    the prediction -- not re-read afterwards, when a reload may have replaced it.
+    """
     rf = REGIONAL_FACTORS.get(region_name, REGIONAL_FACTORS["Europe"])
     try:
         from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG
@@ -716,7 +749,10 @@ def calculate_esg(project, region_name: str = "Europe"):
     total = round((score_env * 0.4 + score_soc * 0.3 + score_eco * 0.3) * duration_factor * 100, 2)
     total = min(total, 100.0)
     features_scaled = make_features(project)
-    success_prob = round(float(rf_model.predict_proba(features_scaled)[0][1]) * 100, 2)
+    model, current = rf_model, champion
+    success_prob = round(float(model.predict_proba(features_scaled)[0][1]) * 100, 2)
+    if provenance_out is not None:
+        provenance_out.append(model_identity(model, current))
 
     category = getattr(project, "category", "Solar Energy")
     region   = getattr(project, "region",   "Europe")
