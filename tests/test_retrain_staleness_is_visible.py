@@ -7,9 +7,16 @@ its artefact, and because drift never fired the scheduler never attempted one.
 
 No failures were counted. No failures looked like health.
 
-A gauge of **age**, not a counter of events, because an alert on age fires when
-the system stops trying — the state a counter cannot express.
+A gauge of **age**, not a counter of events. It is information. The alert no
+longer reads it (decision 2026-10-21): a retrain that was never needed looks
+like one that stopped, and the page fired on exactly that. What must page is an
+unreadable history, which `sora_retrain_history_readable` reports on its own.
+
+"No success recorded" and "history unreadable" are separate facts and are
+returned separately: NaN for the age in both, and the readable flag tells them
+apart. Before, both were -1, and that conflation is what these tests pin down.
 """
+import math
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -43,22 +50,27 @@ def _add(Session, status, hours_ago):
         db.close()
 
 
-def _value():
-    """The function the gauge computes itself from, called directly.
+def _read():
+    """The single read the gauges are set from, called directly.
 
-    Not the gauge's stored value: since #188's follow-up it has no stored
-    value -- `set_function` evaluates this at collection, which is what stopped
-    the metric depending on which endpoint had been called.
+    Not the gauges' stored values: the scrape computes them, so the function
+    is the thing under test.
     """
-    from app.api.infra import retrain_staleness_seconds
+    from app.api.infra import read_retrain_history
 
-    return retrain_staleness_seconds()
+    return read_retrain_history()
+
+
+def _value():
+    return _read()[0]
 
 
 def test_it_reports_the_age_of_the_last_success(log_db):
     _add(log_db, "success", hours_ago=3)
 
-    assert _value() == pytest.approx(3 * 3600, rel=0.02)
+    age, readable = _read()
+    assert readable is True
+    assert age == pytest.approx(3 * 3600, rel=0.02)
 
 
 def test_a_failure_does_not_reset_it(log_db):
@@ -70,16 +82,21 @@ def test_a_failure_does_not_reset_it(log_db):
     assert _value() == pytest.approx(48 * 3600, rel=0.02)
 
 
-def test_never_having_succeeded_is_minus_one(log_db):
-    """Not 0, which reads as "one just finished", and not absent, which leaves
-    the alert with nothing to compare."""
+def test_no_success_recorded_is_nan_and_readable(log_db):
+    """A failed run is recorded, so the history is read and says: no success.
+    The age is NaN, and the history is readable -- this is information, not a
+    fault."""
     _add(log_db, "failed", hours_ago=1)
 
-    assert _value() == -1
+    age, readable = _read()
+    assert math.isnan(age)
+    assert readable is True
 
 
-def test_an_empty_table_is_minus_one(log_db):
-    assert _value() == -1
+def test_an_empty_table_is_nan_and_readable(log_db):
+    age, readable = _read()
+    assert math.isnan(age)
+    assert readable is True
 
 
 def test_the_most_recent_success_wins(log_db):
@@ -89,10 +106,10 @@ def test_the_most_recent_success_wins(log_db):
     assert _value() == pytest.approx(2 * 3600, rel=0.02)
 
 
-def test_an_unreadable_database_fires_the_alert(monkeypatch):
-    """Leaving the previous value would be wrong in a different way: the number
-    stops moving, which reads as "recent" to anyone looking at the value rather
-    than at its timestamp."""
+def test_an_unreadable_database_is_nan_and_not_readable(monkeypatch):
+    """The read failed. The age must not be a sentinel that could be mistaken
+    for a real value, and readability must say the read failed -- the alert
+    reads that flag, not the age."""
     import app.database as db_module
 
     def _boom():
@@ -100,10 +117,30 @@ def test_an_unreadable_database_fires_the_alert(monkeypatch):
 
     monkeypatch.setattr(db_module, "SessionLocal", _boom)
 
-    assert _value() == -1
+    age, readable = _read()
+    assert math.isnan(age)
+    assert readable is False
 
 
-def test_the_gauge_is_computed_by_the_scrape_itself(monkeypatch):
+def test_an_unreadable_history_is_not_the_same_as_no_success(log_db, monkeypatch):
+    """The conflation this change removes. Same age (NaN) in both cases; only
+    readability separates them, and the page must follow readability."""
+    import app.database as db_module
+
+    _add(log_db, "failed", hours_ago=1)
+    _, readable_empty = _read()
+
+    def _boom():
+        raise RuntimeError("database is gone")
+
+    monkeypatch.setattr(db_module, "SessionLocal", _boom)
+    _, readable_broken = _read()
+
+    assert readable_empty is True
+    assert readable_broken is False
+
+
+def test_the_gauges_are_set_from_one_read_at_scrape(monkeypatch):
     """Not pushed by a runner, and not read from a handler nobody scrapes.
 
     Refreshing it inside /api/v1/metrics/prometheus published a metric that
@@ -112,37 +149,32 @@ def test_the_gauge_is_computed_by_the_scrape_itself(monkeypatch):
     runs. A gauge depending on which endpoint was called reports on the
     endpoint.
 
-    This asserted that `app/main.py` contained the text
-    `set_function(retrain_staleness_seconds)`. Two things were wrong with that.
-    It tested the source rather than the behaviour, so it would have passed
-    with the wiring present and broken. And `set_function` had to go in #262:
-    under `PROMETHEUS_MULTIPROC_DIR` it is accepted and never collected --
-    measured -- so the gauge would have vanished from a four-worker scrape
-    while this test stayed green. The computation moved into the `/metrics`
-    handler; what is asserted now is that scraping performs it.
+    Both gauges are set in the scrape's own refresh, from a single call, so the
+    age and its readability describe the same moment. Asserted by behaviour:
+    a scrape performs the read, and what it returns is what appears.
     """
     from fastapi.testclient import TestClient
 
     import app.api.infra as infra_module
-    import app.metrics_endpoint as endpoint
     from app.main import app
 
     calls = []
 
-    def fake_staleness():
+    def fake_read():
         calls.append(1)
-        return 1234.0
+        return 1234.0, True
 
-    monkeypatch.setattr(infra_module, "retrain_staleness_seconds", fake_staleness)
+    monkeypatch.setattr(infra_module, "read_retrain_history", fake_read)
 
     client = TestClient(app)
     body = client.get("/metrics").text
 
-    assert calls, "the scrape did not compute the gauge"
+    assert calls, "the scrape did not compute the gauges"
     assert "sora_retrain_seconds_since_success 1234.0" in body, [
         line for line in body.splitlines()
         if line.startswith("sora_retrain_seconds_since_success")
     ]
+    assert "sora_retrain_history_readable 1.0" in body
 
     # And again, with a different answer: a value cached from the first scrape
     # would satisfy the assertion above forever.
@@ -150,10 +182,29 @@ def test_the_gauge_is_computed_by_the_scrape_itself(monkeypatch):
 
     def later():
         calls.append(1)
-        return 5678.0
+        return float("nan"), False
 
-    monkeypatch.setattr(infra_module, "retrain_staleness_seconds", later)
+    monkeypatch.setattr(infra_module, "read_retrain_history", later)
     body = client.get("/metrics").text
 
     assert calls, "the second scrape reused the first value"
-    assert "sora_retrain_seconds_since_success 5678.0" in body
+    assert "sora_retrain_history_readable 0.0" in body
+    assert "sora_retrain_seconds_since_success NaN" in body
+
+
+def test_a_failed_read_at_scrape_reports_unreadable(monkeypatch):
+    """If the read path raises before it can answer, the scrape still succeeds
+    and reports the history as unreadable, rather than leaving the last good
+    value in place."""
+    from fastapi.testclient import TestClient
+
+    import app.api.infra as infra_module
+    from app.main import app
+
+    def boom():
+        raise RuntimeError("import or query failed")
+
+    monkeypatch.setattr(infra_module, "read_retrain_history", boom)
+    body = TestClient(app).get("/metrics").text
+
+    assert "sora_retrain_history_readable 0.0" in body
