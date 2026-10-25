@@ -70,3 +70,23 @@ commits = [
   "bb5aeb45fa708e10e82126365401d982d7bbd521",  # 2026-07-10 SECURITY_AUDIT_RESULTS.md, SECURITY_FIXES_SUMMARY.md
   "a90dd25a546cf90edd82f622c8b37f39eb8f762c",  # 2026-07-30 tests/test_secret_validation.py
 ]
+
+# Forecast method names in the M3 source-gap contract and its test. The
+# generic-api-key rule matches inside the list of method identifiers, e.g.
+# 'API_IFS_bias365_min180'; they are names of scientific methods, not
+# credentials. The exception requires all three at once: this rule, one of
+# these two files, and a match that is exactly those two identifiers. A real
+# key anywhere else in either file, even on the same line, is still caught.
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+description = "M3 forecast method identifiers, reviewed 2026-10-25"
+condition = "AND"
+regexTarget = "match"
+paths = [
+  '''(^|/)app/services/forecasting/replay_source_gap_contract\.py$''',
+  '''(^|/)tests/test_forecasting_replay_source_gap_contract\.py$''',
+]
+regexes = [
+  '''^API_IFS_uncalibrated['"],\s*['"]API_IFS_bias365_min180['"]$''',
+]
