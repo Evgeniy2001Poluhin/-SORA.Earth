@@ -276,19 +276,24 @@ async def get_system_metrics(authorization: str = Header(None)):
     return _metrics_view(authorization)
 
 
-def retrain_staleness_seconds() -> float:
-    """Seconds since the last successful retrain, computed at collection.
+def read_retrain_history() -> tuple[float, bool]:
+    """Read the retrain history once: (seconds since the last success, readable).
 
-    Wired as the gauge's own `set_function`, not called from a handler.
-    Measured on production 2026-08-15: hooking it into
-    `/api/v1/metrics/prometheus` published a metric that always read 0.0,
-    because `infra/prometheus.yml` scrapes `/metrics` at the root -- served by
-    `Instrumentator().expose(app)` in app/main.py, which never runs this.
-    The value reached Grafana and meant nothing.
+    Three outcomes, and they are not the same fact:
 
-    A gauge that depends on which endpoint was called is a gauge that reports
-    on the endpoint. `set_function` removes the question: whoever collects,
-    the number is computed then.
+      (age, True)    the last successful retrain finished `age` seconds ago
+      (nan, True)    the history was read and no successful retrain is recorded
+      (nan, False)   the history could not be read
+
+    The first two are information about the retrain loop. The third is a fault
+    in the metrics path, and the alert pages on it. Before this they shared one
+    sentinel, -1, so a quiet history and an unreadable one were the same number
+    and the same alert -- which then fired on a retrain that had never been
+    needed, the real question being whether drift was measured at all
+    (decision 2026-10-21).
+
+    Called once per scrape by `app/metrics_endpoint.py`, which sets both gauges
+    from this single read so the age and its readability describe one moment.
 
     Not pushed by the job that retrains either. A value only a runner updates
     goes stale exactly when the thing it measures goes wrong -- and stops
@@ -299,10 +304,10 @@ def retrain_staleness_seconds() -> float:
 
     from app.database import RetrainLog, SessionLocal
 
-    # Inside the try, not before it. Opening the session was the one statement
-    # left outside, so a database that refuses connections raised straight
-    # through this function and took the metrics endpoint down with it -- the
-    # endpoint whose whole job is to still answer when something is wrong.
+    nan = float("nan")
+    # Inside the try, not before it: a database that refuses connections must
+    # not take the metrics endpoint down with it -- the endpoint whose whole job
+    # is to still answer when something is wrong.
     db = None
     try:
         db = SessionLocal()
@@ -312,16 +317,15 @@ def retrain_staleness_seconds() -> float:
                   .order_by(RetrainLog.finished_at.desc())
                   .first())
         if last is None or last[0] is None:
-            return -1.0
+            return nan, True
         finished = last[0]
         if finished.tzinfo is None:
             finished = finished.replace(tzinfo=timezone.utc)
-        return max(0.0, (datetime.now(timezone.utc) - finished).total_seconds())
+        return max(0.0, (datetime.now(timezone.utc) - finished).total_seconds()), True
     except Exception:
-        # A metrics endpoint must not fail because a query did. Leaving the
-        # previous value is wrong in a different way, so it is set to -1: the
-        # alert then fires, and an alert on an unreadable database is correct.
-        return -1.0
+        # A metrics endpoint must not fail because a query did. The read failed,
+        # and that is what the readability gauge reports.
+        return nan, False
     finally:
         if db is not None:
             db.close()

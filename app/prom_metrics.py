@@ -55,18 +55,53 @@ sora_model_rejected     = Counter("sora_model_rejected_total","Models rejected")
 #: A gauge of age, not a counter of events. An alert on this fires when the
 #: system stops trying, which is the state a counter cannot express.
 #:
-#: -1 means no successful run has ever been recorded. Not 0, which would read
-#: as "one just finished", and not absent, which would leave the alert with
-#: nothing to compare.
+#: NaN when no successful run is recorded, and also when the history could not
+#: be read. A sentinel number used to stand for both, which made "nothing has
+#: been needed" and "the metrics path is broken" the same value. They are now
+#: separate: `sora_retrain_history_readable` below tells them apart, and this
+#: gauge is information only. No alert reads its age (decision 2026-10-21): a
+#: retrain that was never needed looks exactly like one that stopped.
 #: `mostrecent`: one number about the whole system, recomputed at scrape time
 #: by whichever worker serves it. Summing four workers' answers would be
 #: meaningless, and `max` would report the staleness of the worker that
 #: happened to look longest ago.
 sora_retrain_seconds_since_success = Gauge(
     "sora_retrain_seconds_since_success",
-    "Seconds since the last successful retrain; -1 if there has never been one",
+    "Seconds since the last successful retrain; NaN if none is recorded or the history cannot be read",
     multiprocess_mode="mostrecent",
 )
+#: 1 if the retrain history was read at the last scrape, 0 if the read failed.
+#: Set beside the age, from the same read, so the two describe one moment.
+sora_retrain_history_readable = Gauge(
+    "sora_retrain_history_readable",
+    "1 if the retrain history was read at the last scrape, 0 if the read failed",
+    multiprocess_mode="mostrecent",
+)
+
+#: Outcome of the last closed-loop drift check. `measured` is `compute_drift`'s
+#: status "ok". The others are the three ways no verdict was produced: `no_log`
+#: (nothing to compare), `insufficient_data` (too few rows), `unavailable` (the
+#: check could not run). One series per status, 1 for the outcome and 0 for the
+#: rest, so "not measured" is a query and not an absence.
+DRIFT_CHECK_STATUSES = ("measured", "no_log", "insufficient_data", "unavailable")
+#: Written by `app/scheduler.py` -> `_record_drift_check`, from the closed loop
+#: in both processes that run it (the scheduler job and the AI-agent route), so
+#: the alert that reads it does not pin a job.
+sora_drift_check_status = Gauge(
+    "sora_drift_check_status",
+    "Last closed-loop drift check: 1 for its outcome, 0 for the others; NaN until one has run in this process",
+    ["status"],
+    multiprocess_mode="mostrecent",
+)
+sora_drift_check_last_run = Gauge(
+    "sora_drift_check_last_run_timestamp_seconds",
+    "Unix time of the last closed-loop drift check, whatever its outcome",
+    multiprocess_mode="mostrecent",
+)
+# No check has run at import. NaN is "unknown", not "not measured": the drift
+# alert reads both as not measured, but the distinction is kept in the value.
+for _status in DRIFT_CHECK_STATUSES:
+    sora_drift_check_status.labels(status=_status).set(float("nan"))
 
 # ── Predictions ──
 sora_prediction_latency = Histogram(

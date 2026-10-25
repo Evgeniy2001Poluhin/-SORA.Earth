@@ -44,12 +44,19 @@ SORA.Earth AI Platform — полнофункциональная платфор
 
 - **Наблюдаемость и прод**
   - Prometheus‑метрики на `/metrics` — реестр `prometheus_client`, HTTP + доменные `sora_*`. Это тот путь, который скрейпит `infra/prometheus.yml`. `/api/v1/metrics/prometheus` отдаёт тот же реестр.
-  - Grafana-дашборд “SORA MLOps Overview” и **7 алертов** для
+  - Grafana-дашборд “SORA MLOps Overview” и **8 алертов** для
     операционного контура из
     `grafana/provisioning/alerting/alerts.yml`, названных так же, как там:
-    `Drift Detected`, `No Successful Retrain`, `Retrain Failed`,
+    `Drift Detected`, `Drift Unmeasured With Traffic`,
+    `Retrain History Unreadable`, `Retrain Failed`,
     `High Prediction Latency`, `App Unreachable`,
     `M3 Observation Coverage Gap`, `M3 Observation Coverage Not Reporting`.
+    Алерта на возраст последнего успешного переобучения больше нет: отсутствие
+    переобучения не является неисправностью, а drift без измерения при трафике
+    — является. `sora_retrain_seconds_since_success` — время с последнего
+    успешного переобучения (информация, без алерта; NaN, если успешного
+    переобучения не записано или история не читается). Это не возраст
+    активного чемпиона: отдельного показателя возраста чемпиона нет.
     Два последних читают покрытие M3 из scheduler; уведомления об их срабатывании
     не настроены (нет contact point).
     Пять алертов качества старого ESG-прогноза удалены по #284: M2
