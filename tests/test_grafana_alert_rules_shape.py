@@ -106,15 +106,32 @@ def test_the_drift_and_retrain_rules_treat_a_quiet_counter_as_healthy(rules):
         assert rules[uid]["noDataState"] == "OK", uid
 
 
-def test_the_retrain_stale_expression_is_zero_when_healthy_and_fires_on_both_branches(rules):
-    nodes = {d["refId"]: d for d in rules["sora-retrain-stale"]["data"]}
+def test_the_drift_unmeasured_rule_is_zero_unless_both_conditions_hold(rules):
+    """The expression is `not measured` AND `traffic`, joined with `and on()`.
+    Both sides must be real comparisons: a plain comparison drops the series
+    instead of returning 0, and `and` keeps only what both sides share."""
+    nodes = {d["refId"]: d for d in rules["sora-drift-unmeasured-with-traffic"]["data"]}
     expr = nodes["A"]["model"]["expr"]
     evaluator = nodes["C"]["model"]["conditions"][0]["evaluator"]
 
-    # The sum of two booleans: 0 when healthy, at least 1 when either holds.
-    assert "> bool 1209600" in expr
-    assert "== bool -1" in expr
+    assert "!= bool 1" in expr
+    assert " and on() " in expr
+    assert "> 0)" in expr
     assert evaluator == {"type": "gt", "params": [0]}
+
+
+def test_the_drift_unmeasured_rule_does_not_pin_a_process_for_the_status(rules):
+    """Either process may run the closed loop (scheduler job, AI-agent route), so
+    the gauge is not pinned to one job; the traffic counter is, to sora-app."""
+    expr = next(d["model"]["expr"] for d in rules["sora-drift-unmeasured-with-traffic"]["data"]
+                if "expr" in d["model"])
+    assert 'sora_drift_check_status{status="measured"}' in expr
+    assert 'http_requests_total{job="sora-app"' in expr
+
+
+def test_the_drift_unmeasured_rule_is_silent_without_traffic(rules):
+    """No traffic means no data, and no data is OK: nothing to say about drift."""
+    assert rules["sora-drift-unmeasured-with-traffic"]["noDataState"] == "OK"
 
 
 def test_the_stale_summary_states_the_real_delay(doc):

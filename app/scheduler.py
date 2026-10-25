@@ -194,6 +194,9 @@ from app.prom_metrics import (
     sora_observation_coverage_days_examined,
     sora_observation_coverage_points_examined,
     sora_observation_coverage_last_success_timestamp_seconds,
+    sora_drift_check_status,
+    sora_drift_check_last_run,
+    DRIFT_CHECK_STATUSES,
 )
 
 # The promotion decision, shared with the other caller that promotes. Imported at
@@ -630,6 +633,27 @@ def get_scheduler_status():
     }
 
 
+def _record_drift_check(status: str) -> None:
+    """Publish the outcome of one closed-loop drift check.
+
+    `status` is what `compute_drift` returned. `ok` is a measurement; the rest
+    are the not-measured statuses, plus `unavailable` for a check that raised
+    before it could answer. Exactly one status series reads 1 after each call,
+    and the last-run timestamp moves whatever the outcome: a check that ran and
+    measured nothing is still a check that ran.
+
+    Called once per run, before the branches, so every outcome is published the
+    same way. Without it the drift alert reads "unknown" as if nothing had
+    happened.
+    """
+    label = "measured" if status == "ok" else status
+    if label not in DRIFT_CHECK_STATUSES:
+        label = "unavailable"
+    for name in DRIFT_CHECK_STATUSES:
+        sora_drift_check_status.labels(status=name).set(1.0 if name == label else 0.0)
+    sora_drift_check_last_run.set(time.time())
+
+
 def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
     from app.locks import RedisLock
     lock = RedisLock(key="sora:lock:closed_loop", timeout=600)
@@ -638,7 +662,12 @@ def closed_loop_retrain(trigger_source="scheduler_closed_loop"):
         return {"status": "skipped", "reason": "lock_held"}
     try:
         from app.api.drift import NOT_MEASURED_STATUSES, compute_drift
-        drift_result = compute_drift(window=50)
+        try:
+            drift_result = compute_drift(window=50)
+        except Exception:
+            _record_drift_check("unavailable")
+            raise
+        _record_drift_check(drift_result.status)
         # `compute_drift`, not the HTTP handler: that one returns a Response on
         # the unavailable path, and this needs the value.
         #
