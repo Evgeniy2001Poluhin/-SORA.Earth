@@ -45,52 +45,69 @@ def _defined_metrics() -> dict[str, str]:
     them turned out to have a dashboard panel and no writer (#299) -- the
     defect this file exists to catch, sitting in the one file it did not read.
     """
-    kinds = {"Counter", "Gauge", "Histogram", "Summary", "Info"}
     out = {}
     for path in sorted((ROOT / "app").rglob("*.py")):
         try:
-            tree = ast.parse(path.read_text())
+            out.update(_metrics_in_source(path.read_text()))
         except SyntaxError:
             continue
+    return out
 
-        # Local names bound to a prometheus_client metric class, per file.
-        # `from prometheus_client import Counter as _C` defeated a version of
-        # this scan that matched the bare class names -- found by mutating a
-        # third file to declare an aliased metric with no writer and watching
-        # the mutant survive. The alias is resolved the same way `_writers()`
-        # already resolves aliases on the metric variables themselves.
-        local = set(kinds)
-        module_aliases = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module == "prometheus_client":
-                for a in node.names:
-                    if a.name in kinds:
-                        local.add(a.asname or a.name)
-            elif isinstance(node, ast.Import):
-                for a in node.names:
-                    if a.name == "prometheus_client":
-                        module_aliases.add(a.asname or a.name)
 
-        for node in ast.walk(tree):
-            if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)):
-                continue
-            func = node.value.func
-            if isinstance(func, ast.Name):
-                constructs = func.id in local
-            elif isinstance(func, ast.Attribute):
-                constructs = func.attr in kinds and getattr(
-                    func.value, "id", None
-                ) in module_aliases
-            else:
-                constructs = False
-            if not constructs:
-                continue
-            var = getattr(node.targets[0], "id", None)
-            if not var or not node.value.args:
-                continue
-            name = node.value.args[0].value
-            if isinstance(name, str) and name.startswith("sora_"):
-                out[var] = name
+_KINDS = {"Counter", "Gauge", "Histogram", "Summary", "Info"}
+
+
+def _metrics_in_source(source: str) -> dict[str, str]:
+    """`sora_*` metrics one module declares, keyed by the variable bound to each.
+
+    A bare name counts as a metric class only when this module imports it from
+    `prometheus_client`. Starting from the bare class names matched
+    `collections.Counter((day for ...))` in a replay module and then read
+    `.value` off a generator, which broke this scan and every test built on it.
+    """
+    tree = ast.parse(source)
+
+    # Local names bound to a prometheus_client metric class, per file.
+    # `from prometheus_client import Counter as _C` defeated a version of
+    # this scan that matched the bare class names -- found by mutating a
+    # third file to declare an aliased metric with no writer and watching
+    # the mutant survive. The alias is resolved the same way `_writers()`
+    # already resolves aliases on the metric variables themselves.
+    local = set()
+    module_aliases = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "prometheus_client":
+            for a in node.names:
+                if a.name in _KINDS:
+                    local.add(a.asname or a.name)
+        elif isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name == "prometheus_client":
+                    module_aliases.add(a.asname or a.name)
+
+    out = {}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)):
+            continue
+        func = node.value.func
+        if isinstance(func, ast.Name):
+            constructs = func.id in local
+        elif isinstance(func, ast.Attribute):
+            constructs = func.attr in _KINDS and getattr(
+                func.value, "id", None
+            ) in module_aliases
+        else:
+            constructs = False
+        if not constructs:
+            continue
+        var = getattr(node.targets[0], "id", None)
+        if not var or not node.value.args:
+            continue
+        first = node.value.args[0]
+        if not (isinstance(first, ast.Constant) and isinstance(first.value, str)):
+            continue
+        if first.value.startswith("sora_"):
+            out[var] = first.value
     return out
 
 
@@ -128,6 +145,31 @@ def _writers() -> dict[str, set[str]]:
                 if local in alias:
                     writers[defs[alias[local]]].add(str(path.relative_to(ROOT)))
     return writers
+
+
+@pytest.mark.parametrize("source", [
+    "from collections import Counter\ncounts = Counter((day for day in []))\n",
+    "from collections import Counter\nletters = Counter('sora_not_a_metric')\n",
+    "import collections\nCounter = collections.Counter\nx = Counter('sora_x')\n",
+])
+def test_a_collections_counter_is_not_a_metric(source):
+    """Neither a generator nor a `sora_` string makes `collections.Counter` a metric.
+
+    The string case is the one that fails if the import check is removed while the
+    constant check stays: the first argument is then a `str` that starts with `sora_`.
+    """
+    assert _metrics_in_source(source) == {}
+
+
+@pytest.mark.parametrize("source, expected", [
+    ("from prometheus_client import Counter\nc = Counter('sora_a_total', 'd')\n", {"c": "sora_a_total"}),
+    ("from prometheus_client import Gauge as _G\ng = _G('sora_b', 'd')\n", {"g": "sora_b"}),
+    ("import prometheus_client as pc\nh = pc.Histogram('sora_c_ms', 'd')\n", {"h": "sora_c_ms"}),
+    ("from prometheus_client import Counter\nn = Counter(NAME, 'd')\n", {}),
+])
+def test_prometheus_declarations_are_still_found(source, expected):
+    """Positive control: the import rule must not lose real declarations or aliases."""
+    assert _metrics_in_source(source) == expected
 
 
 # --- 1: the guard --------------------------------------------------------
