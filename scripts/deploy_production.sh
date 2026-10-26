@@ -89,7 +89,7 @@ stop_containers_created_by_this_run() {
         echo "  stopping containers created by this run:$created" >&2
         # shellcheck disable=SC2086
         #   Deliberately unquoted: a list of ids to be split.
-        docker stop $created >/dev/null 2>&1 || true
+        logged docker stop $created || true
     else
         echo "  this run created no containers" >&2
     fi
@@ -127,6 +127,40 @@ journal_write() {
 
 journal_clear() { rm -f "$JOURNAL"; }
 
+# Where the rollback's own commands write. They used to go to /dev/null, so the
+# rollback of 2026-10-26 said only "the recorded images could not be restored"
+# and nothing about why. Beside the journal when that is writable; otherwise a
+# temporary file; and failing both, nowhere -- an unwritable log must not stop
+# the rollback it would have described.
+ROLLBACK_LOG=""
+rollback_log() {
+    if [ -z "$ROLLBACK_LOG" ]; then
+        local want="$MANIFEST_DIR/rollback-$RUN_ID.log"
+        if { : >> "$want"; } 2>/dev/null; then
+            ROLLBACK_LOG="$want"
+        elif _tmp_log="$(mktemp 2>/dev/null)"; then
+            ROLLBACK_LOG="$_tmp_log"
+        else
+            ROLLBACK_LOG=/dev/null
+        fi
+        echo "  rollback log: $ROLLBACK_LOG" >&2
+    fi
+    printf '%s\n' "$ROLLBACK_LOG"
+}
+
+# Runs one rollback command with its output in the log and its exit code both in
+# the log and on stderr.
+logged() {
+    local log rc
+    log="$(rollback_log)"
+    printf '\n$ %s\n' "$*" >> "$log" 2>/dev/null || true
+    "$@" >> "$log" 2>&1
+    rc=$?
+    printf '[exit %s]\n' "$rc" >> "$log" 2>/dev/null || true
+    echo "  [exit $rc] $*" >&2
+    return "$rc"
+}
+
 # The images that were running, by id, started without a build.
 #
 # compose accepts an id where a tag goes, so a generated override pins each
@@ -144,7 +178,7 @@ restore_recorded_images() {
         done <<< "$PREV_IMAGE_IDS"
     } > "$ovr"
     local rc=0
-    "${DC[@]}" -f "$ovr" up -d --no-build --remove-orphans >/dev/null 2>&1 || rc=1
+    logged "${DC[@]}" -f "$ovr" up -d --no-build --remove-orphans || rc=1
     rm -f "$ovr"
     return "$rc"
 }
@@ -164,6 +198,7 @@ verify_restored_images() {
     done <<< "$PREV_IMAGE_IDS"
     if [ -n "${mismatch// /}" ]; then
         echo "  images do not match the snapshot for:$mismatch" >&2
+        echo "images do not match the snapshot for:$mismatch" >> "$(rollback_log)" 2>/dev/null || true
         return 1
     fi
     return 0
@@ -180,6 +215,10 @@ abort_deployment() {
     echo "REFUSED: $why" >&2
     echo
     echo "== rolling back =="
+    # Chosen once, here, in this shell: `logged` asks for it from a command
+    # substitution, where an assignment would not survive, and a fallback to
+    # mktemp would then make a new file per command.
+    rollback_log > /dev/null
 
     if [ -z "$PREV_COMMIT" ]; then
         # Nothing recorded to go back to -- the first deployment, or a manifest
@@ -225,8 +264,8 @@ abort_deployment() {
     # means "the rollback did not complete" -- an operator has to look, rather
     # than read "restored" and move on.
     echo "  the recorded images could not be restored; rebuilding instead" >&2
-    if "${DC[@]}" up -d --build --remove-orphans >/dev/null 2>&1 \
-        && "${DC[@]}" up -d --force-recreate nginx >/dev/null 2>&1; then
+    if logged "${DC[@]}" up -d --build --remove-orphans \
+        && logged "${DC[@]}" up -d --force-recreate nginx; then
         journal_write rollback-incomplete "rebuilt ${PREV_COMMIT:0:12}; images not verified"
         echo "  ROLLBACK INCOMPLETE: re-deployed the source of ${PREV_COMMIT:0:12};" >&2
         echo "  this is not the runtime state that was replaced -- verify before trusting it" >&2
@@ -945,6 +984,40 @@ APP_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null
 # could produce a different image than the one just migrated from, which is the
 # gap this arrangement closes.
 "${DC[@]}" up -d --no-build --remove-orphans
+
+# `up` did not necessarily move backend and scheduler onto that build.
+#
+# Compose decides whether to recreate a service from its configuration hash and
+# the image it recorded on the container, not from what the tag points at now.
+# Measured on production 2026-10-26 (Compose v5.6.0): a release that changed only
+# Grafana provisioning built a new image under the same tag, `up --no-build` left
+# backend and scheduler on the previous one, and the identity check below refused
+# the release. So when either disagrees with the build, recreate exactly those
+# two -- not the stack -- and do it here, before nginx is recreated to resolve
+# their addresses (the 2026-08-09 incident is nginx holding an address that a
+# later recreate took away).
+app_image_of() {
+    local cid
+    cid="$("${DC[@]}" ps -q "$1" 2>/dev/null || true)"
+    [ -n "$cid" ] || return 0
+    docker inspect -f '{{.Image}}' "$cid" 2>/dev/null || true
+}
+_stale=""
+for svc in backend scheduler; do
+    _img="$(app_image_of "$svc")"
+    [ -n "$_img" ] || fail "$svc has no container, or its image cannot be read, after start"
+    [ "$_img" = "$APP_IMAGE_ID" ] || _stale="$_stale $svc"
+done
+if [ -n "$_stale" ]; then
+    echo "  still on a previous image:$_stale; recreating backend and scheduler on ${APP_IMAGE_ID:0:19}"
+    "${DC[@]}" up -d --no-build --no-deps --force-recreate backend scheduler \
+        || fail "backend and scheduler could not be recreated on the built image"
+    for svc in backend scheduler; do
+        _img="$(app_image_of "$svc")"
+        [ "$_img" = "$APP_IMAGE_ID" ] || fail \
+            "$svc is running image $_img, not the $APP_IMAGE_ID the migration ran from"
+    done
+fi
 
 # nginx is recreated, not restarted. Its configuration is a bind-mounted single
 # file, so the container stays pinned to the inode that existed when it was

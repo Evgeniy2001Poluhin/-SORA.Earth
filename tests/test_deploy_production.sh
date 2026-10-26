@@ -217,6 +217,13 @@ case "$argv" in
     *"up -d postgres"*)
         echo "postgres start must wait for health before migrations" >&2
         exit 1 ;;
+    # The targeted recreate of the two application services. Before the
+    # `up -d --no-build` branches, which would take it for the rollback's
+    # exact-image restore and mark a rollback that never happened.
+    *"--no-deps --force-recreate backend scheduler"*)
+        touch "$STUB_DIR/app_recreated"
+        [ -f "$STUB_DIR/app_recreate_fails" ] && exit 1
+        exit 0 ;;
     *"up -d --no-build --remove-orphans"*)
         # Both the deployment start and the rollback restore spell this the same
         # way. They differ in one thing only: the restore passes a second `-f`,
@@ -227,7 +234,9 @@ case "$argv" in
         # line, so it answers 1 for both spellings and decides nothing.
         if [ "$(printf '%s' "$argv" | tr ' ' '\n' | grep -c -- '^-f$')" -ge 2 ]; then
             touch "$STUB_DIR/rolled_back"
-            [ -f "$STUB_DIR/no_build_fails" ] && exit 1
+            # Says why on stderr, as compose does, so a test can tell a log that
+            # kept the command's output from one that recorded only its status.
+            [ -f "$STUB_DIR/no_build_fails" ] && { echo "stub-compose: exact-image restore refused" >&2; exit 1; }
             exit 0
         fi
         # The deployment start.
@@ -299,8 +308,16 @@ case "$argv" in
     *"inspect -f {{.Image}}"*)
         # `restored_image` lets a test say the image after the rollback is not
         # the one recorded -- the case the verification exists for.
+        # `stale_app_image` is production on 2026-10-26: `up --no-build` left
+        # the containers on the previous image although the tag had moved. Once
+        # the targeted recreate has run they report the built image, unless
+        # `recreate_does_not_fix` says the recreate changed nothing either.
         if [ -f "$STUB_DIR/rolled_back" ] && [ -f "$STUB_DIR/restored_image" ]; then
             cat "$STUB_DIR/restored_image"
+        elif [ -f "$STUB_DIR/app_recreated" ] && [ ! -f "$STUB_DIR/recreate_does_not_fix" ]; then
+            cat "$STUB_DIR/app_image_id" 2>/dev/null || echo "sha256:image"
+        elif [ -f "$STUB_DIR/stale_app_image" ]; then
+            cat "$STUB_DIR/stale_app_image"
         else
             echo "sha256:image"
         fi
@@ -1517,9 +1534,77 @@ new_sandbox
 # the cause -- something rebuilt behind the script, the tag moved -- the
 # migration belongs to a build nobody is serving.
 echo "sha256:a-different-image" > "$STUB_DIR/app_image_id"
+# And the targeted recreate does not move it either -- otherwise this case would
+# now pass, since disagreeing with the build is exactly what triggers it.
+touch "$STUB_DIR/recreate_does_not_fix"
 run_guard
 refused_because "a container running a different image than the migration" "not the sha256:a-different-image the migration ran from"
+check "after one targeted recreate was tried" \
+    "$(grep -c -- '--no-deps --force-recreate backend scheduler' "$STUB_DIR/calls")" "1"
 rm -rf "$SANDBOX"
+
+echo "== backend and scheduler left on the previous image by up =="
+# Production, 2026-10-26: a release that changed only Grafana provisioning built
+# a new image under the same tag, and `up --no-build` left backend and scheduler
+# running the old one. The release was refused and rolled back.
+new_sandbox
+echo "sha256:previous-release" > "$STUB_DIR/stale_app_image"
+run_guard
+check "a stale application image is recreated and the deployment succeeds" "$RC" "0"
+check "with exactly one targeted recreate of backend and scheduler" \
+    "$(grep -c -- 'up -d --no-build --no-deps --force-recreate backend scheduler' "$STUB_DIR/calls")" "1"
+check "and no other force-recreate than backend+scheduler, nginx and prometheus" \
+    "$(grep -- '--force-recreate' "$STUB_DIR/calls" | grep -vc -e '--no-deps --force-recreate backend scheduler$' -e '--force-recreate nginx$' -e '--force-recreate --no-deps prometheus$')" "0"
+_recreate_line="$(grep -n -- '--no-deps --force-recreate backend scheduler' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+_nginx_line="$(grep -n -- 'up -d --force-recreate nginx' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+check "and it happens before nginx is recreated" \
+    "$([ -n "$_recreate_line" ] && [ -n "$_nginx_line" ] && [ "$_recreate_line" -lt "$_nginx_line" ] && echo before || echo "recreate=$_recreate_line nginx=$_nginx_line")" "before"
+check "and nothing was rolled back" "$([ -f "$STUB_DIR/rolled_back" ] && echo yes || echo no)" "no"
+rm -rf "$SANDBOX"
+
+new_sandbox
+run_guard
+check "images already right: the deployment succeeds" "$RC" "0"
+check "without a targeted recreate" \
+    "$(grep -c -- '--no-deps --force-recreate backend scheduler' "$STUB_DIR/calls")" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+echo "sha256:previous-release" > "$STUB_DIR/stale_app_image"
+touch "$STUB_DIR/recreate_does_not_fix"
+run_guard
+refused_because "a recreate that leaves the old image is refused" "not the sha256:image the migration ran from"
+check "and it is refused before nginx is recreated" \
+    "$(grep -c -- 'up -d --force-recreate nginx' "$STUB_DIR/calls")" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+echo "sha256:previous-release" > "$STUB_DIR/stale_app_image"
+touch "$STUB_DIR/app_recreate_fails"
+run_guard
+refused_because "a recreate that fails is refused" "could not be recreated on the built image"
+rm -rf "$SANDBOX"
+
+echo "== the rollback keeps what its commands said =="
+new_sandbox
+# A previous deployment on record, so the rollback attempts the exact-image
+# restore rather than stopping at "nothing to restore".
+with_previous_deployment
+echo "sha256:previous-release" > "$STUB_DIR/stale_app_image"
+touch "$STUB_DIR/recreate_does_not_fix"
+touch "$STUB_DIR/no_build_fails"
+run_guard
+_log="$(grep -o 'rollback log: [^ ]*' "$SANDBOX/out" | head -1 | cut -d' ' -f3)"
+check "the rollback names its log" "$([ -n "$_log" ] && echo named || echo missing)" "named"
+check "beside the journal" "$(dirname "${_log:-/x}")" "$SANDBOX/manifests"
+check "and the log records each command and its exit code" \
+    "$(grep -c '^\[exit ' "${_log:-/dev/null}" 2>/dev/null)" "$(grep -c '^  \[exit ' "$SANDBOX/out")"
+check "with what the failed command said, not only its status" \
+    "$(grep -c 'stub-compose: exact-image restore refused' "${_log:-/dev/null}" 2>/dev/null)" "1"
+check "including the failed exact-image restore" \
+    "$(awk '/up -d --no-build --remove-orphans/ {want=1; next} want && /^\[exit / {print; exit}' "${_log:-/dev/null}" 2>/dev/null)" "[exit 1]"
+rm -rf "$SANDBOX"
+
 
 echo "== the application containers do not migrate =="
 # A static read of the shipped entrypoint, because the property is "this file
