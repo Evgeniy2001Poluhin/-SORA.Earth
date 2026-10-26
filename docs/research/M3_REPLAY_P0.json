@@ -1,0 +1,179 @@
+{
+  "id": "M3-REPLAY-P0-2026-10-22",
+  "schema_version": 1,
+  "role": "exploratory_only",
+  "source_kind": "retrospective_reconstruction",
+  "label": "pseudo-real-time reconstructed vintage; not a real-time claim; not live M3",
+  "point_set": "openmeteo-points-v1",
+  "points": [
+    {
+      "code": "DEU",
+      "lat": 52.52,
+      "lon": 13.405
+    },
+    {
+      "code": "GBR",
+      "lat": 51.5074,
+      "lon": -0.1278
+    },
+    {
+      "code": "FRA",
+      "lat": 48.8566,
+      "lon": 2.3522
+    },
+    {
+      "code": "ESP",
+      "lat": 40.4168,
+      "lon": -3.7038
+    },
+    {
+      "code": "ITA",
+      "lat": 41.9028,
+      "lon": 12.4964
+    },
+    {
+      "code": "NLD",
+      "lat": 52.3676,
+      "lon": 4.9041
+    },
+    {
+      "code": "POL",
+      "lat": 52.2297,
+      "lon": 21.0122
+    },
+    {
+      "code": "IND",
+      "lat": 28.6139,
+      "lon": 77.209
+    },
+    {
+      "code": "CHN",
+      "lat": 39.9042,
+      "lon": 116.4074
+    },
+    {
+      "code": "JPN",
+      "lat": 35.6762,
+      "lon": 139.6503
+    },
+    {
+      "code": "KOR",
+      "lat": 37.5665,
+      "lon": 126.978
+    },
+    {
+      "code": "IDN",
+      "lat": -6.2088,
+      "lon": 106.8456
+    },
+    {
+      "code": "USA",
+      "lat": 38.9072,
+      "lon": -77.0369
+    },
+    {
+      "code": "BRA",
+      "lat": -15.7975,
+      "lon": -47.8919
+    },
+    {
+      "code": "MEX",
+      "lat": 19.4326,
+      "lon": -99.1332
+    },
+    {
+      "code": "CAN",
+      "lat": 45.4215,
+      "lon": -75.6972
+    },
+    {
+      "code": "NGA",
+      "lat": 9.0579,
+      "lon": 7.4951
+    },
+    {
+      "code": "ZAF",
+      "lat": -25.7479,
+      "lon": 28.2293
+    },
+    {
+      "code": "KEN",
+      "lat": -1.2921,
+      "lon": 36.8219
+    },
+    {
+      "code": "RU-MOW",
+      "lat": 55.7558,
+      "lon": 37.6173
+    },
+    {
+      "code": "RU-SPE",
+      "lat": 59.9343,
+      "lon": 30.3351
+    }
+  ],
+  "verification_source": "ERA5 modelled 2m temperature, not thermometer observations",
+  "verification_model": "era5",
+  "forecast_model": "ecmwf_ifs",
+  "forecast_model_version": "not attested by API payload; query and snapshot pinned, no model-cycle claim",
+  "training_start": "2022-01-01",
+  "verification_end": "2025-12-07",
+  "horizon": 7,
+  "forecast_days": 8,
+  "origins": [
+    "2024-12-31T23:59:59+00:00",
+    "2025-01-31T23:59:59+00:00",
+    "2025-02-28T23:59:59+00:00",
+    "2025-03-31T23:59:59+00:00",
+    "2025-04-30T23:59:59+00:00",
+    "2025-05-31T23:59:59+00:00",
+    "2025-06-30T23:59:59+00:00",
+    "2025-07-31T23:59:59+00:00",
+    "2025-08-31T23:59:59+00:00",
+    "2025-09-30T23:59:59+00:00",
+    "2025-10-31T23:59:59+00:00",
+    "2025-11-30T23:59:59+00:00"
+  ],
+  "methods": [
+    "API_IFS_uncalibrated",
+    "Naive",
+    "SeasonalNaive(m=7)",
+    "MovingAverage(k=7)",
+    "Climatology(±3d)"
+  ],
+  "target": "daily mean of hourly temperature_2m, Celsius, UTC",
+  "observation_min_hours": 19,
+  "forecast_min_hours": 24,
+  "outcome_exposure": "related 2024–2026 outcomes inspected in M3-A; all results exploratory",
+  "primary_metric": "equal-weight mean across 21 points of per-window seven-day MAE",
+  "secondary_metrics": [
+    "RMSE",
+    "MASE using seasonal-lag7 errors in the training prefix",
+    "bias actual-minus-predicted",
+    "worst point MAE"
+  ],
+  "inference": "descriptive only; no success test, no candidate selection, no promotion",
+  "missing_policy": "refuse the complete run, report reason; no point/day/method dropping or interpolation",
+  "acquisition": {
+    "purpose": "offline evaluation and prototyping only; not production/commercial serving",
+    "terms_url": "https://open-meteo.com/en/terms",
+    "pricing_evaluation_url": "https://open-meteo.com/en/pricing",
+    "licence": "CC-BY-4.0, attribute Open-Meteo and upstream ECMWF ERA5/IFS; no automatic subscription",
+    "max_http_attempts": 26,
+    "max_bytes_per_response": 33554432,
+    "max_bytes_total": 67108864,
+    "timeout_seconds": 50,
+    "retries_per_request": 1,
+    "max_estimated_weighted_calls": 2500,
+    "allow_redirects": false,
+    "verification_endpoint": "https://archive-api.open-meteo.com/v1/archive",
+    "forecast_endpoint": "https://single-runs-api.open-meteo.com/v1/forecast"
+  },
+  "shared_params": {
+    "hourly": "temperature_2m",
+    "temperature_unit": "celsius",
+    "timezone": "UTC",
+    "timeformat": "iso8601",
+    "cell_selection": "land"
+  }
+}

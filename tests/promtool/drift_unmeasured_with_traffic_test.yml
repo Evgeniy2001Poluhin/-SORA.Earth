@@ -1,0 +1,335 @@
+# promtool unit tests for the "Drift Unmeasured With Traffic" expression.
+#
+# The expression under test is copied verbatim from
+# grafana/provisioning/alerting/alerts.yml, and a pytest test
+# (tests/test_drift_check_status_is_published.py) fails if the two differ.
+# Each case states whether the alert condition should be true (value 1) or
+# empty (condition false / no data, which Grafana maps to OK).
+#
+# Run with the pinned Prometheus image, which ships promtool:
+#   docker run --rm --name sora-gstand-promtool-491 --entrypoint promtool \
+#     -v "$PWD/tests/promtool:/work:ro" prom/prometheus:v3.15.0 \
+#     test rules /work/drift_unmeasured_with_traffic_test.yml
+#
+# Not run by pytest or CI: promtool is not in the CI image.
+rule_files: []
+evaluation_interval: 1m
+tests:
+- name: absent_no_drift_series_with_traffic
+  input_series:
+  - series: http_requests_total{job="sora-app",instance="app:8000",handler="/api/v1/evaluate",method="POST",status="200"}
+    values: 0+1x2000
+  promql_expr_test:
+  - expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}
+      == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}))
+      < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
+    eval_time: 120000s
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: nan_everywhere_with_traffic
+  input_series:
+  - series: http_requests_total{job="sora-app",instance="app:8000",handler="/api/v1/evaluate",method="POST",status="200"}
+    values: 0+1x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="measured"}
+    values: _x2000 NaN
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="no_log"}
+    values: _x2000 NaN
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="insufficient_data"}
+    values: _x2000 NaN
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="unavailable"}
+    values: _x2000 NaN
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="measured"}
+    values: _x2000 NaN
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="no_log"}
+    values: _x2000 NaN
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="insufficient_data"}
+    values: _x2000 NaN
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="unavailable"}
+    values: _x2000 NaN
+  promql_expr_test:
+  - expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}
+      == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}))
+      < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
+    eval_time: 120000s
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: nan_status_with_fresh_timestamp
+  input_series:
+  - series: http_requests_total{job="sora-app",instance="app:8000",handler="/api/v1/evaluate",method="POST",status="200"}
+    values: 0+1x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="measured"}
+    values: _x2000 NaN
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="no_log"}
+    values: _x2000 NaN
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="insufficient_data"}
+    values: _x2000 NaN
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="unavailable"}
+    values: _x2000 NaN
+  - series: sora_drift_check_last_run_timestamp_seconds{job="sora-scheduler",instance="sched:9000"}
+    values: 116400x2000
+  promql_expr_test:
+  - expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}
+      == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}))
+      < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
+    eval_time: 120000s
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: fresh_measured_scheduler
+  input_series:
+  - series: http_requests_total{job="sora-app",instance="app:8000",handler="/api/v1/evaluate",method="POST",status="200"}
+    values: 0+1x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="measured"}
+    values: 1x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="no_log"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="insufficient_data"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="unavailable"}
+    values: '0x2000'
+  - series: sora_drift_check_last_run_timestamp_seconds{job="sora-scheduler",instance="sched:9000"}
+    values: 116400x2000
+  promql_expr_test:
+  - expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}
+      == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}))
+      < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
+    eval_time: 120000s
+    exp_samples: []
+- name: measured_25h_old_is_still_fresh
+  input_series:
+  - series: http_requests_total{job="sora-app",instance="app:8000",handler="/api/v1/evaluate",method="POST",status="200"}
+    values: 0+1x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="measured"}
+    values: 1x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="no_log"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="insufficient_data"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="unavailable"}
+    values: '0x2000'
+  - series: sora_drift_check_last_run_timestamp_seconds{job="sora-scheduler",instance="sched:9000"}
+    values: 30000x2000
+  promql_expr_test:
+  - expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}
+      == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}))
+      < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
+    eval_time: 120000s
+    exp_samples: []
+- name: measured_26h1m_old_is_stale
+  input_series:
+  - series: http_requests_total{job="sora-app",instance="app:8000",handler="/api/v1/evaluate",method="POST",status="200"}
+    values: 0+1x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="measured"}
+    values: 1x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="no_log"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="insufficient_data"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="unavailable"}
+    values: '0x2000'
+  - series: sora_drift_check_last_run_timestamp_seconds{job="sora-scheduler",instance="sched:9000"}
+    values: 26340x2000
+  promql_expr_test:
+  - expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}
+      == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}))
+      < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
+    eval_time: 120000s
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: old_backend_measured_then_new_scheduler_no_log
+  input_series:
+  - series: http_requests_total{job="sora-app",instance="app:8000",handler="/api/v1/evaluate",method="POST",status="200"}
+    values: 0+1x2000
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="measured"}
+    values: 1x2000
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="no_log"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="insufficient_data"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="unavailable"}
+    values: '0x2000'
+  - series: sora_drift_check_last_run_timestamp_seconds{job="sora-app",instance="app:8000"}
+    values: 112800x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="measured"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="no_log"}
+    values: 1x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="insufficient_data"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="unavailable"}
+    values: '0x2000'
+  - series: sora_drift_check_last_run_timestamp_seconds{job="sora-scheduler",instance="sched:9000"}
+    values: 116400x2000
+  promql_expr_test:
+  - expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}
+      == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}))
+      < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
+    eval_time: 120000s
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: old_scheduler_no_log_then_new_backend_measured
+  input_series:
+  - series: http_requests_total{job="sora-app",instance="app:8000",handler="/api/v1/evaluate",method="POST",status="200"}
+    values: 0+1x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="measured"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="no_log"}
+    values: 1x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="insufficient_data"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="unavailable"}
+    values: '0x2000'
+  - series: sora_drift_check_last_run_timestamp_seconds{job="sora-scheduler",instance="sched:9000"}
+    values: 112800x2000
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="measured"}
+    values: 1x2000
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="no_log"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="insufficient_data"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="unavailable"}
+    values: '0x2000'
+  - series: sora_drift_check_last_run_timestamp_seconds{job="sora-app",instance="app:8000"}
+    values: 116400x2000
+  promql_expr_test:
+  - expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}
+      == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}))
+      < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
+    eval_time: 120000s
+    exp_samples: []
+- name: newest_scheduler_insufficient_data_over_old_measured
+  input_series:
+  - series: http_requests_total{job="sora-app",instance="app:8000",handler="/api/v1/evaluate",method="POST",status="200"}
+    values: 0+1x2000
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="measured"}
+    values: 1x2000
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="no_log"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="insufficient_data"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="unavailable"}
+    values: '0x2000'
+  - series: sora_drift_check_last_run_timestamp_seconds{job="sora-app",instance="app:8000"}
+    values: 112800x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="measured"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="no_log"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="insufficient_data"}
+    values: 1x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="unavailable"}
+    values: '0x2000'
+  - series: sora_drift_check_last_run_timestamp_seconds{job="sora-scheduler",instance="sched:9000"}
+    values: 116400x2000
+  promql_expr_test:
+  - expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}
+      == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}))
+      < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
+    eval_time: 120000s
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: backend_only_unmeasured
+  input_series:
+  - series: http_requests_total{job="sora-app",instance="app:8000",handler="/api/v1/evaluate",method="POST",status="200"}
+    values: 0+1x2000
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="measured"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="no_log"}
+    values: 1x2000
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="insufficient_data"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="unavailable"}
+    values: '0x2000'
+  - series: sora_drift_check_last_run_timestamp_seconds{job="sora-app",instance="app:8000"}
+    values: 116400x2000
+  promql_expr_test:
+  - expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}
+      == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}))
+      < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
+    eval_time: 120000s
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: backend_only_measured_fresh
+  input_series:
+  - series: http_requests_total{job="sora-app",instance="app:8000",handler="/api/v1/evaluate",method="POST",status="200"}
+    values: 0+1x2000
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="measured"}
+    values: 1x2000
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="no_log"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="insufficient_data"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-app",instance="app:8000",status="unavailable"}
+    values: '0x2000'
+  - series: sora_drift_check_last_run_timestamp_seconds{job="sora-app",instance="app:8000"}
+    values: 116400x2000
+  promql_expr_test:
+  - expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}
+      == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}))
+      < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
+    eval_time: 120000s
+    exp_samples: []
+- name: no_traffic_unmeasured_is_silent
+  input_series:
+  - series: http_requests_total{job="sora-app",instance="app:8000",handler="/api/v1/evaluate",method="POST",status="200"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="measured"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="no_log"}
+    values: 1x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="insufficient_data"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="unavailable"}
+    values: '0x2000'
+  - series: sora_drift_check_last_run_timestamp_seconds{job="sora-scheduler",instance="sched:9000"}
+    values: 116400x2000
+  promql_expr_test:
+  - expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}
+      == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}))
+      < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
+    eval_time: 120000s
+    exp_samples: []
+- name: no_traffic_series_at_all_is_silent
+  input_series:
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="measured"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="no_log"}
+    values: 1x2000
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="insufficient_data"}
+    values: '0x2000'
+  - series: sora_drift_check_status{job="sora-scheduler",instance="sched:9000",status="unavailable"}
+    values: '0x2000'
+  - series: sora_drift_check_last_run_timestamp_seconds{job="sora-scheduler",instance="sched:9000"}
+    values: 116400x2000
+  promql_expr_test:
+  - expr: (vector(1) unless on() (((max(sora_drift_check_status{job=~"sora-app|sora-scheduler",status="measured"} and on(job) (sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}
+      == on() group_left() max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"})))) == 1) and on() ((time() - max(sora_drift_check_last_run_timestamp_seconds{job=~"sora-app|sora-scheduler"}))
+      < 93600))) and on() (sum(increase(http_requests_total{job="sora-app",handler=~"/api/v1/(evaluate|predict).*"}[24h])) > 0)
+    eval_time: 120000s
+    exp_samples: []
+- name: nan_semantics_in_promql
+  input_series:
+  - series: probe{job="a"}
+    values: NaN NaN NaN
+  - series: probe{job="b"}
+    values: '0x3'
+  promql_expr_test:
+  - expr: vector(NaN) != bool 1
+    eval_time: 2m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: vector(NaN) == 1
+    eval_time: 2m
+    exp_samples: []
+  - expr: max(probe)
+    eval_time: 2m
+    exp_samples:
+    - labels: '{}'
+      value: 0
