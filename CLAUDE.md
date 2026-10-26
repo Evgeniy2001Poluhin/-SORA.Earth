@@ -358,9 +358,13 @@ appending four input columns -- no probability, no prediction, no timestamp, no
 model -- to `data/predictions_log.csv`, the file #281 established is destroyed
 on every redeploy, rollback and `--force-recreate`.
 
-`model_version` on every row is the column default, the literal `"v2.0"`: the
-one construction never assigns it, and `/api/v1/analytics/predictions-log`
-serves the column as though it identified a model.
+`model_version` names the model that computed the row's probability, recorded
+by the writer since 2026-10-26: `active:<run_id>` or `seed:<retrained_at>`,
+`formula:macro` for the macro branch below, and `unknown` when the model and the
+champion read beside it were not the same object -- a reload in progress, for
+instance. It is taken with the model before the prediction, not re-read after.
+Rows written earlier keep the old column default, the literal `"v2.0"`, which
+identifies nothing; they were not given a model after the fact.
 
 **And a model did produce the number beside it.** This paragraph first said the
 rows "describe `/evaluate`, which runs a hardcoded ESG formula rather than a
@@ -372,10 +376,11 @@ and `calculate_esg` returns no `probability` key, so the fallback takes the
 champion's figure. The ESG **score** in the same response is a formula; the
 probability is not.
 
-So `model_version` is a plain provenance gap rather than a defensible blank: a
-champion produced the number in the row beside it, and nothing records which
-one. Only the `_macro_esg_from_payload` branch of `app/api/evaluate.py`, taken
-when the payload carries a macro key, is formula-only.
+So for rows before 2026-10-26 `model_version` is a plain provenance gap rather
+than a defensible blank: a champion produced the number in the row beside it,
+and nothing recorded which one. Only the `_macro_esg_from_payload` branch of
+`app/api/evaluate.py`, taken when the payload carries a macro key, is
+formula-only.
 
 **This is what the drift check samples.** `app/api/drift.py` →
 `_recent_predictions` takes the last `window` rows by id with no `endpoint`

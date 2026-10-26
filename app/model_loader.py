@@ -195,6 +195,9 @@ def reload_champion() -> ModelSource:
         running.model_meta = champion.meta
         running.model_metrics = champion.metrics
         running.model_source = champion.source
+        # Last, so that until it lands `champion.model is rf_model` fails and a
+        # probability computed in between is recorded as of unknown provenance.
+        running.champion = champion
         try:
             running.explainer_shap = __import__("shap").TreeExplainer(champion.model)
         except Exception as exc:
