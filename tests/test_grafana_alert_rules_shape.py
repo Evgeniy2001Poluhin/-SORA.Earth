@@ -150,3 +150,35 @@ def test_the_stale_summary_states_the_real_delay(doc):
                 if r["uid"] == "sora-observation-coverage-stale")
     assert "45 minutes" not in rule["annotations"]["summary"]
     assert "hour" in rule["annotations"]["summary"]
+
+
+#: The rules this file defines, by uid. A change here is a change to what
+#: production evaluates, so it is listed rather than counted.
+EXPECTED_RULES = {
+    "sora-drift-detected",
+    "sora-drift-unmeasured-with-traffic",
+    "sora-retrain-history-unreadable",
+    "sora-retrain-failed",
+    "sora-high-latency",
+    "sora-app-down",
+    "sora-observation-coverage-gap",
+    "sora-observation-coverage-stale",
+}
+
+#: Rules once provisioned and since removed. File provisioning does not delete a
+#: rule that disappears from `groups`; only `deleteRules` does.
+RETIRED_RULES = {"sora-retrain-stale"}
+
+
+def test_the_file_defines_exactly_the_expected_rules(doc):
+    uids = [r["uid"] for g in doc["groups"] for r in g["rules"]]
+    assert len(uids) == len(set(uids)), "a uid is defined twice"
+    assert set(uids) == EXPECTED_RULES
+
+
+def test_every_retired_rule_is_deleted_and_not_defined(doc):
+    """Removing a rule from `groups` left it running on production; deleting it is explicit."""
+    deleted = {(d["orgId"], d["uid"]) for d in doc.get("deleteRules", [])}
+    assert deleted == {(1, uid) for uid in RETIRED_RULES}
+    active = {r["uid"] for g in doc["groups"] for r in g["rules"]}
+    assert not active & RETIRED_RULES, "a rule both defined and deleted would be recreated every start"

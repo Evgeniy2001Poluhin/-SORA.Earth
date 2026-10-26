@@ -630,3 +630,13 @@ groups:
             is reading an old value. Check the scheduler container and its
             observation coverage job (auto_observation_coverage) before trusting
             that alert.
+
+# Rules this file used to define and no longer does. File provisioning only
+# creates and updates: a rule removed from `groups` stays in Grafana's database
+# and keeps evaluating. `sora-retrain-stale` ("No Successful Retrain") was
+# removed when the retrain-age alert was replaced by Retrain History Unreadable
+# and Drift Unmeasured With Traffic, and production still held it after that
+# release -- nine rules where this file defines eight (measured 2026-10-26).
+deleteRules:
+  - orgId: 1
+    uid: sora-retrain-stale
