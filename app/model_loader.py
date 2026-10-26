@@ -185,6 +185,10 @@ def reload_champion() -> ModelSource:
     try:
         from app import main as running
 
+        # An explanation from the previous champion must not survive a failed
+        # rebuild. Invalidate it before publishing any of the new model's parts;
+        # /shap reports unavailable until a matching explainer is constructed.
+        running.explainer_shap = None
         running.rf_model = champion.model
         running.scaler = champion.scaler
         running.best_threshold = champion.best_threshold

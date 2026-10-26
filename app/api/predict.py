@@ -256,6 +256,9 @@ def predict_compare(req: CompareRequest):
 def shap_explain(project: Project):
     from app.main import explainer_shap, make_features_base
 
+    if explainer_shap is None:
+        raise HTTPException(status_code=503, detail="Explanation unavailable for the current model")
+
     feats = make_features_base(_to_legacy(project))
     shap_values = explainer_shap.shap_values(feats)
     raw = shap_values[1][0].tolist() if isinstance(shap_values, list) else shap_values[0].tolist()
