@@ -13,12 +13,22 @@ docker compose -f /opt/sora_earth_ai_platform/docker-compose.prod.yml exec -T po
 -- Insert 30 days of historical data (May 15 - June 13)
 -- 2-3 evaluations per day with realistic ESG scores
 
+-- Shared data: every row is written as data_scope 'public' with no owner. The
+-- column default is 'pilot', which requires an owner, so leaving the scope out
+-- is refused rather than guessed.
 INSERT INTO evaluations (
     name, budget, co2_reduction, social_impact, duration_months,
     total_score, environment_score, social_score, economic_score,
     success_probability, recommendation, risk_level, region,
-    created_at
-) VALUES
+    created_at,
+    data_scope, owner_user_id
+)
+SELECT name, budget, co2_reduction, social_impact, duration_months,
+       total_score, environment_score, social_score, economic_score,
+       success_probability, recommendation, risk_level, region,
+       created_at::timestamp,
+       'public', NULL
+FROM (VALUES
 -- May 15
 ('Historical_renewable_2026-05-15_1', 150000, 180, 8, 24, 72.5, 75, 70, 72.5, 0.78, 'Strong environmental impact', 'low', 'Europe', '2026-05-15 09:00:00'),
 ('Historical_water_2026-05-15_2', 100000, 120, 7, 18, 68.2, 70, 68, 66.5, 0.72, 'Good social engagement', 'medium', 'Asia', '2026-05-15 14:30:00'),
@@ -116,18 +126,22 @@ INSERT INTO evaluations (
 ('Historical_biodiversity_2026-06-10_1', 97500, 115, 7, 18, 67.3, 69, 66, 67, 0.71, 'Good ecosystem management', 'medium', 'Latin America', '2026-06-10 15:00:00'),
 ('Historical_renewable_2026-06-11_1', 141000, 163, 8, 24, 71.0, 73, 70, 70, 0.76, 'Strong clean energy adoption', 'low', 'Europe', '2026-06-11 11:30:00'),
 ('Historical_carbon_2026-06-12_1', 268000, 298, 9, 36, 80.3, 82, 78, 80, 0.86, 'Outstanding carbon initiatives', 'low', 'North America', '2026-06-12 09:45:00'),
-('Historical_transport_2026-06-13_1', 164000, 184, 8, 30, 73.1, 75, 72, 72.5, 0.78, 'Good green mobility projects', 'low', 'Asia', '2026-06-13 14:00:00');
+('Historical_transport_2026-06-13_1', 164000, 184, 8, 30, 73.1, 75, 72, 72.5, 0.78, 'Good green mobility projects', 'low', 'Asia', '2026-06-13 14:00:00')
+) AS v(name, budget, co2_reduction, social_impact, duration_months,
+       total_score, environment_score, social_score, economic_score,
+       success_probability, recommendation, risk_level, region, created_at);
 
 SELECT 'Inserted historical data' as status,
        COUNT(*) as new_records,
        COUNT(DISTINCT DATE(created_at)) as unique_days
 FROM evaluations
-WHERE created_at >= '2026-05-15' AND created_at < '2026-06-14';
+WHERE data_scope = 'public' AND created_at >= '2026-05-15' AND created_at < '2026-06-14';
 
 SELECT COUNT(DISTINCT DATE(created_at)) as total_unique_days,
        MIN(DATE(created_at)) as first_day,
        MAX(DATE(created_at)) as last_day
-FROM evaluations;
+FROM evaluations
+WHERE data_scope = 'public';
 
 EOSQL
 ENDSSH

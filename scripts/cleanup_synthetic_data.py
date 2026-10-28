@@ -18,10 +18,13 @@ def cleanup_synthetic_data():
     db = SessionLocal()
 
     try:
-        # Count current records
-        total_before = db.query(Evaluation).count()
+        # Public rows only, in every count and in the DELETE. A matching name
+        # does not make a saved pilot evaluation synthetic: somebody may have
+        # called their own project "Synthetic Project ...", and it is theirs.
+        public = Evaluation.data_scope == "public"
+        total_before = db.query(Evaluation).filter(public).count()
         synthetic_count = db.query(Evaluation).filter(
-            Evaluation.name.like('Synthetic Project%')
+            public, Evaluation.name.like('Synthetic Project%')
         ).count()
 
         print(f"Database statistics BEFORE cleanup:")
@@ -41,13 +44,13 @@ def cleanup_synthetic_data():
 
         # Delete synthetic data
         deleted = db.query(Evaluation).filter(
-            Evaluation.name.like('Synthetic Project%')
-        ).delete()
+            public, Evaluation.name.like('Synthetic Project%')
+        ).delete(synchronize_session=False)
 
         db.commit()
 
         # Verify
-        total_after = db.query(Evaluation).count()
+        total_after = db.query(Evaluation).filter(public).count()
 
         print(f"\n✓ Deleted {deleted} synthetic records")
         print(f"\nDatabase statistics AFTER cleanup:")

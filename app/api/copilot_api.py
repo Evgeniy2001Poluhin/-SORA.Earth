@@ -4,6 +4,11 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import logging
 from app.auth import require_auth
+# Copilot sessions live in data/sessions.db with no owner column, so every
+# session is readable by every signed-in caller. The specialist role is kept off
+# every route that writes or reads one (app/project_access.py:refuse_specialist)
+# until sessions have an owner; /copilot/health stays open.
+from app.project_access import refuse_specialist
 from app.services.copilot import (
     explain_prediction,
     health as copilot_health,
@@ -105,7 +110,7 @@ def _scan_text(base):
         collect(value)
     return " ".join(p for p in parts if p).strip()
 
-@router.post("/copilot/explain")
+@router.post("/copilot/explain", dependencies=[Depends(refuse_specialist)])
 def explain(payload: CopilotRequest, k: int = Query(4, ge=1, le=8)):
     base = explain_prediction(probability=payload.probability, features=payload.features, shap_values=payload.shap_values, project=payload.project, model_version=payload.model_version or "v5")
     q = _build_rag_query(payload.probability, payload.features)
@@ -138,7 +143,7 @@ import asyncio, json
 _SPEED_MAP = {"fast": 0.015, "normal": 0.035, "slow": 0.08}
 
 
-@router.post("/copilot/explain/stream")
+@router.post("/copilot/explain/stream", dependencies=[Depends(refuse_specialist)])
 async def explain_stream(payload: CopilotRequest, k: int = Query(4, ge=1, le=8), speed: str = Query("normal")):
     """SSE streaming variant of /copilot/explain.
 
@@ -211,12 +216,12 @@ from app.services.sessions import (
 from fastapi import HTTPException
 
 
-@router.get("/copilot/sessions", dependencies=[Depends(require_auth)])
+@router.get("/copilot/sessions", dependencies=[Depends(require_auth), Depends(refuse_specialist)])
 def sessions_list(limit: int = Query(50, ge=1, le=200)):
     return {"sessions": _ses_list(limit=limit)}
 
 
-@router.get("/copilot/sessions/{session_id}", dependencies=[Depends(require_auth)])
+@router.get("/copilot/sessions/{session_id}", dependencies=[Depends(require_auth), Depends(refuse_specialist)])
 def sessions_get(session_id: str):
     s = _ses_get(session_id)
     if not s:
@@ -224,7 +229,7 @@ def sessions_get(session_id: str):
     return s
 
 
-@router.delete("/copilot/sessions/{session_id}")
+@router.delete("/copilot/sessions/{session_id}", dependencies=[Depends(refuse_specialist)])
 def sessions_delete(session_id: str):
     ok = _ses_del(session_id)
     if not ok:
@@ -272,7 +277,7 @@ class QAResponse(BaseModel):
     compliance: Dict[str, Any]
 
 
-@router.post("/copilot/qa", response_model=QAResponse)
+@router.post("/copilot/qa", response_model=QAResponse, dependencies=[Depends(refuse_specialist)])
 def qa(payload: QARequest):
     sess = _ses_get(payload.session_id)
     if not sess:

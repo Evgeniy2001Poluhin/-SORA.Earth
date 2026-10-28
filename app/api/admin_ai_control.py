@@ -52,8 +52,12 @@ def ai_generate_report(_admin=Depends(require_admin)):
         last_retrain = db.query(RetrainLog).order_by(RetrainLog.started_at.desc()).first()
         refresh_total = db.query(DataRefreshLog).count()
         refresh_success = db.query(DataRefreshLog).filter(DataRefreshLog.status == "success").count()
-        pred_total = db.query(PredictionLog).count()
-        avg_latency = db.query(func.avg(PredictionLog.latency_ms)).scalar()
+        # The shared corpus only: a saved pilot evaluation is not platform
+        # traffic (app/project_access.py).
+        from app.project_access import shared_data_predicate
+        public = shared_data_predicate(PredictionLog)
+        pred_total = db.query(PredictionLog).filter(public).count()
+        avg_latency = db.query(func.avg(PredictionLog.latency_ms)).filter(public).scalar()
         last_metrics = None
         if last_retrain and last_retrain.metrics_json:
             try:

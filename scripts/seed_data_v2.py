@@ -2,6 +2,13 @@
 """Seed evaluations database with sample projects."""
 import json, httpx, sys
 
+# RETIRED. POST /evaluate no longer saves an anonymous call, and a save with
+# ?save=true is a private (pilot) evaluation of the signed-in account -- never
+# shared data. Counting HTTP 200 as "seeded" would now count rows that do not
+# exist. Shared rows are written as data_scope = 'public' by scripts/seed_data.py.
+sys.exit("seed_data_v2.py is retired: /evaluate no longer stores shared data; "
+         "use scripts/seed_data.py")
+
 BASE = "http://localhost:8000"
 
 r = httpx.post(f"{BASE}/auth/login", json={"username": "admin", "password": "sora2026"}, timeout=30)

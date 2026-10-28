@@ -911,7 +911,12 @@ def scheduled_pretrain_forecast_models():
         from app.services.forecasting.data_loader import load_time_series
 
         with SessionLocal() as read_db:
-            rows = read_db.query(Evaluation).order_by(Evaluation.created_at.asc()).all()
+            # The precheck counts what the loader will read: public rows. A
+            # count over every row would let pilot saves make an insufficient
+            # public series look trainable (app/project_access.py).
+            from app.project_access import shared_data_predicate
+            rows = (read_db.query(Evaluation).filter(shared_data_predicate(Evaluation))
+                    .order_by(Evaluation.created_at.asc()).all())
 
             if not rows or len(rows) < 10:
                 logger.info("Forecast pretrain: insufficient data (%d rows)", len(rows) if rows else 0)

@@ -89,8 +89,12 @@ def compare_periods(period1_days: int = 30, period2_days: int = 7):
     try:
         from app.database import SessionLocal
         from sqlalchemy import text
+        from app.project_access import PUBLIC_SCOPE_SQL
         db = SessionLocal()
-        df = pd.read_sql(text("SELECT * FROM evaluations ORDER BY created_at"), db.bind)
+        # The shared corpus only, before the period split and the sufficiency
+        # check below (app/project_access.py).
+        df = pd.read_sql(text("SELECT * FROM evaluations WHERE " + PUBLIC_SCOPE_SQL
+                              + " ORDER BY created_at, id"), db.bind)
         db.close()
     except Exception as e:
         raise HTTPException(500, f"Cannot load from DB: {e}")

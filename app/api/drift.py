@@ -131,6 +131,7 @@ def _recent_predictions(window: int, db=None):
         db = SessionLocal()
     try:
         from app.database import PredictionLog
+        from app.project_access import shared_data_predicate
 
         rows = (
             db.query(
@@ -139,6 +140,10 @@ def _recent_predictions(window: int, db=None):
                 PredictionLog.social_impact,
                 PredictionLog.duration_months,
             )
+            # Public rows, filtered *before* the LIMIT. Applied after, the
+            # newest pilot saves would fill the window and the KS test would
+            # run on whatever public rows were left -- possibly none.
+            .filter(shared_data_predicate(PredictionLog))
             .order_by(PredictionLog.id.desc())
             .limit(window)
             .all()

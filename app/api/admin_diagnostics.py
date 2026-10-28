@@ -7,6 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
+from app.project_access import shared_data_predicate
 from app.database import (SessionLocal, RetrainLog, DataRefreshLog, PredictionLog,
                           count_physical_runs)
 
@@ -46,9 +47,12 @@ def admin_diagnostics(
     refresh_errors = db.query(DataRefreshLog).filter(DataRefreshLog.status == "error").count()
     refresh_recent = db.query(DataRefreshLog).filter(DataRefreshLog.timestamp >= since).count()
     last_refresh = db.query(DataRefreshLog).order_by(DataRefreshLog.timestamp.desc()).first()
-    prediction_total = db.query(PredictionLog).count()
-    pred_recent = db.query(PredictionLog).filter(PredictionLog.timestamp >= since).count()
-    avg_latency = db.query(func.avg(PredictionLog.latency_ms)).filter(PredictionLog.timestamp >= since).scalar()
+    # Platform traffic is the shared corpus; saved pilot rows are excluded from
+    # every figure here (app/project_access.py).
+    public = shared_data_predicate(PredictionLog)
+    prediction_total = db.query(PredictionLog).filter(public).count()
+    pred_recent = db.query(PredictionLog).filter(public, PredictionLog.timestamp >= since).count()
+    avg_latency = db.query(func.avg(PredictionLog.latency_ms)).filter(public, PredictionLog.timestamp >= since).scalar()
     top_errors = db.query(RetrainLog.error_message, func.count(RetrainLog.id)).filter(RetrainLog.status == "failed", RetrainLog.error_message.isnot(None)).group_by(RetrainLog.error_message).order_by(func.count(RetrainLog.id).desc()).limit(5).all()
     last_metrics = None
     if last_retrain and last_retrain.metrics_json:

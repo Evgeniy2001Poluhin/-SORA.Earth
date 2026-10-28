@@ -38,7 +38,11 @@ NAMES = [
 
 def seed():
     db = SessionLocal()
-    existing = db.query(Evaluation).count()
+    # Shared seed data: written as `public` with no owner, on purpose -- the
+    # model and database default is `pilot`, which needs an owner and would
+    # refuse these rows. Counted over public rows only, so saved pilot
+    # evaluations never make the corpus look already seeded.
+    existing = db.query(Evaluation).filter(Evaluation.data_scope == "public").count()
     if existing >= 50:
         print(f"Already {existing} evaluations, skipping seed.")
         db.close()
@@ -70,11 +74,12 @@ def seed():
             success_probability=round(prob, 3), recommendation=rec,
             risk_level=risk, region=region, lat=round(lat, 4), lon=round(lon, 4),
             created_at=datetime.utcnow() - timedelta(days=days_ago),
+            data_scope="public", owner_user_id=None,
         )
         db.add(ev)
 
     db.commit()
-    final = db.query(Evaluation).count()
+    final = db.query(Evaluation).filter(Evaluation.data_scope == "public").count()
     print(f"Seeded {len(NAMES)} evaluations. Total: {final}")
     db.close()
 

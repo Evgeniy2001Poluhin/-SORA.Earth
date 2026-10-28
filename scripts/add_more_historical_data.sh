@@ -1,4 +1,13 @@
 #!/bin/bash
+
+# RETIRED. POST /evaluate no longer saves an anonymous call: without
+# ?save=true it computes and writes nothing, and a save is a private (pilot)
+# evaluation of the signed-in specialist or admin -- never shared data. So every
+# HTTP 200 this script counted as "added" would now be a row that does not
+# exist. Shared rows are written as data_scope = 'public' by a maintenance path
+# that says so: scripts/seed_data.py or scripts/insert_historical_evals.sh.
+echo "this script is retired: /evaluate no longer stores shared data; see the comment at the top" >&2
+exit 2
 # Add more historical data to reach LSTM threshold faster
 
 API_URL="https://sora-earth.online/api/v1/evaluate"

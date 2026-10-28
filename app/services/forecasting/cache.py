@@ -25,6 +25,13 @@ class CacheEntry:
     ttl: float
 
 
+#: Which rows a cached model may have been fitted on. Part of every key, so a
+#: model fitted by a loader that read every evaluation -- before the series was
+#: restricted to the public corpus -- can never be served as a fit of the
+#: public series. Change it whenever the loader's row selection changes.
+DATA_POLICY = "scope-public-v1"
+
+
 class ForecastModelCache:
     """Thread-safe LRU cache for fitted forecast models.
 
@@ -55,7 +62,7 @@ class ForecastModelCache:
         return h.hexdigest()[:12]
 
     def _cache_key(self, model_name: str, metric: str, data_hash: str) -> str:
-        return f"{model_name}:{metric}:{data_hash}"
+        return f"{DATA_POLICY}:{model_name}:{metric}:{data_hash}"
 
     def get_fitted_model(
         self, model_name: str, metric: str, df: pd.DataFrame
@@ -104,7 +111,8 @@ class ForecastModelCache:
                 count = len(self._cache)
                 self._cache.clear()
             else:
-                keys_to_remove = [k for k in self._cache if k.startswith(f"{model_name}:")]
+                keys_to_remove = [k for k in self._cache
+                                  if k.startswith(f"{DATA_POLICY}:{model_name}:")]
                 for k in keys_to_remove:
                     del self._cache[k]
                 count = len(keys_to_remove)

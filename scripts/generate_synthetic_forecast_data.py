@@ -70,8 +70,15 @@ def insert_synthetic_data():
     db = SessionLocal()
 
     try:
+        # Public rows only, everywhere below. The synthetic series is shared
+        # data, written as `public` with no owner; a pilot evaluation whose
+        # name happens to match is not deleted, counted or dated with it.
+        public = Evaluation.data_scope == "public"
+
         # Clear old synthetic data
-        db.query(Evaluation).filter(Evaluation.name.like('Synthetic Project%')).delete()
+        db.query(Evaluation).filter(
+            public, Evaluation.name.like('Synthetic Project%')
+        ).delete(synchronize_session=False)
         db.commit()
 
         print("Generating synthetic data...")
@@ -80,23 +87,24 @@ def insert_synthetic_data():
         print(f"Inserting {len(data)} synthetic evaluations...")
 
         for record in data:
-            eval_obj = Evaluation(**record)
+            eval_obj = Evaluation(**record, data_scope="public", owner_user_id=None)
             db.add(eval_obj)
 
         db.commit()
         print(f"✓ Inserted {len(data)} synthetic evaluations")
 
         # Verify
-        count = db.query(Evaluation).count()
-        synthetic_count = db.query(Evaluation).filter(Evaluation.name.like('Synthetic Project%')).count()
+        count = db.query(Evaluation).filter(public).count()
+        synthetic_count = db.query(Evaluation).filter(
+            public, Evaluation.name.like('Synthetic Project%')).count()
 
         print(f"\nDatabase statistics:")
         print(f"  Total evaluations: {count}")
         print(f"  Synthetic data: {synthetic_count}")
 
         # Check date range
-        first = db.query(Evaluation).order_by(Evaluation.created_at.asc()).first()
-        last = db.query(Evaluation).order_by(Evaluation.created_at.desc()).first()
+        first = db.query(Evaluation).filter(public).order_by(Evaluation.created_at.asc()).first()
+        last = db.query(Evaluation).filter(public).order_by(Evaluation.created_at.desc()).first()
 
         if first and last:
             days = (last.created_at - first.created_at).days
