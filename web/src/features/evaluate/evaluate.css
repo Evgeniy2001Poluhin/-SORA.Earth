@@ -1,4 +1,19 @@
 .ev{display:flex;flex-direction:column;gap:40px}
+
+/* Calculate / Calculate and save, and what a save said */
+.ev-actions{display:grid;gap:8px}
+.ev-btn.ev-btn-save{background:var(--bg-2);color:var(--text);border:1px solid var(--planet)}
+.ev-save-note{margin:10px 0 0;font-size:12px;color:var(--muted)}
+.ev-save-note a{color:var(--planet)}
+.ev-save-problem{margin:10px 0 0;font-size:13px;color:#EF4444}
+.ev-save-ok{margin:10px 0 0;font-size:13px;color:var(--planet)}
+.ev-save-ok a{color:inherit;text-decoration:underline}
+
+/* A saved evaluation opened from History */
+.ev-snapshot .card-head{display:flex;align-items:center;justify-content:space-between}
+.ev-snapshot-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 22px;margin:8px 0 12px}
+.ev-snapshot-error{color:#EF4444;margin:0}
+.ev-snapshot-loading{color:var(--muted);margin:0}
 .ev-hero{display:grid;grid-template-columns:1.15fr 1fr;gap:48px;
   padding:20px 0 36px;border-bottom:1px solid var(--line);align-items:end}
 @media(max-width:960px){.ev-hero{grid-template-columns:1fr}}

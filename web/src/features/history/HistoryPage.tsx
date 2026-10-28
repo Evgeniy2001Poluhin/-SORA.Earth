@@ -1,10 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { historyApi } from "../../api/endpoints/history";
 import type { HistoryParams } from "../../api/endpoints/history";
 import { errorMessage } from "@/lib/errors";
-import { auth, ApiError } from "@/api/client";
+import { ApiError } from "@/api/client";
+import { useAuth } from "@/store/auth";
+import { historyTitle } from "@/app/access";
+import { isSessionEnded, session } from "@/lib/session";
 import { SUCCESS_PROBABILITY_NOTE } from "../evaluate/successProbabilityNote";
 import "./history.css";
 
@@ -15,11 +18,23 @@ export default function HistoryPage() {
   const nav = useNavigate();
   const [params, setParams] = useState<HistoryParams>({ limit: PAGE, offset: 0 });
   const [csvError, setCsvError] = useState<string | null>(null);
+  const user = useAuth((s) => s.user);
+  const phase = useAuth((s) => s.phase);
+  const epoch = useAuth((s) => s.epoch);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   // Server state belongs to the query cache, not to an effect that writes state.
+  // Keyed by account and session generation, so one account's rows are never
+  // served from the cache to the next, even within staleTime; and not sent
+  // until the stored session has been checked.
   const query = useQuery({
-    queryKey: ["history", params],
-    queryFn: () => historyApi.list(params),
+    queryKey: ["history", user?.user_id ?? "anonymous", epoch, params],
+    queryFn: ({ signal }) => historyApi.list(params, { signal }),
+    enabled: phase === "ready",
   });
   // Absent and empty are different answers (#236). `/history` answers 200 with
   // `items` and `total` every time; a failed request has no answer at all, and
@@ -30,13 +45,14 @@ export default function HistoryPage() {
   const data = { items: query.data?.items ?? [], total: query.data?.total };
   const loading = query.isPending;
   const err = query.error ? errorMessage(query.error) : null;
+  const status = query.error instanceof ApiError ? query.error.status : null;
 
   const page = Math.floor((params.offset || 0) / PAGE) + 1;
   const pages = data.total != null ? Math.max(1, Math.ceil(data.total / PAGE)) : null;
   const set = (patch: Partial<HistoryParams>) => setParams((p) => ({ ...p, ...patch, offset: 0 }));
 
-  const fmt = (s: string) =>
-    new Date(s).toLocaleString("en-GB", {
+  const fmt = (s: string | null) =>
+    s == null ? "—" : new Date(s).toLocaleString("en-GB", {
       year: "2-digit", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit",
     });
 
@@ -47,27 +63,23 @@ export default function HistoryPage() {
   // is not a row that scored zero: `evaluations.total_score` is a nullable
   // column, and `a + null` counted it as one.
   const avgScore = useMemo(() => {
-    const scored = data.items.filter((x) => typeof x.total_score === "number" && Number.isFinite(x.total_score));
-    return scored.length ? scored.reduce((a, x) => a + x.total_score, 0) / scored.length : null;
+    const scored = data.items
+      .map((x) => x.total_score)
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    return scored.length ? scored.reduce((a, v) => a + v, 0) / scored.length : null;
   }, [data.items]);
 
+  // The whole history this account may read: the server ignores the page's
+  // filters for the export (app/api/evaluate.py export_csv), and so does the
+  // label. Through the shared transport, so it carries the Bearer and is
+  // aborted with the session; a Blob that arrives after the account changed is
+  // refused before it can become a download.
   const downloadCSV = async () => {
     setCsvError(null);
+    const started = session.epoch();
     try {
-      const headers: Record<string, string> = {};
-      const token = auth.get();
-      if (token) headers["Authorization"] = "Bearer " + token;
-
-      const response = await fetch("/api/v1/export/csv", { headers });
-      if (!response.ok) {
-        if (response.status === 401) {
-          setCsvError("Sign in to export CSV");
-        } else {
-          setCsvError(`Failed to download CSV: ${response.status}`);
-        }
-        return;
-      }
-      const blob = await response.blob();
+      const blob = await historyApi.exportCsv();
+      if (!mounted.current || !session.isCurrent(started)) return;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -77,14 +89,18 @@ export default function HistoryPage() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (e) {
-      setCsvError(`Could not download CSV: ${errorMessage(e)}`);
+      if (isSessionEnded(e) || !mounted.current) return;
+      if (e instanceof ApiError && e.status === 401) setCsvError("Sign in to export CSV");
+      else if (e instanceof ApiError && e.status === 403) setCsvError("CSV export is not available for your role");
+      else if (e instanceof ApiError) setCsvError(`Failed to download CSV: ${e.status}`);
+      else setCsvError(`Could not download CSV: ${errorMessage(e)}`);
     }
   };
 
   return (
     <div className="hist-page">
       <div className="eyebrow">EVALUATION LOG</div>
-      <h1 className="hist-title">History</h1>
+      <h1 className="hist-title">{historyTitle(user)}</h1>
       <div className="ev-meta">
         <span>{data.total ?? "—"} evaluations</span>
         <span>·</span>
@@ -124,12 +140,16 @@ export default function HistoryPage() {
           onChange={(e) => set({ date_to: e.target.value ? e.target.value + "T23:59:59" : undefined })}
         />
         <button className="hist-reset" onClick={() => setParams({ limit: PAGE, offset: 0 })}>Reset</button>
-        <button className="hist-export" onClick={downloadCSV}>Export CSV</button>
+        <button className="hist-export" onClick={downloadCSV} title="Every evaluation you can read, not only the filtered page">
+          Export CSV (all)
+        </button>
       </div>
 
       {(err || csvError) && <div className="hist-error">
-        {query.error instanceof ApiError && query.error.status === 401
+        {status === 401
           ? "Sign in to view evaluation history"
+          : status === 403
+          ? "Evaluation history is not available for your role"
           : csvError || `Failed to load: ${err}`}
       </div>}
 
@@ -160,12 +180,12 @@ export default function HistoryPage() {
               onClick={() => nav("/evaluate?snapshot=" + it.id)}
             >
               <div className="tn">{fmt(it.created_at)}</div>
-              <div>{it.region}</div>
+              <div>{it.region ?? "—"}</div>
               <div className="tn">{it.total_score != null ? it.total_score.toFixed(1) : "—"}</div>
               <div className="tn">{it.success_probability != null ? `${it.success_probability.toFixed(0)}%` : "—"}</div>
-              <div className={"hist-risk r-" + (it.risk_level || "").toLowerCase()}>{it.risk_level}</div>
-              <div className="tn">${it.budget.toLocaleString()}</div>
-              <div className="tn">{it.duration_months}</div>
+              <div className={"hist-risk r-" + (it.risk_level || "").toLowerCase()}>{it.risk_level ?? "—"}</div>
+              <div className="tn">{it.budget != null ? "$" + it.budget.toLocaleString() : "—"}</div>
+              <div className="tn">{it.duration_months ?? "—"}</div>
             </button>
           ))}
       </div>

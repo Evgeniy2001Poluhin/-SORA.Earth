@@ -1,6 +1,6 @@
-import { api } from "../client";
+import { api, apiWithStatus } from "../client";
 import type { EvaluateRequest, EvaluateResponse, ExplainResponse, CountriesMap, ShapFeature, EvaluateProjectRequest,
-  MonteCarloResponse, EvaluateRankingResponse, EvaluateRankingEntry, WhatIfResponse, WhatIfVariation, WhatIfRequest } from "../types";
+  MonteCarloResponse, EvaluateRankingResponse, SavedEvaluation, EvaluateRankingEntry, WhatIfResponse, WhatIfVariation, WhatIfRequest } from "../types";
 import { mockEvaluate, isMock } from "../mock";
 
 const delay = <T,>(v: T, ms = 350) => new Promise<T>(r => setTimeout(() => r(v), ms));
@@ -87,9 +87,39 @@ const mockWhatIf = (b: WhatIfRequest): WhatIfResponse => {
   }};
 };
 
+/**
+ * The answer to a save that cannot be shown as saved: not 201, not saved=true,
+ * or no usable id. The row may or may not exist -- the user is told to look.
+ */
+export class SaveNotConfirmedError extends Error {
+  constructor(detail: string) {
+    super("The save was not confirmed: " + detail);
+    this.name = "SaveNotConfirmedError";
+  }
+}
+
+/** Accept a save only on the full contract: 201, saved=true, a positive integer id. */
+export function confirmSaved(status: number, body: unknown): SavedEvaluation {
+  if (status !== 201) throw new SaveNotConfirmedError("answered " + status + ", not 201");
+  const b = body as Partial<SavedEvaluation> | null;
+  if (!b || typeof b !== "object" || b.saved !== true) throw new SaveNotConfirmedError("the answer does not say saved");
+  const id = b.evaluation_id;
+  if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) throw new SaveNotConfirmedError("the answer carries no evaluation id");
+  return b as SavedEvaluation;
+}
+
+let mockSavedId = 1000;
+
 export const evaluateApi = {
   countries: () => isMock ? delay(COUNTRIES, 100) : api<CountriesMap>("/countries"),
-  evaluate: (b: EvaluateRequest) => isMock ? delay(mockEvaluate(b)) : api<EvaluateResponse>("/evaluate", { method:"POST", body: JSON.stringify(b) }),
+  /** Computes and writes nothing. */
+  evaluate: (b: EvaluateRequest) => isMock ? delay(mockEvaluate(b)) : api<EvaluateResponse>("/evaluate", { method:"POST", body: JSON.stringify(b), cache:"no-store" }),
+  /** Computes again and saves under the signed-in account (specialist, admin). */
+  save: async (b: EvaluateRequest): Promise<SavedEvaluation> => {
+    if (isMock) return delay(confirmSaved(201, { ...mockEvaluate(b), saved: true, evaluation_id: ++mockSavedId }));
+    const { status, data } = await apiWithStatus<unknown>("/evaluate?save=true", { method:"POST", body: JSON.stringify(b), cache:"no-store" });
+    return confirmSaved(status, data);
+  },
   explain:  (b: EvaluateRequest) => isMock ? delay(mockExplain(b)) : api<ExplainResponse>("/predict/explain", { method:"POST", body: JSON.stringify(b) }),
   ranking:  (b: EvaluateProjectRequest) => isMock ? delay(mockRanking(b)) : api<EvaluateRankingResponse>("/evaluate/ranking", { method:"POST", body: JSON.stringify(b) }),
   monteCarlo: (b: EvaluateProjectRequest & { n?: number }) => isMock ? delay(mockMonteCarlo(b)) : api<MonteCarloResponse>("/evaluate/monte-carlo", { method:"POST", body: JSON.stringify(b) }),

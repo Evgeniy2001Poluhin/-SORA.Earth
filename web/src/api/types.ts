@@ -11,6 +11,15 @@ export interface EvaluateResponse {
   region: string; lat: number; lon: number;
   country_benchmark: { country: string; co2_per_capita: number; renewable_share: number;
     esg_rank: number | null; hdi: number };
+  /** POST /evaluate answers false and null; only ?save=true, answered 201, saves. */
+  saved?: boolean;
+  evaluation_id?: number | null;
+}
+
+/** A save the server confirmed: 201, saved=true and the id of the committed row. */
+export interface SavedEvaluation extends EvaluateResponse {
+  saved: true;
+  evaluation_id: number;
 }
 export interface ShapFeature {
   feature: string; value: number; shap_value: number;
