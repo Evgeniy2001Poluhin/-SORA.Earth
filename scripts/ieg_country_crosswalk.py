@@ -9,6 +9,16 @@ conflicts that need a disposition, the aliases applied, the counts, and a manife
     countries  the World Bank country registry snapshot (scripts/snapshot_wb_countries.py)
     oghist     the OGHIST historical income classification, read only for its
                wb_code and country_name columns; income_group is never read
+    approval   the pinned approval-FY output (ieg_approval_fy.py), read only for
+               ieg_page_file, ieg_index, resolved_wb_fy, aux_state and status
+    remap      the reviewed legacy WB-2 remap table (ieg_country_remap_v1.csv)
+
+Remap (rule CW-08). A raw WB-2 code the registry does not carry is converted to
+its WB id only by a reviewed remap row, and only where pno_code_not_in_registry
+would otherwise fire. The conversion needs the name witness to agree with the
+target or be absent, a known approval FY with no aux conflict, and the FY bounds
+of the row. Anything else stays quarantined under the same reason, with the
+outcome recorded in remap_outcome.
 
 Evidence. Name: the IEG country string, normalized, is looked up in a P&O
 name dictionary built from the whole P&O corpus, or in the explicit alias table,
@@ -27,7 +37,7 @@ inputs and the two input tables alone.
 
 Usage:
     python scripts/ieg_country_crosswalk.py --snapshot DIR --countries DIR \
-        --oghist DIR --aliases CSV [--regional CSV] --out DIR
+        --oghist DIR --approval DIR --aliases CSV [--regional CSV] [--remap CSV] --out DIR
 
 Exit status: 0 published; 1 refused or failed before the rename, so no final
 directory exists; 3 published, but the fsync of the parent directory failed,
@@ -49,25 +59,37 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-SCHEMA_VERSION = "1"
-RULE_VERSION = "1"
+SCHEMA_VERSION = "2"
+RULE_VERSION = "3"
 TOOL_PATH = "scripts/ieg_country_crosswalk.py"
 HERE = Path(__file__).resolve().parent
 DEFAULT_REGIONAL = HERE / "ieg_regional_names_v1.csv"
+DEFAULT_REMAP = HERE / "ieg_country_remap_v1.csv"
+DEFAULT_PARTIAL = HERE / "ieg_remap_partial_names_v1.csv"
 
 PINNED_SNAPSHOT_MANIFEST_SHA256 = "b3d43f8033367d79bb14ace692f8cada7068e98a3540fdfbbc0a1bea2505474c"
 PINNED_PAGE_DIGEST = "960d776e8db25a59abcb3562e921c1643ace32466d71682c017b2912dc43d4f3"
 PINNED_COUNTRIES_MANIFEST_SHA256 = "51dc057758c4b16a2d0e76bb62b9f063f7bbada9e48141b40aeb8161e4ffafdd"
 PINNED_COUNTRIES_RAW_SHA256 = "99c199efc2fc2880c169eb611f5a32ba69adc0e225b83f54fe384a5d66ba2448"
 PINNED_OGHIST_MANIFEST_SHA256 = "385d6e35e7db73d60b8a0d8ae407d54a870e106723acd175e69fd656dae6a4c2"
+PINNED_APPROVAL_MANIFEST_SHA256 = "73c443f33707c238c88544bab10473d662c922647e07c13b9a6cd4970ff85619"
+PINNED_APPROVAL_ROWS_SHA256 = "b7308e573768300fc62329d3a7830508551bbce7cf118fd5f1c4243d6cec01df"
 
 COUNTRIES_RAW_FILE = "raw/countries.json"
 OGHIST_INCOME_FILE = "income_history.csv"
+APPROVAL_ROWS_FILE = "project_approval_no_y.csv"
 FORMER_SUFFIX = " (former)"
+REMAP_WITNESS_POLICY = "IEG name must resolve to the same target, or be absent"
+REMAP_SOURCE_PREFIX = "https://databank.worldbank.org/metadataglossary/world-development-indicators/country/"
+REMAP_ACTIONS = ("convert", "quarantine")
+FY_MIN = 1944
 
 # The only keys this tool asks of a record. Anything else in a record is never read.
 IEG_FIELDS = ("project_id", "country", "as_of_date")
 PNO_FIELDS = ("id", "countrycode", "countryname")
+# From the approval output. evaluation_fy and every other approval column are never read.
+APPROVAL_FIELDS = ("ieg_page_file", "ieg_index", "resolved_wb_fy", "aux_state", "status")
+APPROVAL_AUX_OK = ("absent", "agrees")
 
 # WB codes that are not ISO 3166 codes. Kept as WB identities with iso3 null, never shown as ISO3.
 NON_ISO_WB_IDS = frozenset({"XKX"})
@@ -85,6 +107,13 @@ ALIAS_COLUMNS = (
     "effective_start", "effective_end", "rule_id", "rule_version", "status",
 )
 REGIONAL_COLUMNS = ("kind", "key", "display", "class", "reason", "evidence", "rule_id", "status")
+REMAP_COLUMNS = (
+    "source_namespace", "raw_code", "rule_id", "action", "target_namespace", "target_code",
+    "target_iso2", "start_fy", "end_fy", "witness_policy", "reason", "source_url", "status",
+)
+PARTIAL_COLUMNS = ("raw_code", "normalized_name", "rule_id", "reason", "status")
+# A name that says only part of a convertible territory's name. Data, never a pattern.
+PARTIAL_FORBIDDEN_FRAGMENT = "west bank"
 ALIAS_METHODS = ("truncation_40", "space_insensitive_equal", "token_permutation", "registry_name_and_code")
 REVIEW_STATUSES = ("proposed", "reviewed")
 
@@ -95,7 +124,8 @@ ST_CODE = "resolved_by_code"
 ST_CONFLICT = "conflict"
 ST_REGION = "excluded_regional"
 ST_QUAR = "quarantine"
-STATUSES = (ST_AGREE, ST_NAME, ST_CODE, ST_CONFLICT, ST_REGION, ST_QUAR)
+ST_REMAP = "resolved_by_remap"
+STATUSES = (ST_AGREE, ST_NAME, ST_CODE, ST_CONFLICT, ST_REGION, ST_QUAR, ST_REMAP)
 
 # Reasons.
 R_NAME_CODE = "name_code_disagree"
@@ -108,6 +138,7 @@ R_NOT_IN_REG = "pno_code_not_in_registry"
 R_HISTORICAL = "historical_former_entity"
 R_MULTI = "pno_code_multiple"
 R_NEITHER = "neither_usable_source"
+R_GZ_PARTIAL = "gz_partial_territory_name"
 
 # Rule identifiers, one per decision branch. Alias and regional rows carry their own ids.
 RULE_AGREE = "CW-01"
@@ -117,6 +148,7 @@ RULE_CONFLICT = "CW-04"
 RULE_REGION = "CW-05"
 RULE_QUAR = "CW-06"
 RULE_DUP = "CW-07"
+RULE_REMAP = "CW-08"
 
 RULES = (
     (RULE_AGREE, ST_AGREE, "The name evidence and the P&O code evidence both resolve to the same P&O code, and that code is a registry country. The WB identity is the registry id of its iso2Code."),
@@ -126,6 +158,7 @@ RULES = (
     (RULE_REGION, ST_REGION, "Explicit regional entry: the IEG name, or the P&O code it resolves to, is in the fixed regional list. Excluded with its reason, not dropped."),
     (RULE_QUAR, ST_QUAR, "Any other case: a P&O code that the registry does not carry, a registry aggregate that is not on the fixed list, several codes in one record, or no usable evidence. The reason says which."),
     (RULE_DUP, ST_CONFLICT, "A repeated IEG project_id whose records give different country values. Every such record is a conflict; the duplicates are kept, not merged, and neither is preferred."),
+    (RULE_REMAP, ST_REMAP, "A P&O code the registry does not carry, where the reviewed remap table converts it (remap_rule_id). Converted only when the name witness agrees with the target or is absent, the approval FY is known and carries no aux conflict, and the FY is within the row's bounds. The WB identity is the table target, checked against the registry iso2Code. The raw code is kept; no predecessor data is carried. A name on the reviewed partial-name list for the code is quarantined under CW-06 with reason gz_partial_territory_name. Any other remap outcome stays quarantined under CW-06 with reason pno_code_not_in_registry."),
 )
 
 # Classes of a code.
@@ -175,6 +208,8 @@ class Pins:
     countries_manifest_sha256: str
     countries_raw_sha256: str
     oghist_manifest_sha256: str
+    approval_manifest_sha256: str = PINNED_APPROVAL_MANIFEST_SHA256
+    approval_rows_sha256: str = PINNED_APPROVAL_ROWS_SHA256
 
 
 DEFAULT_PINS = Pins(
@@ -183,6 +218,8 @@ DEFAULT_PINS = Pins(
     PINNED_COUNTRIES_MANIFEST_SHA256,
     PINNED_COUNTRIES_RAW_SHA256,
     PINNED_OGHIST_MANIFEST_SHA256,
+    PINNED_APPROVAL_MANIFEST_SHA256,
+    PINNED_APPROVAL_ROWS_SHA256,
 )
 
 
@@ -629,6 +666,161 @@ def _load_aliases(path, name_dict, registry, pno_name_by_code):
     return aliases, sha
 
 
+@dataclass(frozen=True)
+class Remap:
+    rule_id: str
+    raw_code: str
+    action: str  # "convert" or "quarantine"
+    target_wb: str
+    target_iso2: str
+    start_fy: object  # int or None: the approval FY must be at least this
+    end_fy: object  # int or None: the approval FY must be at most this
+    reason: str
+    status: str
+
+
+def _fy_bound(text, what, rule_id):
+    if text == "":
+        return None
+    if not re.fullmatch(r"[0-9]{4}", text) or int(text) < FY_MIN:
+        raise SourceError(f"remap {rule_id}: {what} is not a fiscal year")
+    return int(text)
+
+
+def _load_remap(path, registry):
+    """The reviewed legacy WB-2 remap table. Every convert row is checked against the registry."""
+    rows, sha = _read_csv_table(path, REMAP_COLUMNS)
+    wb_to_iso2 = {rid: iso2 for iso2, (rid, _name) in registry.country_by_iso2.items()}
+    table, seen_rules = {}, set()
+    for row in rows:
+        rule_id, code, action = row["rule_id"], row["raw_code"], row["action"]
+        if rule_id in seen_rules:
+            raise SourceError(f"remap rule_id {rule_id} appears more than once")
+        seen_rules.add(rule_id)
+        if row["source_namespace"] != "WB-2":
+            raise SourceError(f"remap {rule_id}: source_namespace is not WB-2")
+        if not re.fullmatch(r"[A-Z0-9]{2}", code):
+            raise SourceError(f"remap {rule_id}: raw_code is not a two-character WB-2 code")
+        if code in table:
+            raise SourceError(f"remap raw code {code!r} has two rules")
+        if code in registry.country_by_iso2 or code in registry.aggregate_by_iso2:
+            raise SourceError(f"remap {rule_id}: {code!r} is a registry code, so it is not remapped")
+        if row["status"] not in REVIEW_STATUSES:
+            raise SourceError(f"remap {rule_id} has an unknown status")
+        if row["reason"] == "":
+            raise SourceError(f"remap {rule_id} states no reason")
+        if action not in REMAP_ACTIONS:
+            raise SourceError(f"remap {rule_id} has an unknown action")
+        start = _fy_bound(row["start_fy"], "start_fy", rule_id)
+        end = _fy_bound(row["end_fy"], "end_fy", rule_id)
+        if start is not None and end is not None and start > end:
+            raise SourceError(f"remap {rule_id}: start_fy is after end_fy")
+        if action == "quarantine":
+            if any(row[k] for k in ("target_namespace", "target_code", "target_iso2", "start_fy",
+                                    "end_fy", "witness_policy")):
+                raise SourceError(f"remap {rule_id}: a quarantine row names a target, a bound or a witness")
+            table[code] = Remap(rule_id, code, action, "", "", None, None, row["reason"], row["status"])
+            continue
+        if row["target_namespace"] != "WB id":
+            raise SourceError(f"remap {rule_id}: target_namespace is not WB id")
+        wb, iso2 = row["target_code"], row["target_iso2"]
+        if wb_to_iso2.get(wb) != iso2:
+            raise SourceError(f"remap {rule_id}: target WB id {wb!r} is not a registry country with ISO2 {iso2!r}")
+        if row["witness_policy"] != REMAP_WITNESS_POLICY:
+            raise SourceError(f"remap {rule_id}: witness_policy is not the policy this tool implements")
+        if not (row["source_url"].startswith(REMAP_SOURCE_PREFIX) and row["source_url"].endswith("/" + wb)):
+            raise SourceError(f"remap {rule_id}: source_url is not the WB glossary entry for {wb}")
+        table[code] = Remap(rule_id, code, action, wb, iso2, start, end, row["reason"], row["status"])
+    return table, sha, rows
+
+
+def _load_partial_names(path, remap, registry):
+    """Names that identify only part of a convertible territory. Each is quarantined, never converted.
+
+    An exact list keyed by raw code, not a pattern. A name is refused if it is not in normal form, if
+    its raw code is not a convert row of the remap table, if it is a registry country name, or if it
+    contains the West Bank fragment (such a name is the full territory name, not a partial one).
+    """
+    rows, sha = _read_csv_table(path, PARTIAL_COLUMNS)
+    registry_names = {norm(name) for _iso2, (_rid, name) in registry.country_by_iso2.items()}
+    names, seen_rules = set(), set()
+    for row in rows:
+        rule_id, code, text = row["rule_id"], row["raw_code"], row["normalized_name"]
+        if rule_id in seen_rules:
+            raise SourceError(f"partial-name rule_id {rule_id} appears more than once")
+        seen_rules.add(rule_id)
+        if row["status"] not in REVIEW_STATUSES:
+            raise SourceError(f"partial-name {rule_id} has an unknown status")
+        if row["reason"] == "":
+            raise SourceError(f"partial-name {rule_id} states no reason")
+        if code not in remap or remap[code].action != "convert":
+            raise SourceError(f"partial-name {rule_id}: {code!r} is not a convert row of the remap table")
+        if norm(text) != text or text == "":
+            raise SourceError(f"partial-name {rule_id}: normalized_name is not in normal form")
+        if PARTIAL_FORBIDDEN_FRAGMENT in text:
+            raise SourceError(f"partial-name {rule_id} names the West Bank, so it is the full territory name")
+        if text in registry_names:
+            raise SourceError(f"partial-name {rule_id} is a registry country name")
+        if (code, text) in names:
+            raise SourceError(f"partial-name {rule_id} repeats a name for {code!r}")
+        names.add((code, text))
+    return frozenset(names), sha, rows
+
+
+@dataclass(frozen=True)
+class ApprovalFY:
+    fy: object  # int, or None when no usable approval FY exists
+    aux_state: str
+    status: str
+
+
+def _valid_fy(text, status):
+    if status == "quarantine" or not isinstance(text, str) or not re.fullmatch(r"[0-9]{4}", text):
+        return None
+    value = int(text)
+    return value if value >= FY_MIN else None
+
+
+def _load_approval(directory, pins):
+    """The pinned approval-FY rows: five whitelisted columns, keyed by IEG locator. No other column is read."""
+    man_bytes = (directory / "manifest.json").read_bytes()
+    if _sha(man_bytes) != pins.approval_manifest_sha256:
+        raise PinMismatch("the approval manifest.json does not match the pinned sha256")
+    manifest = _strict_json(man_bytes, "approval manifest.json")
+    try:
+        snap_sha = manifest["inputs"]["manifest_sha256"]
+        snap_digest = manifest["inputs"]["page_digest"]
+        entry = manifest["outputs"][APPROVAL_ROWS_FILE]
+        want_sha, want_bytes = entry["sha256"], entry["bytes"]
+    except (KeyError, TypeError):
+        raise SourceError("approval manifest.json lacks the inputs and outputs structure this tool reads") from None
+    if (snap_sha, snap_digest) != (pins.snapshot_manifest_sha256, pins.page_digest):
+        raise SourceError("the approval output was built from a different snapshot")
+    if want_sha != pins.approval_rows_sha256:
+        raise PinMismatch("the approval rows file does not match the pinned sha256")
+    body = (directory / APPROVAL_ROWS_FILE).read_bytes()
+    if _sha(body) != want_sha or len(body) != want_bytes:
+        raise SourceError(f"{APPROVAL_ROWS_FILE} differs from the approval manifest")
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        raise SourceError(f"{APPROVAL_ROWS_FILE} is not UTF-8") from None
+    reader = csv.DictReader(io.StringIO(text, newline=""))
+    if not set(APPROVAL_FIELDS) <= set(reader.fieldnames or ()):
+        raise SourceError("the approval rows file lacks a column this tool reads")
+    out = {}
+    for number, raw in enumerate(reader, start=2):
+        if None in raw or any(value is None for value in raw.values()):
+            raise SourceError(f"approval line {number}: wrong number of fields")
+        fields = project(raw, APPROVAL_FIELDS)
+        key = (fields["ieg_page_file"], fields["ieg_index"])
+        if key in out:
+            raise SourceError(f"approval locator {key} appears more than once")
+        out[key] = ApprovalFY(_valid_fy(fields["resolved_wb_fy"], fields["status"]),
+                              fields["aux_state"], fields["status"])
+    return out, want_sha
+
+
 # --- the P&O dictionary -----------------------------------------------------------------
 
 
@@ -670,6 +862,10 @@ class Context:
     aliases: dict
     regional_codes: dict
     regional_names: dict
+    remap: dict  # raw WB-2 code -> Remap
+    approval: object  # (page_file, index) -> ApprovalFY, or None when no approval output was given
+    registry_wb_by_name: dict  # norm(registry country name) -> set of WB ids
+    partial_names: frozenset  # (raw WB-2 code, normalized name) that identify only part of the territory
 
 
 def _class(ctx, code):
@@ -714,6 +910,15 @@ class Row:
     dup_count: int = 1
     dup_disagree: bool = False
     detail: str = ""
+    remap_rule: str = ""
+    remap_raw: str = ""
+    remap_target_wb: str = ""
+    remap_target_iso2: str = ""
+    remap_outcome: str = ""
+    remap_witness: str = ""
+    remap_fy: str = ""
+    remap_fy_status: str = ""
+    remap_aux: str = ""
 
 
 def _set_status(row, status, reason, rule):
@@ -754,8 +959,75 @@ def _single(row, code, source, ctx):
         _excluded(row, R_REG_AGG, ctx.regional_codes[code].rule_id)
     elif cls == CLS_AGG_UNLISTED:
         _quarantine(row, R_AGG_UNLISTED)
+    elif code in ctx.oghist.former_codes:
+        _quarantine(row, R_HISTORICAL)
+    elif code in ctx.remap:
+        _remap(row, code, ctx)
     else:
-        _quarantine(row, R_HISTORICAL if code in ctx.oghist.former_codes else R_NOT_IN_REG)
+        _quarantine(row, R_NOT_IN_REG)
+
+
+def _remap_witness(row, rule, ctx):
+    """The country witness: the name must resolve to the same target, or be absent.
+
+    Resolution is the P&O dictionary, the alias table, or an exact registry country name.
+    """
+    if row.name_kind == "region_name":
+        return "region_name"
+    if row.name_kind in ("exact", "alias"):
+        if row.name_code == rule.raw_code:
+            return "agree"
+        hit = ctx.registry.country_by_iso2.get(row.name_code)
+        return "agree" if hit is not None and hit[0] == rule.target_wb else "conflict"
+    targets = ctx.registry_wb_by_name.get(row.country_norm)
+    if not targets:
+        return "absent"
+    return "agree" if targets == {rule.target_wb} else "conflict"
+
+
+def _remap(row, code, ctx):
+    """Rule CW-08. The table decides; an outcome other than converted stays quarantined under the same reason."""
+    rule = ctx.remap[code]
+    row.remap_rule, row.remap_raw = rule.rule_id, code
+    row.remap_target_wb, row.remap_target_iso2 = rule.target_wb, rule.target_iso2
+    if rule.action == "quarantine":
+        row.remap_witness, row.remap_outcome = "not_evaluated", "quarantine_table"
+        _quarantine(row, R_NOT_IN_REG)
+        return
+    appr = None if ctx.approval is None else ctx.approval.get((row.page_file, str(row.index)))
+    fy = None if appr is None else appr.fy
+    if (code, row.country_norm) in ctx.partial_names and PARTIAL_FORBIDDEN_FRAGMENT not in row.country_norm:
+        witness = "partial_territory_name"
+    else:
+        witness = _remap_witness(row, rule, ctx)
+    row.remap_witness = witness
+    row.remap_fy = "" if fy is None else str(fy)
+    row.remap_fy_status = "no_approval_evidence" if appr is None else appr.status
+    row.remap_aux = "no_approval_evidence" if appr is None else appr.aux_state
+    if witness == "partial_territory_name":
+        outcome = "quarantine_partial_territory_name"
+    elif witness in ("conflict", "region_name"):
+        outcome = f"quarantine_witness_{witness}"
+    elif fy is None:
+        outcome = "quarantine_fy_unknown"
+    elif row.remap_aux not in APPROVAL_AUX_OK:
+        outcome = "quarantine_fy_conflict"
+    elif rule.start_fy is not None and fy < rule.start_fy:
+        outcome = "quarantine_fy_below_start"
+    elif rule.end_fy is not None and fy > rule.end_fy:
+        outcome = "quarantine_fy_above_end"
+    else:
+        outcome = "converted"
+    row.remap_outcome = outcome
+    if outcome != "converted":
+        _quarantine(row, R_GZ_PARTIAL if witness == "partial_territory_name" else R_NOT_IN_REG)
+        return
+    _set_status(row, ST_REMAP, "", RULE_REMAP)
+    _, wb_name = ctx.registry.country_by_iso2[rule.target_iso2]
+    row.resolved_code = code
+    row.wb_code, row.iso2, row.registry_name = rule.target_wb, rule.target_iso2, wb_name
+    row.oghist_present = "true" if rule.target_wb in ctx.oghist.wb_codes else "false"
+    row.non_iso = "true" if rule.target_wb in NON_ISO_WB_IDS else "false"
 
 
 def _evaluate(row, ctx):
@@ -858,6 +1130,8 @@ def _apply_duplicates(rows):
             row.dup_count = len(members)
             if disagree:
                 row.dup_disagree = True
+                if row.remap_outcome:
+                    row.remap_outcome = "superseded_by_duplicate_conflict"
                 _conflict(row, R_DUP, RULE_DUP)
 
 
@@ -879,6 +1153,8 @@ def _row_cells(r):
         r.resolved_code or "", r.wb_code, r.iso2, "WB" if r.wb_code else "", "", r.registry_name,
         r.oghist_present, r.non_iso,
         r.regional_entry, str(r.dup_count), r.detail,
+        r.remap_rule, r.remap_outcome, r.remap_raw, r.remap_target_wb, r.remap_target_iso2,
+        r.remap_witness, r.remap_fy, r.remap_fy_status, r.remap_aux,
     ]
 
 
@@ -892,6 +1168,8 @@ ROW_COLUMNS = (
     "resolved_pno_code", "wb_code", "iso2", "code_system", "iso3", "registry_name",
     "oghist_wb_code_present", "non_iso_wb_code",
     "regional_entry", "duplicate_project_id_count", "detail",
+    "remap_rule_id", "remap_outcome", "remap_raw_code", "remap_target_wb", "remap_target_iso2",
+    "remap_witness", "remap_fy_used", "remap_fy_status", "remap_aux_state",
 )
 
 CONFLICT_COLUMNS = (
@@ -1000,7 +1278,52 @@ def _qa(rows, ieg_records, pno, ctx):
             "resolved_wb_codes_absent_from_oghist": sorted(oghist_absent_codes),
         },
         "non_iso_resolved_rows": sum(1 for r in rows if r.non_iso == "true"),
-        "projection": {"ieg_fields": list(IEG_FIELDS), "pno_fields": list(PNO_FIELDS)},
+        "remap": _remap_qa(rows, ctx),
+        "projection": {"ieg_fields": list(IEG_FIELDS), "pno_fields": list(PNO_FIELDS),
+                       "approval_fields": list(APPROVAL_FIELDS)},
+    }
+
+
+def _fy_bucket(rule, fy_text):
+    if rule.action == "quarantine":
+        return "not_evaluated"
+    if fy_text == "":
+        return "fy_unknown"
+    if rule.start_fy is None:
+        return "no_threshold"
+    return "below_start" if int(fy_text) < rule.start_fy else "from_start"
+
+
+def _remap_qa(rows, ctx):
+    """Counts for the rows the remap table governs, by raw code and FY bucket. Counted from the final rows."""
+    outcomes = defaultdict(int)
+    per_code = {}
+    for r in rows:
+        if not r.remap_outcome:
+            continue
+        outcomes[r.remap_outcome] += 1
+        rule = ctx.remap[r.remap_raw]
+        entry = per_code.setdefault(r.remap_raw, {
+            "rule_id": rule.rule_id, "action": rule.action, "eligible_rows": 0, "converted_rows": 0,
+            "quarantined_by_outcome": defaultdict(int), "fy_buckets": defaultdict(int),
+            "converted_by_fy_bucket": defaultdict(int),
+        })
+        entry["eligible_rows"] += 1
+        bucket = _fy_bucket(rule, r.remap_fy)
+        entry["fy_buckets"][bucket] += 1
+        if r.status == ST_REMAP:
+            entry["converted_rows"] += 1
+            entry["converted_by_fy_bucket"][bucket] += 1
+        else:
+            entry["quarantined_by_outcome"][r.remap_outcome] += 1
+    for entry in per_code.values():
+        entry["quarantined_by_outcome"] = dict(sorted(entry["quarantined_by_outcome"].items()))
+        entry["fy_buckets"] = dict(sorted(entry["fy_buckets"].items()))
+        entry["converted_by_fy_bucket"] = dict(sorted(entry["converted_by_fy_bucket"].items()))
+    return {
+        "eligible_rows": sum(outcomes.values()),
+        "outcome_counts": dict(sorted(outcomes.items())),
+        "by_raw_code": dict(sorted(per_code.items())),
     }
 
 
@@ -1093,14 +1416,20 @@ def _tool_identity():
 # --- build ----------------------------------------------------------------------------------
 
 
-def build(snapshot, countries, oghist, aliases_path, out, *, regional_path=None, pins=None):
+def build(snapshot, countries, oghist, aliases_path, out, *, regional_path=None, remap_path=None,
+          approval_path=None, partial_names_path=None, pins=None):
     """Build the output directory. Return the sha256 of its manifest.json.
 
-    The defaults are read when the call runs, so a caller can replace DEFAULT_PINS or DEFAULT_REGIONAL.
+    approval_path is the pinned approval-FY output. Without it no approval FY is known, so every row the
+    remap table governs is quarantined (fy_unknown). The defaults are read when the call runs, so a caller
+    can replace DEFAULT_PINS, DEFAULT_REGIONAL or DEFAULT_REMAP.
     """
     snapshot, countries, oghist = Path(snapshot), Path(countries), Path(oghist)
     aliases_path, out = Path(aliases_path), Path(out)
     regional_path = DEFAULT_REGIONAL if regional_path is None else Path(regional_path)
+    remap_path = DEFAULT_REMAP if remap_path is None else Path(remap_path)
+    partial_names_path = DEFAULT_PARTIAL if partial_names_path is None else Path(partial_names_path)
+    approval_path = None if approval_path is None else Path(approval_path)
     pins = DEFAULT_PINS if pins is None else pins
     _check_destination(out)
 
@@ -1122,9 +1451,21 @@ def build(snapshot, countries, oghist, aliases_path, out, *, regional_path=None,
     aliases, aliases_sha = _load_aliases(aliases_path, name_dict, registry, pno_name_by_code)
     regional_codes, regional_names, regional_sha = _load_regional(
         regional_path, set(aliases), names_in_corpus, pno_name_by_code, pno_name_norms, registry)
+    remap, remap_sha, remap_rows = _load_remap(remap_path, registry)
+    partial_names, partial_sha, partial_rows = _load_partial_names(partial_names_path, remap, registry)
+    approval, approval_sha = (None, None) if approval_path is None else _load_approval(approval_path, pins)
+    if approval is not None:
+        locators = {(rec.page_file, str(rec.index)) for rec in ieg_records}
+        if set(approval) != locators:
+            raise SourceError("the approval rows and the IEG records do not name the same locators; nothing was written")
+    registry_wb_by_name = defaultdict(set)
+    for _iso2, (rid, rname) in registry.country_by_iso2.items():
+        registry_wb_by_name[norm(rname)].add(rid)
     ctx = Context(registry=registry, oghist=oghist_info, name_dict=name_dict,
                   pno_name_by_code=pno_name_by_code, aliases=aliases,
-                  regional_codes=regional_codes, regional_names=regional_names)
+                  regional_codes=regional_codes, regional_names=regional_names,
+                  remap=remap, approval=approval, registry_wb_by_name=dict(registry_wb_by_name),
+                  partial_names=partial_names)
 
     rows = _build_rows(ieg_records, pno, ctx)
     _apply_duplicates(rows)
@@ -1191,13 +1532,43 @@ def build(snapshot, countries, oghist, aliases_path, out, *, regional_path=None,
             "aliases": {"file": aliases_path.name, "sha256": aliases_sha, "rows": len(aliases)},
             "regional": {"file": regional_path.name, "sha256": regional_sha,
                          "code_rows": len(regional_codes), "name_rows": len(regional_names)},
+            "remap": {"file": remap_path.name, "sha256": remap_sha, "rows": len(remap_rows),
+                      "convert_rows": sum(1 for r in remap.values() if r.action == "convert"),
+                      "quarantine_rows": sum(1 for r in remap.values() if r.action == "quarantine"),
+                      "columns": list(REMAP_COLUMNS)},
+            "partial_names": {"file": partial_names_path.name, "sha256": partial_sha,
+                              "rows": len(partial_rows),
+                              "entries": sorted([code, text] for code, text in partial_names),
+                              "columns": list(PARTIAL_COLUMNS)},
+            "approval": None if approval is None else {
+                "name": approval_path.name,
+                "manifest_sha256": pins.approval_manifest_sha256,
+                "rows_file": APPROVAL_ROWS_FILE,
+                "rows_sha256": approval_sha,
+                "rows": len(approval),
+                "snapshot_manifest_sha256": pins.snapshot_manifest_sha256,
+                "columns_read": list(APPROVAL_FIELDS),
+            },
         },
-        "projection": {"ieg_fields": list(IEG_FIELDS), "pno_fields": list(PNO_FIELDS)},
+        "projection": {"ieg_fields": list(IEG_FIELDS), "pno_fields": list(PNO_FIELDS),
+                       "approval_fields": list(APPROVAL_FIELDS)},
+        "cell_encoding": {
+            "rule": "Raw source values in the derived CSVs are JSON-encoded text, not bare values. The JSON is produced with json.dumps(ensure_ascii=False), so non-ASCII text stays literal.",
+            "ieg_country_raw": "A JSON string, quotes included: \"Africa\" is written as \"Africa\" with its two double quotes. Same encoding in country_conflicts.csv.",
+            "pno_countryname_raw": "A JSON array of strings, for example [\"Republic of Angola\"]. The unquoted text <missing> means the P&O record, its countryname, or the list is absent, null or empty in the source.",
+            "pno_countrycode_raw": "As pno_countryname_raw: a JSON array of strings, or <missing>.",
+            "absent_marker": "<missing> is a literal, unquoted string. Every JSON value in these columns begins with a double quote or an opening bracket, so the marker cannot be mistaken for a value.",
+            "plain_text_columns": "project_id, ieg_page_file, ieg_index, ieg_country_norm, the code, name and WB id columns, and the QA and manifest values are plain text, not JSON.",
+            "approval_input": "Only resolved_wb_fy, aux_state and status are read from the approval rows, and resolved_wb_fy is plain digits. The approval file's own raw cells, such as ieg_as_of_date_raw, are JSON-encoded in that file and are never read here.",
+        },
         "policy": {
             "iso3": "null everywhere: no ISO 3166 registry is pinned, so no code is shown as ISO3",
-            "code_system": "WB for every resolved row; the WB id is the registry id of the P&O code's iso2Code",
+            "code_system": "WB for every resolved row; the WB id is the registry id of the P&O code's iso2Code, or the remap table's target for a remapped row",
             "dated_aliases": "not supported in this step: a dated alias needs the approval date, which is not projected",
-            "legacy_codes": "P&O codes the registry does not carry are quarantined; no successor is assigned",
+            "legacy_codes": "A P&O code the registry does not carry is quarantined, unless the reviewed remap table converts it under CW-08. A table row names the successor; no other successor is assigned.",
+            "remap": "Council decision C11 (GPT round 8). Converted only with an agreeing or absent name witness, a known approval FY with no aux conflict, and the row's FY bounds. The raw code is kept, no predecessor data is carried, and the table status stays proposed until reviewed.",
+            "partial_names": "A normalized name in the reviewed partial-name list, for the same raw code, is quarantined under reason gz_partial_territory_name before any witness or FY is considered. The list is exact data: a name that contains the West Bank fragment is never a partial name, and the loader refuses one that does.",
+            "fy_conflict": "An approval whose P&O approvalfy disagrees with the computed FY (aux_state disagrees) is treated as a conflicting approval FY and quarantined. This is a reading of 'conflicting' made in this step; the approval output itself keeps the FY.",
             "dup_policy": "repeated project_ids are kept, one row per IEG record; disagreement is a conflict",
         },
         "rules": _rules_list(),
@@ -1218,12 +1589,19 @@ def main(argv=None):
     parser.add_argument("--snapshot", required=True, type=Path, help="pinned snapshot 2026-10-15-sorted (read-only)")
     parser.add_argument("--countries", required=True, type=Path, help="pinned country registry directory (read-only)")
     parser.add_argument("--oghist", required=True, type=Path, help="pinned OGHIST r2 directory (read-only)")
+    parser.add_argument("--approval", required=True, type=Path,
+                        help="pinned approval-FY output directory (read-only): the FY for the remap")
     parser.add_argument("--aliases", required=True, type=Path, help="versioned alias table CSV")
     parser.add_argument("--regional", type=Path, default=DEFAULT_REGIONAL, help="fixed regional list CSV")
+    parser.add_argument("--remap", type=Path, default=DEFAULT_REMAP, help="reviewed legacy WB-2 remap table CSV")
+    parser.add_argument("--partial-names", type=Path, default=DEFAULT_PARTIAL,
+                        help="reviewed partial-territory-name list CSV (quarantined, never converted)")
     parser.add_argument("--out", required=True, type=Path, help="new output directory; must not exist")
     args = parser.parse_args(argv)
     try:
-        sha = build(args.snapshot, args.countries, args.oghist, args.aliases, args.out, regional_path=args.regional)
+        sha = build(args.snapshot, args.countries, args.oghist, args.aliases, args.out,
+                    regional_path=args.regional, remap_path=args.remap, approval_path=args.approval,
+                    partial_names_path=args.partial_names)
     except DurabilityUnconfirmed as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 3
