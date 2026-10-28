@@ -154,7 +154,7 @@ remain open while GAP-011 does, and `M0_COMPLETION_REPORT.md` does not exist.
 | Category | SEC |
 | Severity | P1 — HIGH |
 | Status | CLOSED |
-| Verified 2026-07-30 | `app/auth.py` → `_hash_password()` uses `argon2.PasswordHasher` (PR #34), with migration of the legacy formats on verify. |
+| Verified 2026-07-30 | `app/passwords.py` → `_hash_password()` uses `argon2.PasswordHasher` (PR #34; moved out of `app/auth.py` with persistent accounts, when the legacy-format migration was removed). |
 | Evidence (as raised 2026-07-24) | `app/auth.py` — uses `hashlib.sha256` instead of bcrypt |
 | Root Cause (as raised) | bcrypt in requirements.txt but not used |
 | Impact (as raised) | Passwords vulnerable to GPU brute-force attacks |

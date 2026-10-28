@@ -118,6 +118,29 @@ def _provision_test_schema():
 
 _provision_test_schema()
 
+
+def _seed_accounts():
+    """The three built-in accounts, as the deployment's bootstrap creates them.
+
+    Accounts live in the `users` table now, so a fresh test database has none
+    and every login test would fail for a reason that has nothing to do with
+    it. This is the same `accounts.bootstrap` the deployment runs, with the
+    development passwords -- and like it, a no-op on a table that already
+    holds accounts, which is the CI PostgreSQL case on a second run.
+
+    Tests that change an account create their own; these three are shared by
+    the whole suite and must be left as they were found.
+    """
+    from app import accounts
+    from app.database import SessionLocal
+    from app.passwords import _hash_password
+
+    with SessionLocal() as session:
+        accounts.bootstrap(session, accounts.DEV_PASSWORDS, _hash_password)
+
+
+_seed_accounts()
+
 # Create in-memory mock cache BEFORE any imports
 mock_cache = {}
 mock_lists = {}  # For Redis list operations (rpush, lrange)
@@ -667,3 +690,43 @@ def pytest_report_header(config):
         "  to do with the test being collected. Tests that do not import `app`",
         "  still run.",
     ]
+
+
+@pytest.fixture
+def make_account():
+    """Create accounts for one test and delete them afterwards.
+
+    For any test that blocks, resets or otherwise changes an account: the
+    three built-in ones are shared by the whole suite. Names are made unique
+    per call, so a test run twice against the same PostgreSQL never collides
+    with what an interrupted earlier run left behind.
+    """
+    import uuid as _uuid
+
+    import sqlalchemy as sa
+
+    from app import accounts
+    from app.database import SessionLocal, User
+    from app.passwords import _hash_password
+
+    created = []
+
+    def make(prefix="acct", password="correct horse battery staple", role="specialist",
+             is_blocked=False):
+        name = f"{prefix}-{_uuid.uuid4().hex[:10]}"
+        with SessionLocal() as session:
+            user = accounts.create_user(session, username=name, password=password, role=role,
+                                        created_by=None, hash_password=_hash_password)
+            if is_blocked:
+                user = accounts.update_access(session, actor_id=_uuid.uuid4(), user_id=user.id,
+                                              is_blocked=True)
+            state = accounts.state_by_id(session, user.id)
+        created.append(state.id)
+        return state
+
+    yield make
+
+    with SessionLocal() as session:
+        if created:
+            session.execute(sa.delete(User).where(User.id.in_(created)))
+            session.commit()

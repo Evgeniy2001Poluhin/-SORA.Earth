@@ -638,6 +638,64 @@ class EnvironmentalJobLog(Base):
     metadata_json = Column(JSON, nullable=True)  # Job-specific metadata
 
 
+#: Roles an account may hold. `specialist` is the pilot participant: it is not
+#: `analyst`, because `require_analyst_or_admin` admits analysts to operational
+#: endpoints a participant has no business reaching.
+USER_ROLES = ("admin", "analyst", "viewer", "specialist")
+
+
+class User(Base):
+    """An account. The only place accounts live.
+
+    Accounts used to be a module-level dict in app/auth.py rebuilt at import
+    from SORA_DEFAULT_*_PASSWORD, so anything created at runtime was gone on
+    the next restart, and blocking someone meant changing an environment
+    variable and redeploying.
+
+    `token_version` is the generation of every session the account holds. A
+    token carries the version it was issued at, and is accepted only while the
+    row still has that version, so resetting a password, changing a role,
+    blocking -- and unblocking -- revokes every outstanding token in every
+    worker at the moment the transaction commits. It is read on every request,
+    not cached: a cache is exactly the window revocation is meant to close.
+
+    `password_changed_at` is informational. It deliberately plays no part in
+    revocation -- comparing a token's `iat` against it brings clock skew and
+    second-resolution ties into a security decision for no gain.
+    """
+    __tablename__ = "users"
+
+    id = Column(sa.Uuid(as_uuid=True), primary_key=True)
+    username = Column(String(50), nullable=False)
+    password_hash = Column(Text, nullable=False)
+    role = Column(String(16), nullable=False)
+    is_blocked = Column(Boolean, nullable=False, server_default=sa.false())
+    token_version = Column(BigInteger, nullable=False, server_default=sa.text("1"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    password_changed_at = Column(DateTime(timezone=True), nullable=False,
+                                 server_default=func.now())
+    created_by_user_id = Column(sa.Uuid(as_uuid=True),
+                                sa.ForeignKey("users.id", name="fk_users_created_by",
+                                              ondelete="RESTRICT"),
+                                nullable=True)
+
+    __table_args__ = (
+        sa.UniqueConstraint("username", name="uq_users_username"),
+        CheckConstraint(
+            "username = lower(trim(username)) AND length(username) BETWEEN 3 AND 50",
+            name="ck_users_username",
+        ),
+        CheckConstraint(
+            "role IN ('admin', 'analyst', 'viewer', 'specialist')",
+            name="ck_users_role",
+        ),
+        CheckConstraint("token_version > 0", name="ck_users_token_version"),
+        CheckConstraint("password_hash LIKE '$argon2id$%'",
+                        name="ck_users_password_argon2id"),
+    )
+
+
 def count_physical_runs(db, status=None, since=None) -> int:
     """How many retrains happened, not how many rows were written (#199 phase 2A).
 

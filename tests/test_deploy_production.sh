@@ -91,6 +91,10 @@ new_sandbox() {
         echo '      - targets: ["scheduler:9000"]'
     } > "$REPO/infra/prometheus.yml"
     echo "services: {}" > "$REPO/compose.yml"
+    # Present so the deployment runs its account-bootstrap step; the deploy
+    # script runs it only where the checked-out code has it.
+    mkdir -p "$REPO/scripts"
+    echo "# stand-in" > "$REPO/scripts/bootstrap_users.py"
     git -C "$REPO" add -A >/dev/null
     git -C "$REPO" commit -qm "first"
     git -C "$REPO" branch -M main >/dev/null 2>&1
@@ -210,6 +214,18 @@ case "$argv" in
         n=$(( $(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0) + 1 ))
         echo "$n" > "$STUB_DIR/migrate_calls"
         [ -f "$STUB_DIR/migrate_fails" ] && exit 1
+        exit 0 ;;
+    # The persistent-accounts rollback barrier asks whether `users` exists.
+    # "f" unless a case says otherwise; a failing query prints nothing, which
+    # the barrier must treat as a refusal.
+    *"exec -T postgres sh -c"*)
+        [ -f "$STUB_DIR/users_table_unreadable" ] && exit 1
+        cat "$STUB_DIR/users_table" 2>/dev/null || echo f
+        exit 0 ;;
+    *"run --rm --no-deps bootstrap-users"*)
+        n=$(( $(cat "$STUB_DIR/bootstrap_calls" 2>/dev/null || echo 0) + 1 ))
+        echo "$n" > "$STUB_DIR/bootstrap_calls"
+        [ -f "$STUB_DIR/bootstrap_fails" ] && exit 1
         exit 0 ;;
     *"up -d --wait postgres"*)
         [ -f "$STUB_DIR/postgres_fails" ] && exit 1
@@ -1179,6 +1195,26 @@ check "without building" \
     "$(grep -qc 'up -d --no-build' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
 
+new_sandbox
+with_previous_deployment
+echo "nginx" > "$STUB_DIR/services"
+echo "p-nginx-1|nginx|0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp" > "$STUB_DIR/running"
+touch "$STUB_DIR/nginx_t_fails"
+echo t > "$STUB_DIR/users_table"
+run_guard
+# The previous commit predates persistent accounts and the migration has made
+# the table: that code would not start on this schema and would ignore every
+# block and reset, so the automatic rollback stops and says so, and the exit is
+# the one that needs an operator.
+check "an automatic rollback past persistent accounts is refused" "$RC" "76"
+check "it says why" \
+    "$(grep -qc 'ROLLBACK REFUSED' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "and did not restore the previous images" \
+    "$(grep -qc 'restored the images that were running' "$SANDBOX/out" && echo yes || echo no)" "no"
+check "and the journal records the refusal" \
+    "$(grep -qc 'rollback-refused' "$SANDBOX/manifests/in-progress" 2>/dev/null && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
 echo "== a refusal with nothing recorded stops only what this run created =="
 # No previous manifest: there is no state to restore, so the only safe action is
 # to stop what this run started. Anything already present may belong to another
@@ -1500,6 +1536,73 @@ run_guard
 refused_because "a database that will not start refuses the deployment" "postgres would not start"
 check "and the migration was not attempted against nothing" \
     "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" "0"
+rm -rf "$SANDBOX"
+
+echo "== the accounts are bootstrapped after the migration, before anything is recreated =="
+# The new code reads accounts only from the `users` table. Serving it over an
+# empty table is a site nobody can sign in to, and over a table with no active
+# administrator one nobody can manage -- so the check runs every deployment,
+# from the deployed image, and a refusal stops the release.
+
+new_sandbox
+run_guard
+check "the account bootstrap ran exactly once" \
+    "$(cat "$STUB_DIR/bootstrap_calls" 2>/dev/null || echo 0)" "1"
+MIG_LINE="$(grep -n 'run --rm --no-deps migrate' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+BOOT_LINE="$(grep -n 'run --rm --no-deps bootstrap-users' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+UP_LINE="$(grep -n 'up -d --no-build --remove-orphans' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+check "after the migration and before the containers are recreated" \
+    "$([ -n "$MIG_LINE" ] && [ -n "$BOOT_LINE" ] && [ -n "$UP_LINE" ] && [ "$MIG_LINE" -lt "$BOOT_LINE" ] && [ "$BOOT_LINE" -lt "$UP_LINE" ] && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
+new_sandbox
+touch "$STUB_DIR/bootstrap_fails"
+run_guard
+refused_because "a refused account bootstrap refuses the deployment" "account bootstrap refused"
+check "and nothing was recreated" \
+    "$(grep -c 'up -d --no-build --remove-orphans' "$STUB_DIR/calls")" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+touch "$STUB_DIR/migrate_fails"
+run_guard
+check "a failed migration is not followed by a bootstrap" \
+    "$(cat "$STUB_DIR/bootstrap_calls" 2>/dev/null || echo 0)" "0"
+rm -rf "$SANDBOX"
+
+echo "== code from before persistent accounts is not restored once users exists =="
+# That code would refuse the migrated schema and ignore every block and reset.
+# The sandbox's commits have no app/accounts.py, so every rollback here is to
+# such code.
+
+new_sandbox
+echo t > "$STUB_DIR/users_table"
+run_guard --rollback "$FIRST"
+refused_because "an explicit rollback onto a schema with users is refused" "predates persistent accounts"
+check "and the migration did not run" \
+    "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+touch "$STUB_DIR/users_table_unreadable"
+run_guard --rollback "$FIRST"
+refused_because "an unreadable answer refuses rather than assumes the table is absent" "predates persistent accounts"
+rm -rf "$SANDBOX"
+
+new_sandbox
+echo f > "$STUB_DIR/users_table"
+run_guard --rollback "$FIRST"
+check "with no users table, the rollback is not refused for it" \
+    "$(grep -c 'predates persistent accounts' "$SANDBOX/out" | tr -d ' ')" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+git -C "$REPO" rm -q scripts/bootstrap_users.py
+git -C "$REPO" commit -qm "no bootstrap"
+git -C "$REPO" push -q origin main 2>/dev/null
+run_guard
+check "code without the bootstrap script does not ask for the service" \
+    "$(cat "$STUB_DIR/bootstrap_calls" 2>/dev/null || echo 0)" "0"
 rm -rf "$SANDBOX"
 
 echo "== the migration and the application are one image, not two builds =="

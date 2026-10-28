@@ -1,9 +1,11 @@
 """The production guards must be reachable, not merely present.
 
-Three guards refuse to start a production deployment with development secrets:
+Guards refuse a production deployment with development secrets:
 
-    app/auth.py:28              a dev JWT signing key
-    app/auth.py:371             the built-in account passwords
+    app/auth.py                 a dev JWT signing key
+    scripts/bootstrap_users.py  the built-in account passwords, which seed an
+                                empty `users` table once and are never read by
+                                the backend; `--dev` is refused in production
     app/secret_validation.py    every secret in REQUIRED_IN_PRODUCTION
 
 Each is written correctly and covered by tests. On the running production host
@@ -75,8 +77,8 @@ def names_read_by_app() -> set[str]:
     working entry.
 
     Names assembled at runtime — the `f"SORA_DEFAULT_{role.upper()}_PASSWORD"`
-    in `app/auth.py` — still cannot be seen, which is why those are asserted by
-    name below instead.
+    in `scripts/bootstrap_users.py`, which is not under `app/` at all — cannot
+    be seen, which is why those are asserted by name below instead.
     """
     found: set[str] = set()
     for path in sorted((REPO / "app").rglob("*.py")):
@@ -171,10 +173,9 @@ def test_compose_passes_no_name_the_application_never_reads(service):
         "DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME",
         "POOL_MODE", "MAX_CLIENT_CONN", "DEFAULT_POOL_SIZE", "AUTH_TYPE",
         "WORKERS",
-        # Read at app/auth.py:367 through an f-string, so the AST scan above
-        # cannot see them by construction. Not an exemption from the rule --
-        # `test_every_secret_the_code_requires_is_supplied` asserts each of
-        # them is passed, which is the same claim from the other side.
+        # Read by scripts/bootstrap_users.py through an f-string. Listed so
+        # this test does not ask for their deletion; that the backend is not
+        # given them at all is asserted below.
         "SORA_DEFAULT_ADMIN_PASSWORD",
         "SORA_DEFAULT_ANALYST_PASSWORD",
         "SORA_DEFAULT_VIEWER_PASSWORD",
@@ -193,24 +194,49 @@ def test_compose_passes_no_name_the_application_never_reads(service):
     )
 
 
+BOOTSTRAP_PASSWORDS = (
+    "SORA_DEFAULT_ADMIN_PASSWORD",
+    "SORA_DEFAULT_ANALYST_PASSWORD",
+    "SORA_DEFAULT_VIEWER_PASSWORD",
+)
+
+
 def test_every_secret_the_code_requires_is_supplied():
-    """The names the guards demand, checked against what backend receives."""
+    """The names the guards demand, checked against what each service receives."""
     env = compose_environment("backend")
-    missing = [
-        name
-        for name in (
-            "SORA_JWT_SECRET",
-            "SORA_ADMIN_TOKEN",
-            "SORA_DEFAULT_ADMIN_PASSWORD",
-            "SORA_DEFAULT_ANALYST_PASSWORD",
-            "SORA_DEFAULT_VIEWER_PASSWORD",
-        )
-        if name not in env
-    ]
+    missing = [name for name in ("SORA_JWT_SECRET", "SORA_ADMIN_TOKEN") if name not in env]
     assert not missing, (
         "backend is not given these, so the application falls back to the "
         f"development literals in app/auth.py: {missing}"
     )
+
+    bootstrap = compose_environment("bootstrap-users")
+    absent = [name for name in BOOTSTRAP_PASSWORDS if name not in bootstrap]
+    assert not absent, (
+        "bootstrap-users is not given these, so the first deployment to an "
+        f"empty database cannot create the built-in accounts: {absent}"
+    )
+    assert bootstrap.get("SORA_ENV") == "production", (
+        "bootstrap-users must know it is production, or `--dev` would be accepted"
+    )
+
+
+@pytest.mark.parametrize("service", APP_SERVICES)
+def test_the_bootstrap_passwords_reach_no_running_service(service):
+    """They seed an empty table once. A long-running process has no use for them.
+
+    The backend used to rebuild the accounts from them on every import, so
+    they had to be there. Now nothing in it reads them, and a secret handed to
+    a process that never uses it is exposure without benefit.
+    """
+    leaked = [name for name in BOOTSTRAP_PASSWORDS if name in compose_environment(service)]
+    assert not leaked, f"{service} is given {leaked}, which it never reads"
+
+
+def test_the_bootstrap_service_gets_no_signing_key():
+    """It hashes passwords and writes rows; it issues no tokens."""
+    env = compose_environment("bootstrap-users")
+    assert "SORA_JWT_SECRET" not in env and "SORA_ADMIN_TOKEN" not in env, sorted(env)
 
 
 def test_the_guard_reads_the_environment_and_not_only_its_argument():

@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.auth import create_access_token
+from tests._auth_tokens import access_token_for
 
 
 def test_the_mass_delete_is_refused_before_it_can_run(client, monkeypatch):
@@ -32,7 +32,7 @@ def test_the_mass_delete_is_refused_before_it_can_run(client, monkeypatch):
     # this is the call that would have emptied the table.
     assert session.query.call_count == 0, "the mass-delete handler ran for an anonymous caller"
 
-    viewer = create_access_token({"sub": "viewer"})
+    viewer = access_token_for("viewer")
     forbidden = client.request("DELETE", "/api/v1/history",
                                headers={"Authorization": f"Bearer {viewer}"})
     assert forbidden.status_code == 403

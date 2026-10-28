@@ -16,7 +16,7 @@ they are safe.
 import pytest
 from fastapi.routing import APIRoute
 
-from app.auth import create_access_token
+from tests._auth_tokens import access_token_for
 
 # --- the policy, one entry per state-changing (path, method-agnostic) route ---
 
@@ -52,6 +52,9 @@ ADMIN = {
     "/api/v1/model/data/bulk-upload", "/api/v1/model/data/bulk-upload/content",
     "/api/v1/model/data/refresh", "/api/v1/model/retrain",
     "/api/v1/model/retrain/{retrain_log_id}/retry-registration",
+    # Account management: creating, resetting, blocking and re-roling accounts.
+    "/api/v1/admin/users", "/api/v1/admin/users/{user_id}",
+    "/api/v1/admin/users/{user_id}/reset-password",
     # Guarded by this fix.
     "/api/v1/cache/clear",
     "/api/v1/cache/redis/invalidate",
@@ -154,7 +157,7 @@ def test_the_cache_invalidation_routes_reject_the_unauthorized(client):
     handler runs; only these two are exercised end to end because they are cheap
     and touch only the mocked cache.
     """
-    viewer = create_access_token({"sub": "viewer"})
+    viewer = access_token_for("viewer")
     for method, path in (
         ("DELETE", "/api/v1/cache/redis/invalidate"),
         ("DELETE", "/api/v1/cache/redis/invalidate/predict"),

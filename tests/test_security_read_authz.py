@@ -1,6 +1,6 @@
 """Security tests for read authorization (GHSA-jmpv-7wjf-87q9)."""
 import pytest
-from app.auth import create_access_token
+from tests._auth_tokens import access_token_for
 from app.security.spreadsheet import neutralize_cell
 
 
@@ -9,7 +9,7 @@ def test_csv_export_neutralizes_formula_triggers(client):
     from app.database import Evaluation
     from app.main import get_db_sync
 
-    admin_token = create_access_token({"sub": "admin", "role": "admin"})
+    admin_token = access_token_for("admin")
 
     # Directly insert an evaluation with a formula-trigger name.
     db = get_db_sync()
@@ -47,7 +47,7 @@ def test_csv_export_does_not_modify_normal_names(client):
     from app.database import Evaluation
     from app.main import get_db_sync
 
-    admin_token = create_access_token({"sub": "admin", "role": "admin"})
+    admin_token = access_token_for("admin")
 
     # Directly insert an evaluation with a normal name.
     db = get_db_sync()
@@ -112,7 +112,7 @@ def test_neutralize_cell_leaves_numbers_unchanged():
 
 def test_predictions_log_limit_validation(client):
     """analytics/predictions-log with an over-limit limit → 422."""
-    admin_token = create_access_token({"sub": "admin", "role": "admin"})
+    admin_token = access_token_for("admin")
 
     # Request with limit > 1000 should be rejected.
     response = client.get("/api/v1/analytics/predictions-log?limit=1001",
@@ -122,7 +122,7 @@ def test_predictions_log_limit_validation(client):
 
 def test_predictions_log_accepts_valid_limit(client):
     """analytics/predictions-log with a valid limit → 200."""
-    admin_token = create_access_token({"sub": "admin", "role": "admin"})
+    admin_token = access_token_for("admin")
 
     # Request with limit ≤ 1000 should succeed.
     response = client.get("/api/v1/analytics/predictions-log?limit=100",
@@ -156,7 +156,7 @@ def test_anonymous_get_on_protected_routes_returns_401(client):
 
 def test_authenticated_user_can_access_protected_routes(client):
     """Authenticated GET (viewer, analyst, admin) → 200 or 404."""
-    viewer_token = create_access_token({"sub": "viewer", "role": "viewer"})
+    viewer_token = access_token_for("viewer")
 
     protected_routes = [
         "/api/v1/history",
@@ -182,6 +182,6 @@ def test_batch_list_requires_authentication(client):
     assert response.status_code == 401, "Anonymous batch list returned non-401"
 
     # Authenticated request should succeed.
-    viewer_token = create_access_token({"sub": "viewer", "role": "viewer"})
+    viewer_token = access_token_for("viewer")
     response = client.get("/api/v1/batch", headers={"Authorization": f"Bearer {viewer_token}"})
     assert response.status_code == 200, "Authenticated batch list failed"

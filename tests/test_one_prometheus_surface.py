@@ -147,9 +147,9 @@ def test_the_operational_dict_is_still_served_as_json(client):
     for field in ("requests_total", "uptime_seconds", "avg_response_time_ms"):
         assert field in body, f"{field} disappeared with the hand-built exporter"
 
-    from app.auth import create_access_token
+    from tests._auth_tokens import access_token_for
 
-    token = create_access_token({"sub": "admin", "role": "admin"})
+    token = access_token_for("admin")
     admin_body = client.get(
         "/api/v1/metrics", headers={"Authorization": f"Bearer {token}"}).json()
 

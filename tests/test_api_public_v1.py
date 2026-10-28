@@ -3,7 +3,7 @@
 from typing import Dict, Any
 
 import pytest
-from app.auth import create_access_token
+from tests._auth_tokens import access_token_for
 
 
 PROJECT: Dict[str, Any] = {
@@ -28,7 +28,7 @@ def test_evaluate_and_history_flow(client):
     Проверка теперь идёт по дельте, а не по «хотя бы одна»: набор не изолирован
     по базе между тестами, и непустая история могла бы остаться от соседа.
     """
-    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    token = access_token_for("viewer")
     headers = {"Authorization": f"Bearer {token}"}
 
     before = client.get("/api/v1/history", headers=headers)
@@ -122,7 +122,7 @@ def test_trends_and_prediction_history(client):
     assert trends.status_code == 200
     # допускаем разный формат (list/dict), главное — не 500
 
-    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    token = access_token_for("viewer")
     hist = client.get("/api/v1/predictions/history", headers={"Authorization": f"Bearer {token}"})
     assert hist.status_code == 200
     h_data = hist.json()
@@ -133,7 +133,7 @@ def test_trends_and_prediction_history(client):
 # pending". Both routes exist: app/api/evaluate.py:287 and
 # app/api/predict.py:233. The marker outlived the gap it described.
 def test_export_csv_endpoints(client):
-    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    token = access_token_for("viewer")
     headers = {"Authorization": f"Bearer {token}"}
 
     # общий экспорт

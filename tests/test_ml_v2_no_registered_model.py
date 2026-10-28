@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 from mlflow.exceptions import MlflowException
 import pytest
 
-from app.auth import create_access_token
+from tests._auth_tokens import access_token_for
 from app.ml import routes
 
 
@@ -84,7 +84,7 @@ def ml_client():
 
 
 def _admin_headers():
-    return {"Authorization": f"Bearer {create_access_token({'sub': 'admin', 'role': 'admin'})}"}
+    return {"Authorization": f"Bearer {access_token_for('admin')}"}
 
 
 def test_model_version_answers_503_when_no_bundle_is_loaded(ml_client):

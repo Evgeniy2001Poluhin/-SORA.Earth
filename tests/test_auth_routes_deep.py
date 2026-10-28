@@ -31,7 +31,7 @@ def test_login_wrong_password():
 
 # test_register and test_register_duplicate were here. The endpoint they
 # exercised was removed in #169: it answered 200 and lost the account on the
-# next restart. Its absence is asserted in tests/test_accounts_are_not_persisted.py.
+# next restart. Its absence is asserted in tests/test_registration_stays_closed.py.
 
 def test_me_without_token():
     c = TestClient(app, raise_server_exceptions=False)
