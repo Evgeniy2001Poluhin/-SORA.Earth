@@ -1,22 +1,27 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import OnboardingTour from "./OnboardingTour";
 import { useTheme } from "./theme-context";
 import { ModelBadge } from "../components/ModelBadge";
 import { HealthPill } from "../features/evaluate/HealthPill";
 import { useServiceSnapshot } from "../features/evaluate/useServiceHealth";
+import { navFor } from "./access";
+import { useAuth } from "@/store/auth";
 import "./shell.css";
-
-const NAV = [ { to:"/", label:"Home" }, { to:"/evaluate", label:"Evaluate" }, { to:"/compare", label:"Compare" }, { to:"/drift", label:"Drift" }, { to:"/explain", label:"Explain" }, { to:"/copilot", label:"✨ Co-Pilot" }, { to:"/calibration", label:"Calibration" }, { to:"/mlops", label:"MLOps" }, { to:"/history", label:"History" }, { to:"/map", label:"Map" }, { to:"/forecast", label:"Forecast" }, { to:"/webhooks", label:"Webhooks" }, { to:"/status", label:"Status" }, { to:"/compliance", label:"Compliance" } ];
 
 export function Shell() {
   const { theme, toggle } = useTheme();
   const [tour, setTour] = useState(0);
   const navRef = useRef<HTMLElement>(null);
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   // The header pill reads the service's own answer, the same shared query the
   // Evaluate hero uses (one request, not one per page).
   const { status } = useServiceSnapshot();
+  const user = useAuth((s) => s.user);
+  const logout = useAuth((s) => s.logout);
+  const navigate = useNavigate();
+  // The menu and the route guard read the same rule (./access.ts).
+  const nav = navFor(user);
 
   // Bring the active link inside the nav's own scroll box, on load and on each
   // route change. scrollLeft is set directly: scrollIntoView would also scroll
@@ -45,7 +50,7 @@ export function Shell() {
           <span className="display" style={{fontSize:20}}>SORA<span style={{color:"var(--planet)"}}>.</span>earth</span>
         </div>
         <nav className="shell-nav" ref={navRef}>
-          {NAV.map(n => <NavLink key={n.to} to={n.to} end data-tour={n.to.replace("/","")||"home"} className={({isActive})=>isActive?"active":""}>{n.label}</NavLink>)}
+          {nav.map(n => <NavLink key={n.to} to={n.to} end data-tour={n.to.replace("/","")||"home"} className={({isActive})=>isActive?"active":""}>{n.label}</NavLink>)}
         </nav>
         <div className="shell-right" style={{display:"flex",alignItems:"center",gap:10}}>
           <button onClick={toggle} className="theme-toggle" aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
@@ -54,6 +59,17 @@ export function Shell() {
           <button onClick={()=>setTour(t=>t+1)} className="theme-toggle" title="Take the tour" aria-label="Take the tour">?</button>
           <ModelBadge />
           <HealthPill status={status} />
+          {user ? (
+            <div className="shell-account" style={{display:"flex",alignItems:"center",gap:8,fontSize:12}}>
+              <span className="shell-user" title={"Signed in as " + user.username}>{user.username} · {user.role}</span>
+              <button type="button" className="theme-toggle" style={{width:"auto",padding:"0 10px"}}
+                onClick={() => navigate("/login?next=" + encodeURIComponent(pathname + search))}>Switch account</button>
+              <button type="button" className="theme-toggle" style={{width:"auto",padding:"0 10px"}}
+                onClick={() => void logout()}>Sign out</button>
+            </div>
+          ) : (
+            pathname !== "/login" && <Link to={"/login?next=" + encodeURIComponent(pathname + search)} className="shell-signin" style={{fontSize:12,color:"var(--planet)"}}>Sign in</Link>
+          )}
         </div>
       </header>
       <main className="shell-main"><Outlet/></main>

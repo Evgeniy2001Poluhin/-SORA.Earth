@@ -1,6 +1,16 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, expect } from "vitest";
+import { resetAuthForTests } from "@/store/auth";
+import { session } from "@/lib/session";
+
+// Every test starts as a fresh page load that has finished checking its
+// session: anonymous, nothing stored, no QueryClient bound from a previous test.
+// A test about hydration puts the store back to "hydrating" itself.
+beforeEach(() => {
+  session.bindQueryClient(null);
+  resetAuthForTests("ready");
+});
 
 // Nothing in the suite may reach the network. Any component or mock that tries
 // to fetch is a defect, so fail loudly instead of hanging or hitting a real API.
