@@ -68,9 +68,9 @@ def _evaluation(session, *, scope, owner=None, name, score, when, budget=100000.
     return row.id
 
 
-def _log(session, *, scope, owner=None, budget=100000.0, category="Solar Energy",
+def _log(session, *, scope, owner=None, budget=100000.0, co2=50.0, category="Solar Energy",
          probability=70.0, prediction=1, when=None):
-    row = PredictionLog(endpoint="evaluate", budget=budget, co2_reduction=50.0,
+    row = PredictionLog(endpoint="evaluate", budget=budget, co2_reduction=co2,
                         social_impact=6.0, duration_months=12, category=category,
                         region="Germany", prediction=prediction, probability=probability,
                         esg_total_score=60.0, latency_ms=12.0, model_version="unknown",
@@ -98,8 +98,11 @@ class World(SimpleNamespace):
         with self.Session() as s:
             e = _evaluation(s, scope="pilot", owner=owner.id, name=name, score=score,
                             when=when, budget=budget)
-            lg = _log(s, scope="pilot", owner=owner.id, budget=-5.0, category=category,
-                      probability=3.0, prediction=0)
+            # A null budget and category feed every null-rate numerator
+            # (data health's and the summary's); a CO2 of 500 the
+            # out-of-range one.
+            lg = _log(s, scope="pilot", owner=owner.id, budget=None, co2=500.0,
+                      category=category, probability=3.0, prediction=0)
             s.commit()
         return e, lg
 
@@ -577,8 +580,9 @@ SHARED_READS = [
 @pytest.mark.parametrize("method,path,auth", SHARED_READS)
 def test_a_shared_figure_is_unchanged_by_pilot_rows(client, world, method, path, auth):
     """The same request, answered before and after more pilot rows arrive --
-    with a null category and a negative budget, so the null and out-of-range
-    numerators of data health would move if either query missed the filter.
+    with a null budget and category and an out-of-range CO2, so the null and
+    out-of-range numerators of data health and the summary would move if any
+    of their separate queries missed the filter.
     An administrator's Bearer must not widen a shared figure either."""
     headers = {"admin": H(world.people.admin),
                "apikey": {"X-API-Key": os.environ.get("SORA_ADMIN_TOKEN", "ci-test-admin")},
