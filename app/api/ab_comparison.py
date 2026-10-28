@@ -110,14 +110,15 @@ def ab_comparison():
 def ab_comparison_plot():
     """Bar chart comparing model metrics."""
     import app.main as m
-    import matplotlib; matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    # A bare Figure, never registered with pyplot (see app/pyplot_lock.py).
+    from matplotlib.figure import Figure
 
     data = ab_comparison()
     models = data["models"]
     metrics = ["accuracy", "f1_score", "auc_roc"]
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig = Figure(figsize=(10, 6))
+    ax = fig.subplots()
     x = np.arange(len(metrics))
     width = 0.25
     colors = ["#e74c3c", "#3498db", "#2ecc71"]
@@ -137,11 +138,10 @@ def ab_comparison_plot():
     ax.set_ylim(0, 1.1)
     ax.grid(True, alpha=0.3, axis="y")
 
-    plt.tight_layout()
+    fig.tight_layout()
     # Rendered into memory: a GET does not rewrite a tracked file in data/.
     png = io.BytesIO()
-    plt.savefig(png, format="png", dpi=150, bbox_inches="tight")
-    plt.close()
+    fig.savefig(png, format="png", dpi=150, bbox_inches="tight")
 
     return Response(png.getvalue(), media_type="image/png",
                     headers={"Content-Disposition": 'attachment; filename="ab_comparison.png"'})

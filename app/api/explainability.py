@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query
 from typing import Dict
+import threading
 import numpy as np
 import pandas as pd
 import shap
@@ -59,6 +60,14 @@ def _make_background(scaler, n=50):
     return scaler.transform(df), df
 
 
+#: KernelExplainer keeps each call's samples, model outputs and intermediate
+#: matrices on the instance (allocate() and run() assign them to self), and
+#: this one instance is shared by every request in the process. Two calls at
+#: once were measured returning one caller's contributions to the other, so a
+#: call holds this lock from shap_values() to its last read of the result.
+_EXPLAINER_LOCK = threading.Lock()
+
+
 def _get_explainer():
     global _explainer, _explainer_kind, _bg_df
     if _explainer is not None:
@@ -77,7 +86,8 @@ def explain_global(top_n: int = Query(10, ge=1, le=11), nsamples: int = 30):
     model, scaler = _resolve_state()
     sample_df = bg_df.head(20)
     sample_scaled = scaler.transform(sample_df)
-    sv = expl.shap_values(sample_scaled, nsamples=nsamples, silent=True)
+    with _EXPLAINER_LOCK:
+        sv = expl.shap_values(sample_scaled, nsamples=nsamples, silent=True)
     sv_arr = np.asarray(sv)
     if isinstance(sv, list):
         sv_arr = np.asarray(sv[1])
@@ -133,7 +143,9 @@ def explain_local(features: Dict[str, float], top_n: int = 10, nsamples: int = 1
     Xs = scaler.transform(df_raw)
 
     # Compute SHAP on scaled input
-    sv = expl.shap_values(Xs, nsamples=nsamples, silent=True)
+    with _EXPLAINER_LOCK:
+        sv = expl.shap_values(Xs, nsamples=nsamples, silent=True)
+        base = expl.expected_value
     sv_arr = np.asarray(sv)
     if isinstance(sv, list):
         sv_arr = np.asarray(sv[1])
@@ -142,7 +154,6 @@ def explain_local(features: Dict[str, float], top_n: int = 10, nsamples: int = 1
     contrib = sv_arr[0]
     if contrib.ndim > 1:
         contrib = contrib[:, -1]
-    base = expl.expected_value
     if hasattr(base, "__len__"):
         base = float(base[1])
 

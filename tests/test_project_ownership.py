@@ -1012,3 +1012,146 @@ def test_a_signed_in_waterfall_neither_reads_nor_writes_the_shared_png_cache(
 
     assert client.post("/api/v1/predict/explain/waterfall", json=body,
                        headers={"Authorization": "Bearer not.a.token"}).status_code == 401
+
+
+# ------------------------------------------------- state shared between threads
+#
+# Sync handlers run on a thread pool, so two requests in one worker can be in
+# the same module-level object at once. Each case below observes the guard at
+# the moment the shared object is used: a race reproduced by timing would pass
+# or fail by luck.
+
+
+@pytest.mark.parametrize("signed_in", [True, False])
+def test_the_waterfall_draws_only_while_holding_the_pyplot_lock(
+        client, world, monkeypatch, tmp_path, signed_in):
+    """An anonymous waterfall was measured saving a signed-in caller's budget
+    into the shared PNG cache: both drew onto pyplot's one current figure."""
+    import matplotlib.pyplot as plt
+    import shap
+
+    from app.pyplot_lock import PYPLOT_LOCK
+
+    monkeypatch.setenv("SORA_DATA_DIR", str(tmp_path / "data"))
+    real, seen = shap.plots.waterfall, []
+
+    def watched(*args, **kwargs):
+        seen.append((PYPLOT_LOCK.locked(), list(plt.get_fignums())))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(shap.plots, "waterfall", watched)
+    headers = H(world.people.a) if signed_in else {}
+    r = client.post("/api/v1/predict/explain/waterfall", headers=headers,
+                    json={"budget": 98765, "co2_reduction": 120, "social_impact": 7,
+                          "duration_months": 24})
+    assert r.status_code == 200, r.text
+    assert seen == [(True, [])], "drew outside the lock, or onto a figure already open"
+    assert plt.get_fignums() == [], "a figure was left open for the next request to draw on"
+
+
+@pytest.mark.parametrize("path", ["/api/v1/model/reliability-diagram",
+                                  "/api/v1/model/ab-comparison/plot"])
+def test_the_other_charts_never_touch_pyplot(client, monkeypatch, path):
+    """They need no lock because they never register a figure with pyplot,
+    where a concurrent shap plot's gcf() could find it."""
+    import matplotlib.pyplot as plt
+
+    def refused(*args, **kwargs):
+        raise AssertionError("pyplot used outside app/pyplot_lock.py")
+
+    for name in ("subplots", "figure", "savefig", "tight_layout", "gcf"):
+        monkeypatch.setattr(plt, name, refused)
+    r = client.get(path)
+    assert r.status_code == 200, r.text
+    assert r.content[:4] == b"\x89PNG"
+
+
+@pytest.mark.parametrize("route", ["local", "global"])
+def test_the_shared_kernel_explainer_runs_one_call_at_a_time(client, monkeypatch, route):
+    """KernelExplainer keeps a call's samples and outputs on the instance; two
+    calls at once were measured handing one caller's contributions to the other."""
+    import app.api.explainability as xp
+
+    expl, _kind, _bg = xp._get_explainer()
+    real, seen = expl.shap_values, []
+
+    def watched(*args, **kwargs):
+        seen.append(xp._EXPLAINER_LOCK.locked())
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(expl, "shap_values", watched)
+    if route == "local":
+        r = client.post("/api/v1/explain/local?nsamples=20", json={
+            "budget": 98765, "co2_reduction": 120, "social_impact": 7, "duration_months": 24})
+    else:
+        r = client.get("/api/v1/explain/global?nsamples=10")
+    assert r.status_code == 200, r.text
+    assert seen == [True]
+
+
+def _sentry_events(options, monkeypatch):
+    """Run one failing request through a real Sentry client; return what it sent."""
+    import json
+
+    import sentry_sdk
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from pydantic import BaseModel
+    from sentry_sdk.transport import Transport
+
+    sent = []
+
+    class Capture(Transport):
+        def capture_envelope(self, envelope):
+            for item in envelope.items:
+                sent.append(item.payload.get_bytes().decode("utf-8", "replace"))
+
+    class Body(BaseModel):
+        budget: float
+
+    probe = FastAPI()
+
+    @probe.post("/boom")
+    def boom(body: Body):
+        # Built at run time: Sentry also sends the source lines around the
+        # failure, and a literal here would be found there, not in the locals.
+        probability = "-".join(["PROBABILITY", str(31337)])  # noqa: F841
+        raise RuntimeError("boom")
+
+    sentry_sdk.init(dsn="https://key@o0.ingest.sentry.io/1", transport=Capture,
+                    default_integrations=True, **options)
+    try:
+        TestClient(probe, raise_server_exceptions=False).post(
+            "/boom", json={"budget": 4242.4242},
+            headers={"Authorization": "Bearer SECRET-BEARER"})
+        sentry_sdk.flush()
+    finally:
+        sentry_sdk.init()  # no DSN: a disabled client for the rest of the session
+    return "\n".join(sent)
+
+
+def test_sentry_sends_no_body_no_locals_no_credentials(monkeypatch):
+    from app.sentry_options import SENTRY_OPTIONS
+
+    # The control: Sentry's permissive settings do carry all three, so their
+    # absence below is the options and not a client that captured nothing.
+    loose = _sentry_events({"send_default_pii": True, "include_local_variables": True,
+                            "max_request_body_size": "always"}, monkeypatch)
+    assert "boom" in loose and "4242.4242" in loose and "PROBABILITY-31337" in loose
+
+    sent = _sentry_events(SENTRY_OPTIONS, monkeypatch)
+    assert "boom" in sent, "nothing was reported at all"
+    for leaked in ("4242.4242", "PROBABILITY-31337", "SECRET-BEARER"):
+        assert leaked not in sent, leaked
+
+
+def test_the_application_initialises_sentry_with_those_options(monkeypatch):
+    from app.sentry_options import SENTRY_OPTIONS, sentry_init_kwargs
+
+    monkeypatch.setenv("SENTRY_DSN", "https://key@o0.ingest.sentry.io/1")
+    kwargs = sentry_init_kwargs()
+    assert {k: kwargs[k] for k in SENTRY_OPTIONS} == SENTRY_OPTIONS
+    import inspect
+
+    import app.main as main
+    assert "sentry_sdk.init(**sentry_init_kwargs())" in inspect.getsource(main)
