@@ -26,6 +26,10 @@ import {
   SPECIALIST_A, SPECIALIST_B, deferred, jsonResponse, renderWithQuery, routeFetch, seedSession, stubChartLayout,
 } from "@/test/utils";
 
+// The first test pays for importing recharts; under a loaded parallel run that
+// can approach the 5 s default.
+vi.setConfig({ testTimeout: 15_000 });
+
 const FORM = {
   project_name: "Solar Farm", country: "Sweden", budget_usd: 150000,
   co2_reduction_tons_per_year: 340, social_impact_score: 9, project_duration_months: 18,

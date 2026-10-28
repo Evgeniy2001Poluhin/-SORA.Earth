@@ -23,6 +23,8 @@ import { useAuth } from "@/store/auth";
 import { callsOf } from "@/test/http";
 import { SPECIALIST_A, deferred, jsonResponse, renderWithQuery, routeFetch, seedSession } from "@/test/utils";
 
+vi.setConfig({ testTimeout: 15_000 });
+
 const EMPTY = { items: [], total: 0, limit: 20, offset: 0 };
 const EXPORT = "/api/v1/export/csv";
 
