@@ -104,3 +104,62 @@ def commit_or_refuse(session):
         raise HTTPException(status_code=503,
                             detail="The access could not be recorded, so it was not performed",
                             headers={"Retry-After": "5"}) from None
+
+
+class _Deleted:
+    """A row as DELETE ... RETURNING reported it: what `target()` reads."""
+
+    def __init__(self, row):
+        self.id, self.owner_user_id, self.data_scope = row
+
+
+def _returning(session, *where):
+    from sqlalchemy import delete
+
+    from app.database import Evaluation
+    result = session.execute(
+        delete(Evaluation).where(*where)
+        .returning(Evaluation.id, Evaluation.owner_user_id, Evaluation.data_scope)
+        .execution_options(synchronize_session=False))
+    return [_Deleted(r) for r in result.all()]
+
+
+def delete_evaluation(session, *, actor: UserInfo, request: Request, eval_id: int):
+    """Delete one evaluation and record exactly what was deleted. Not committed.
+
+    The record is built from the DELETE's own RETURNING, not from a read before
+    it. Two administrators deleting the same id at once both used to read the
+    row, both record it as `deleted` with affected_count 1, and only one of
+    them had deleted anything. On PostgreSQL the second DELETE waits on the
+    first's row lock and then finds nothing, so it records a not_found with
+    nothing affected -- which is what happened.
+
+    Returns the deleted row, or None. The caller commits with
+    commit_or_refuse, so the deletion and its record land together.
+    """
+    from app.database import Evaluation
+    deleted = _returning(session, Evaluation.id == eval_id)
+    if not deleted:
+        record(session, actor=actor, request=request, action="delete", status_code=404,
+               outcome="not_found", affected_count=0,
+               targets=[target(EVALUATION, resource_id=eval_id, effect="not_found")])
+        return None
+    record(session, actor=actor, request=request, action="delete", status_code=200,
+           affected_count=len(deleted),
+           targets=[target(EVALUATION, row, effect="deleted") for row in deleted])
+    return deleted[0]
+
+
+def clear_public(session, *, actor: UserInfo, request: Request) -> int:
+    """Delete every public evaluation and record the ids actually deleted.
+
+    Same rule as delete_evaluation: a concurrent clear that found the rows
+    already gone records zero, not the list it would have deleted.
+    """
+    from app.database import Evaluation
+    from app.project_access import PUBLIC, shared_data_predicate
+    deleted = _returning(session, shared_data_predicate(Evaluation))
+    record(session, actor=actor, request=request, action="clear", status_code=200,
+           filters={"data_scope": PUBLIC}, affected_count=len(deleted),
+           targets=[target(EVALUATION, row, effect="deleted") for row in deleted])
+    return len(deleted)

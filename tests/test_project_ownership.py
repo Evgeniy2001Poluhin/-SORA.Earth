@@ -425,6 +425,55 @@ def test_a_deletion_and_its_record_are_one_change(client, world):
         (world.b_eval, world.people.b.id, "deleted")]
 
 
+def _gone_before_this_request_touches_it(world, where):
+    """Another administrator's DELETE commits just before this request's first
+    statement on `evaluations` -- the interleaving of two concurrent deletes,
+    made deterministic. Through a separate sqlite3 connection, so the request's
+    own engine and events are not involved."""
+    import sqlite3
+
+    fired = []
+
+    def before(conn, cursor, statement, params, context, executemany):
+        if fired or "evaluations" not in statement:
+            return
+        fired.append(statement)
+        other = sqlite3.connect(world.engine.url.database)
+        other.execute("DELETE FROM evaluations WHERE " + where)
+        other.commit()
+        other.close()
+
+    sa.event.listen(world.engine, "before_cursor_execute", before)
+    return lambda: sa.event.remove(world.engine, "before_cursor_execute", before)
+
+
+def test_a_row_another_delete_removed_first_is_not_recorded_as_deleted(client, world):
+    """The record says what this request deleted. Read before the DELETE, the
+    row looked present, so the second of two concurrent deletes recorded it as
+    `deleted` with affected_count 1 while deleting nothing."""
+    stop = _gone_before_this_request_touches_it(world, f"id = {world.b_eval}")
+    try:
+        r = client.delete(f"/api/v1/history/{world.b_eval}", headers=H(world.people.admin))
+    finally:
+        stop()
+    assert r.status_code == 404
+    [rec] = world.events(action="delete")
+    assert (rec.event.outcome, rec.event.affected_count) == ("not_found", 0)
+    assert [t.effect for t in rec.targets] == ["not_found"]
+
+
+def test_a_clear_that_finds_the_rows_gone_records_none(client, world):
+    stop = _gone_before_this_request_touches_it(world, "data_scope = 'public'")
+    try:
+        r = client.delete("/api/v1/history", headers=H(world.people.admin))
+    finally:
+        stop()
+    assert r.status_code == 200
+    assert r.json()["deleted_count"] == 0
+    [rec] = world.events(action="clear")
+    assert rec.event.affected_count == 0 and rec.targets == []
+
+
 def test_deleting_a_missing_id_is_a_recorded_404(client, world):
     r = client.delete("/api/v1/history/987654321", headers=H(world.people.admin))
     assert r.status_code == 404

@@ -392,23 +392,13 @@ def delete_evaluation(eval_id: int, request: Request, response: Response,
     response.headers.update(NO_STORE)
     db = get_db_sync()
     try:
-        row = db.query(Evaluation).filter(Evaluation.id == eval_id).first()
-        if row is None:
-            project_audit.record(
-                db, actor=actor, request=request, action="delete", status_code=404,
-                outcome="not_found", affected_count=0,
-                targets=[project_audit.target(project_audit.EVALUATION, resource_id=eval_id,
-                                              effect="not_found")])
-            project_audit.commit_or_refuse(db)
-            raise HTTPException(status_code=404, detail="Evaluation not found", headers=NO_STORE)
-        project_audit.record(
-            db, actor=actor, request=request, action="delete", status_code=200,
-            affected_count=1,
-            targets=[project_audit.target(project_audit.EVALUATION, row, effect="deleted")])
-        db.query(Evaluation).filter(Evaluation.id == eval_id).delete(synchronize_session=False)
+        deleted = project_audit.delete_evaluation(db, actor=actor, request=request,
+                                                  eval_id=eval_id)
         project_audit.commit_or_refuse(db)
     finally:
         db.close()
+    if deleted is None:
+        raise HTTPException(status_code=404, detail="Evaluation not found", headers=NO_STORE)
     return HistoryDeleted(status="deleted", id=eval_id)
 
 
@@ -425,21 +415,11 @@ def clear_history(request: Request, response: Response,
     response.headers.update(NO_STORE)
     db = get_db_sync()
     try:
-        rows = db.query(Evaluation).filter(shared_data_predicate(Evaluation)).all()
-        ids = [r.id for r in rows]
-        project_audit.record(
-            db, actor=actor, request=request, action="clear", status_code=200,
-            filters={"data_scope": PUBLIC}, affected_count=len(ids),
-            targets=[project_audit.target(project_audit.EVALUATION, r, effect="deleted")
-                     for r in rows])
-        if ids:
-            db.query(Evaluation).filter(
-                Evaluation.id.in_(ids), shared_data_predicate(Evaluation),
-            ).delete(synchronize_session=False)
+        count = project_audit.clear_public(db, actor=actor, request=request)
         project_audit.commit_or_refuse(db)
     finally:
         db.close()
-    return HistoryCleared(status="cleared", scope=PUBLIC, deleted_count=len(ids))
+    return HistoryCleared(status="cleared", scope=PUBLIC, deleted_count=count)
 
 
 @router.get("/export/csv")

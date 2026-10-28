@@ -359,3 +359,108 @@ def test_the_lstm_volume_counts_public_days_only(scratch_db):
                                  "VALUES (1, :c, :o)"), {"c": now - timedelta(days=d), "o": owner})
         unique_days, _last = conn.execute(sa.text(RECENT_VOLUME_SQL)).one()
     assert unique_days == 2
+
+
+# ------------------------------------------------ two deletes at once
+
+
+class _Blocked:
+    """Hold a lock in a separate transaction, start the calls, prove they wait.
+
+    The pattern from tests/test_persistent_accounts_postgres.py: a barrier only
+    aligns when threads start, so here an outside transaction holds the row
+    lock both deletes must queue behind, the calls are shown to be still
+    running after a pause, and only then is the lock released.
+    """
+
+    def __init__(self, engine, sql, params=None):
+        self.engine, self.sql, self.params = engine, sql, params or {}
+
+    def run(self, *calls, pause=1.0):
+        import threading
+
+        conn = self.engine.connect()
+        tx = conn.begin()
+        conn.execute(sa.text(self.sql), self.params)
+        results = [None] * len(calls)
+
+        def run(i, call):
+            try:
+                results[i] = call()
+            except Exception as exc:  # the outcome is the assertion, not a crash
+                results[i] = exc
+
+        threads = [threading.Thread(target=run, args=(i, c), daemon=True)
+                   for i, c in enumerate(calls)]
+        try:
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=pause)
+            waiting = [t.is_alive() for t in threads]
+        finally:
+            tx.rollback()
+            conn.close()
+        for t in threads:
+            t.join(timeout=60)
+        assert not any(t.is_alive() for t in threads), "a call never finished"
+        return waiting, results
+
+
+def _audited(Session, fn, actor):
+    def call():
+        with Session() as s:
+            out = fn(s, actor)
+            project_audit.commit_or_refuse(s)
+            return out
+    return call
+
+
+def test_two_deletes_of_one_row_record_one_deletion(scratch_db):
+    """Both wait on the row; one deletes it, the other finds nothing and says
+    so. A record built from a read taken before the wait would claim two."""
+    engine, _url = scratch_db
+    Session = sessionmaker(bind=engine)
+    actor = _admin(Session)
+    with Session() as s:
+        row = Evaluation(budget=1.0, data_scope="public")
+        s.add(row)
+        s.commit()
+        row_id = row.id
+
+    def delete(s, a):
+        return project_audit.delete_evaluation(s, actor=a, request=_request(), eval_id=row_id)
+
+    held = _Blocked(engine, "SELECT 1 FROM evaluations WHERE id = :i FOR UPDATE", {"i": row_id})
+    waiting, results = held.run(_audited(Session, delete, actor), _audited(Session, delete, actor))
+    assert waiting == [True, True], "the deletes did not wait on the row, so nothing overlapped"
+    assert not [r for r in results if isinstance(r, Exception)], results
+    assert sorted(r is None for r in results) == [False, True]
+
+    with engine.connect() as conn:
+        effects = conn.execute(sa.text(
+            "SELECT e.affected_count, t.effect FROM project_access_events e "
+            "JOIN project_access_targets t ON t.event_id = e.id ORDER BY t.effect")).all()
+    assert [tuple(r) for r in effects] == [(1, "deleted"), (0, "not_found")]
+
+
+def test_two_clears_at_once_record_each_row_once(scratch_db):
+    engine, _url = scratch_db
+    Session = sessionmaker(bind=engine)
+    actor = _admin(Session)
+    with Session() as s:
+        rows = [Evaluation(budget=1.0, data_scope="public") for _ in range(3)]
+        s.add_all(rows)
+        s.commit()
+
+    def clear(s, a):
+        return project_audit.clear_public(s, actor=a, request=_request())
+
+    held = _Blocked(engine, "SELECT 1 FROM evaluations FOR UPDATE")
+    waiting, results = held.run(_audited(Session, clear, actor), _audited(Session, clear, actor))
+    assert waiting == [True, True], "the clears did not wait on the rows"
+    assert sorted(results) == [0, 3], results
+    with engine.connect() as conn:
+        deleted = conn.execute(sa.text(
+            "SELECT count(*) FROM project_access_targets WHERE effect = 'deleted'")).scalar_one()
+    assert deleted == 3
