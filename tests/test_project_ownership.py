@@ -749,6 +749,25 @@ def test_a_signed_in_simulation_sends_nothing_to_the_shared_experiment(
     assert telemetry == ["log_simulation"], "the anonymous control did not log"
 
 
+def test_a_signed_in_ab_prediction_leaves_the_public_stats_alone(client, world):
+    """/ab/stats is public and serves averages of every counted call, so one
+    counted signed-in call is that call's exact probability."""
+    body = {"budget": 250000, "co2_reduction": 120, "social_impact": 7, "duration_months": 24}
+    before = client.get("/api/v1/ab/stats").json()
+    r = client.post("/api/v1/ab/predict", json=body, headers=H(world.people.a))
+    assert r.status_code == 200, r.text
+    assert client.get("/api/v1/ab/stats").json() == before
+
+    assert client.post("/api/v1/ab/predict", json=body,
+                       headers={"Authorization": "Bearer not.a.token"}).status_code == 401
+    assert client.get("/api/v1/ab/stats").json() == before
+
+    # The control: an anonymous call is still counted, so the equality above
+    # is the gate and not a counter that never moves.
+    client.post("/api/v1/ab/predict", json=body)
+    assert client.get("/api/v1/ab/stats").json() != before
+
+
 # ------------------------------------------- 19: surfaces outside ownership
 
 
