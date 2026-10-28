@@ -48,6 +48,25 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build bac
 docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
 
+### A commit carrying `.deploy-blocked` is not deployable
+
+Production is deployed with `./scripts/deploy_production.sh` (see CLAUDE.md,
+"Production Server"); the commands above are for a fresh single host. That
+script reads `.deploy-blocked` from the **target** commit -- for a deploy and
+for `--rollback` alike -- and refuses before checkout, build, migration or any
+container change, quoting the file's first line. There is no override.
+
+The marker is how staged work is merged before it may run. It is present now
+because the project-ownership change landed in parts: the schema, the access
+rules and the audit are merged, and the cutover that makes them safe to switch
+on -- stopping the old backend and scheduler before the migration, and a
+rollback barrier for the new schema -- is not. **It is removed by the change
+that delivers that cutover, and by nothing else.** Removing it to get a
+deployment through deploys the half that was deliberately held back.
+
+The guard lives in the script, so a copy of the script from before it existed
+does not read the file.
+
 ### Rolling back past `f2c9a1d47b30`
 
 **`alembic downgrade` will refuse.** That revision creates `batch_results`,

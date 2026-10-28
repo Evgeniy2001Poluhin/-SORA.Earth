@@ -1022,6 +1022,17 @@ cd /opt/sora_earth_ai_platform
 
 Rollback is the same script: `./scripts/deploy_production.sh --rollback SHA`.
 
+**A commit carrying `.deploy-blocked` is not deployable, by either mode.** The
+script reads the file from the *target* commit, before checkout, build,
+migration or any container change, and refuses with the reason on its first
+line; there is no override. It is how staged work lands on `main` before it may
+run: the project-ownership schema and routes are merged while the cutover that
+makes them safe -- stopping the old backend and scheduler, migrating, and a
+rollback barrier for the new schema -- is not. **The marker is removed by the
+change that delivers that cutover, and by nothing else**; deleting it to get a
+deployment through is deploying the half that was held back. A copy of the
+script from before the guard existed does not read the file.
+
 **A manual `docker compose up` / `build` / `restart` is not a deployment
 procedure, and a green container health check is not evidence that the site
 works.** The script exists because every incident in the month it was written
