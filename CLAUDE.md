@@ -13,7 +13,7 @@ before measuring readiness against anything.
 
 ```
 Product      SORA.Earth ESG platform -- this file and README.md
-             In production, 166 published endpoints -- that is 166 (path,
+             In production, 167 published endpoints -- that is 167 (path,
              method) pairs under /api/, HEAD and OPTIONS excluded. The bare
              number was right and said nothing about what it counted; the app
              also has 180 unique paths and 157 of them under /api/ (#292).
@@ -314,7 +314,7 @@ Feature engineering: `make_features()` computes derived features (budget_per_mon
 
 ### Database Schema
 
-Eighteen SQLAlchemy models in `app/database.py`, with the table each one
+Twenty SQLAlchemy models in `app/database.py`, with the table each one
 creates. The table names are what `psql` needs, and they are not the class
 names lowercased: most are plural, two are not.
 
@@ -338,6 +338,8 @@ names lowercased: most are plural, two are not.
 | `EnvironmentalObservation` | `environmental_observations` |
 | `EnvironmentalJobLog` | `environmental_job_log` |
 | `User` | `users` |
+| `ProjectAccessEvent` | `project_access_events` |
+| `ProjectAccessTarget` | `project_access_targets` |
 
 The table is read from `__tablename__` and checked against the module by
 `tests/test_docs_name_real_tables.py`, which also refuses any SQL in this file
@@ -345,14 +347,21 @@ that names a table no model creates. **Edit the code, then regenerate this; do
 not hand-edit the table.**
 
 **What `predictions_log` holds, and it is not what the name says.** The table
-is **fed entirely by `/evaluate`**. Three functions are called `log_prediction`
-and they do different things:
+is **fed entirely by `/evaluate`** -- and since project ownership, only by a
+*save*: `POST /evaluate?save=true` writes the `evaluations` row and its
+`predictions_log` row in one transaction, both owned by the caller and both
+`data_scope = 'pilot'` (`app/services/evaluation_store.py`, the only writer). A
+plain `POST /evaluate` writes nothing. Rows from before ownership are `public`.
+
+The writer used to be a third function called `log_prediction`, in `app.main`,
+with its own commit that swallowed every failure. Two remain, and neither
+writes the table:
 
 | symbol | writes | callers |
 |---|---|---|
-| `app.mlflow_tracking.log_prediction` | MLflow telemetry on a thread; a no-op under `SORA_OFFLINE` | `/predict`, `/predict/neural`, `/predict/stacking` |
-| `app.main.log_prediction` | the row in `predictions_log` | `/evaluate`, and nothing else |
-| `app.obs.request_log.log_prediction` | a JSONL file, and the only one of the three that takes a `model_version` | `app/ml/routes.py`, off unless `SORA_REQUEST_LOG=1` |
+| `app.mlflow_tracking.log_prediction` | MLflow telemetry on a thread; a no-op under `SORA_OFFLINE` | `/predict`, `/predict/neural`, `/predict/stacking` -- anonymous calls only |
+| `app.services.evaluation_store.save_evaluation` | the row in `predictions_log`, with its evaluation | `/evaluate?save=true`, and nothing else |
+| `app.obs.request_log.log_prediction` | a JSONL file | `app/ml/routes.py`, off unless `SORA_REQUEST_LOG=1` |
 
 So a `/predict` call leaves **no durable row**. What it leaves is `_log_csv`
 appending four input columns -- no probability, no prediction, no timestamp, no
@@ -384,8 +393,10 @@ and nothing recorded which one. Only the `_macro_esg_from_payload` branch of
 formula-only.
 
 **This is what the drift check samples.** `app/api/drift.py` →
-`_recent_predictions` takes the last `window` rows by id with no `endpoint`
-filter, so the KS test compares evaluation inputs against the baseline. Adding
+`_recent_predictions` takes the last `window` **public** rows by id -- the scope
+filter runs before the `LIMIT`, so saved pilot rows cannot crowd the window --
+with no `endpoint` filter, so the KS test compares evaluation inputs against the
+baseline. Adding
 such a filter would be worse than leaving it: `endpoint == "predict"` selects
 nothing, and a KS test over an empty frame is not a verdict.
 
@@ -452,6 +463,49 @@ refuses both `--rollback` to such a commit and the automatic rollback onto it
 (`accounts_downgrade_blocked`; the automatic case stops with exit 76 and
 `rollback-refused`, leaving the new code running). Fix forward, and never drop
 the table to "undo" the change.
+
+**Project ownership** (`app/project_access.py`, migration `b7d41f2e9c35`).
+`evaluations` and `predictions_log` carry `owner_user_id` (FK `users`,
+`ON DELETE RESTRICT`) and `data_scope`, and a CHECK pairs them:
+
+```
+public    the shared corpus: every row from before ownership, and rows a
+          maintenance script writes on purpose (it must say
+          data_scope='public' -- the default is 'pilot', which needs an owner,
+          so a writer that forgets is refused rather than published)
+pilot     a saved evaluation; always has an owner
+```
+
+| path | anonymous | specialist | analyst, viewer | admin |
+|---|---|---|---|---|
+| `POST /evaluate` | computes, saves nothing | same | same | same |
+| `POST /evaluate?save=true` | 401 | 201, own pilot row | 403 | 201, own pilot row |
+| `GET /history`, `/history/{id}`, `/export/csv`, `/analytics/predictions-log` | 401 | own pilot rows | public rows | everything, audited |
+| `DELETE /history/{id}` | 401 | 403 | 403 | that row, audited |
+| `DELETE /history` | 401 | 403 | 403 | **public rows only**, audited |
+| `/trends`, `/analytics/data-health` and every other shared figure | public rows | public rows | public rows | public rows |
+
+Somebody else's id is a 404, exactly like a missing one; a 403 means the role
+cannot do the operation and comes before any lookup. A body naming
+`owner_user_id`, `user_id` or `data_scope` is a 422. An invalid, revoked or
+blocked Bearer is a 401 -- never an anonymous request.
+
+Every shared consumer filters `data_scope = 'public'` -- a positive match --
+before its LIMIT, COUNT or sufficiency check: trends, data health, model health,
+the analytics summary, admin diagnostics, the drift sample, the training loader,
+the forecast loader, the LSTM status count, the scheduler's pretrain check, and
+the maintenance scripts. `/evaluate` no longer feeds the MLflow evaluation
+experiment, the Redis drift observations or `evaluations_avg_score`; a signed-in
+call to `/predict*`, `/what-if`, `/evaluate/monte-carlo` or `/evaluate/ranking`
+uses no shared cache and writes no shared telemetry or CSV. A specialist gets
+403 on Copilot, batch and `/predictions/history|export/csv`, whose storage has
+no owner column.
+
+Every administrator read or deletion of project rows is recorded in
+`project_access_events` / `project_access_targets` (`app/project_audit.py`)
+and **committed before the data is returned** -- a failed audit is a 503 and
+no data. A deletion and its record are one transaction. Read the record at
+`GET /api/v1/admin/project-access-log`; there is no route to change it.
 
 ### API Organization
 
@@ -1021,6 +1075,17 @@ cd /opt/sora_earth_ai_platform
 ```
 
 Rollback is the same script: `./scripts/deploy_production.sh --rollback SHA`.
+
+**A commit carrying `.deploy-blocked` is not deployable, by either mode.** The
+script reads the file from the *target* commit, before checkout, build,
+migration or any container change, and refuses with the reason on its first
+line; there is no override. It is how staged work lands on `main` before it may
+run: the project-ownership schema and routes are merged while the cutover that
+makes them safe -- stopping the old backend and scheduler, migrating, and a
+rollback barrier for the new schema -- is not. **The marker is removed by the
+change that delivers that cutover, and by nothing else**; deleting it to get a
+deployment through is deploying the half that was held back. A copy of the
+script from before the guard existed does not read the file.
 
 **A manual `docker compose up` / `build` / `restart` is not a deployment
 procedure, and a green container health check is not evidence that the site

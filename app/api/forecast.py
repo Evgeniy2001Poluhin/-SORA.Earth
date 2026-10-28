@@ -14,6 +14,7 @@ import logging
 from fastapi import APIRouter, Query, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from app.auth import require_admin
+from app.project_access import PUBLIC_SCOPE_SQL
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -47,6 +48,19 @@ _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="forecast")
 # in flight rather than racing it.
 _lstm_fit_lock = threading.Lock()
 _lstm_fit_cache: dict = {}  # {"fingerprint": tuple, "outcome": dict}, or empty
+
+
+#: How many distinct days of shared evaluations the last 60 days hold, and the
+#: newest. Public rows only, like the series the LSTM would train on; a module
+#: constant so the PostgreSQL tests run exactly this text
+#: (tests/test_project_ownership_postgres.py).
+RECENT_VOLUME_SQL = """
+        SELECT
+            COUNT(DISTINCT created_at::date) as unique_days,
+            MAX(created_at)::date as last_date
+        FROM evaluations
+        WHERE created_at >= NOW() - INTERVAL '60 days'
+          AND """ + PUBLIC_SCOPE_SQL
 
 
 def _get_db():
@@ -593,15 +607,10 @@ def get_lstm_status(db: Session = Depends(_get_db)):
     # A request that fails must not leave the previous successful fit green.
     sora_forecast_lstm_active.set(float("nan"))
 
-    # Query current data volume
+    # Query current data volume -- of the shared corpus, as the loader below
+    # reads it.
     from sqlalchemy import text
-    result = db.execute(text("""
-        SELECT
-            COUNT(DISTINCT created_at::date) as unique_days,
-            MAX(created_at)::date as last_date
-        FROM evaluations
-        WHERE created_at >= NOW() - INTERVAL '60 days'
-    """)).fetchone()
+    result = db.execute(text(RECENT_VOLUME_SQL)).fetchone()
 
     unique_days = result[0] if result else 0
     # `fetchone()` on an aggregate query always returns one row, even over zero

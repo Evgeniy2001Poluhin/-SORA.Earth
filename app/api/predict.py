@@ -7,7 +7,10 @@ import numpy as np
 import torch
 from app.prom_metrics import sora_prediction_latency, sora_predictions_total
 
-from app.auth import require_auth
+from typing import Optional
+
+from app.auth import UserInfo, optional_auth, require_auth
+from app.auth import refuse_specialist
 from app.schemas import NeuralNetworkUnavailable
 from app.schemas import ProjectInput as Project
 from app.validators import ProjectInput as LegacyProjectInput
@@ -17,6 +20,23 @@ from app.redis_cache import CACHE_NAMESPACE, cache_get, cache_set
 from app.security.spreadsheet import neutralize_cell
 
 router = APIRouter()
+
+
+def _private(caller) -> bool:
+    """A signed-in call keeps its inputs out of every shared store.
+
+    The prediction cache is shared by every caller with the same payload, the
+    MLflow input log is one experiment for the whole platform, and
+    `data/predictions_log.csv` is served by /predictions/history to anyone
+    signed in. A specialist's project inputs belong in none of them, so a call
+    carrying a valid Bearer -- any role -- uses none of them: no cache read, no
+    cache write, no MLflow input event, no CSV row. Technical counters (count,
+    latency) are kept; they carry no input and no result.
+
+    isinstance rather than `is not None`, so a handler called directly in a
+    test, where the parameter holds the Depends marker, behaves as anonymous.
+    """
+    return isinstance(caller, UserInfo)
 
 def _cache_key(prefix: str, payload) -> str:
     # A stable digest, not hash(str(...)) (#325). Python salts str hashing per
@@ -84,11 +104,12 @@ _NEURAL_UNAVAILABLE = NeuralNetworkUnavailable(
 
 
 @router.post("/predict")
-def predict_project(project: Project):
+def predict_project(project: Project, caller: Optional[UserInfo] = Depends(optional_auth)):
     import app.main as m
 
+    private = _private(caller)
     ck = _cache_key("predict", project.model_dump())
-    cached = cache_get(ck)
+    cached = None if private else cache_get(ck)
     if cached:
         cached["cached"] = True
         return cached
@@ -122,9 +143,10 @@ def predict_project(project: Project):
         "threshold": m.best_threshold,
         "inference_time_ms": _lat,
     }
-    cache_set(ck, result)
-    log_prediction("RandomForest", project.model_dump(), prediction, result["probability"])
-    _log_csv(project)
+    if not private:
+        cache_set(ck, result)
+        log_prediction("RandomForest", project.model_dump(), prediction, result["probability"])
+        _log_csv(project)
     METRICS["predictions_total"] = METRICS.get("predictions_total", 0) + 1
     return result
 
@@ -138,15 +160,16 @@ def predict_project(project: Project):
         }
     },
 )
-def predict_neural(project: Project):
+def predict_neural(project: Project, caller: Optional[UserInfo] = Depends(optional_auth)):
     from app.main import nn_model, best_threshold, make_features_base
 
     # Ahead of the cache, so the refusal cannot depend on what the cache holds.
     if nn_model is None:
         return JSONResponse(status_code=503, content=_NEURAL_UNAVAILABLE.model_dump())
 
+    private = _private(caller)
     ck = _cache_key("neural", project.model_dump())
-    cached = cache_get(ck)
+    cached = None if private else cache_get(ck)
     if cached:
         cached["cached"] = True
         return cached
@@ -166,21 +189,24 @@ def predict_neural(project: Project):
         "threshold": best_threshold,
         "inference_time_ms": _lat,
     }
-    cache_set(ck, result)
-    log_prediction("NeuralNet", project.model_dump(), prediction, result["probability"])
+    if not private:
+        cache_set(ck, result)
+        log_prediction("NeuralNet", project.model_dump(), prediction, result["probability"])
     METRICS["predictions_total"] = METRICS.get("predictions_total", 0) + 1
     return result
 
 
 @router.post("/predict/stacking")
-def predict_stacking(project: Project):
+def predict_stacking(project: Project, caller: Optional[UserInfo] = Depends(optional_auth)):
     import app.main as m
+
+    private = _private(caller)
 
     # The composition is part of the key, so a result blended from a different
     # set of models is never served for this one.
     composition = "rf+nn" if m.nn_model is not None else "rf"
     ck = _cache_key("stacking:" + composition, project.model_dump())
-    cached = cache_get(ck)
+    cached = None if private else cache_get(ck)
     if cached:
         cached["cached"] = True
         return cached
@@ -205,8 +231,9 @@ def predict_stacking(project: Project):
         "model": "StackingEnsemble",
         "inference_time_ms": _lat,
     }
-    cache_set(ck, result)
-    log_prediction("StackingEnsemble", project.model_dump(), prediction, result["probability"])
+    if not private:
+        cache_set(ck, result)
+        log_prediction("StackingEnsemble", project.model_dump(), prediction, result["probability"])
     METRICS["predictions_total"] = METRICS.get("predictions_total", 0) + 1
     return result
 
@@ -267,7 +294,10 @@ def shap_explain(project: Project):
     return {"feature_names": feature_names, "shap_values": vals}
 
 
-@router.get("/predictions/history", dependencies=[Depends(require_auth)])
+# Not a personal journal: `data/predictions_log.csv` has no owner column, and
+# every signed-in reader sees all of it. A specialist is kept off both routes.
+@router.get("/predictions/history",
+            dependencies=[Depends(require_auth), Depends(refuse_specialist)])
 def predictions_history():
     from app.main import PRED_LOG
     if not PRED_LOG:
@@ -279,7 +309,8 @@ def predictions_history():
     return rows
 
 
-@router.get("/predictions/export/csv", dependencies=[Depends(require_auth)])
+@router.get("/predictions/export/csv",
+            dependencies=[Depends(require_auth), Depends(refuse_specialist)])
 def export_predictions_csv():
     from app.main import PRED_LOG
     if not PRED_LOG or not os.path.exists(PRED_LOG):

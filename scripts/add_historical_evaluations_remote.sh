@@ -41,7 +41,7 @@ def get_existing_stats(session):
             STDDEV(success_prob) as std_prob,
             MIN(created_at)::date as first_date
         FROM evaluations
-        WHERE created_at >= NOW() - INTERVAL '30 days'
+        WHERE data_scope = 'public' AND created_at >= NOW() - INTERVAL '30 days'
     """)
     result = session.execute(query).fetchone()
     return {
@@ -135,11 +135,13 @@ try:
         INSERT INTO evaluations (
             project_name, created_at, budget, co2_reduction, social_impact,
             duration_months, region, category, esg_environmental, esg_social,
-            esg_governance, esg_total, success_prob, recommendations, confidence_level
+            esg_governance, esg_total, success_prob, recommendations, confidence_level,
+            data_scope, owner_user_id
         ) VALUES (
             :project_name, :created_at, :budget, :co2_reduction, :social_impact,
             :duration_months, :region, :category, :esg_environmental, :esg_social,
-            :esg_governance, :esg_total, :success_prob, :recommendations, :confidence_level
+            :esg_governance, :esg_total, :success_prob, :recommendations, :confidence_level,
+            'public', NULL
         )
     """)
 
@@ -156,6 +158,7 @@ try:
                MIN(created_at)::date as first_date,
                MAX(created_at)::date as last_date
         FROM evaluations
+        WHERE data_scope = 'public'
     """)).fetchone()
 
     print(f"\n✅ Success!")

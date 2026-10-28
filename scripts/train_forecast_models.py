@@ -44,7 +44,10 @@ def load_evaluation_history(metric_field: str):
     """Load evaluation history from database for specific metric."""
     db = SessionLocal()
     try:
-        rows = db.query(Evaluation).order_by(Evaluation.created_at.asc()).all()
+        # Public rows only: these models are registered in MLflow as the
+        # platform's forecasters, and pilot evaluations are private.
+        rows = (db.query(Evaluation).filter(Evaluation.data_scope == "public")
+                .order_by(Evaluation.created_at.asc()).all())
 
         if not rows:
             raise ValueError("No evaluation data found in database")

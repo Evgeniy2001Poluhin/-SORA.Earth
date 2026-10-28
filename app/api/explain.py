@@ -1,7 +1,10 @@
 """SHAP explainability endpoints."""
-import os, pickle, hashlib, numpy as np, shap
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+import io, os, pickle, hashlib, numpy as np, shap
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse, Response
+from app.auth import UserInfo, optional_auth
 from app.schemas import ProjectInput as Project
 from app.validators import ProjectInput as LegacyProjectInput
 from app.paths import data_dir
@@ -105,10 +108,9 @@ def explain_prediction(project: Project):
 
 
 @router.post("/predict/explain/waterfall")
-def explain_waterfall(project: Project):
+def explain_waterfall(project: Project, caller: Optional[UserInfo] = Depends(optional_auth)):
     import app.main as m
-    import matplotlib; matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    from app.pyplot_lock import exclusive_pyplot
 
     feats = m.make_features(_to_legacy(project))
     names = list(feats.columns) if hasattr(feats, "columns") else [f"f{i}" for i in range(feats.shape[1])]
@@ -123,14 +125,28 @@ def explain_waterfall(project: Project):
             data=explanation.data, feature_names=names,
         )
 
+    # The PNG cache is shared: a later anonymous request with the same payload
+    # is served the file, and its Last-Modified says when somebody computed
+    # it. A signed-in caller's project is drawn in memory and neither reads
+    # nor writes the cache. A bad Bearer is a 401 (optional_auth).
+    if isinstance(caller, UserInfo):
+        buf = io.BytesIO()
+        with exclusive_pyplot() as plt:
+            shap.plots.waterfall(explanation[0], show=False)
+            plt.tight_layout(); plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+        return Response(buf.getvalue(), media_type="image/png", headers={
+            "Content-Disposition": 'attachment; filename="shap_waterfall.png"',
+            "Cache-Control": "private, no-store"})
+
     _cache_dir = os.path.join(data_dir(), "explanations")
     os.makedirs(_cache_dir, exist_ok=True)
     _key = hashlib.sha1(repr(sorted(project.dict().items())).encode()).hexdigest()[:16]
     out = os.path.join(_cache_dir, "wf_" + _key + ".png")
     if os.path.exists(out):
         return FileResponse(out, media_type="image/png", filename="shap_waterfall.png")
-    shap.plots.waterfall(explanation[0], show=False)
-    plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches="tight"); plt.close()
+    with exclusive_pyplot() as plt:
+        shap.plots.waterfall(explanation[0], show=False)
+        plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches="tight")
     return FileResponse(out, media_type="image/png", filename="shap_waterfall.png")
 
 
@@ -138,9 +154,8 @@ def explain_waterfall(project: Project):
 def beeswarm_plot():
     """Beeswarm plot from training data SHAP values."""
     import app.main as m
-    import matplotlib; matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
     import pandas as pd
+    from app.pyplot_lock import exclusive_pyplot
 
     csv_path = os.path.join(data_dir(), "projects.csv")
     if not os.path.exists(csv_path):
@@ -177,6 +192,7 @@ def beeswarm_plot():
         )
 
     out = os.path.join(data_dir(), "shap_beeswarm.png")
-    shap.plots.beeswarm(explanation, show=False, max_display=len(X.columns))
-    plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches="tight"); plt.close()
+    with exclusive_pyplot() as plt:
+        shap.plots.beeswarm(explanation, show=False, max_display=len(X.columns))
+        plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches="tight")
     return FileResponse(out, media_type="image/png", filename="shap_beeswarm.png")

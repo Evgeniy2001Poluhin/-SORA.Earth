@@ -318,6 +318,25 @@ accounts_downgrade_blocked() {
     return 0
 }
 
+# A commit can be merged before it may be deployed.
+#
+# Work that lands in stages -- the ownership change is the first: its schema
+# and routes are merged while the cutover that makes them safe to run is not --
+# carries a `.deploy-blocked` file whose first line says why. The question is
+# asked of the *target* commit, not of the working tree, so it holds for a
+# deploy and for `--rollback` alike, and it is asked before checkout, build,
+# migration or any container change. There is no override: the stage that
+# completes the work removes the file, and that commit is what gets deployed.
+#
+# The file stops this script only. A copy of the script from before this
+# function existed does not know to look.
+refuse_blocked_target() {
+    local to="$1" reason
+    git cat-file -e "$to:.deploy-blocked" 2>/dev/null || return 0
+    reason="$(git cat-file -p "$to:.deploy-blocked" 2>/dev/null | head -n 1 || true)"
+    fail "${to:0:12} is marked not deployable by .deploy-blocked: ${reason:-no reason given}. Nothing was changed; deploy a commit without the marker."
+}
+
 # A signal during mutation must undo what the mutation started.
 #
 # Only `fail()` routed through the rollback, so a SIGTERM -- an operator's
@@ -564,6 +583,7 @@ elif [ "$MODE" = deploy ]; then
     [ "$HEAD_SHA" = "$ORIGIN_MAIN" ] \
         || fail "HEAD ($HEAD_SHA) is not origin/main ($ORIGIN_MAIN); merge first, then deploy"
     TARGET="$HEAD_SHA"
+    refuse_blocked_target "$TARGET"
     echo "  deploying origin/main @ ${TARGET:0:12}"
 else
     # An earlier version required HEAD == origin/main unconditionally, which
@@ -582,6 +602,8 @@ else
         || fail "$TARGET is not an ancestor of origin/main; only merged code may be deployed"
     [ "$TARGET" != "$ORIGIN_MAIN" ] \
         || fail "$TARGET is origin/main; use a plain deploy rather than --rollback"
+    # Before the accounts question and before the checkout below.
+    refuse_blocked_target "$TARGET"
     # Before anything changes: code from before persistent accounts would lift
     # every block and reset made since (accounts_downgrade_blocked).
     if accounts_downgrade_blocked "$TARGET"; then

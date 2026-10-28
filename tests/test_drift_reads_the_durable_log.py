@@ -56,6 +56,7 @@ def test_recent_predictions_reads_the_table():
                     co2_reduction=5.0,
                     social_impact=5.0,
                     duration_months=12,
+                    data_scope="public",
                 )
             )
         db.flush()  # assigns ids and makes the rows visible to this session

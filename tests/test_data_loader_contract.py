@@ -45,7 +45,7 @@ def _db(observations):
         for day, value in observations
     ]
     session = MagicMock()
-    session.query.return_value.order_by.return_value.all.return_value = rows
+    session.query.return_value.filter.return_value.order_by.return_value.all.return_value = rows
     return session
 
 
@@ -161,7 +161,7 @@ def test_an_empty_result_carries_the_provenance_column_too():
     assert no_rows.empty
 
     session = MagicMock()
-    session.query.return_value.order_by.return_value.all.return_value = [
+    session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
         SimpleNamespace(created_at="2026-01-01 12:00:00", total_score=None,
                         co2_reduction=None, success_probability=None)
     ]
@@ -173,7 +173,7 @@ def test_an_empty_result_carries_the_provenance_column_too():
 
 def test_no_rows_yields_an_empty_frame_with_the_same_columns():
     session = MagicMock()
-    session.query.return_value.order_by.return_value.all.return_value = []
+    session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
     out = load_time_series(session, "score")
 
     assert list(out.columns) == ["ds", "y", "is_observed"]
@@ -187,7 +187,7 @@ def _db_with_no_values():
     database can actually hold, not a constructed impossibility.
     """
     session = MagicMock()
-    session.query.return_value.order_by.return_value.all.return_value = [
+    session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
         SimpleNamespace(created_at=f"2026-01-0{d} 12:00:00", total_score=None,
                         co2_reduction=None, success_probability=None)
         for d in (1, 2)
@@ -226,7 +226,7 @@ def test_the_two_empty_paths_return_the_same_schema():
     assertions while callers still saw the schema move.
     """
     no_rows = MagicMock()
-    no_rows.query.return_value.order_by.return_value.all.return_value = []
+    no_rows.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
 
     from_no_rows = load_time_series(no_rows, "score")
     from_no_values = load_time_series(_db_with_no_values(), "score")

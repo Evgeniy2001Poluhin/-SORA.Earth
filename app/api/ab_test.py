@@ -2,7 +2,9 @@ import logging
 import os, random, time
 from fastapi import APIRouter, Body, Depends
 from fastapi.responses import JSONResponse
-from app.auth import require_admin
+from typing import Optional
+
+from app.auth import UserInfo, optional_auth, require_admin
 from pydantic import BaseModel, Field
 from collections import defaultdict
 
@@ -38,7 +40,7 @@ class ABRequest(BaseModel):
     responses={503: {"model": ABPredictUnavailable,
                      "description": "Neither arm could produce a prediction."}},
 )
-def ab_predict(data: ABRequest):
+def ab_predict(data: ABRequest, caller: Optional[UserInfo] = Depends(optional_auth)):
     from app.main import rf_model, ensemble_model_v2, make_features, make_features_v2
     use_a = random.random() < _traffic_split['model_a']
     t0 = time.time()
@@ -68,8 +70,14 @@ def ab_predict(data: ABRequest):
 
     prob = round(_clip_prob(prob), 4)
     latency = round((time.time() - t0) * 1000, 2)
-    _stats[model_used]['requests'] += 1
-    _stats[model_used]['total_prob'] += prob
+    # Only an anonymous call reaches the shared counters. /ab/stats is public
+    # and serves their averages, so one signed-in request would publish its
+    # exact probability (requests 1, avg = that number), and later ones could
+    # be recovered from the difference between two reads. A bad Bearer is a
+    # 401 (optional_auth), never an anonymous request that gets counted.
+    if not isinstance(caller, UserInfo):
+        _stats[model_used]['requests'] += 1
+        _stats[model_used]['total_prob'] += prob
 
     return {
         'model': model_used,

@@ -24,8 +24,13 @@ def load_training_data():
     try:
         from app.database import SessionLocal
         from sqlalchemy import text
+        from app.project_access import PUBLIC_SCOPE_SQL
         db = SessionLocal()
-        df = pd.read_sql(text("SELECT * FROM evaluations"), db.bind)
+        # Public rows only, and before the `>= 20` test: whether the database
+        # has enough data -- or the CSV fallback is taken -- is decided by the
+        # rows the drift analyses may use, not by how many pilot saves exist.
+        df = pd.read_sql(text("SELECT * FROM evaluations WHERE " + PUBLIC_SCOPE_SQL
+                              + " ORDER BY id"), db.bind)
         db.close()
         if len(df) >= 20:
             logger.info("Loaded %d rows from PostgreSQL", len(df))

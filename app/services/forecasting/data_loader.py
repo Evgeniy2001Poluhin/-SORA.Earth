@@ -54,8 +54,14 @@ def load_time_series(db: Session, metric: MetricType) -> pd.DataFrame:
         there are no rows or no values for the metric.
     """
     from app.database import Evaluation
+    from app.project_access import shared_data_predicate
 
-    rows = db.query(Evaluation).order_by(Evaluation.created_at.asc()).all()
+    # The shared corpus only, before the daily mean and the interpolation. A
+    # saved pilot evaluation is one person's project; in a daily mean it would
+    # move the public series, and in the count it would make a series look
+    # better supported than the public data are.
+    rows = (db.query(Evaluation).filter(shared_data_predicate(Evaluation))
+            .order_by(Evaluation.created_at.asc(), Evaluation.id.asc()).all())
     if not rows:
         return pd.DataFrame(columns=["ds", "y", "is_observed"])
 

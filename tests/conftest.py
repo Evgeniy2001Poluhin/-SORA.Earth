@@ -728,5 +728,19 @@ def make_account():
 
     with SessionLocal() as session:
         if created:
+            # What these accounts own first: the owner and actor keys are
+            # RESTRICT, so on PostgreSQL the users cannot go while their saved
+            # evaluations or audit events remain. The audit has no deletion
+            # path in the application; this is the test's own scratch data.
+            from app.database import (Evaluation, PredictionLog, ProjectAccessEvent,
+                                      ProjectAccessTarget)
+            events = sa.select(ProjectAccessEvent.id).where(
+                ProjectAccessEvent.actor_user_id.in_(created))
+            session.execute(sa.delete(ProjectAccessTarget).where(
+                ProjectAccessTarget.event_id.in_(events)))
+            session.execute(sa.delete(ProjectAccessEvent).where(
+                ProjectAccessEvent.actor_user_id.in_(created)))
+            session.execute(sa.delete(Evaluation).where(Evaluation.owner_user_id.in_(created)))
+            session.execute(sa.delete(PredictionLog).where(PredictionLog.owner_user_id.in_(created)))
             session.execute(sa.delete(User).where(User.id.in_(created)))
             session.commit()

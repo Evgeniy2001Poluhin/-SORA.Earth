@@ -53,16 +53,18 @@ def test_the_offset_keeps_its_old_range():
     assert len(offsets) >= 8, f"only {len(offsets)} distinct offsets over 500 names; markers would stack again"
 
 
-def test_evaluate_stores_the_marker_at_that_offset(client):
+def test_evaluate_stores_the_marker_at_that_offset(client, make_account):
     """Wired, not only defined: the row the map reads carries this offset."""
     from app.main import COUNTRIES
 
+    owner = make_account(prefix="marker")
+    headers = {"Authorization": f"Bearer {access_token_for(owner.username)}"}
     name = "Solar Farm Almaty"
-    r = client.post("/api/v1/evaluate", json={"name": name, "budget": 100000, "co2_reduction": 50,
-                                              "social_impact": 7, "duration_months": 24, "region": "Germany"})
-    assert r.status_code == 200, r.text
-    token = access_token_for("viewer")
-    items = client.get("/api/v1/history", headers={"Authorization": f"Bearer {token}"}).json()["items"]
-    row = next(i for i in items if i.get("name") == name)
+    r = client.post("/api/v1/evaluate?save=true", headers=headers,
+                    json={"name": name, "budget": 100000, "co2_reduction": 50,
+                          "social_impact": 7, "duration_months": 24, "region": "Germany"})
+    assert r.status_code == 201, r.text
+    items = client.get("/api/v1/history", headers=headers).json()["items"]
+    row = next(i for i in items if i["id"] == r.json()["evaluation_id"])
     assert row["lat"] == pytest.approx(COUNTRIES["Germany"]["lat"] + marker_offset(name))
     assert row["lon"] == pytest.approx(COUNTRIES["Germany"]["lon"] + marker_offset(name))

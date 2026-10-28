@@ -25,7 +25,7 @@ def test_scheduled_pretrain_forecast_models_success(monkeypatch):
             mock_rows.append(row)
 
         mock_db = MagicMock()
-        mock_db.query.return_value.order_by.return_value.all.return_value = mock_rows
+        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = mock_rows
         # The job reads through `with SessionLocal() as read_db:` since #127,
         # so the mock has to be its own context manager -- otherwise `read_db`
         # is `__enter__()`'s auto-created child and the rows above never
@@ -79,7 +79,7 @@ def test_scheduled_pretrain_forecast_models_insufficient_data():
             mock_rows.append(row)
 
         mock_db = MagicMock()
-        mock_db.query.return_value.order_by.return_value.all.return_value = mock_rows
+        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = mock_rows
         # The job reads through `with SessionLocal() as read_db:` since #127,
         # so the mock has to be its own context manager -- otherwise `read_db`
         # is `__enter__()`'s auto-created child and the rows above never
@@ -129,7 +129,7 @@ def test_scheduled_pretrain_forecast_models_training_error():
             mock_rows.append(row)
 
         mock_db = MagicMock()
-        mock_db.query.return_value.order_by.return_value.all.return_value = mock_rows
+        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = mock_rows
         # The job reads through `with SessionLocal() as read_db:` since #127,
         # so the mock has to be its own context manager -- otherwise `read_db`
         # is `__enter__()`'s auto-created child and the rows above never
@@ -170,7 +170,7 @@ def test_scheduled_pretrain_forecast_models_partial_success():
             mock_rows.append(row)
 
         mock_db = MagicMock()
-        mock_db.query.return_value.order_by.return_value.all.return_value = mock_rows
+        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = mock_rows
         # The job reads through `with SessionLocal() as read_db:` since #127,
         # so the mock has to be its own context manager -- otherwise `read_db`
         # is `__enter__()`'s auto-created child and the rows above never
@@ -223,7 +223,7 @@ def test_scheduled_pretrain_forecast_models_data_quality():
             mock_rows.append(row)
 
         mock_db = MagicMock()
-        mock_db.query.return_value.order_by.return_value.all.return_value = mock_rows
+        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = mock_rows
         # The job reads through `with SessionLocal() as read_db:` since #127,
         # so the mock has to be its own context manager -- otherwise `read_db`
         # is `__enter__()`'s auto-created child and the rows above never

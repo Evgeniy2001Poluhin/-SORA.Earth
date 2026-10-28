@@ -27,6 +27,7 @@ def test_csv_export_neutralizes_formula_triggers(client):
             success_probability=50.0,
             risk_level="MEDIUM",
             region="Europe",
+            data_scope="public",
         )
         db.add(eval_record)
         db.commit()
@@ -65,6 +66,7 @@ def test_csv_export_does_not_modify_normal_names(client):
             success_probability=50.0,
             risk_level="MEDIUM",
             region="Europe",
+            data_scope="public",
         )
         db.add(eval_record)
         db.commit()

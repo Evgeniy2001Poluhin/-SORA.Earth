@@ -107,6 +107,7 @@ ADMIN = {
     "/api/v1/observations",
     "/api/v1/observations/coverage",
     "/api/v1/audit/log",
+    "/api/v1/admin/project-access-log",
 }
 
 # Routes protected by API key (require_admin_apikey or require_api_key).

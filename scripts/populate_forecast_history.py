@@ -43,6 +43,9 @@ def main():
                 AVG(success_probability) as avg_prob,
                 AVG(co2_reduction) as avg_co2
             FROM evaluations
+            -- The shared corpus only, before the daily mean: forecast_history
+            -- is a public series, and a saved pilot evaluation is not part of it.
+            WHERE data_scope = 'public'
             GROUP BY date
             ORDER BY date
         """)

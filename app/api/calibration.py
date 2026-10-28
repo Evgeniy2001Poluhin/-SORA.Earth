@@ -48,8 +48,8 @@ def _validate_social_impact_api_scale(project: dict):
 @router.get("/model/reliability-diagram")
 def reliability_diagram():
     import app.main as m
-    import matplotlib; matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    # A bare Figure, never registered with pyplot (see app/pyplot_lock.py).
+    from matplotlib.figure import Figure
     from sklearn.calibration import calibration_curve
 
     csv_path = os.path.join(data_dir(), "projects.csv")
@@ -108,7 +108,8 @@ def reliability_diagram():
         probas_cal = probas_v2
 
     y = np.array(labels)
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    fig = Figure(figsize=(14, 6))
+    axes = fig.subplots(1, 2)
 
     ax = axes[0]
     for name, probs, color, ls in [
@@ -136,11 +137,10 @@ def reliability_diagram():
     ax2.legend()
     ax2.grid(True, alpha=0.3)
 
-    plt.tight_layout()
+    fig.tight_layout()
     # Rendered into memory: a GET does not rewrite a tracked file in data/.
     png = io.BytesIO()
-    plt.savefig(png, format="png", dpi=150, bbox_inches="tight")
-    plt.close()
+    fig.savefig(png, format="png", dpi=150, bbox_inches="tight")
 
     from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
     metrics = {}
@@ -174,9 +174,18 @@ def predict_with_uncertainty(project: dict):
     from app.schemas import ProjectInput as Project
     from app.validators import ProjectInput as PI
 
-    p = Project(**project)
-    legacy = PI(budget=p.budget, co2_reduction=p.co2_reduction,
-                social_impact=p.social_impact, duration_months=p.duration_months)
+    # The body is a plain dict, so FastAPI validates nothing and a value the
+    # model refuses used to escape as a 500 -- with the value in the
+    # exception text. Refuse it as a 422 that does not echo the input.
+    from fastapi.exceptions import RequestValidationError
+    from pydantic import ValidationError
+    try:
+        p = Project(**project)
+        legacy = PI(budget=p.budget, co2_reduction=p.co2_reduction,
+                    social_impact=p.social_impact, duration_months=p.duration_months)
+    except ValidationError as exc:
+        raise RequestValidationError(
+            exc.errors(include_input=False, include_url=False, include_context=False)) from None
 
     feats = m.make_features(legacy)
     base_proba = float(m.rf_model.predict_proba(feats)[0][1])

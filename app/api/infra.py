@@ -4,6 +4,9 @@ from app.prom_metrics import (sora_retrain_total, sora_full_pipeline_total,
                               sora_model_promoted, sora_model_rejected)
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from app.auth import require_admin, require_auth
+# Batch results have no owner column either: the specialist role is refused on
+# all three batch routes until they do (app/auth.py:refuse_specialist).
+from app.auth import refuse_specialist
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
 
@@ -49,7 +52,7 @@ router = APIRouter()
 
 
 # ===== BATCH =====
-@router.post("/batch/evaluate", tags=["batch"])
+@router.post("/batch/evaluate", tags=["batch"], dependencies=[Depends(refuse_specialist)])
 def batch_evaluate(req: BatchRequest, db: Session = Depends(get_db)):
     from app.main import COUNTRIES, calculate_esg
 
@@ -104,7 +107,7 @@ def batch_evaluate(req: BatchRequest, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/batch/{batch_id}", tags=["batch"], dependencies=[Depends(require_auth)])
+@router.get("/batch/{batch_id}", tags=["batch"], dependencies=[Depends(require_auth), Depends(refuse_specialist)])
 def get_batch(batch_id: str, db: Session = Depends(get_db)):
     import json as _json
     record = db.query(BatchResultDB).filter(BatchResultDB.batch_id == batch_id).first()
@@ -122,7 +125,7 @@ def get_batch(batch_id: str, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/batch", tags=["batch"])
+@router.get("/batch", tags=["batch"], dependencies=[Depends(refuse_specialist)])
 def list_batches(limit: int = 20, db: Session = Depends(get_db), _user=Depends(require_auth)):
     records = (
         db.query(BatchResultDB)

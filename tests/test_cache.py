@@ -31,17 +31,27 @@ def test_cache_clear():
     assert resp.json()["status"] == "cache cleared"
 
 
-def test_cache_hit(monkeypatch):
+def test_evaluate_neither_reads_nor_fills_the_cache(monkeypatch):
+    """/evaluate has no result cache any more.
+
+    This test used to require a hit on the second identical call. The cache
+    returned its stored response before either database write, so a repeated
+    payload was never saved, and a cached saved response would have returned
+    another caller's evaluation_id. Two identical calls now leave the counters
+    exactly where they were -- and still agree on the score, which is the part
+    of the old assertion that was about correctness.
+    """
     monkeypatch.setattr("app.external_data.get_country_context", lambda c: {
         "co2_per_capita": 5.0, "renewable_share": 60.0, "life_expectancy": 82.0,
         "gdp_per_capita": 50000, "gini_index": 27.0, "gov_effectiveness": 1.5
     })
     payload = {"name": "Cache Test", "budget": 50000, "co2_reduction": 30, "social_impact": 5, "duration_months": 12, "region": "Norway"}
+    before = client.get("/api/v1/cache/stats").json()
     r1 = client.post("/api/v1/evaluate", json=payload)
     r2 = client.post("/api/v1/evaluate", json=payload)
+    after = client.get("/api/v1/cache/stats").json()
     assert r1.json()["total_score"] == r2.json()["total_score"]
-    stats = client.get("/api/v1/cache/stats").json()
-    assert stats["hits"] >= 1
+    assert (after["hits"], after["misses"]) == (before["hits"], before["misses"])
 
 
 def test_lru_eviction():

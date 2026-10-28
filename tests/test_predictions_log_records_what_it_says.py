@@ -5,17 +5,18 @@ follow an output back along the whole chain, and `forecast/decision → audit
 trail` is its last link. Measured 2026-09-20, that link does not hold for the
 endpoints the product is named for.
 
-Three functions are called `log_prediction` and they do different things:
+Two functions are called `log_prediction`, and neither writes the table:
 
     app.mlflow_tracking.log_prediction   MLflow telemetry on a thread; a no-op
                                          under SORA_OFFLINE. Used by /predict,
                                          /predict/neural, /predict/stacking.
-    app.main.log_prediction              writes the row in the predictions_log
-                                         TABLE. One caller: /evaluate.
-    app.obs.request_log.log_prediction   a JSONL file, and the only one of the
-                                         three that takes model_version. Used by
-                                         app/ml/routes.py, and off unless
-                                         SORA_REQUEST_LOG=1.
+    app.obs.request_log.log_prediction   a JSONL file. Used by app/ml/routes.py,
+                                         and off unless SORA_REQUEST_LOG=1.
+
+The row itself is written by app/services/evaluation_store.py, as part of
+saving an evaluation (`POST /evaluate?save=true`), in the same transaction as
+the `evaluations` row. It used to be a third `log_prediction`, in app.main,
+committing on its own.
 
 So the durable table named for predictions is fed entirely by `/evaluate`, and
 `/predict` leaves no row in it. What `/predict` does leave is `_log_csv` writing
@@ -87,7 +88,7 @@ def test_exactly_one_place_writes_a_row_to_the_table():
     constructions = _prediction_log_constructions()
     files = sorted({path for path, _ in constructions})
 
-    assert files == ["app/main.py"], (
+    assert files == ["app/services/evaluation_store.py"], (
         f"PredictionLog rows are now written from {files}. The documentation "
         f"and the drift sample both describe a table fed from one place; "
         f"update them together with this list."
@@ -95,7 +96,7 @@ def test_exactly_one_place_writes_a_row_to_the_table():
 
 
 def test_the_row_writer_is_called_only_from_evaluate():
-    """`app.main.log_prediction` has one caller, and it is not a predict route."""
+    """The store has one caller, and it is not a predict route."""
     callers = []
     for root, _dirs, files in os.walk(os.path.join(REPO_ROOT, "app")):
         for name in files:
@@ -103,7 +104,7 @@ def test_the_row_writer_is_called_only_from_evaluate():
                 continue
             path = os.path.join(root, name)
             source = open(path, encoding="utf-8").read()
-            if re.search(r"from app\.main import[^\n]*\blog_prediction\b", source):
+            if re.search(r"from app\.services\.evaluation_store import", source):
                 callers.append(os.path.relpath(path, REPO_ROOT))
 
     assert callers == ["app/api/evaluate.py"], (
@@ -129,7 +130,7 @@ def test_the_predict_routes_use_a_different_function_of_the_same_name():
         "app.mlflow_tracking; whichever symbol it binds now, the audit-trail "
         "note in CLAUDE.md describes the old one"
     )
-    assert not re.search(r"from app\.main import[^\n]*\blog_prediction\b", predict), (
+    assert "evaluation_store" not in predict, (
         "app/api/predict.py now imports the row writer. That is a change to "
         "what the table holds and to the drift sample -- welcome, but it has to "
         "move the documentation with it"
@@ -146,7 +147,7 @@ def test_the_documentation_says_what_the_table_actually_holds():
     """
     predict = _read("app", "api", "predict.py")
     predict_writes_rows = bool(
-        re.search(r"from app\.main import[^\n]*\blog_prediction\b", predict))
+        re.search(r"evaluation_store", predict))
 
     claude = _collapse(_read("CLAUDE.md"))
     says_evaluate_only = "fed entirely by `/evaluate`" in claude

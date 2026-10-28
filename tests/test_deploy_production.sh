@@ -557,6 +557,73 @@ run_guard --wat
 refused_because "an unknown argument" "unknown argument"
 rm -rf "$SANDBOX"
 
+echo "== a target carrying .deploy-blocked is refused before anything changes =="
+# Staged work can be merged before it may run: the ownership schema and routes
+# are on main while the cutover that makes them safe is not. The marker is read
+# from the target commit, for a deploy and for --rollback, and the refusal has
+# to come before the checkout, the build, the migration and every container
+# change -- "refused" after an `up` would be detection, not prevention.
+
+# The docker calls that change something. Anything the guard runs before it
+# decides is a read; none of these may appear.
+mutating_calls() {
+    # No file means docker was never called at all.
+    [ -f "$STUB_DIR/calls" ] || { echo 0; return; }
+    grep -cE 'compose .* (up|build|run|create|start|stop|restart|rm|down|pull)( |$)' \
+        "$STUB_DIR/calls" || true
+}
+block_head() {
+    echo "ownership cutover incomplete; requires PR2c" > "$REPO/.deploy-blocked"
+    git -C "$REPO" add -A >/dev/null
+    git -C "$REPO" commit -qm "blocked"
+    git -C "$REPO" push -q origin main 2>/dev/null
+    BLOCKED="$(git -C "$REPO" rev-parse HEAD)"
+}
+
+new_sandbox
+block_head
+run_guard
+refused_because "a deploy of a commit carrying .deploy-blocked" "marked not deployable by .deploy-blocked"
+check "the refusal quotes the marker's reason" \
+    "$(grep -q 'requires PR2c' "$SANDBOX/out" && echo yes || echo no)" "yes"
+check "and nothing was built, migrated or started" "$(mutating_calls)" "0"
+check "and no deployment record was opened" \
+    "$([ -e "$SANDBOX/manifests/in-progress" ] && echo opened || echo none)" "none"
+rm -rf "$SANDBOX"
+
+new_sandbox
+block_head
+# The marker removed in a later commit: that later commit is origin/main, and
+# the blocked one is now an ordinary ancestor -- exactly what --rollback takes.
+git -C "$REPO" rm -q .deploy-blocked
+git -C "$REPO" commit -qm "unblocked"
+git -C "$REPO" push -q origin main 2>/dev/null
+UNBLOCKED="$(git -C "$REPO" rev-parse HEAD)"
+run_guard --rollback "$BLOCKED"
+refused_because "a rollback to a commit carrying .deploy-blocked" "marked not deployable by .deploy-blocked"
+check "the checkout did not move" "$(git -C "$REPO" rev-parse HEAD)" "$UNBLOCKED"
+check "and the migration did not run" \
+    "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" "0"
+check "and nothing was built or started" "$(mutating_calls)" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+block_head
+git -C "$REPO" rm -q .deploy-blocked
+git -C "$REPO" commit -qm "unblocked"
+git -C "$REPO" push -q origin main 2>/dev/null
+run_guard
+# The removal condition: the commit that drops the marker deploys normally.
+check "a commit without the marker is not refused for it" \
+    "$(grep -c 'marked not deployable' "$SANDBOX/out" | tr -d ' ')" "0"
+check "and it deploys" "$RC" "0"
+# The control for the two zero counts above: on a deployment that does run,
+# the same counter sees its calls. Without it a pattern that matched nothing
+# would make "nothing was started" true of every run.
+check "and the counter sees a real deployment's build and up" \
+    "$([ "$(mutating_calls)" -gt 0 ] && echo yes || echo no)" "yes"
+rm -rf "$SANDBOX"
+
 echo "== it refuses a deployment that did not end where it should =="
 new_sandbox
 # A declared service that never came up.

@@ -54,6 +54,8 @@ def test_compute_drift_realistic_traffic():
                 endpoint="evaluate",
                 probability=0.75,
                 latency_ms=100.0,
+                # Shared traffic, which is what drift reads.
+                data_scope="public",
             )
             db.add(log)
             db.flush()
@@ -112,6 +114,8 @@ def test_compute_drift_control_extreme_values():
                 endpoint="evaluate",
                 probability=0.75,
                 latency_ms=100.0,
+                # Shared traffic, which is what drift reads.
+                data_scope="public",
             )
             db.add(log)
             db.flush()
@@ -138,9 +142,14 @@ def test_compute_drift_control_extreme_values():
 def test_drift_detector_baseline_check():
     """DriftDetector does not flag social_impact drift for typical values.
 
-    Fit the baseline from data/projects.csv, add observations via /evaluate
-    with typical social_impact values (6-7 on API scale), and assert that
-    social_impact is not flagged as drift.
+    Fit the baseline from data/projects.csv, add observations with typical
+    social_impact values (6-7 on API scale), and assert that social_impact is
+    not flagged as drift.
+
+    Through POST /mlops/drift/observe: /evaluate no longer adds observations
+    at all -- every call to it is an unsaved calculation or a private save, and
+    neither belongs in the shared drift window. The observe route is the
+    writer that remains, and it converts the scale the same way.
 
     On the base branch: FAILS because observations are on 0-10 scale while
     baseline is on 0-100 scale.
@@ -171,21 +180,21 @@ def test_drift_detector_baseline_check():
         # Clear observations
         drift_detector._r.delete(drift_detector._k_obs)
 
-        # Add observations via /evaluate with typical social_impact
+        # Add observations with typical social_impact, on the API scale
         client = TestClient(app)
         n_obs = max(drift_detector.min_samples, 15)
         for i in range(n_obs):
             response = client.post(
-                "/api/v1/evaluate",
+                "/api/v1/mlops/drift/observe",
+                headers={"X-API-Key": "dev-user-key"},
                 json={
-                    "name": f"test-project-{i}",
                     "budget": 150000,
                     "co2_reduction": 800,
                     "social_impact": 6.5 if i % 2 == 0 else 7.0,  # Typical API values
                     "duration_months": 18,
                 },
             )
-            assert response.status_code == 200, f"Evaluate failed: {response.text}"
+            assert response.status_code == 200, f"observe failed: {response.text}"
 
         # Check drift
         result = drift_detector._baseline_drift_check()

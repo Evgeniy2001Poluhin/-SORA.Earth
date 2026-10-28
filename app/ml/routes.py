@@ -2,7 +2,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from app.auth import require_admin
+from typing import Optional
+
+from app.auth import UserInfo, optional_auth, require_admin
 from mlflow.exceptions import MlflowException
 import logging
 import time
@@ -38,7 +40,7 @@ class PredictResponse(BaseModel):
 
 
 @router.post("/predict", response_model=PredictResponse)
-def predict(req: PredictRequest):
+def predict(req: PredictRequest, caller: Optional[UserInfo] = Depends(optional_auth)):
     try:
         t0 = time.perf_counter()
 
@@ -66,14 +68,18 @@ def predict(req: PredictRequest):
         latency_ms = (time.perf_counter() - t0) * 1000.0
         mv = str(bundle["version"])
 
-        log_prediction(
-            features=req.dict(),
-            probability=proba,
-            label=cls,
-            latency_ms=latency_ms,
-            model_version=mv,
-            model_alias="champion",
-        )
+        # The request log is shared: the public /api/v2/drift/* routes read
+        # it back, inputs and probability included. A signed-in caller's
+        # project stays out of it; a bad Bearer is a 401 (optional_auth).
+        if not isinstance(caller, UserInfo):
+            log_prediction(
+                features=req.dict(),
+                probability=proba,
+                label=cls,
+                latency_ms=latency_ms,
+                model_version=mv,
+                model_alias="champion",
+            )
 
         return PredictResponse(
             success_probability=round(proba, 4),

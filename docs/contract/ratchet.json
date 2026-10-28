@@ -11,16 +11,14 @@
     "WS /ws/live @app/api/infra.py": "websocket"
   },
   "counts": {
-    "considered": 176,
-    "with_response_model": 32
+    "considered": 177,
+    "with_response_model": 38
   },
   "uncovered": [
     "DELETE /api/v1/webhooks/{sub_id} @app/api/webhooks.py",
     "DELETE /cache/redis/invalidate @app/api/infra.py",
     "DELETE /cache/redis/invalidate/{prefix} @app/api/infra.py",
     "DELETE /copilot/sessions/{session_id} @app/api/copilot_api.py",
-    "DELETE /history @app/api/evaluate.py",
-    "DELETE /history/{eval_id} @app/api/evaluate.py",
     "DELETE /mlops/drift/baseline @app/api/drift_baseline.py",
     "GET /ab/stats @app/api/ab_test.py",
     "GET /admin/ai-teammate/status @app/api/ai_teammate_routes.py",
@@ -31,7 +29,6 @@
     "GET /analytics/country-ranking @app/api/analytics.py",
     "GET /analytics/data-health @app/api/analytics.py",
     "GET /analytics/metrics/model-health @app/api/analytics.py",
-    "GET /analytics/predictions-log @app/api/analytics.py",
     "GET /analytics/summary @app/api/analytics.py",
     "GET /api/v1/ @app/main.py",
     "GET /api/v1/admin @app/main.py",
@@ -84,8 +81,6 @@
     "GET /forecast/metrics/latest @app/api/forecast.py",
     "GET /forecast/metrics/performance @app/api/forecast.py",
     "GET /health @app/api/system.py",
-    "GET /history @app/api/evaluate.py",
-    "GET /history/{eval_id} @app/api/evaluate.py",
     "GET /infra/data-refresh-status @app/api/infra.py",
     "GET /map/countries @app/api/map_data.py",
     "GET /map/countries/{code} @app/api/map_data.py",

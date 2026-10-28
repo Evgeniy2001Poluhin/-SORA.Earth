@@ -35,8 +35,8 @@ _budgets = itertools.count(301_000, 1_017)
 
 
 def _project():
-    # A fresh budget each call: /evaluate caches by payload, and a cached answer
-    # writes no row.
+    # A fresh budget each call. /evaluate cached by payload once, and a cached
+    # answer wrote no row; the cache is gone, the habit costs nothing.
     return {"name": "provenance", "budget": next(_budgets), "co2_reduction": 150,
             "social_impact": 7, "duration_months": 24, "category": "Solar Energy",
             "region": "Germany"}
@@ -63,14 +63,36 @@ def _champion(model, source):
     return SimpleNamespace(model=model, source=source)
 
 
-def _last_row():
-    from app.database import PredictionLog
-    db = main.get_db_sync()
-    try:
-        return db.query(PredictionLog).filter(PredictionLog.endpoint == "evaluate") \
-            .order_by(PredictionLog.id.desc()).first()
-    finally:
-        db.close()
+class _Saver:
+    """POST /evaluate?save=true as one specialist; read back that owner's row.
+
+    Only a save writes a predictions_log row now, and it is owned, so the row
+    under test is found by its owner rather than as "the newest in the table".
+    """
+
+    def __init__(self, client, owner):
+        self.client, self.owner = client, owner
+
+    def __call__(self, payload):
+        from tests._auth_tokens import bearer
+        return self.client.post("/api/v1/evaluate?save=true", json=payload,
+                                headers=bearer(self.owner.username))
+
+    def last_row(self):
+        from app.database import PredictionLog
+        db = main.get_db_sync()
+        try:
+            return db.query(PredictionLog).filter(
+                PredictionLog.endpoint == "evaluate",
+                PredictionLog.owner_user_id == self.owner.id,
+            ).order_by(PredictionLog.id.desc()).first()
+        finally:
+            db.close()
+
+
+@pytest.fixture
+def save(client, make_account):
+    return _Saver(client, make_account(prefix="provenance"))
 
 
 @pytest.fixture
@@ -119,20 +141,20 @@ def test_a_value_longer_than_the_column_is_not_cut_short():
 # --- what /evaluate writes ------------------------------------------------
 
 
-def test_evaluate_records_the_serving_model(client, serving):
+def test_evaluate_records_the_serving_model(save, serving):
     model = _Model()
     serving(model, ModelSource("active", run_id=RUN, version="20261020_010101"))
 
-    r = client.post("/api/v1/evaluate", json=_project())
+    r = save(_project())
 
-    assert r.status_code == 200, r.text
-    row = _last_row()
+    assert r.status_code == 201, r.text
+    row = save.last_row()
     assert row.model_version == "active:" + RUN
     assert row.model_version != "v2.0"
     assert row.probability == pytest.approx(70.0)
 
 
-def test_a_champion_replaced_after_the_prediction_does_not_rename_the_row(client, serving, monkeypatch):
+def test_a_champion_replaced_after_the_prediction_does_not_rename_the_row(save, serving, monkeypatch):
     """The row names the model that computed it, not the one serving at write time."""
     replacement = _Model(p=0.2)
 
@@ -144,43 +166,46 @@ def test_a_champion_replaced_after_the_prediction_does_not_rename_the_row(client
     first = _Model(p=0.7, on_predict=reload_now)
     serving(first, ModelSource("active", run_id=RUN))
 
-    r = client.post("/api/v1/evaluate", json=_project())
+    r = save(_project())
 
-    assert r.status_code == 200, r.text
+    assert r.status_code == 201, r.text
     assert main.champion.source.run_id == OTHER_RUN, "the swap did not happen; the test proves nothing"
-    row = _last_row()
+    row = save.last_row()
     assert row.probability == pytest.approx(70.0)
     assert row.model_version == "active:" + RUN
 
 
-def test_a_reload_half_done_is_recorded_as_unknown(client, monkeypatch):
+def test_a_reload_half_done_is_recorded_as_unknown(save, monkeypatch):
     """`reload_champion` assigns `rf_model` before `champion`; in between, nobody knows."""
     old, new = _Model(p=0.6), _Model(p=0.4)
     monkeypatch.setattr(_real_main(), "champion", _champion(old, ModelSource("active", run_id=RUN)))
     monkeypatch.setattr(_real_main(), "rf_model", new)
 
-    r = client.post("/api/v1/evaluate", json=_project())
+    r = save(_project())
 
-    assert r.status_code == 200, r.text
-    row = _last_row()
+    assert r.status_code == 201, r.text
+    row = save.last_row()
     assert row.probability == pytest.approx(40.0)
     assert row.model_version == "unknown"
 
 
-def test_the_macro_branch_is_recorded_as_a_formula(client, serving):
+def test_the_macro_branch_is_recorded_as_a_formula(save, serving):
     serving(_Model(), ModelSource("active", run_id=RUN))
     payload = dict(_project(), co2_per_capita=5.0, renewable_share=30.0, gdp_per_capita=20000)
 
-    r = client.post("/api/v1/evaluate", json=payload)
+    r = save(payload)
 
-    assert r.status_code == 200, r.text
-    assert _last_row().model_version == "formula:macro"
+    assert r.status_code == 201, r.text
+    assert save.last_row().model_version == "formula:macro"
 
 
-def test_a_writer_that_is_not_told_the_model_says_unknown_not_the_old_literal():
+def test_the_row_cannot_be_built_without_being_told_the_model():
+    """No default at all, so the old literal "v2.0" -- or any other -- cannot
+    be recorded by a caller that forgot to say which model computed the row."""
     import inspect
-    default = inspect.signature(main.log_prediction).parameters["model_version"].default
-    assert default == "unknown"
+    from app.services.evaluation_store import prediction_log_row
+    default = inspect.signature(prediction_log_row).parameters["model_version"].default
+    assert default is inspect.Parameter.empty
 
 
 def test_reload_champion_publishes_the_champion_last():

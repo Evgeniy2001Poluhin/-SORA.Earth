@@ -464,6 +464,41 @@ def require_auth(authorization: str = Header(None)) -> UserInfo:
         raise HTTPException(status_code=401, detail=str(e), headers={"WWW-Authenticate": "Bearer"})
     return UserInfo(user_id=str(account.id), username=account.username, role=account.role)
 
+def optional_auth(authorization: str = Header(None)) -> Optional[UserInfo]:
+    """The caller's account, or None when the request carries no Authorization.
+
+    For routes that serve anonymous callers and behave differently for a
+    signed-in one -- /evaluate saves only for an owner, and a signed-in call
+    stays out of the shared telemetry.
+
+    Absent is the only case that becomes None. A header that is present goes
+    through require_auth unchanged, so a malformed, forged, expired, revoked or
+    blocked token is a 401 -- never an anonymous request. Treating a bad token
+    as no token would let a revoked session keep using every route that has an
+    anonymous path, and would turn "save" into "computed but silently not
+    saved". An account store that cannot be read is a 503 for the same reason:
+    it cannot say who is blocked.
+    """
+    if authorization is None:
+        return None
+    return require_auth(authorization)
+
+
+def refuse_specialist(user=Depends(optional_auth)):
+    """403 for a specialist on a surface outside the ownership model.
+
+    Copilot sessions, batch results and the prediction CSV have their own
+    storage with no owner column. Until they have one, a specialist is kept off
+    them on the server -- hiding a menu entry is not a control. Anonymous and
+    the other roles are unaffected: this adds a refusal, it does not add
+    authentication where a route had none.
+    """
+    if user is not None and user.role == "specialist":
+        raise HTTPException(status_code=403,
+                            detail="Not available to the specialist role")
+    return user
+
+
 def require_admin(authorization: str = Header(None)) -> UserInfo:
     user = require_auth(authorization)
     if user.role != "admin":
