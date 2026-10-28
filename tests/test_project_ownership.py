@@ -1091,7 +1091,7 @@ def test_the_shared_kernel_explainer_runs_one_call_at_a_time(client, monkeypatch
 
 def _sentry_events(options, monkeypatch):
     """Run one failing request through a real Sentry client; return what it sent."""
-    import json
+    import logging
 
     import sentry_sdk
     from fastapi import FastAPI
@@ -1113,10 +1113,11 @@ def _sentry_events(options, monkeypatch):
 
     @probe.post("/boom")
     def boom(body: Body):
+        logging.getLogger("probe").error("scoring %s", "-".join(["LOGGED", str(body.budget)]))
         # Built at run time: Sentry also sends the source lines around the
         # failure, and a literal here would be found there, not in the locals.
         probability = "-".join(["PROBABILITY", str(31337)])  # noqa: F841
-        raise RuntimeError("boom")
+        raise RuntimeError("boom " + "-".join(["MESSAGE", str(body.budget)]))
 
     sentry_sdk.init(dsn="https://key@o0.ingest.sentry.io/1", transport=Capture,
                     default_integrations=True, **options)
@@ -1137,12 +1138,23 @@ def test_sentry_sends_no_body_no_locals_no_credentials(monkeypatch):
     # absence below is the options and not a client that captured nothing.
     loose = _sentry_events({"send_default_pii": True, "include_local_variables": True,
                             "max_request_body_size": "always"}, monkeypatch)
-    assert "boom" in loose and "4242.4242" in loose and "PROBABILITY-31337" in loose
+    for carried in ("PROBABILITY-31337", "MESSAGE-4242.4242", "LOGGED-4242.4242"):
+        assert carried in loose, carried
 
     sent = _sentry_events(SENTRY_OPTIONS, monkeypatch)
-    assert "boom" in sent, "nothing was reported at all"
+    assert "RuntimeError" in sent, "nothing was reported at all"
     for leaked in ("4242.4242", "PROBABILITY-31337", "SECRET-BEARER"):
         assert leaked not in sent, leaked
+
+
+def test_an_out_of_range_uncertainty_request_is_a_422_that_echoes_nothing(client):
+    """A plain-dict body is validated by hand; a refusal used to escape as a
+    500 carrying input_value=... in its text, which an error reporter sends."""
+    r = client.post("/api/v1/predict/uncertainty", json={
+        "budget": 123456789012.34, "co2_reduction": 120, "social_impact": 7,
+        "duration_months": 24})
+    assert r.status_code == 422, r.text
+    assert "123456789012" not in r.text
 
 
 def test_the_application_initialises_sentry_with_those_options(monkeypatch):

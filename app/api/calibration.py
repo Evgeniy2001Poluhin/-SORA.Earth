@@ -174,9 +174,18 @@ def predict_with_uncertainty(project: dict):
     from app.schemas import ProjectInput as Project
     from app.validators import ProjectInput as PI
 
-    p = Project(**project)
-    legacy = PI(budget=p.budget, co2_reduction=p.co2_reduction,
-                social_impact=p.social_impact, duration_months=p.duration_months)
+    # The body is a plain dict, so FastAPI validates nothing and a value the
+    # model refuses used to escape as a 500 -- with the value in the
+    # exception text. Refuse it as a 422 that does not echo the input.
+    from fastapi.exceptions import RequestValidationError
+    from pydantic import ValidationError
+    try:
+        p = Project(**project)
+        legacy = PI(budget=p.budget, co2_reduction=p.co2_reduction,
+                    social_impact=p.social_impact, duration_months=p.duration_months)
+    except ValidationError as exc:
+        raise RequestValidationError(
+            exc.errors(include_input=False, include_url=False, include_context=False)) from None
 
     feats = m.make_features(legacy)
     base_proba = float(m.rf_model.predict_proba(feats)[0][1])
