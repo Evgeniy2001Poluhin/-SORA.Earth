@@ -1,4 +1,5 @@
-import { api } from '../client';
+import { api, apiStream } from '../client';
+import { session, SessionChangedError } from '@/lib/session';
 import type { ExplainResponse } from '../types';
 
 export interface CopilotShapValue { feature: string; shap_value: number; }
@@ -47,20 +48,26 @@ export const copilotApi = {
   getSession: (id: string) => api<CopilotSessionFull>('/copilot/sessions/' + encodeURIComponent(id)),
   deleteSession: (id: string) => api<{ deleted: boolean; id: string }>('/copilot/sessions/' + encodeURIComponent(id), { method: 'DELETE' }),
   async *explainStream(b: CopilotRequest, opts?: { signal?: AbortSignal; speed?: 'fast' | 'normal' | 'slow' }): AsyncGenerator<CopilotStreamEvent, void, unknown> {
-    const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api/v1';
+    // Through the shared transport: the stream carries the session's Bearer, so
+    // the server can refuse a role it does not serve (a specialist gets 403),
+    // and it is aborted when the session ends.
     const qs = opts?.speed ? ('?speed=' + encodeURIComponent(opts.speed)) : '';
-    const res = await fetch(base + '/copilot/explain/stream' + qs, {
+    const { res, epoch } = await apiStream('/copilot/explain/stream' + qs, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(b),
       signal: opts?.signal,
     });
-    if (!res.ok || !res.body) { throw new Error('Stream failed: HTTP ' + res.status); }
+    if (!res.body) { throw new Error('Stream failed: HTTP ' + res.status); }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
     while (true) {
       const { done, value } = await reader.read();
+      // A chunk that arrives after the session changed belongs to nobody here.
+      if (!session.isCurrent(epoch)) {
+        void reader.cancel().catch(() => {});
+        throw new SessionChangedError();
+      }
       if (done) break;
       buf += decoder.decode(value, { stream: true });
       const chunks = buf.split('\n\n');
@@ -70,7 +77,13 @@ export const copilotApi = {
         if (!line.startsWith('data:')) continue;
         const payload = line.slice(5).trim();
         if (!payload) continue;
-        try { yield JSON.parse(payload) as CopilotStreamEvent; } catch (err) { console.warn('SSE parse error:', err, payload); }
+        if (!session.isCurrent(epoch)) {
+          void reader.cancel().catch(() => {});
+          throw new SessionChangedError();
+        }
+        let event: CopilotStreamEvent;
+        try { event = JSON.parse(payload) as CopilotStreamEvent; } catch (err) { console.warn('SSE parse error:', err, payload); continue; }
+        yield event;
       }
     }
   },

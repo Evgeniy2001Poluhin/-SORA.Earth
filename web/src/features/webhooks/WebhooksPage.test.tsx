@@ -19,16 +19,14 @@ function stubFetch(
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const { ok, status, body } = handler(url, init?.method ?? "GET");
-    return {
-      ok,
+    // A real Response: the page now reads through the shared transport, which
+    // reads an error body as text. A body of null stands for "nothing parseable
+    // came back", which is what a 502 from a proxy looks like.
+    expect(ok).toBe(status >= 200 && status < 300);
+    return new Response(body === null ? "" : JSON.stringify(body), {
       status,
-      json: async () => {
-        // A body of null stands for "nothing parseable came back", which is what
-        // a 502 from a proxy looks like.
-        if (body === null) throw new SyntaxError("Unexpected end of JSON input");
-        return body;
-      },
-    } as Response;
+      headers: { "content-type": "application/json" },
+    });
   }) as unknown as typeof fetch;
 }
 
