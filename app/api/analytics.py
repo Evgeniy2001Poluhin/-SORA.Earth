@@ -1,9 +1,13 @@
 """Analytics endpoints for ESG benchmarking and model health."""
-from fastapi import APIRouter, Query, HTTPException, Request, Depends
+from typing import List
+
+from fastapi import APIRouter, Query, HTTPException, Request, Depends, Response
 from pydantic import BaseModel, Field
 
 from app.api.infra import admin_auth
-from app.auth import require_auth
+from app.auth import UserInfo, require_auth
+from app.project_access import shared_data_predicate
+from app.schemas import PredictionLogView
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -137,19 +141,52 @@ async def country_ranking(
         "data":   [{"country": name, **data} for name, data in ranked[offset:offset + limit]],
     }
 
-@router.get("/predictions-log", dependencies=[Depends(require_auth)])
-def get_predictions_log(limit: int = Query(100, ge=1, le=1000)):
+_PREDICTION_LOG_FIELDS = tuple(f for f in PredictionLogView.model_fields
+                               if f not in ("owner_user_id", "data_scope"))
+
+
+@router.get("/predictions-log", response_model=List[PredictionLogView],
+            response_model_exclude_unset=True)
+def get_predictions_log(request: Request, response: Response,
+                        limit: int = Query(100, ge=1, le=1000),
+                        actor: UserInfo = Depends(require_auth)):
+    """The predictions_log rows the caller may read, newest first.
+
+    The same rule as /history (app/project_access.py): a specialist's own
+    saved rows, the shared corpus for analyst and viewer, everything for an
+    administrator -- recorded in the durable audit before it is returned.
+    """
     from app.main import get_db_sync
     from app.database import PredictionLog
+    from app import project_audit
+    from app.project_access import is_service_read, project_read_predicate
+
+    response.headers["Cache-Control"] = "private, no-store"
+    service = is_service_read(actor)
     db = get_db_sync()
     try:
-        rows = db.query(PredictionLog).order_by(
-            PredictionLog.timestamp.desc()
-        ).limit(limit).all()
-        return [
-            {c.name: getattr(r, c.name) for c in PredictionLog.__table__.columns}
-            for r in rows
-        ]
+        rows = (
+            db.query(PredictionLog)
+            .filter(project_read_predicate(PredictionLog, actor))
+            .order_by(PredictionLog.timestamp.desc(), PredictionLog.id.desc())
+            .limit(limit)
+            .all()
+        )
+        views = []
+        for r in rows:
+            fields = {f: getattr(r, f) for f in _PREDICTION_LOG_FIELDS}
+            if service:
+                fields["owner_user_id"] = str(r.owner_user_id) if r.owner_user_id else None
+                fields["data_scope"] = r.data_scope
+            views.append(PredictionLogView(**fields))
+        if service:
+            project_audit.record(
+                db, actor=actor, request=request, action="log_read", status_code=200,
+                targets=[project_audit.target(project_audit.PREDICTION_LOG, r, effect="returned")
+                         for r in rows],
+                filters={"limit": limit}, returned_count=len(rows))
+            project_audit.commit_or_refuse(db)
+        return views
     finally:
         db.close()
 
@@ -162,15 +199,20 @@ def model_health(_: None = Depends(admin_auth)):
     from datetime import datetime, timedelta
     from sqlalchemy import func
 
+    # Shared figures: the public corpus only, in every query below. A saved
+    # pilot evaluation is somebody's own work, not platform traffic.
+    public = shared_data_predicate(PredictionLog)
     db = get_db_sync()
     try:
-        total_predictions = db.query(PredictionLog).count()
+        total_predictions = db.query(PredictionLog).filter(public).count()
 
         last_24h = db.query(PredictionLog).filter(
+            public,
             PredictionLog.timestamp >= datetime.utcnow() - timedelta(hours=24)
         ).count()
 
         avg_latency_overall = db.query(PredictionLog).filter(
+            public,
             PredictionLog.latency_ms.isnot(None)
         ).with_entities(
             func.avg(PredictionLog.latency_ms)
@@ -178,6 +220,7 @@ def model_health(_: None = Depends(admin_auth)):
 
         def _avg_latency_for(endpoint: str):
             q = db.query(PredictionLog).filter(
+                public,
                 PredictionLog.endpoint == endpoint,
                 PredictionLog.latency_ms.isnot(None),
             ).with_entities(func.avg(PredictionLog.latency_ms))
@@ -191,7 +234,7 @@ def model_health(_: None = Depends(admin_auth)):
             row.endpoint: row.count
             for row in db.query(
                 PredictionLog.endpoint, func.count().label("count")
-            ).group_by(PredictionLog.endpoint)
+            ).filter(public).group_by(PredictionLog.endpoint)
         }
     finally:
         db.close()
@@ -230,11 +273,16 @@ def data_health(window_hours: int = 24):
     from app.main import get_db_sync
     from app.database import PredictionLog
 
+    # Public rows only, and in *every* query: `_null_rate` and `_oor_rate`
+    # build their own queries rather than refining `q`, so a filter on `q`
+    # alone would leave pilot rows in each numerator while the denominator
+    # excluded them.
+    public = shared_data_predicate(PredictionLog)
     db = get_db_sync()
     try:
         since = datetime.utcnow() - timedelta(hours=window_hours)
 
-        q = db.query(PredictionLog).filter(PredictionLog.timestamp >= since)
+        q = db.query(PredictionLog).filter(public, PredictionLog.timestamp >= since)
         total = q.count()
         if total == 0:
             return {
@@ -251,6 +299,7 @@ def data_health(window_hours: int = 24):
                 db.query(func.count())
                 .select_from(PredictionLog)
                 .filter(
+                    public,
                     PredictionLog.timestamp >= since,
                     column.is_(None),
                 )
@@ -273,6 +322,7 @@ def data_health(window_hours: int = 24):
                 db.query(func.count())
                 .select_from(PredictionLog)
                 .filter(
+                    public,
                     PredictionLog.timestamp >= since,
                     condition,
                 )
@@ -352,15 +402,20 @@ def analytics_summary(window_hours: int = 24, _: None = Depends(admin_auth)):
     from app.main import get_db_sync, rf_model, xgb_model, nn_model, ensemble_model_v2, model_metrics
     from app.database import PredictionLog
 
+    # Every one of the separate queries below carries the public filter; each
+    # is its own SELECT, so one missed is one leak.
+    public = shared_data_predicate(PredictionLog)
     db = get_db_sync()
     try:
         since = datetime.utcnow() - timedelta(hours=window_hours)
 
         total = db.query(PredictionLog).filter(
+            public,
             PredictionLog.timestamp >= since
         ).count()
 
         avg_latency = db.query(func.avg(PredictionLog.latency_ms)).filter(
+            public,
             PredictionLog.timestamp >= since,
             PredictionLog.latency_ms.isnot(None)
         ).scalar()
@@ -370,11 +425,13 @@ def analytics_summary(window_hours: int = 24, _: None = Depends(admin_auth)):
             for row in db.query(
                 PredictionLog.endpoint, func.count().label("count")
             ).filter(
+                public,
                 PredictionLog.timestamp >= since
             ).group_by(PredictionLog.endpoint)
         }
 
         preds_q = db.query(PredictionLog).filter(
+            public,
             PredictionLog.timestamp >= since,
             PredictionLog.prediction.isnot(None)
         )
@@ -385,22 +442,26 @@ def analytics_summary(window_hours: int = 24, _: None = Depends(admin_auth)):
         positive_frac = round(positive / preds_total, 4) if preds_total else None
         negative_frac = round(negative / preds_total, 4) if preds_total else None
 
-        null_budget = db.query(func.count()).filter(
+        null_budget = db.query(func.count()).select_from(PredictionLog).filter(
+            public,
             PredictionLog.timestamp >= since,
             PredictionLog.budget.is_(None)
         ).scalar()
 
-        null_co2 = db.query(func.count()).filter(
+        null_co2 = db.query(func.count()).select_from(PredictionLog).filter(
+            public,
             PredictionLog.timestamp >= since,
             PredictionLog.co2_reduction.is_(None)
         ).scalar()
 
-        null_social = db.query(func.count()).filter(
+        null_social = db.query(func.count()).select_from(PredictionLog).filter(
+            public,
             PredictionLog.timestamp >= since,
             PredictionLog.social_impact.is_(None)
         ).scalar()
 
-        null_duration = db.query(func.count()).filter(
+        null_duration = db.query(func.count()).select_from(PredictionLog).filter(
+            public,
             PredictionLog.timestamp >= since,
             PredictionLog.duration_months.is_(None)
         ).scalar()

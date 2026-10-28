@@ -10,16 +10,19 @@ be checked against.
 from tests._auth_tokens import access_token_for
 
 
-def test_history_reports_the_probability_evaluate_reported(client):
+def test_history_reports_the_probability_evaluate_reported(client, make_account):
+    # Saved by its owner and read back by its owner: an anonymous /evaluate no
+    # longer stores anything.
+    owner = make_account(prefix="scale")
+    headers = {"Authorization": f"Bearer {access_token_for(owner.username)}"}
     body = {"name": "scale-check", "budget": 100000, "co2_reduction": 50,
             "social_impact": 7, "duration_months": 24, "region": "Germany"}
-    evaluated = client.post("/api/v1/evaluate", json=body)
-    assert evaluated.status_code == 200, evaluated.text
+    evaluated = client.post("/api/v1/evaluate?save=true", json=body, headers=headers)
+    assert evaluated.status_code == 201, evaluated.text
     p = evaluated.json()["success_probability"]
 
-    token = access_token_for("viewer")
-    items = client.get("/api/v1/history", headers={"Authorization": f"Bearer {token}"}).json()["items"]
-    row = next(i for i in items if i.get("name") == "scale-check")
+    items = client.get("/api/v1/history", headers=headers).json()["items"]
+    row = next(i for i in items if i["id"] == evaluated.json()["evaluation_id"])
 
     assert row["success_probability"] == p
     assert 1 < p <= 100, (

@@ -300,37 +300,10 @@ def assert_schema_ready(engine=None):
         )
 
 
-def log_prediction(endpoint, input_data, result, latency_ms=None, model_version="unknown"):
-    try:
-        from app.database import PredictionLog
-        db = get_db_sync()
-
-        # Compute prediction from probability and model threshold
-        probability = result.get("probability") or result.get("success_probability")
-        prediction = None
-        if probability is not None:
-            # probability is stored as percentage (0-100), threshold is in [0, 1]
-            prediction = 1 if (probability / 100.0) >= best_threshold else 0
-
-        log = PredictionLog(
-            endpoint=endpoint,
-            budget=input_data.budget,
-            co2_reduction=input_data.co2_reduction,
-            social_impact=input_data.social_impact,
-            duration_months=input_data.duration_months,
-            category=getattr(input_data, "category", None),
-            region=getattr(input_data, "region", None),
-            prediction=prediction,
-            probability=probability,
-            esg_total_score=result.get("total_score"),
-            latency_ms=latency_ms,
-            model_version=model_version,
-        )
-        db.add(log)
-        db.commit()
-        db.close()
-    except Exception as e:
-        logger.error(f"log_prediction failed: {e}")
+# `log_prediction` used to be here: the writer of the `predictions_log` table,
+# with its own session and commit, swallowing every failure. It is now part of
+# saving an evaluation, in app/services/evaluation_store.py, where the log row
+# and the evaluation commit together or not at all.
 
 # ===== APP =====
 
@@ -880,6 +853,7 @@ from app.api import ab_test as ab_api
 from app.api import admin_snapshot
 from app.api import admin_timeline
 from app.api import admin_diagnostics
+from app.api import project_access_log
 from app.api import admin_ai_control
 from app.api import ai_teammate_routes
 from app.api import copilot_api
@@ -910,6 +884,7 @@ api_v1.include_router(admin_retrain_log.router)
 api_v1.include_router(admin_snapshot.router)
 api_v1.include_router(admin_timeline.router)
 api_v1.include_router(admin_diagnostics.router)
+api_v1.include_router(project_access_log.router)
 api_v1.include_router(admin_ai_control.router)
 api_v1.include_router(drift_baseline_router)
 api_v1.include_router(explainability_router)

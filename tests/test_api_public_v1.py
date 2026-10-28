@@ -16,31 +16,30 @@ PROJECT: Dict[str, Any] = {
 }
 
 
-def test_evaluate_and_history_flow(client):
-    """Оценка сохраняется и читается обратно.
+def test_evaluate_and_history_flow(client, make_account):
+    """Сохранённая оценка читается обратно её владельцем.
 
-    Маркер xfail здесь гласил «history empty after evaluate — either evaluate
-    doesn't persist, or history reads from a different source» (#5). Ни то, ни
-    другое: `/api/v1/history` отдаёт страницу `{items, total, limit, offset}`, а
-    тест требовал `isinstance(rows, list)`. Измерено на этом же прогоне: после
-    одной оценки `total == 1`, и запись лежит в `items`.
+    Анонимный POST /evaluate больше ничего не сохраняет: сохранение -- это
+    `?save=true` от specialist или admin, и запись принадлежит ему. Поэтому
+    поток проверяется от имени специалиста, а не по общей истории viewer.
 
-    Проверка теперь идёт по дельте, а не по «хотя бы одна»: набор не изолирован
-    по базе между тестами, и непустая история могла бы остаться от соседа.
+    Проверка идёт по дельте и по id, а не по «хотя бы одна»: набор не
+    изолирован по базе между тестами.
     """
-    token = access_token_for("viewer")
-    headers = {"Authorization": f"Bearer {token}"}
+    owner = make_account(prefix="flow")
+    headers = {"Authorization": f"Bearer {access_token_for(owner.username)}"}
 
     before = client.get("/api/v1/history", headers=headers)
     assert before.status_code == 200
     total_before = before.json()["total"]
 
-    resp = client.post("/api/v1/evaluate", json=PROJECT)
-    assert resp.status_code == 200
+    resp = client.post("/api/v1/evaluate?save=true", json=PROJECT, headers=headers)
+    assert resp.status_code == 201
     data = resp.json()
     assert "total_score" in data
     assert "risk_level" in data
     assert "success_probability" in data
+    assert data["saved"] is True
 
     hist = client.get("/api/v1/history", headers=headers)
     assert hist.status_code == 200
@@ -50,6 +49,7 @@ def test_evaluate_and_history_flow(client):
         f"{total_before} -> {page['total']}: оценка не доехала до истории"
     )
     assert page["items"], "total вырос, а страница пуста"
+    assert page["items"][0]["id"] == data["evaluation_id"]
     assert page["items"][0]["total_score"] == pytest.approx(data["total_score"]), (
         "первая запись страницы — не та оценка, которую только что сделали "
         "(порядок по created_at desc)"

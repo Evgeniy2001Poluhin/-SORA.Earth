@@ -957,3 +957,113 @@ class UncertaintyOk(BaseModel):
     confidence: Literal["high", "medium", "low"]
     uncertainty: UncertaintyDetail
     reliability: Literal["high", "medium", "low"]
+
+
+# ---------------------------------------------------------------- ownership
+#
+# Explicit views of project rows. These routes used to serialise every ORM
+# column, so adding `owner_user_id` to the table would have published every
+# owner's UUID to every reader without anyone deciding it. A column reaches a
+# response now only by being named here.
+#
+# `owner_user_id` and `data_scope` are set only on an administrator's view --
+# the service interface where ownership is the point. The routes return these
+# with `response_model_exclude_unset`, so for everyone else the two keys are
+# absent, not null.
+
+class EvaluationView(BaseModel):
+    id: int
+    name: Optional[str] = None
+    budget: Optional[float] = None
+    co2_reduction: Optional[float] = None
+    social_impact: Optional[float] = None
+    duration_months: Optional[int] = None
+    total_score: Optional[float] = None
+    environment_score: Optional[float] = None
+    social_score: Optional[float] = None
+    economic_score: Optional[float] = None
+    success_probability: Optional[float] = None
+    recommendation: Optional[str] = None
+    risk_level: Optional[str] = None
+    region: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    created_at: Optional[Any] = None
+    owner_user_id: Optional[str] = None
+    data_scope: Optional[str] = None
+
+
+class EvaluationHistoryPage(BaseModel):
+    items: List[EvaluationView]
+    total: int
+    limit: int
+    offset: int
+
+
+class PredictionLogView(BaseModel):
+    id: int
+    timestamp: Optional[Any] = None
+    request_id: Optional[str] = None
+    endpoint: Optional[str] = None
+    model_version: Optional[str] = None
+    budget: Optional[float] = None
+    co2_reduction: Optional[float] = None
+    social_impact: Optional[float] = None
+    duration_months: Optional[int] = None
+    category: Optional[str] = None
+    region: Optional[str] = None
+    prediction: Optional[int] = None
+    probability: Optional[float] = None
+    esg_total_score: Optional[float] = None
+    confidence: Optional[float] = None
+    latency_ms: Optional[float] = None
+    owner_user_id: Optional[str] = None
+    data_scope: Optional[str] = None
+
+
+class HistoryDeleted(BaseModel):
+    status: Literal["deleted"]
+    id: int
+
+
+class HistoryCleared(BaseModel):
+    status: Literal["cleared"]
+    #: Always "public". Saved pilot evaluations are not cleared in bulk; an
+    #: administrator removes one by its id.
+    scope: Literal["public"]
+    deleted_count: int
+
+
+class ProjectAccessTargetView(BaseModel):
+    resource_type: str
+    resource_id: int
+    owner_user_id: Optional[str] = None
+    data_scope: Optional[str] = None
+    effect: str
+
+
+class ProjectAccessEventView(BaseModel):
+    id: str
+    occurred_at: Any
+    actor_user_id: str
+    actor_username: str
+    actor_role: str
+    request_id: str
+    action: str
+    method: str
+    route_template: str
+    status_code: int
+    outcome: str
+    filters: Optional[Dict[str, Any]] = None
+    returned_count: Optional[int] = None
+    matched_count: Optional[int] = None
+    affected_count: Optional[int] = None
+    reason: Optional[str] = None
+    targets: List[ProjectAccessTargetView]
+
+
+class ProjectAccessLogPage(BaseModel):
+    items: List[ProjectAccessEventView]
+    total: int
+    limit: int
+    offset: int

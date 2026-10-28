@@ -1,15 +1,25 @@
 """predictions_log.prediction is written with the threshold-based label.
 
 Finding 19: `predictions_log.prediction` was always NULL because `calculate_esg`
-does not return a "prediction" key, and `log_prediction` tried to get one.
+does not return a "prediction" key, and the writer tried to get one.
 
 The fix computes the prediction from the probability and the model's
 best_threshold: prediction = 1 if probability >= threshold*100 else 0.
 """
 import pytest
 
+from tests._auth_tokens import bearer
 
-def test_evaluate_writes_prediction_based_on_threshold(client):
+
+# Only a save writes a predictions_log row, and the row is owned: each test
+# saves as its own specialist and reads back that owner's rows, so a row left
+# by any other test cannot be the one asserted on.
+@pytest.fixture
+def owner(make_account):
+    return make_account(prefix="predlog")
+
+
+def test_evaluate_writes_prediction_based_on_threshold(client, owner):
     """The /evaluate endpoint writes predictions_log.prediction as 0 or 1."""
     from app.database import PredictionLog
     from app.main import get_db_sync, best_threshold
@@ -27,19 +37,20 @@ def test_evaluate_writes_prediction_based_on_threshold(client):
 
     db = get_db_sync()
     try:
-        before_count = db.query(PredictionLog).count()
+        before_count = db.query(PredictionLog).filter(PredictionLog.owner_user_id == owner.id).count()
     finally:
         db.close()
 
-    r = client.post("/api/v1/evaluate", json=high_prob_project)
-    assert r.status_code == 200, r.text
+    r = client.post("/api/v1/evaluate?save=true", headers=bearer(owner.username), json=high_prob_project)
+    assert r.status_code == 201, r.text
     result = r.json()
 
     # Get the logged prediction
     db = get_db_sync()
     try:
         log_entry = db.query(PredictionLog).filter(
-            PredictionLog.endpoint == "evaluate"
+            PredictionLog.endpoint == "evaluate",
+            PredictionLog.owner_user_id == owner.id,
         ).order_by(PredictionLog.id.desc()).first()
 
         assert log_entry is not None, "No log entry found"
@@ -59,13 +70,13 @@ def test_evaluate_writes_prediction_based_on_threshold(client):
         )
         assert log_entry.prediction == 1, "High probability should predict 1"
 
-        after_count = db.query(PredictionLog).count()
+        after_count = db.query(PredictionLog).filter(PredictionLog.owner_user_id == owner.id).count()
         assert after_count == before_count + 1, "Exactly one row should be written"
     finally:
         db.close()
 
 
-def test_low_probability_predicts_zero(client):
+def test_low_probability_predicts_zero(client, owner):
     """A project with probability below threshold gets prediction=0."""
     from app.database import PredictionLog
     from app.main import get_db_sync, best_threshold
@@ -81,13 +92,14 @@ def test_low_probability_predicts_zero(client):
         "region": "Europe"
     }
 
-    r = client.post("/api/v1/evaluate", json=low_prob_project)
-    assert r.status_code == 200, r.text
+    r = client.post("/api/v1/evaluate?save=true", headers=bearer(owner.username), json=low_prob_project)
+    assert r.status_code == 201, r.text
 
     db = get_db_sync()
     try:
         log_entry = db.query(PredictionLog).filter(
-            PredictionLog.endpoint == "evaluate"
+            PredictionLog.endpoint == "evaluate",
+            PredictionLog.owner_user_id == owner.id,
         ).order_by(PredictionLog.id.desc()).first()
 
         assert log_entry is not None
@@ -107,7 +119,7 @@ def test_low_probability_predicts_zero(client):
         db.close()
 
 
-def test_prediction_matches_probability_across_range(client):
+def test_prediction_matches_probability_across_range(client, owner):
     """The prediction column correctly reflects the probability for various inputs."""
     from app.database import PredictionLog
     from app.main import get_db_sync, best_threshold
@@ -122,7 +134,7 @@ def test_prediction_matches_probability_across_range(client):
 
     db = get_db_sync()
     try:
-        before_count = db.query(PredictionLog).count()
+        before_count = db.query(PredictionLog).filter(PredictionLog.owner_user_id == owner.id).count()
     finally:
         db.close()
 
@@ -134,14 +146,15 @@ def test_prediction_matches_probability_across_range(client):
             "region": "Europe",
             **case
         }
-        r = client.post("/api/v1/evaluate", json=project)
-        assert r.status_code == 200, f"Case {i} failed: {r.text}"
+        r = client.post("/api/v1/evaluate?save=true", headers=bearer(owner.username), json=project)
+        assert r.status_code == 201, f"Case {i} failed: {r.text}"
 
     # Verify all predictions
     db = get_db_sync()
     try:
         logs = db.query(PredictionLog).filter(
-            PredictionLog.endpoint == "evaluate"
+            PredictionLog.endpoint == "evaluate",
+            PredictionLog.owner_user_id == owner.id,
         ).order_by(PredictionLog.id.desc()).limit(len(test_cases)).all()
 
         assert len(logs) == len(test_cases), f"Expected {len(test_cases)} new logs"
@@ -157,13 +170,13 @@ def test_prediction_matches_probability_across_range(client):
                 f"for probability={log.probability}"
             )
 
-        after_count = db.query(PredictionLog).count()
+        after_count = db.query(PredictionLog).filter(PredictionLog.owner_user_id == owner.id).count()
         assert after_count == before_count + len(test_cases)
     finally:
         db.close()
 
 
-def test_prediction_is_integer_zero_or_one(client):
+def test_prediction_is_integer_zero_or_one(client, owner):
     """The prediction column stores integer 0 or 1, not None."""
     from app.database import PredictionLog
     from app.main import get_db_sync
@@ -178,13 +191,14 @@ def test_prediction_is_integer_zero_or_one(client):
         "region": "Europe"
     }
 
-    r = client.post("/api/v1/evaluate", json=project)
-    assert r.status_code == 200, r.text
+    r = client.post("/api/v1/evaluate?save=true", headers=bearer(owner.username), json=project)
+    assert r.status_code == 201, r.text
 
     db = get_db_sync()
     try:
         log_entry = db.query(PredictionLog).filter(
-            PredictionLog.endpoint == "evaluate"
+            PredictionLog.endpoint == "evaluate",
+            PredictionLog.owner_user_id == owner.id,
         ).order_by(PredictionLog.id.desc()).first()
 
         assert log_entry.prediction in (0, 1), (
@@ -198,31 +212,27 @@ def test_prediction_is_integer_zero_or_one(client):
 
 
 @pytest.mark.parametrize("offset, expected", [(0.0, 1), (-0.1, 0)])
-def test_prediction_at_the_threshold_boundary(client, offset, expected):
+def test_prediction_at_the_threshold_boundary(offset, expected):
     """Exactly at the threshold is a positive prediction; just below is not.
 
-    Called on log_prediction directly with a controlled probability, because no
-    real project lands on the threshold to a tenth of a percent -- which is why
+    On the row builder directly with a controlled probability, because no real
+    project lands on the threshold to a tenth of a percent -- which is why
     `>=` becoming `>` survived every test above.
     """
-    from app.database import PredictionLog
-    from app.main import best_threshold, get_db_sync, log_prediction
     from types import SimpleNamespace
+
+    from app.main import best_threshold
+    from app.services.evaluation_store import prediction_log_row
 
     probability = round(best_threshold * 100 + offset, 4)
     # The same shape /evaluate passes: a project with attributes, not a dict.
     project = SimpleNamespace(budget=100000, co2_reduction=100, social_impact=5,
                               duration_months=12, category="Solar Energy", region="Europe")
-    log_prediction("evaluate", project, {"success_probability": probability})
-
-    db = get_db_sync()
-    try:
-        row = db.query(PredictionLog).filter(
-            PredictionLog.endpoint == "evaluate"
-        ).order_by(PredictionLog.id.desc()).first()
-    finally:
-        db.close()
-    assert row is not None and row.probability == probability
+    row = prediction_log_row(endpoint="evaluate", project=project,
+                             result={"success_probability": probability}, latency_ms=None,
+                             model_version="unknown", threshold=best_threshold,
+                             owner_user_id=None, data_scope="public")
+    assert row.probability == probability
     assert row.prediction == expected, (
         f"probability {probability} against threshold {best_threshold * 100}: "
         f"prediction {row.prediction}, expected {expected}"

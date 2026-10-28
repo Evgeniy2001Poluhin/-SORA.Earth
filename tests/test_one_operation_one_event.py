@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from app import mlflow_tracking
+from tests._auth_tokens import bearer
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -161,11 +162,10 @@ def api(client):
     return client
 
 
-#: `/api/v1/evaluate` caches on the request body for ten minutes
-#: (`app/api/evaluate.py:115`), so two tests posting the same payload leave the
-#: second served from cache with no telemetry at all -- it fails, and for a
-#: reason that has nothing to do with its subject. Found the hard way. Each
-#: test gets its own body.
+#: `/api/v1/evaluate` used to cache on the request body for ten minutes, so two
+#: tests posting the same payload left the second served from cache with no
+#: telemetry at all. The cache is gone; each test still gets its own body, so
+#: nothing here depends on that staying true.
 _COUNTER = iter(range(1, 10_000))
 
 
@@ -182,42 +182,55 @@ MC = {"project_name": "P", "region": "Sweden", "budget_usd": 100000,
       "project_duration_months": 24, "noise": 0.15}
 
 
-def test_evaluate_emits_exactly_one_event(api, events):
-    """Check 2. It used to emit three, two of them the same evaluation."""
-    r = api.post("/api/v1/evaluate", json=_project())
+@pytest.mark.parametrize("save", [False, True])
+def test_evaluate_emits_no_shared_event(api, events, make_account, save):
+    """Check 2. It used to emit three, two of them the same evaluation; then one.
 
-    assert r.status_code == 200, r.text
-    assert _names(events) == ["log_evaluation"], _names(events)
+    Now none. Every /evaluate is either an unsaved calculation or a private
+    save, and the MLflow evaluation experiment is shared by the platform --
+    neither belongs in it. Both modes are asserted, because a gate keyed on the
+    mode would pass one and fail the other.
+    """
+    owner = make_account(prefix="oneevent")
+    url = "/api/v1/evaluate?save=true" if save else "/api/v1/evaluate"
+    r = api.post(url, json=_project(), headers=bearer(owner.username))
+
+    assert r.status_code == (201 if save else 200), r.text
+    assert _names(events) == [], _names(events)
 
 
-def test_evaluate_still_writes_its_prediction_log_row(api, events):
-    """`app.main.log_prediction` is a database write, not telemetry.
+def test_evaluate_still_writes_its_prediction_log_row(api, events, make_account):
+    """The predictions_log row is part of a save, not telemetry.
 
     It shares a name with `app.mlflow_tracking.log_prediction` and does
     something else: a row in `predictions_log`. I removed the call while
     reading it as a duplicate MLflow event. Mutation testing caught it -- every
     assertion stayed green when the call was put back, which is what a test
     that does not cover something looks like. This is that test.
+
+    The writer is app/services/evaluation_store.py now, and only a save
+    writes: one row, owned by the caller.
     """
+    import uuid as _uuid
+
     from app.database import PredictionLog
     from app.main import get_db_sync
 
-    db = get_db_sync()
-    try:
-        before = db.query(PredictionLog).filter(PredictionLog.endpoint == "evaluate").count()
-    finally:
-        db.close()
+    owner = make_account(prefix="logrow")
 
-    r = api.post("/api/v1/evaluate", json=_project())
-    assert r.status_code == 200, r.text
+    def count():
+        db = get_db_sync()
+        try:
+            return db.query(PredictionLog).filter(
+                PredictionLog.endpoint == "evaluate",
+                PredictionLog.owner_user_id == _uuid.UUID(str(owner.id))).count()
+        finally:
+            db.close()
 
-    db = get_db_sync()
-    try:
-        after = db.query(PredictionLog).filter(PredictionLog.endpoint == "evaluate").count()
-    finally:
-        db.close()
-
-    assert after == before + 1, "the /evaluate prediction-log row was not written"
+    before = count()
+    r = api.post("/api/v1/evaluate?save=true", json=_project(), headers=bearer(owner.username))
+    assert r.status_code == 201, r.text
+    assert count() == before + 1, "the /evaluate prediction-log row was not written"
 
 
 @pytest.mark.parametrize("n, samples", [(50, 50), (500, 500)])

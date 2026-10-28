@@ -2,12 +2,26 @@ import logging
 from typing import Optional
 from typing import List
 
-from fastapi import APIRouter, Depends, Request, Query
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi.encoders import jsonable_encoder
+from fastapi import Response
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
-from app.auth import require_admin, require_auth
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.auth import UserInfo, optional_auth, require_admin, require_auth
+from app import project_audit
+from app.project_access import (FORBIDDEN_BODY_KEYS, PUBLIC, SAVING_ROLES, is_service_read,
+                                project_read_predicate, shared_data_predicate)
 from app.security.spreadsheet import neutralize_cell
+from app.services.evaluation_store import save_evaluation
 
 from app.schemas import (
+    EvaluationHistoryPage,
+    EvaluationView,
+    HistoryCleared,
+    HistoryDeleted,
     ProjectInput as Project,
     GHGInput,
     MonteCarloHistogram,
@@ -15,11 +29,8 @@ from app.schemas import (
     MonteCarloUnavailable,
 )
 from app.country_benchmarks import BENCHMARKS, GLOBAL_AVG, SOURCES
-from app.cache import cache
 from app import external_data
-from app.drift_detection import drift_detector
-from app.mlflow_tracking import log_evaluation, log_simulation
-from app.middleware import METRICS
+from app.mlflow_tracking import log_simulation
 from app.database import Evaluation
 from app.map_position import marker_offset
 
@@ -109,16 +120,66 @@ def _macro_esg_from_payload(payload: dict):
     }
 
 
-@router.post("/evaluate")
-async def evaluate_project(request: Request, project: Project):
-    from app.main import calculate_esg, get_db_sync, COUNTRIES, _sanitize_pdf
+#: Every response that carries a caller's own evaluation, saved or not, and
+#: every read of project rows. A shared proxy or the browser's disk cache must
+#: not hand one account's projects to the next person on the machine.
+NO_STORE = {"Cache-Control": "private, no-store"}
+
+
+@router.post("/evaluate", summary="Evaluate a project; with ?save=true, save it as yours")
+async def evaluate_project(
+    request: Request,
+    project: Project,
+    save: bool = Query(False, description="Save the evaluation under the signed-in account. "
+                                          "Specialist and admin only; 401 without a Bearer, "
+                                          "403 for analyst and viewer."),
+    caller: Optional[UserInfo] = Depends(optional_auth),
+):
+    """Compute an evaluation, and save it only when asked to by its owner.
+
+    Two operations on one route, chosen by `save`:
+
+        POST /evaluate             computes and writes nothing. 200, saved=false.
+        POST /evaluate?save=true   computes, then writes the evaluation and its
+                                   predictions_log row in one transaction under
+                                   the caller's account. 201, saved=true, with
+                                   the evaluation_id -- only after the commit.
+
+    Anonymous calls used to write both rows with no owner, into the corpus that
+    trends, drift and forecasting read. A calculation is now just a
+    calculation; a saved one is private (`data_scope = 'pilot'`) and belongs to
+    whoever saved it. The owner comes from the verified token. A body naming
+    `owner_user_id`, `user_id` or `data_scope` is refused, not ignored.
+
+    No result cache. The process-local LRU this route had returned a cached
+    response *before* either write, so a repeated payload was never saved, and
+    a cached saved response would hand back somebody else's evaluation_id.
+
+    Nothing from this route feeds the shared channels any more -- the MLflow
+    evaluation experiment, the Redis drift observations and the
+    evaluations_avg_score counter. Every call is either an unsaved calculation
+    or a private save, and neither belongs in a platform-wide figure.
+    """
+    from app.main import calculate_esg, COUNTRIES, _sanitize_pdf
+
+    # Before any computation: who is asking decides whether this can save.
+    if save:
+        if caller is None:
+            raise HTTPException(status_code=401, detail="Sign in to save an evaluation",
+                                headers={"WWW-Authenticate": "Bearer"})
+        if caller.role not in SAVING_ROLES:
+            raise HTTPException(status_code=403,
+                                detail="This role cannot save evaluations")
 
     raw_payload = await request.json()
     payload = dict(raw_payload) if isinstance(raw_payload, dict) else project.model_dump()
-    cache_key = cache.make_key("eval", payload)
-    cached = cache.get(cache_key)
-    if cached:
-        return cached
+    forbidden = sorted(FORBIDDEN_BODY_KEYS.intersection(payload))
+    if forbidden:
+        raise HTTPException(status_code=422, detail={
+            "reason_code": "forbidden_control_fields",
+            "fields": forbidden,
+            "message": "The owner and scope of a saved evaluation are set by the server.",
+        })
 
     start = time.perf_counter()
     cdata = COUNTRIES.get(
@@ -144,21 +205,6 @@ async def evaluate_project(request: Request, project: Project):
 
     latency_ms = round((time.perf_counter() - start) * 1000, 2)
 
-    # Not MLflow. `app.main.log_prediction` writes a row to the
-    # `predictions_log` **table**; it shares a name with
-    # `app.mlflow_tracking.log_prediction` and does something else entirely. I
-    # removed this call while reading it as a duplicate telemetry event, which
-    # it is not -- mutation testing said so, by leaving every assertion green
-    # when the call came back.
-    from app.main import log_prediction
-    log_prediction(
-        "evaluate",
-        project,
-        result,
-        latency_ms=latency_ms,
-        model_version=model_version,
-    )
-
     try:
         ctx = external_data.get_country_context(project.region or region_name)
         if ctx is not None:
@@ -170,51 +216,35 @@ async def evaluate_project(request: Request, project: Project):
     lat = cdata["lat"] + offset
     lon = cdata["lon"] + offset
 
-    db = get_db_sync()
-    try:
-        ev = Evaluation(
-            name=project.name,
-            budget=project.budget,
-            co2_reduction=project.co2_reduction,
-            social_impact=project.social_impact,
-            duration_months=project.duration_months,
-            total_score=result["total_score"],
-            environment_score=result["environment_score"],
-            social_score=result["social_score"],
-            economic_score=result["economic_score"],
-            success_probability=result["success_probability"],
-            recommendation="; ".join([_sanitize_pdf(r) for r in result.get("recommendations", [])]),
-            risk_level=result["risk_level"],
-            created_at=datetime.now(),
-            region=region_name,
-            lat=lat,
-            lon=lon,
-        )
-        db.add(ev)
-        db.commit()
-    finally:
-        db.close()
+    evaluation_id = None
+    if save:
+        # The predictions_log row is part of the save, not telemetry beside it:
+        # app/services/evaluation_store.py writes both in one transaction. It
+        # used to be `app.main.log_prediction`, a separate commit that
+        # swallowed its own failure.
+        from app.main import best_threshold
+        try:
+            evaluation_id = save_evaluation(
+                owner_user_id=uuid.UUID(caller.user_id),
+                project=project,
+                result=result,
+                recommendation="; ".join(
+                    [_sanitize_pdf(r) for r in result.get("recommendations", [])]),
+                region_name=region_name,
+                lat=lat,
+                lon=lon,
+                latency_ms=latency_ms,
+                model_version=model_version,
+                threshold=best_threshold,
+            )
+        except SQLAlchemyError as exc:
+            logger.error("evaluation could not be saved: %s", type(exc).__name__)
+            raise HTTPException(status_code=503, detail="The evaluation could not be saved",
+                                headers={"Retry-After": "5", **NO_STORE}) from None
 
     result["region"] = region_name
     result["lat"] = lat
     result["lon"] = lon
-
-    # The one MLflow event for this operation (#258). It used to be two: this
-    # one and an identical `log_evaluation` from inside `calculate_esg`.
-    log_evaluation(project.name, result, result["risk_level"])
-
-    # Convert social_impact to model scale (0-100) for drift detection. The
-    # baseline is fitted from data/projects.csv which uses 0-100, so observations
-    # must be on the same scale.
-    from app.scales import social_impact_to_model
-    drift_detector.add_observation(
-        {
-            "budget": project.budget,
-            "co2_reduction": project.co2_reduction,
-            "social_impact": social_impact_to_model(project.social_impact),
-            "duration_months": project.duration_months,
-        }
-    )
 
     country_name = project.region or "Germany"
     bench = BENCHMARKS.get(country_name, GLOBAL_AVG)
@@ -226,20 +256,36 @@ async def evaluate_project(request: Request, project: Project):
         "hdi": bench["hdi"],
     }
 
-    m = METRICS
-    m["evaluations_total"] = m.get("evaluations_total", 0) + 1
-    prev_avg = m.get("evaluations_avg_score", 0.0)
-    n = m["evaluations_total"]
-    m["evaluations_avg_score"] = round(
-        prev_avg + (result["total_score"] - prev_avg) / n, 2
-    )
-
-    cache.set(cache_key, result, ttl=600)
-    return result
+    result["saved"] = evaluation_id is not None
+    result["evaluation_id"] = evaluation_id
+    return JSONResponse(status_code=201 if save else 200,
+                        content=jsonable_encoder(result), headers=NO_STORE)
 
 
-@router.get("/history", dependencies=[Depends(require_auth)])
+_EVALUATION_FIELDS = tuple(f for f in EvaluationView.model_fields
+                           if f not in ("owner_user_id", "data_scope"))
+
+
+def _evaluation_view(row, *, service: bool) -> EvaluationView:
+    """A row as the API shows it. Ownership only on the administrator's view."""
+    fields = {f: getattr(row, f) for f in _EVALUATION_FIELDS}
+    if service:
+        fields["owner_user_id"] = str(row.owner_user_id) if row.owner_user_id else None
+        fields["data_scope"] = row.data_scope
+    return EvaluationView(**fields)
+
+
+def _newest_first(query):
+    # Ties on created_at are broken by id, so a page boundary is not a matter
+    # of whichever order the database happened to return equal timestamps in.
+    return query.order_by(Evaluation.created_at.desc(), Evaluation.id.desc())
+
+
+@router.get("/history", response_model=EvaluationHistoryPage,
+            response_model_exclude_unset=True)
 def get_history(
+    request: Request,
+    response: Response,
     region: Optional[str] = Query(None),
     risk_level: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
@@ -248,11 +294,21 @@ def get_history(
     max_score: Optional[float] = Query(None, ge=0, le=100),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    actor: UserInfo = Depends(require_auth),
 ):
+    """The evaluations the caller may read (app/project_access.py).
+
+    A specialist sees their own saved evaluations; analyst and viewer see the
+    shared corpus; an administrator sees everything, and every such read is
+    recorded before it is returned. The access rule is part of the query, so
+    `total` and the page are computed over the same permitted rows.
+    """
     from app.main import get_db_sync
+    response.headers.update(NO_STORE)
+    service = is_service_read(actor)
     db = get_db_sync()
     try:
-        q = db.query(Evaluation)
+        q = db.query(Evaluation).filter(project_read_predicate(Evaluation, actor))
         if region:
             q = q.filter(Evaluation.region.ilike(f"%{region}%"))
         if risk_level:
@@ -266,85 +322,190 @@ def get_history(
         if max_score is not None:
             q = q.filter(Evaluation.total_score <= max_score)
         total = q.count()
-        rows = q.order_by(Evaluation.created_at.desc()).offset(offset).limit(limit).all()
-        items = [{c.name: getattr(r, c.name) for c in Evaluation.__table__.columns} for r in rows]
-        return {"items": items, "total": total, "limit": limit, "offset": offset}
+        rows = _newest_first(q).offset(offset).limit(limit).all()
+        items = [_evaluation_view(r, service=service) for r in rows]
+        if service:
+            project_audit.record(
+                db, actor=actor, request=request, action="list", status_code=200,
+                targets=[project_audit.target(project_audit.EVALUATION, r, effect="returned")
+                         for r in rows],
+                filters={k: v for k, v in {
+                    "region": region, "risk_level": risk_level, "date_from": date_from,
+                    "date_to": date_to, "min_score": min_score, "max_score": max_score,
+                    "limit": limit, "offset": offset}.items() if v is not None},
+                returned_count=len(rows), matched_count=total)
+            project_audit.commit_or_refuse(db)
+        return EvaluationHistoryPage(items=items, total=total, limit=limit, offset=offset)
     finally:
         db.close()
 
-@router.get("/history/{eval_id}", dependencies=[Depends(require_auth)])
-def get_evaluation_by_id(eval_id: int):
+
+@router.get("/history/{eval_id}", response_model=EvaluationView,
+            response_model_exclude_unset=True)
+def get_evaluation_by_id(eval_id: int, request: Request, response: Response,
+                         actor: UserInfo = Depends(require_auth)):
+    """One evaluation, if the caller may read it; otherwise 404.
+
+    Somebody else's id answers exactly like an id that does not exist. The
+    lookup carries the access rule, so there is no step at which the row was
+    found and then refused -- and nothing to tell the two cases apart by.
+    """
     from app.main import get_db_sync
-    from fastapi import HTTPException
+    response.headers.update(NO_STORE)
+    service = is_service_read(actor)
+    db = get_db_sync()
+    try:
+        row = db.query(Evaluation).filter(
+            Evaluation.id == eval_id,
+            project_read_predicate(Evaluation, actor),
+        ).first()
+        if service:
+            found = row is not None
+            project_audit.record(
+                db, actor=actor, request=request, action="detail",
+                status_code=200 if found else 404,
+                outcome="ok" if found else "not_found",
+                targets=[project_audit.target(project_audit.EVALUATION, row, effect="returned")
+                         if found else
+                         project_audit.target(project_audit.EVALUATION, resource_id=eval_id,
+                                              effect="not_found")],
+                returned_count=1 if found else 0, matched_count=1 if found else 0)
+            project_audit.commit_or_refuse(db)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Evaluation not found", headers=NO_STORE)
+        return _evaluation_view(row, service=service)
+    finally:
+        db.close()
+
+
+@router.delete("/history/{eval_id}", response_model=HistoryDeleted)
+def delete_evaluation(eval_id: int, request: Request, response: Response,
+                      actor: UserInfo = Depends(require_admin)):
+    """Delete one evaluation, recorded in the same transaction as the DELETE.
+
+    Admin only, and refused before any lookup for everyone else, so a 403 says
+    nothing about whether the id exists. The evaluation's predictions_log row is
+    left alone: nothing links the two reliably, and deleting log rows that
+    merely look alike would delete somebody else's.
+    """
+    from app.main import get_db_sync
+    response.headers.update(NO_STORE)
     db = get_db_sync()
     try:
         row = db.query(Evaluation).filter(Evaluation.id == eval_id).first()
-        if not row:
-            raise HTTPException(status_code=404, detail="Evaluation not found")
-        return {c.name: getattr(row, c.name) for c in Evaluation.__table__.columns}
+        if row is None:
+            project_audit.record(
+                db, actor=actor, request=request, action="delete", status_code=404,
+                outcome="not_found", affected_count=0,
+                targets=[project_audit.target(project_audit.EVALUATION, resource_id=eval_id,
+                                              effect="not_found")])
+            project_audit.commit_or_refuse(db)
+            raise HTTPException(status_code=404, detail="Evaluation not found", headers=NO_STORE)
+        project_audit.record(
+            db, actor=actor, request=request, action="delete", status_code=200,
+            affected_count=1,
+            targets=[project_audit.target(project_audit.EVALUATION, row, effect="deleted")])
+        db.query(Evaluation).filter(Evaluation.id == eval_id).delete(synchronize_session=False)
+        project_audit.commit_or_refuse(db)
     finally:
         db.close()
+    return HistoryDeleted(status="deleted", id=eval_id)
 
-@router.delete("/history/{eval_id}", dependencies=[Depends(require_admin)])
-def delete_evaluation(eval_id: int):
+
+@router.delete("/history", response_model=HistoryCleared)
+def clear_history(request: Request, response: Response,
+                  actor: UserInfo = Depends(require_admin)):
+    """Clear the shared corpus. Saved pilot evaluations are not touched.
+
+    This used to delete every row in the table. With ownership that would
+    remove every specialist's work in one call, so the scope is fixed to
+    `public` and stated in the response. A pilot evaluation is deleted by id.
+    """
     from app.main import get_db_sync
-
+    response.headers.update(NO_STORE)
     db = get_db_sync()
     try:
-        db.query(Evaluation).filter(Evaluation.id == eval_id).delete()
-        db.commit()
+        rows = db.query(Evaluation).filter(shared_data_predicate(Evaluation)).all()
+        ids = [r.id for r in rows]
+        project_audit.record(
+            db, actor=actor, request=request, action="clear", status_code=200,
+            filters={"data_scope": PUBLIC}, affected_count=len(ids),
+            targets=[project_audit.target(project_audit.EVALUATION, r, effect="deleted")
+                     for r in rows])
+        if ids:
+            db.query(Evaluation).filter(
+                Evaluation.id.in_(ids), shared_data_predicate(Evaluation),
+            ).delete(synchronize_session=False)
+        project_audit.commit_or_refuse(db)
     finally:
         db.close()
-    return {"status": "deleted"}
+    return HistoryCleared(status="cleared", scope=PUBLIC, deleted_count=len(ids))
 
 
-@router.delete("/history", dependencies=[Depends(require_admin)])
-def clear_history():
+@router.get("/export/csv")
+def export_csv(request: Request, actor: UserInfo = Depends(require_auth)):
+    """Every evaluation the caller may read, as CSV -- the same rule as /history.
+
+    The whole permitted history, not the current page's filters. An
+    administrator's export names every exported id in the audit, committed
+    before the first byte is sent.
+    """
     from app.main import get_db_sync
 
+    service = is_service_read(actor)
     db = get_db_sync()
     try:
-        db.query(Evaluation).delete()
-        db.commit()
-    finally:
-        db.close()
-    return {"status": "cleared"}
+        rows = _newest_first(
+            db.query(Evaluation).filter(project_read_predicate(Evaluation, actor))).all()
 
-
-@router.get("/export/csv", dependencies=[Depends(require_auth)])
-def export_csv():
-    from app.main import get_db_sync
-
-    db = get_db_sync()
-    try:
-        rows = db.query(Evaluation).order_by(Evaluation.created_at.desc()).all()
-    finally:
-        db.close()
-
-    output = io.StringIO()
-    w = csv.writer(output)
-    w.writerow([
-        "Name", "Budget", "CO2 Reduction", "Social Impact", "Duration (months)",
-        "ESG Score", "Environment", "Social", "Economic",
-        "Success Probability", "Risk Level", "Region", "Date",
-    ])
-    for r in rows:
+        output = io.StringIO()
+        w = csv.writer(output)
         w.writerow([
-            neutralize_cell(r.name or ""), r.budget, r.co2_reduction, r.social_impact,
-            r.duration_months, r.total_score, r.environment_score,
-            r.social_score, r.economic_score, r.success_probability,
-            neutralize_cell(r.risk_level or ""), neutralize_cell(r.region or ""), r.created_at,
+            "ID", "Name", "Budget", "CO2 Reduction", "Social Impact", "Duration (months)",
+            "ESG Score", "Environment", "Social", "Economic",
+            "Success Probability", "Risk Level", "Region", "Date",
         ])
-    output.seek(0)
+        for r in rows:
+            w.writerow([
+                r.id, neutralize_cell(r.name or ""), r.budget, r.co2_reduction, r.social_impact,
+                r.duration_months, r.total_score, r.environment_score,
+                r.social_score, r.economic_score, r.success_probability,
+                neutralize_cell(r.risk_level or ""), neutralize_cell(r.region or ""), r.created_at,
+            ])
+        body = output.getvalue().encode()
+
+        if service:
+            project_audit.record(
+                db, actor=actor, request=request, action="export", status_code=200,
+                targets=[project_audit.target(project_audit.EVALUATION, r, effect="returned")
+                         for r in rows],
+                returned_count=len(rows), matched_count=len(rows))
+            project_audit.commit_or_refuse(db)
+    finally:
+        db.close()
+
     return StreamingResponse(
-        io.BytesIO(output.getvalue().encode()),
+        io.BytesIO(body),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=sora_earth_projects.csv"},
+        headers={"Content-Disposition": "attachment; filename=sora_earth_projects.csv",
+                 **NO_STORE},
     )
 
 
+def _shared_telemetry(caller) -> bool:
+    """Whether a simulation's summary may go to the shared MLflow experiment.
+
+    Only for an anonymous call. A signed-in caller's what-if, Monte Carlo or
+    ranking is a run over their own project, and its baseline score and spread
+    are results of that project -- the experiment is shared by the whole
+    platform. isinstance, so a handler called directly in a test (where the
+    parameter holds the Depends marker) behaves as anonymous.
+    """
+    return not isinstance(caller, UserInfo)
+
+
 @router.post("/what-if")
-def what_if(project: Project):
+def what_if(project: Project, caller: Optional[UserInfo] = Depends(optional_auth)):
     import uuid
 
     from app.main import COUNTRIES, calculate_esg
@@ -385,18 +546,19 @@ def what_if(project: Project):
     # call itself. The aggregate is what a reader of the experiment wants
     # anyway: where the baseline sat and how far the variants moved it.
     changes = [v["score_change"] for v in variations.values()]
-    log_simulation(
-        "what_if",
-        metrics={
-            "variants": len(variations),
-            "baseline_score": base["total_score"],
-            "min_score_change": round(min(changes), 2) if changes else None,
-            "max_score_change": round(max(changes), 2) if changes else None,
-            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
-        },
-        tags={"event_id": event_id, "region": wi_region,
-              "model_version": _model_version()},
-    )
+    if _shared_telemetry(caller):
+        log_simulation(
+            "what_if",
+            metrics={
+                "variants": len(variations),
+                "baseline_score": base["total_score"],
+                "min_score_change": round(min(changes), 2) if changes else None,
+                "max_score_change": round(max(changes), 2) if changes else None,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+            },
+            tags={"event_id": event_id, "region": wi_region,
+                  "model_version": _model_version()},
+        )
     return {"base": base, "variations": variations}
 
 
@@ -435,11 +597,18 @@ def ghg_calculate(data: GHGInput):
 
 @router.get("/trends")
 def trends():
+    """One point per evaluation in the shared corpus.
+
+    Per evaluation, not an aggregate, so a saved pilot evaluation would appear
+    here as its own score, probability and date. Public rows only, for every
+    caller: this route takes no account into consideration at all.
+    """
     from app.main import get_db_sync
 
     db = get_db_sync()
     try:
-        rows = db.query(Evaluation).order_by(Evaluation.created_at.asc()).all()
+        rows = (db.query(Evaluation).filter(shared_data_predicate(Evaluation))
+                .order_by(Evaluation.created_at.asc(), Evaluation.id.asc()).all())
     finally:
         db.close()
     return [
@@ -574,7 +743,7 @@ def generate_pdf_report(project: Project):
 
 
 @router.post("/evaluate/ranking")
-async def evaluate_ranking(project: Project):
+async def evaluate_ranking(project: Project, caller: Optional[UserInfo] = Depends(optional_auth)):
     import uuid
 
     from app.main import calculate_esg, COUNTRIES
@@ -608,22 +777,23 @@ async def evaluate_ranking(project: Project):
     # enumerating `calculate_esg`'s callers rather than by working from the
     # list in the issue.
     scored = [row["total_score"] for row in out if "total_score" in row]
-    log_simulation(
-        "country_ranking",
-        metrics={
-            "countries": len(out),
-            "succeeded": len(scored),
-            "failed": len(out) - len(scored),
-            "max_score": round(max(scored), 2) if scored else None,
-            "min_score": round(min(scored), 2) if scored else None,
-            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
-        },
-        tags={
-            "event_id": event_id,
-            "model_version": _model_version(),
-            "partial_sample": "true" if len(scored) != len(out) else "false",
-        },
-    )
+    if _shared_telemetry(caller):
+        log_simulation(
+            "country_ranking",
+            metrics={
+                "countries": len(out),
+                "succeeded": len(scored),
+                "failed": len(out) - len(scored),
+                "max_score": round(max(scored), 2) if scored else None,
+                "min_score": round(min(scored), 2) if scored else None,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+            },
+            tags={
+                "event_id": event_id,
+                "model_version": _model_version(),
+                "partial_sample": "true" if len(scored) != len(out) else "false",
+            },
+        )
     return {"count": len(out), "ranking": out}
 
 
@@ -708,7 +878,8 @@ def _simulate_once(req: "_MCRequest", region_name: str, jitter) -> float:
     responses={503: {"model": MonteCarloUnavailable, "description": "No simulation produced a score."}},
     summary="Distribution of the ESG score under input noise",
 )
-async def evaluate_monte_carlo(req: _MCRequest):
+async def evaluate_monte_carlo(req: _MCRequest,
+                              caller: Optional[UserInfo] = Depends(optional_auth)):
     """Run N simulations with triangular noise on inputs, return distribution stats.
 
     Two things this contract fixes (docs/API_CONTRACT_ROADMAP.md). "Every
@@ -751,17 +922,18 @@ async def evaluate_monte_carlo(req: _MCRequest):
         # One event for the failed sweep too. The alternative the issue names
         # -- an explicit counter and no event -- would leave the experiment
         # unable to distinguish "nobody asked" from "everything raised".
-        log_simulation(
-            "monte_carlo",
-            metrics={
-                "requested": n, "succeeded": 0, "failed": _failed,
-                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
-            },
-            tags={
-                "event_id": event_id, "region": rname, "outcome": "no_successful_runs",
-                "model_version": _model_version(), "partial_sample": "true",
-            },
-        )
+        if _shared_telemetry(caller):
+            log_simulation(
+                "monte_carlo",
+                metrics={
+                    "requested": n, "succeeded": 0, "failed": _failed,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                },
+                tags={
+                    "event_id": event_id, "region": rname, "outcome": "no_successful_runs",
+                    "model_version": _model_version(), "partial_sample": "true",
+                },
+            )
         return JSONResponse(
             status_code=503,
             content=MonteCarloUnavailable(
@@ -798,26 +970,27 @@ async def evaluate_monte_carlo(req: _MCRequest):
     # `event_id` also appears in the warnings above, so a log line and its run
     # can be joined. No part of the request payload is included: an aggregate
     # is a summary, and the project name is the caller's text.
-    log_simulation(
-        "monte_carlo",
-        metrics={
-            "requested": n,
-            "succeeded": len(scores),
-            "failed": _failed,
-            "mean": round(statistics.mean(scores), 2),
-            "stdev": round(statistics.pstdev(scores), 2),
-            "p05": pct(5),
-            "p50": pct(50),
-            "p95": pct(95),
-            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
-        },
-        tags={
-            "event_id": event_id,
-            "region": rname,
-            "model_version": _model_version(),
-            "partial_sample": "true" if _failed else "false",
-        },
-    )
+    if _shared_telemetry(caller):
+        log_simulation(
+            "monte_carlo",
+            metrics={
+                "requested": n,
+                "succeeded": len(scores),
+                "failed": _failed,
+                "mean": round(statistics.mean(scores), 2),
+                "stdev": round(statistics.pstdev(scores), 2),
+                "p05": pct(5),
+                "p50": pct(50),
+                "p95": pct(95),
+                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+            },
+            tags={
+                "event_id": event_id,
+                "region": rname,
+                "model_version": _model_version(),
+                "partial_sample": "true" if _failed else "false",
+            },
+        )
     return MonteCarloOk(
         status="ok",
         requested=n,
