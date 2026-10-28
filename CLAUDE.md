@@ -444,10 +444,14 @@ hashing       Argon2id only (app/passwords.py). The two SHA-256 verify paths
               and legacy_hash_count() are gone: no store ever held such a hash.
 ```
 
-**Rolling back past this change re-opens what it closed.** Code from before it
-reads accounts from the environment and ignores `users`, so a block or reset
-done since would stop applying. Do not roll back across it once an account has
-been blocked or reset, and never drop the table to "undo" it.
+**Code from before this change cannot be restored once `users` exists.** It
+reads accounts from the environment and ignores the table, so every block and
+reset made since would be lifted; and its entrypoint refuses a database past its
+own Alembic head, so it would not start anyway. `deploy_production.sh` therefore
+refuses both `--rollback` to such a commit and the automatic rollback onto it
+(`accounts_downgrade_blocked`; the automatic case stops with exit 76 and
+`rollback-refused`, leaving the new code running). Fix forward, and never drop
+the table to "undo" the change.
 
 ### API Organization
 

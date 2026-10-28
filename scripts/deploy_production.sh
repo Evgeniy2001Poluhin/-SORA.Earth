@@ -233,12 +233,13 @@ abort_deployment() {
     # Before the checkout: restoring code that predates persistent accounts
     # would undo every block and reset made since. Leave the new code running
     # and stop; an operator decides, with external access closed if need be.
-    if _blocked="$(accounts_downgrade_blocked "$PREV_COMMIT")"; then
-        echo "  ROLLBACK REFUSED: ${PREV_COMMIT:0:12} predates persistent accounts, and" >&2
-        echo "  $_blocked account(s) have been blocked, reset or re-roled since; restoring" >&2
-        echo "  it would lift those. The new code is still running. Close external access" >&2
-        echo "  or fix forward; see CLAUDE.md, 'Accounts live in the users table'." >&2
-        journal_write rollback-refused "previous code predates persistent accounts; $_blocked revocation(s) would be undone"
+    if accounts_downgrade_blocked "$PREV_COMMIT"; then
+        echo "  ROLLBACK REFUSED: ${PREV_COMMIT:0:12} predates persistent accounts and the" >&2
+        echo "  users table now exists (or its existence could not be read). That code would" >&2
+        echo "  refuse the migrated schema and ignore every block and reset. The new code is" >&2
+        echo "  still running: fix forward, closing external access if need be. See" >&2
+        echo "  CLAUDE.md, 'Accounts live in the users table'." >&2
+        journal_write rollback-refused "previous code predates persistent accounts and the users table exists"
         exit 76
     fi
 
@@ -292,23 +293,25 @@ abort_deployment() {
 
 step() { echo; echo "== $* =="; }
 
-# Going back to code from before persistent accounts can undo a revocation.
+# Code from before persistent accounts cannot be restored once `users` exists.
 #
-# That code ignores the `users` table and rebuilds admin, analyst and viewer
-# from SORA_DEFAULT_*_PASSWORD on every start. So once any account has been
-# blocked, reset or given another role -- token_version above 1, or blocked --
-# returning to it would quietly restore the old passwords and lift the block.
-# Prints the number of such accounts and succeeds when the move must be
-# refused; fails (nothing printed) when it is safe. A count that cannot be read
-# refuses: the question is exactly the one an unreachable database leaves open.
+# Two reasons, either sufficient. That code ignores the table and rebuilds
+# admin, analyst and viewer from SORA_DEFAULT_*_PASSWORD, so every block and
+# reset made since would be lifted. And its entrypoint refuses a database past
+# its own Alembic head, so it would not start at all -- while the image-id
+# check below would still report the restore as a success.
+#
+# Whether the table exists is asked on its own: a query that names `users`
+# fails outright where it is absent, CASE or not, and an absent table is the
+# one case where going back is still fine -- the migration never got there.
+# Succeeds (refuse) when the table exists or the answer cannot be read; fails
+# (allow) when the target has the accounts code or the table is absent.
 accounts_downgrade_blocked() {
-    local to="$1" n
+    local to="$1" exists
     git cat-file -e "$to:app/accounts.py" 2>/dev/null && return 1
-    n="$("${DC[@]}" exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$0"' \
-        "SELECT CASE WHEN to_regclass('public.users') IS NULL THEN 0 ELSE (SELECT count(*) FROM users WHERE token_version > 1 OR is_blocked) END" \
-        < /dev/null 2>/dev/null || true)"
-    [ "$n" = 0 ] && return 1
-    echo "${n:-unreadable}"
+    exists="$("${DC[@]}" exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$0"' \
+        "SELECT to_regclass('public.users') IS NOT NULL" < /dev/null 2>/dev/null || true)"
+    [ "$exists" = f ] && return 1
     return 0
 }
 
@@ -578,8 +581,8 @@ else
         || fail "$TARGET is origin/main; use a plain deploy rather than --rollback"
     # Before anything changes: code from before persistent accounts would lift
     # every block and reset made since (accounts_downgrade_blocked).
-    if _blocked="$(accounts_downgrade_blocked "$TARGET")"; then
-        fail "${TARGET:0:12} predates persistent accounts, and $_blocked account(s) have been blocked, reset or re-roled since; rolling back would lift those. Roll back to a commit that has app/accounts.py, or fix forward."
+    if accounts_downgrade_blocked "$TARGET"; then
+        fail "${TARGET:0:12} predates persistent accounts and the users table exists (or could not be checked): that code refuses the migrated schema and would ignore every block and reset. Roll back to a commit that has app/accounts.py, or fix forward."
     fi
     # The journal records deployments this script made. One made by hand leaves
     # no entry, and the next scripted run then names the last *scripted* commit
@@ -1024,7 +1027,10 @@ APP_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null
 # would be a site nobody can sign in to. An existing table is never modified
 # (scripts/bootstrap_users.py), so SORA_DEFAULT_*_PASSWORD changes nothing once
 # accounts exist.
-"${DC[@]}" run --rm --no-deps bootstrap-users \
+# Only where the checked-out code has the step: a rollback to a commit from
+# before persistent accounts has neither the script nor the service.
+[ ! -f scripts/bootstrap_users.py ] \
+    || "${DC[@]}" run --rm --no-deps bootstrap-users \
     || fail "the account bootstrap refused; nothing has been recreated. Either the SORA_DEFAULT_*_PASSWORD values are missing on a first deployment, or no active administrator exists."
 
 # --no-build, because everything that builds was built above. A rebuild here
