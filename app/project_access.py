@@ -22,13 +22,15 @@ that counts them.
 The shared filter is a positive match on `public`. `!= 'pilot'` or
 `owner_user_id IS NULL` would admit any scope added later; a positive match
 excludes it until somebody decides it belongs in the shared corpus.
+
+This module imports nothing from app.auth. The scheduler imports it through
+the forecast loader, and runs without the JWT secret app.auth requires in
+production; the dependency that refuses the specialist role lives in
+app/auth.py for that reason.
 """
 import uuid
 
 import sqlalchemy as sa
-from fastapi import Depends, HTTPException
-
-from app.auth import UserInfo, optional_auth
 
 PUBLIC = "public"
 PILOT = "pilot"
@@ -53,7 +55,7 @@ def shared_data_predicate(model):
     return model.data_scope == PUBLIC
 
 
-def project_read_predicate(model, actor: UserInfo):
+def project_read_predicate(model, actor):
     """The rows `actor` may read. Admin sees everything and must be audited."""
     if actor.role == "specialist":
         return sa.and_(model.data_scope == PILOT,
@@ -67,21 +69,6 @@ def project_read_predicate(model, actor: UserInfo):
     return sa.false()
 
 
-def is_service_read(actor: UserInfo) -> bool:
+def is_service_read(actor) -> bool:
     """True when the read must go through the durable audit."""
     return actor.role == "admin"
-
-
-def refuse_specialist(user=Depends(optional_auth)):
-    """403 for a specialist on a surface outside the ownership model.
-
-    Copilot sessions, batch results and the prediction CSV have their own
-    storage with no owner column. Until they have one, a specialist is kept off
-    them on the server -- hiding a menu entry is not a control. Anonymous and
-    the other roles are unaffected: this adds a refusal, it does not add
-    authentication where a route had none.
-    """
-    if user is not None and user.role == "specialist":
-        raise HTTPException(status_code=403,
-                            detail="Not available to the specialist role")
-    return user

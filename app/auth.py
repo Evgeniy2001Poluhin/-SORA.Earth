@@ -484,6 +484,21 @@ def optional_auth(authorization: str = Header(None)) -> Optional[UserInfo]:
     return require_auth(authorization)
 
 
+def refuse_specialist(user=Depends(optional_auth)):
+    """403 for a specialist on a surface outside the ownership model.
+
+    Copilot sessions, batch results and the prediction CSV have their own
+    storage with no owner column. Until they have one, a specialist is kept off
+    them on the server -- hiding a menu entry is not a control. Anonymous and
+    the other roles are unaffected: this adds a refusal, it does not add
+    authentication where a route had none.
+    """
+    if user is not None and user.role == "specialist":
+        raise HTTPException(status_code=403,
+                            detail="Not available to the specialist role")
+    return user
+
+
 def require_admin(authorization: str = Header(None)) -> UserInfo:
     user = require_auth(authorization)
     if user.role != "admin":

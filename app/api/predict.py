@@ -10,7 +10,7 @@ from app.prom_metrics import sora_prediction_latency, sora_predictions_total
 from typing import Optional
 
 from app.auth import UserInfo, optional_auth, require_auth
-from app.project_access import refuse_specialist
+from app.auth import refuse_specialist
 from app.schemas import NeuralNetworkUnavailable
 from app.schemas import ProjectInput as Project
 from app.validators import ProjectInput as LegacyProjectInput

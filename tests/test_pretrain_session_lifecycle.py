@@ -103,6 +103,7 @@ class Ledger:
         self.opened, self.closed, self.uses, self.written = [], [], [], []
         q = MagicMock()
         q.order_by.return_value = q
+        q.filter.return_value = q  # the public-scope filter on the precheck
         q.all.return_value = rows
         self.query_result = q
 

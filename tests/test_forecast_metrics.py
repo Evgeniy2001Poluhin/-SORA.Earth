@@ -304,7 +304,7 @@ def test_scheduled_pretrain_logs_metrics(monkeypatch):
             mock_rows.append(row)
 
         mock_db = MagicMock()
-        mock_db.query.return_value.order_by.return_value.all.return_value = mock_rows
+        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = mock_rows
         # `with SessionLocal() as read_db:` since #127 -- without this the
         # mock's auto-created __enter__ child is what the job reads through,
         # and the rows configured above never reach it.
@@ -355,7 +355,7 @@ def test_forecast_metrics_logged_on_failure():
             mock_rows.append(row)
 
         mock_db = MagicMock()
-        mock_db.query.return_value.order_by.return_value.all.return_value = mock_rows
+        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = mock_rows
         # `with SessionLocal() as read_db:` since #127 -- without this the
         # mock's auto-created __enter__ child is what the job reads through,
         # and the rows configured above never reach it.

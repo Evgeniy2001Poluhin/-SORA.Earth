@@ -5,8 +5,8 @@ from app.prom_metrics import (sora_retrain_total, sora_full_pipeline_total,
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from app.auth import require_admin, require_auth
 # Batch results have no owner column either: the specialist role is refused on
-# all three batch routes until they do (app/project_access.py).
-from app.project_access import refuse_specialist
+# all three batch routes until they do (app/auth.py:refuse_specialist).
+from app.auth import refuse_specialist
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
 

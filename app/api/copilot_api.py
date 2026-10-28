@@ -6,9 +6,9 @@ import logging
 from app.auth import require_auth
 # Copilot sessions live in data/sessions.db with no owner column, so every
 # session is readable by every signed-in caller. The specialist role is kept off
-# every route that writes or reads one (app/project_access.py:refuse_specialist)
+# every route that writes or reads one (app/auth.py:refuse_specialist)
 # until sessions have an owner; /copilot/health stays open.
-from app.project_access import refuse_specialist
+from app.auth import refuse_specialist
 from app.services.copilot import (
     explain_prediction,
     health as copilot_health,
