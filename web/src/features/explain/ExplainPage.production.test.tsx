@@ -11,7 +11,7 @@
  * server never answered is precisely the #216 failure in a new place.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 vi.mock("@/api/mock", async (importOriginal) => {
@@ -22,7 +22,8 @@ vi.mock("@/api/mock", async (importOriginal) => {
 import { ExplainPage } from "./ExplainPage";
 import { explainApi } from "@/api/endpoints/explain";
 import { isMock } from "@/api/mock";
-import { renderWithQuery } from "@/test/utils";
+import { ANALYST, deferred, renderWithQuery, seedSession } from "@/test/utils";
+import { useAuth } from "@/store/auth";
 import { callsOf, scoreLikeNumbersIn, stubStatus, stubTransportError } from "@/test/http";
 
 const REQUEST = { budget: 150000, co2_reduction: 340, social_impact: 9, duration_months: 18 };
@@ -207,5 +208,55 @@ describe("ExplainPage: what the numbers and labels claim", () => {
     expect(valueFor("feature_absent")).toBe("—");
     expect(valueFor("feature_zero")).toBe("0.000");
     expect(valueFor("feature_positive")).toBe("+0.210");
+  });
+});
+
+describe("the waterfall belongs to the session that asked for it", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    seedSession(ANALYST, "tok-ana");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, writable: true, value: vi.fn(() => "blob:test") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, writable: true, value: vi.fn() });
+  });
+
+  it("carries the session's Bearer, so a signed-in waterfall stays out of the shared PNG cache", async () => {
+    const stub = stubExplainEndpoints();
+    renderWithQuery(<ExplainPage />);
+    await userEvent.click(screen.getByRole("button", { name: "MED" }));
+    await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1));
+
+    const waterfall = callsOf(stub).find((c) => c.url === "/api/v1/predict/explain/waterfall")!;
+    expect(waterfall.headers["Authorization"]).toBe("Bearer tok-ana");
+  });
+
+  it("makes no image, and shows no result, for an answer that arrives after a sign-out", async () => {
+    const image = deferred<Response>();
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).includes("waterfall")
+        ? image.promise
+        : new Response(JSON.stringify(SERVER_EXPLANATION), { status: 200, headers: { "content-type": "application/json" } }),
+    ) as unknown as typeof fetch;
+    renderWithQuery(<ExplainPage />);
+    await userEvent.click(screen.getByRole("button", { name: "MED" }));
+
+    await act(async () => { await useAuth.getState().logout(); });
+    await act(async () => {
+      image.resolve(new Response("<svg xmlns='http://www.w3.org/2000/svg'/>", { status: 200, headers: { "content-type": "image/svg+xml" } }));
+      await new Promise((r) => setTimeout(r, 30));
+    });
+
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(screen.queryByAltText("SHAP waterfall")).toBeNull();
+    expect(screen.queryByText("server_side_feature_a")).toBeNull();
+  });
+
+  it("revokes its object URL when the page goes", async () => {
+    stubExplainEndpoints();
+    const { unmount } = renderWithQuery(<ExplainPage />);
+    await userEvent.click(screen.getByRole("button", { name: "MED" }));
+    await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1));
+
+    unmount();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:test");
   });
 });

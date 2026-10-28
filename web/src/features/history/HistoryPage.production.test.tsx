@@ -27,7 +27,7 @@ vi.mock("@/api/mock", async (importOriginal) => {
 
 import HistoryPage from "./HistoryPage";
 import { isMock } from "@/api/mock";
-import { renderWithQuery } from "@/test/utils";
+import { ADMIN, ANALYST, SPECIALIST_A, renderWithQuery, seedSession } from "@/test/utils";
 import { stubJson, stubStatus } from "@/test/http";
 
 const renderPage = () => renderWithQuery(<MemoryRouter><HistoryPage /></MemoryRouter>);
@@ -202,5 +202,57 @@ describe("Authentication (GHSA-jmpv-7wjf-87q9)", () => {
 
     // Clean up
     auth.set(null);
+  });
+});
+
+describe("History is the account's own, and says so", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sends the Bearer and keeps the answer out of the HTTP cache", async () => {
+    seedSession(SPECIALIST_A, "tok-a");
+    const stub = stubJson({ items: [row(1, 70)], total: 1, limit: 20, offset: 0 });
+    renderPage();
+    await waitFor(() => expect(stub).toHaveBeenCalled());
+    const [url, init] = stub.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/^\/api\/v1\/history\?/);
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer tok-a");
+    expect(init.cache).toBe("no-store");
+  });
+
+  it.each([
+    ["specialist", SPECIALIST_A, "My evaluations"],
+    ["analyst", ANALYST, "Shared history"],
+    ["admin", ADMIN, "All evaluations"],
+  ])("titles the page for the %s role", async (_role, user, title) => {
+    seedSession(user, "tok");
+    stubJson({ items: [], total: 0, limit: 20, offset: 0 });
+    renderPage();
+    expect(await screen.findByRole("heading", { name: title })).toBeInTheDocument();
+  });
+
+  it("does not show a 403 as an empty history", async () => {
+    seedSession(SPECIALIST_A, "tok-a");
+    stubStatus(403, JSON.stringify({ detail: "forbidden" }));
+    const { container } = renderPage();
+    await waitFor(() => expect(container.querySelector(".hist-error")).not.toBeNull());
+    expect(container.querySelector(".hist-error")?.textContent).toContain("not available for your role");
+    expect(container.textContent).not.toContain("No evaluations match the current filters.");
+    expect(header(container)).not.toMatch(/\b0 evaluations/);
+  });
+
+  it("renders a row whose nullable columns are all null", async () => {
+    stubJson({
+      items: [{ id: 9, name: null, budget: null, co2_reduction: null, social_impact: null, duration_months: null,
+        total_score: null, environment_score: null, social_score: null, economic_score: null,
+        success_probability: null, recommendation: null, risk_level: null, region: null, lat: null, lon: null,
+        created_at: null }],
+      total: 1, limit: 20, offset: 0,
+    });
+    const { container } = renderPage();
+    await waitFor(() => expect(container.querySelector(".hist-item")).not.toBeNull());
+    const cells = Array.from(container.querySelector(".hist-item")!.children).map((c) => c.textContent);
+    expect(cells).toEqual(["—", "—", "—", "—", "—", "—", "—"]);
   });
 });
