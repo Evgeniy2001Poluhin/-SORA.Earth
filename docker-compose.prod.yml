@@ -103,6 +103,31 @@ services:
       postgres:
         condition: service_healthy
 
+  # The three built-in accounts, created once in an empty `users` table.
+  #
+  # Run only by `docker compose run --rm bootstrap-users`, from
+  # scripts/deploy_production.sh, after `migrate` and before either application
+  # service is recreated. A separate service rather than a step of `migrate`:
+  # that one owns the schema and is given DATABASE_URL and nothing else; this
+  # one is given the bootstrap passwords and no signing key. On a table that
+  # already holds accounts it changes nothing and only checks that an active
+  # administrator exists (scripts/bootstrap_users.py).
+  bootstrap-users:
+    profiles: ["migration"]
+    user: "1000:1000"
+    image: ${SORA_APP_IMAGE:-sora_earth_app:current}
+    entrypoint: ["python3", "scripts/bootstrap_users.py"]
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      SORA_ENV: production
+      SORA_DEFAULT_ADMIN_PASSWORD: ${SORA_DEFAULT_ADMIN_PASSWORD}
+      SORA_DEFAULT_ANALYST_PASSWORD: ${SORA_DEFAULT_ANALYST_PASSWORD}
+      SORA_DEFAULT_VIEWER_PASSWORD: ${SORA_DEFAULT_VIEWER_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   backend:
     user: "1000:1000"
     volumes:
@@ -168,12 +193,9 @@ services:
       # app/auth.py:21 -- which is published in this repository.
       SORA_JWT_SECRET: ${JWT_SECRET}
       SORA_ADMIN_TOKEN: ${SORA_ADMIN_TOKEN}
-      # Read at app/auth.py:367 as f"SORA_DEFAULT_{role.upper()}_PASSWORD".
-      # Absent, the three built-in accounts fall back to the literals beside
-      # that line.
-      SORA_DEFAULT_ADMIN_PASSWORD: ${SORA_DEFAULT_ADMIN_PASSWORD}
-      SORA_DEFAULT_ANALYST_PASSWORD: ${SORA_DEFAULT_ANALYST_PASSWORD}
-      SORA_DEFAULT_VIEWER_PASSWORD: ${SORA_DEFAULT_VIEWER_PASSWORD}
+      # SORA_DEFAULT_*_PASSWORD are no longer passed here. Accounts live in
+      # the `users` table; those three values seed it once, through the
+      # `bootstrap-users` service below, and the backend never reads them.
       # Demanded by app/secret_validation.py in production. The backend reaches
       # the database through DATABASE_URL and has no other use for it; passed
       # because the validator requires it, and that requirement is worth

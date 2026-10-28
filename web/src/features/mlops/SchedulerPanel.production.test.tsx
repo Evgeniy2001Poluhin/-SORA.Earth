@@ -101,7 +101,7 @@ describe("the guard on these tests", () => {
 describe("SchedulerPanel when the scheduler container cannot be reached", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    useAuth.setState({ user: { username: "admin", role: "admin" } });
+    useAuth.setState({ user: { user_id: "00000000-0000-0000-0000-000000000001", username: "admin", role: "admin" } });
   });
 
   it("does not say the scheduler is disabled or idle when it does not know", async () => {
@@ -178,7 +178,7 @@ function route(scheduler: Answer, history: Answer) {
 describe("SchedulerPanel while the answer is not in", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    useAuth.setState({ user: { username: "admin", role: "admin" } });
+    useAuth.setState({ user: { user_id: "00000000-0000-0000-0000-000000000001", username: "admin", role: "admin" } });
   });
 
   it("says loading, not idle, before the first status answer", () => {
@@ -271,7 +271,7 @@ const HISTORY_ROW = {
 describe("SchedulerPanel run history", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    useAuth.setState({ user: { username: "admin", role: "admin" } });
+    useAuth.setState({ user: { user_id: "00000000-0000-0000-0000-000000000001", username: "admin", role: "admin" } });
   });
 
   it("does not keep showing the last good rows once a refresh fails", async () => {

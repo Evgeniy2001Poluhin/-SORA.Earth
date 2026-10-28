@@ -2,14 +2,14 @@ import pytest
 from fastapi.testclient import TestClient
 import app.main as main_module
 from app.main import app
-from app.auth import create_access_token
+from tests._auth_tokens import access_token_for
 
 client = TestClient(app)
 
 
 def _signed_in():
     """Reading stored evaluations requires a signed-in user (GHSA-jmpv-7wjf-87q9)."""
-    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    token = access_token_for("viewer")
     return {"Authorization": f"Bearer {token}"}
 
 PROJECT = {

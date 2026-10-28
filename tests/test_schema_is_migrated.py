@@ -238,7 +238,12 @@ def test_both_paths_to_head_produce_the_same_schema():
         built = subprocess.run(
             [sys.executable, "-c",
              "import app.database as d; "
-             "d.Base.metadata.create_all(bind=d.engine, checkfirst=True)"],
+             # Only tables that existed when production converged this way.
+             # `users` came later, from a migration that creates it outright;
+             # building it here would hand that migration a table it never
+             # expects to find, which no real deployment can do.
+             "d.Base.metadata.create_all(bind=d.engine, checkfirst=True, "
+             "tables=[t for t in d.Base.metadata.sorted_tables if t.name not in ('users',)])"],
             cwd=REPO_ROOT,
             env={**os.environ, "DATABASE_URL": conv_url.render_as_string(hide_password=False)},
             capture_output=True, text=True, timeout=120,

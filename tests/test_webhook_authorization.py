@@ -8,6 +8,8 @@ of this did, and it was green while telling me nothing.
 The matrix is the point. Each row distinguishes a different way the gate could
 be wrong.
 """
+from tests._auth_tokens import access_token_for
+import uuid
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -47,12 +49,18 @@ def client():
 
 
 def token(sub, role):
-    return {"Authorization": f"Bearer {auth.create_access_token({'sub': sub, 'role': role})}"}
+    if sub == "deleted-account":
+        # A validly signed token for a UUID no row has: what is left in a
+        # client's hands once its account is gone.
+        forged = auth._jwt_decode(access_token_for("admin"))
+        forged["sub"] = str(uuid.uuid4())
+        return {"Authorization": f"Bearer {auth._jwt_encode(forged)}"}
+    return {"Authorization": f"Bearer {access_token_for(sub, role=role)}"}
 
 
 ANONYMOUS = {}
 GARBAGE = {"Authorization": "Bearer not-a-token"}
-NO_SCHEME = {"Authorization": auth.create_access_token({"sub": "admin", "role": "admin"})}
+NO_SCHEME = {"Authorization": access_token_for("admin")}
 
 
 @pytest.mark.parametrize("headers,expected,why", [
@@ -117,7 +125,7 @@ def test_the_role_comes_from_the_store_and_not_from_the_token(client):
     would notice it in testing.
     """
     claims_admin_but_is_not = {
-        "Authorization": f"Bearer {auth.create_access_token({'sub': 'viewer', 'role': 'admin'})}"
+        "Authorization": f"Bearer {access_token_for('viewer', role='admin')}"
     }
     assert client.delete("/api/v1/webhooks/1",
                          headers=claims_admin_but_is_not).status_code == 403

@@ -2,7 +2,7 @@
 SORA.Earth JWT Authentication + RBAC + API Keys
 Pure Python JWT (HS256) — no external deps
 """
-import hashlib, hmac, json, logging, os, secrets, time, base64
+import hashlib, hmac, json, logging, os, secrets, time, base64, uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -14,7 +14,12 @@ import threading
 
 from fastapi import Depends, HTTPException, Security, Header, status
 from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
+
+from app import accounts
+from app.accounts import AccountState
+from app.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +47,8 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
-class UserCreate(BaseModel):
-    username: str = Field(min_length=3, max_length=50)
-    password: str = Field(min_length=6)
-    role: str = Field(default="viewer", pattern="^(admin|analyst|viewer)$")
-
 class UserInfo(BaseModel):
+    user_id: str
     username: str
     role: str
 
@@ -73,85 +74,34 @@ def _jwt_decode(token: str) -> dict:
     expected = hmac.new(SECRET_KEY.encode(), f"{h}.{p}".encode(), hashlib.sha256).digest()
     if not hmac.compare_digest(expected, _b64url_decode(s)):
         raise ValueError("Invalid signature")
-    payload = json.loads(_b64url_decode(p))
-    if payload.get("exp") and payload["exp"] < time.time():
+    try:
+        header = json.loads(_b64url_decode(h))
+    except (ValueError, UnicodeDecodeError):
+        raise ValueError("Invalid token format") from None
+    if not isinstance(header, dict) or header.get("alg") != "HS256":
+        raise ValueError("Invalid token algorithm")
+    try:
+        payload = json.loads(_b64url_decode(p))
+    except (ValueError, UnicodeDecodeError):
+        raise ValueError("Invalid token format") from None
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid token format")
+    # `exp` is required. It used to be honoured only when present, so a signed
+    # payload without one never expired.
+    exp = payload.get("exp")
+    if isinstance(exp, bool) or not isinstance(exp, (int, float)):
+        raise ValueError("Token has no expiry")
+    if exp < time.time():
         raise ValueError("Token expired")
     return payload
 
-# --- password hashing -------------------------------------------------------
-#
-# Argon2id at the argon2-cffi defaults: time_cost=3, memory_cost=64 MiB,
-# parallelism=4, which costs roughly 150 ms to hash and 130 ms to verify on
-# commodity hardware. The cost is deliberately not configurable: the only
-# reason to expose it would be to lower it, and a weak setting is
-# indistinguishable from a strong one until a table leaks.
-#
-# Two legacy formats are still accepted so that no existing account is locked
-# out, and both are upgraded in place on the next successful login:
-#
-#   $argon2id$...          current
-#   <hex salt>$<sha256>    legacy, salted but a single fast round
-#   <sha256>               legacy, unsalted -- rainbow-table material
-#
-# A single SHA-256 round is the wrong primitive for passwords whether or not it
-# is salted: commodity GPUs evaluate it in the billions per second.
-# OWASP's floor for Argon2id. Raising the parameters as hardware improves is
-# expected and is why they are read from the environment at all; lowering them
-# past this point is refused outright, because a weak setting is
-# indistinguishable from a strong one until a table leaks.
-ARGON2_FLOOR = {"time_cost": 2, "memory_cost": 19 * 1024, "parallelism": 1}
-ARGON2_DEFAULTS = {"time_cost": 3, "memory_cost": 64 * 1024, "parallelism": 4}
-# A ceiling as well as a floor: memory_cost is allocated per concurrent
-# verification, so a mistyped value denies service just as effectively as a
-# weak one -- in the opposite direction and just as quietly.
-# memory_cost is the total for one hash operation. parallelism splits that
-# total across lanes -- it does not multiply it. Measured on this build, m=256
-# MiB costs ~256 MiB of peak RSS at p=1, 2, 4 and 8 alike.
-#
-# So the multiplier is concurrency, not parallelism: N verifications in flight
-# hold roughly N x memory_cost at once. Nothing in the app caps N -- the rate
-# limiter bounds requests per key per minute, not simultaneous ones -- and no
-# container in docker-compose.prod.yml declares a memory limit, so a mistyped
-# cost is bounded only by host RAM.
-#
-# 256 MiB is therefore a configuration guard rather than a proof of safety: it
-# keeps a typo from reserving gigabytes per verification, while eight
-# concurrent logins at the ceiling would still hold ~2 GiB. Bounding N belongs
-# with a declared container limit and an admission bound, and should come
-# before this ceiling is raised.
-ARGON2_CEILING = {"time_cost": 10, "memory_cost": 256 * 1024, "parallelism": 8}
-
-
-def _argon2_params() -> dict:
-    params = {}
-    for name, default in ARGON2_DEFAULTS.items():
-        raw = os.getenv(f"SORA_ARGON2_{name.upper()}")
-        if raw is None:
-            params[name] = default
-            continue
-        try:
-            value = int(raw)
-        except ValueError:
-            raise RuntimeError(
-                f"SORA_ARGON2_{name.upper()} must be an integer, got {raw!r}"
-            ) from None
-        if value < ARGON2_FLOOR[name]:
-            raise RuntimeError(
-                f"SORA_ARGON2_{name.upper()}={value} is below the floor "
-                f"{ARGON2_FLOOR[name]}. Refusing to weaken password hashing."
-            )
-        if value > ARGON2_CEILING[name]:
-            raise RuntimeError(
-                f"SORA_ARGON2_{name.upper()}={value} exceeds the ceiling "
-                f"{ARGON2_CEILING[name]}. A cost this high denies service."
-            )
-        params[name] = value
-    return params
-
-
-_password_hasher = PasswordHasher(**_argon2_params())
-
-ARGON2_PREFIX = "$argon2"
+# Argon2id parameters and the hasher live in app/passwords.py, which imports
+# nothing that needs the JWT secret: scripts/bootstrap_users.py hashes the
+# initial passwords with it and is given no signing key.
+from app.passwords import (  # noqa: E402  (re-exported; tests read them here)
+    ARGON2_CEILING, ARGON2_DEFAULTS, ARGON2_FLOOR, ARGON2_PREFIX,
+    _argon2_params, _hash_password, _password_hasher,
+)
 
 # Login is the only unauthenticated endpoint that does deliberately expensive
 # work: an Argon2id verification costs ~130 ms and allocates 64 MiB by design.
@@ -167,20 +117,6 @@ ARGON2_PREFIX = "$argon2"
 # bound rather than a lockout.
 _login_limiter = RateLimiter(max_requests=10, window_seconds=60)
 
-
-def _hash_password(password: str) -> str:
-    return _password_hasher.hash(password)
-
-
-def _verify_legacy_sha256(plain: str, hashed: str) -> bool:
-    """Constant-time check against either legacy format."""
-    if "$" in hashed:
-        salt, stored = hashed.split("$", 1)
-        candidate = hashlib.sha256(f"{salt}{plain}".encode()).hexdigest()
-    else:
-        salt, stored = "", hashed
-        candidate = hashlib.sha256(plain.encode()).hexdigest()
-    return hmac.compare_digest(candidate, stored)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
@@ -201,7 +137,7 @@ def verify_password(plain: str, hashed: str) -> bool:
                 "password hash could not be evaluated: %s", type(exc).__name__
             )
             return False
-    return _verify_legacy_sha256(plain, hashed)
+    return False
 
 
 def needs_rehash(hashed: str) -> bool:
@@ -212,20 +148,6 @@ def needs_rehash(hashed: str) -> bool:
         return _password_hasher.check_needs_rehash(hashed)
     except InvalidHash:
         return True
-
-
-def upgrade_password_hash(user: dict, plain: str) -> bool:
-    """Re-hash in place after a successful login. Returns True if it changed.
-
-    Called only once the password has already been verified, so the plaintext
-    is known-good. This is what keeps the legacy formats from becoming
-    permanent: every active account migrates the next time its owner signs in.
-    """
-    if not needs_rehash(user.get("hashed_password", "")):
-        return False
-    user["hashed_password"] = _hash_password(plain)
-    return True
-
 
 
 
@@ -266,24 +188,14 @@ _verify_slots = threading.BoundedSemaphore(VERIFY_CONCURRENCY)
 _ABSENT_ACCOUNT_HASH = _password_hasher.hash(os.urandom(32).hex())
 
 
-def _verify_and_upgrade_under_gate(plain: str, stored: str,
-                                  user: dict | None) -> bool:
-    """Verify, and re-hash if needed, under a single slot.
+def _verify_under_gate(plain: str, stored: str) -> tuple[bool, Optional[str]]:
+    """Verify, and compute a re-hash if one is due, under a single slot.
 
-    One acquisition covers both. Releasing between them and taking a second
-    slot would put the same login through the gate twice: the bound would still
-    hold, but a request that already passed admission could be made to compete
-    again, and the two Argon2 operations of one login would no longer be
-    accounted together.
-
-    A stale hash is therefore always replaced on a successful verification:
-    holding the slot already, there is no second admission to fail and no
-    reason to skip. Nothing is deferred and nothing runs after the response.
-
-    Should a future store make persisting the new hash fallible -- these records
-    live in a process dictionary today -- the login must still succeed, and the
-    replacement is simply attempted again at the next successful login. That is
-    the same mechanism that migrates a legacy account in the first place.
+    Returns (matched, new_hash). One acquisition covers both Argon2 operations
+    of a login, so a request that already passed admission is never made to
+    compete again for its second one. The new hash is only computed here; the
+    caller persists it conditionally (app/accounts.py:store_rehash), so the
+    slot is never held across a database round trip.
     """
     if not _verify_slots.acquire(blocking=False):
         raise HTTPException(
@@ -293,9 +205,8 @@ def _verify_and_upgrade_under_gate(plain: str, stored: str,
         )
     try:
         matched = verify_password(plain, stored)
-        if matched and user is not None and needs_rehash(stored):
-            upgrade_password_hash(user, plain)
-        return matched
+        new_hash = _hash_password(plain) if matched and needs_rehash(stored) else None
+        return matched, new_hash
     finally:
         _verify_slots.release()
 
@@ -326,75 +237,59 @@ def _account_key(username: str) -> str:
                     hashlib.sha256).hexdigest()[:32]
 
 
-def authenticate(username: str, password: str, users: dict | None = None,
-                 client_ip: str | None = None) -> Optional[dict]:
-    """Look up, verify, and migrate the stored hash. None when either fails.
+def _db_unavailable(exc: Exception) -> HTTPException:
+    # No fallback to the environment or to process memory: an account store
+    # that cannot be read cannot say who is blocked, so nobody is admitted.
+    logger.error("account store unavailable: %s", type(exc).__name__)
+    return HTTPException(status_code=503, detail="Account store unavailable",
+                         headers={"Retry-After": "5"})
 
-    Every login path goes through here deliberately. Verifying and upgrading in
-    separate places invites a fourth login route that authenticates correctly
-    but forgets the upgrade, which would keep the legacy formats alive
-    indefinitely and quietly.
+
+def authenticate(username: str, password: str,
+                 client_ip: str | None = None) -> Optional[AccountState]:
+    """Look up, verify, and re-check. None for every kind of refusal.
+
+    Unknown, wrong password and blocked all answer None, so the caller gives
+    them the same response. Every login route goes through here.
+
+    The account is read twice. Argon2 takes ~130 ms, and a reset or block can
+    commit inside that window; issuing tokens from the first read would hand
+    out the new generation on the strength of the old password. So the second
+    read must show the same version, still unblocked, or the login is refused
+    and the caller simply tries again.
     """
     if client_ip is not None:
         # Before the expensive verification, not after.
         _login_limiter.check(f"login-ip:{client_ip}")
         _login_limiter.check(f"login-user:{_account_key(username)}")
-    store = USERS_DB if users is None else users
-    user = store.get(username)
+    try:
+        with SessionLocal() as session:
+            before = accounts.state_by_username(session, username)
+    except SQLAlchemyError as exc:
+        raise _db_unavailable(exc) from None
     # The comparison runs whether or not the account exists, against a hash
     # nobody holds, so a miss costs the same as a hit.
-    stored = user.get("hashed_password", "") if user else _ABSENT_ACCOUNT_HASH
-    if not _verify_and_upgrade_under_gate(password, stored, user):
+    stored = before.password_hash if before else _ABSENT_ACCOUNT_HASH
+    matched, new_hash = _verify_under_gate(password, stored)
+    if not matched or before is None or before.is_blocked:
         return None
-    return user
+    try:
+        with SessionLocal() as session:
+            if new_hash is not None:
+                # Best effort. A failure leaves the old hash, which still
+                # verifies; the next login tries again.
+                try:
+                    accounts.store_rehash(session, before, new_hash)
+                except SQLAlchemyError:
+                    session.rollback()
+                    logger.warning("password re-hash could not be stored; retried at next login")
+            after = accounts.state_by_id(session, before.id)
+    except SQLAlchemyError as exc:
+        raise _db_unavailable(exc) from None
+    if after is None or after.is_blocked or after.token_version != before.token_version:
+        return None
+    return after
 
-
-def legacy_hash_count(users: dict | None = None) -> int:
-    """How many stored hashes are still not Argon2id.
-
-    The unsalted branch above can only be deleted once this reaches zero and
-    stays there, so the removal date is evidence rather than a guess.
-    """
-    store = USERS_DB if users is None else users
-    return sum(
-        1 for u in store.values()
-        if not str(u.get("hashed_password", "")).startswith(ARGON2_PREFIX)
-    )
-
-# Load default users from environment (fallback to dev passwords only in dev mode)
-def _get_default_password(role: str, dev_default: str) -> str:
-    """Get password from env or use dev default only if not in production."""
-    env_key = f"SORA_DEFAULT_{role.upper()}_PASSWORD"
-    password = os.getenv(env_key)
-    if password:
-        return password
-    if SORA_ENV == "production":
-        raise RuntimeError(
-            f"CRITICAL: Production deployment requires {env_key} environment variable. "
-            f"Default passwords are disabled in production for security."
-        )
-    return dev_default
-
-USERS_DB: dict = {
-    "admin": {
-        "username": "admin",
-        "hashed_password": _hash_password(_get_default_password("admin", "sora2026")),
-        "role": "admin",
-        "created_at": datetime.now(timezone.utc).isoformat()
-    },
-    "analyst": {
-        "username": "analyst",
-        "hashed_password": _hash_password(_get_default_password("analyst", "analyst123")),
-        "role": "analyst",
-        "created_at": datetime.now(timezone.utc).isoformat()
-    },
-    "viewer": {
-        "username": "viewer",
-        "hashed_password": _hash_password(_get_default_password("viewer", "viewer123")),
-        "role": "viewer",
-        "created_at": datetime.now(timezone.utc).isoformat()
-    },
-}
 
 # Refresh tokens are not kept in a list of the valid ones.
 #
@@ -453,11 +348,22 @@ def _is_revoked(fingerprint: str) -> bool:
                        "revocation is process-local until Redis returns")
         return False
 
-def create_access_token(data: dict) -> str:
-    payload = {"sub": data.get("sub", ""), "role": data.get("role", ""), "type": "access", "iat": int(time.time()), "exp": int(time.time()) + ACCESS_TOKEN_EXPIRE_MINUTES * 60}
+def _session_claims(account) -> dict:
+    """`sub` is the account's UUID and `ver` its session generation.
+
+    The role is carried for clients to read, never trusted on the way back in:
+    require_auth takes the role from the row.
+    """
+    return {"sub": str(account.id), "ver": int(account.token_version), "role": account.role}
+
+
+def create_access_token(account) -> str:
+    now = int(time.time())
+    payload = dict(_session_claims(account), type="access", iat=now,
+                   exp=now + ACCESS_TOKEN_EXPIRE_MINUTES * 60)
     return _jwt_encode(payload)
 
-def create_refresh_token(data: dict) -> str:
+def create_refresh_token(account) -> str:
     # jti makes the token unique. Without it the payload is (sub, role, type,
     # iat, exp) at one-second resolution, so two logins by the same account in
     # the same second produced byte-identical tokens -- and revoking either one
@@ -466,9 +372,9 @@ def create_refresh_token(data: dict) -> str:
     #
     # Access tokens are left alone: nothing revokes them individually, so a nonce
     # there would carry no meaning.
-    payload = {"sub": data.get("sub", ""), "role": data.get("role", ""), "type": "refresh",
-               "jti": secrets.token_urlsafe(16),
-               "iat": int(time.time()), "exp": int(time.time()) + REFRESH_TOKEN_EXPIRE_DAYS * 86400}
+    now = int(time.time())
+    payload = dict(_session_claims(account), type="refresh", jti=secrets.token_urlsafe(16),
+                   iat=now, exp=now + REFRESH_TOKEN_EXPIRE_DAYS * 86400)
     return _jwt_encode(payload)
 
 def validate_refresh_token(token: str) -> dict:
@@ -505,20 +411,58 @@ def revoke_refresh_token(token: str):
         logger.warning("could not record a refresh-token revocation in Redis; "
                        "it holds for this process only")
 
+def _claims(payload: dict, expected_type: str) -> tuple[uuid.UUID, int]:
+    """The claims a session token must carry, or ValueError.
+
+    A token without `ver`, or with the old `sub=<username>`, is refused rather
+    than interpreted: the first deployment of persistent accounts asks everyone
+    to log in again, which is the price of not trusting a token that cannot be
+    revoked.
+    """
+    if payload.get("type") != expected_type:
+        raise ValueError("Invalid token type")
+    iat = payload.get("iat")
+    if isinstance(iat, bool) or not isinstance(iat, int):
+        raise ValueError("Token has no issue time")
+    ver = payload.get("ver")
+    if isinstance(ver, bool) or not isinstance(ver, int) or ver < 1:
+        raise ValueError("Token has no session version")
+    try:
+        user_id = uuid.UUID(str(payload.get("sub", "")))
+    except ValueError:
+        raise ValueError("Invalid token subject") from None
+    return user_id, ver
+
+
+def account_for_token(payload: dict, expected_type: str) -> AccountState:
+    """The current account a decoded token speaks for, or ValueError.
+
+    Read from the database on every call, uncached: blocking or resetting an
+    account takes effect for the next request in every worker, which is the
+    whole of the revocation guarantee.
+    """
+    user_id, ver = _claims(payload, expected_type)
+    try:
+        with SessionLocal() as session:
+            account = accounts.state_by_id(session, user_id)
+    except SQLAlchemyError as exc:
+        raise _db_unavailable(exc) from None
+    if account is None:
+        raise ValueError("User not found")
+    if account.is_blocked or account.token_version != ver:
+        raise ValueError("Session is no longer valid")
+    return account
+
+
 def require_auth(authorization: str = Header(None)) -> UserInfo:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated", headers={"WWW-Authenticate": "Bearer"})
     token = authorization.split(" ", 1)[1]
     try:
-        payload = _jwt_decode(token)
+        account = account_for_token(_jwt_decode(token), "access")
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e), headers={"WWW-Authenticate": "Bearer"})
-    if payload.get("type") != "access":
-        raise HTTPException(status_code=401, detail="Invalid token type")
-    user = USERS_DB.get(payload["sub"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return UserInfo(username=user["username"], role=user["role"])
+    return UserInfo(user_id=str(account.id), username=account.username, role=account.role)
 
 def require_admin(authorization: str = Header(None)) -> UserInfo:
     user = require_auth(authorization)

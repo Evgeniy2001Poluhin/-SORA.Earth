@@ -230,6 +230,18 @@ abort_deployment() {
         exit 76
     fi
 
+    # Before the checkout: restoring code that predates persistent accounts
+    # would undo every block and reset made since. Leave the new code running
+    # and stop; an operator decides, with external access closed if need be.
+    if _blocked="$(accounts_downgrade_blocked "$PREV_COMMIT")"; then
+        echo "  ROLLBACK REFUSED: ${PREV_COMMIT:0:12} predates persistent accounts, and" >&2
+        echo "  $_blocked account(s) have been blocked, reset or re-roled since; restoring" >&2
+        echo "  it would lift those. The new code is still running. Close external access" >&2
+        echo "  or fix forward; see CLAUDE.md, 'Accounts live in the users table'." >&2
+        journal_write rollback-refused "previous code predates persistent accounts; $_blocked revocation(s) would be undone"
+        exit 76
+    fi
+
     git --no-pager checkout --quiet --detach "$PREV_COMMIT" 2>/dev/null \
         || { echo "  ROLLBACK FAILED: cannot check out ${PREV_COMMIT:0:12}" >&2
              # Every other terminal path records its outcome; this one left the
@@ -279,6 +291,26 @@ abort_deployment() {
 }
 
 step() { echo; echo "== $* =="; }
+
+# Going back to code from before persistent accounts can undo a revocation.
+#
+# That code ignores the `users` table and rebuilds admin, analyst and viewer
+# from SORA_DEFAULT_*_PASSWORD on every start. So once any account has been
+# blocked, reset or given another role -- token_version above 1, or blocked --
+# returning to it would quietly restore the old passwords and lift the block.
+# Prints the number of such accounts and succeeds when the move must be
+# refused; fails (nothing printed) when it is safe. A count that cannot be read
+# refuses: the question is exactly the one an unreachable database leaves open.
+accounts_downgrade_blocked() {
+    local to="$1" n
+    git cat-file -e "$to:app/accounts.py" 2>/dev/null && return 1
+    n="$("${DC[@]}" exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$0"' \
+        "SELECT CASE WHEN to_regclass('public.users') IS NULL THEN 0 ELSE (SELECT count(*) FROM users WHERE token_version > 1 OR is_blocked) END" \
+        < /dev/null 2>/dev/null || true)"
+    [ "$n" = 0 ] && return 1
+    echo "${n:-unreadable}"
+    return 0
+}
 
 # A signal during mutation must undo what the mutation started.
 #
@@ -544,6 +576,11 @@ else
         || fail "$TARGET is not an ancestor of origin/main; only merged code may be deployed"
     [ "$TARGET" != "$ORIGIN_MAIN" ] \
         || fail "$TARGET is origin/main; use a plain deploy rather than --rollback"
+    # Before anything changes: code from before persistent accounts would lift
+    # every block and reset made since (accounts_downgrade_blocked).
+    if _blocked="$(accounts_downgrade_blocked "$TARGET")"; then
+        fail "${TARGET:0:12} predates persistent accounts, and $_blocked account(s) have been blocked, reset or re-roled since; rolling back would lift those. Roll back to a commit that has app/accounts.py, or fix forward."
+    fi
     # The journal records deployments this script made. One made by hand leaves
     # no entry, and the next scripted run then names the last *scripted* commit
     # as the one it replaced, skipping everything in between (#133). The "to
@@ -979,6 +1016,16 @@ APP_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null
 # itself.
 "${DC[@]}" run --rm --no-deps migrate \
     || fail "alembic upgrade head failed; nothing has been recreated. The schema is wherever the migration left it -- inspect it before retrying."
+
+# The built-in accounts, once, into an empty `users` table -- and on every
+# deployment after that, a check that an active administrator still exists.
+# From the same image as the migration, before anything is recreated: the new
+# code reads accounts only from that table, so serving it over an empty one
+# would be a site nobody can sign in to. An existing table is never modified
+# (scripts/bootstrap_users.py), so SORA_DEFAULT_*_PASSWORD changes nothing once
+# accounts exist.
+"${DC[@]}" run --rm --no-deps bootstrap-users \
+    || fail "the account bootstrap refused; nothing has been recreated. Either the SORA_DEFAULT_*_PASSWORD values are missing on a first deployment, or no active administrator exists."
 
 # --no-build, because everything that builds was built above. A rebuild here
 # could produce a different image than the one just migrated from, which is the

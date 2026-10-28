@@ -22,8 +22,12 @@ from app.auth import (
 PASSWORD = "correct horse battery staple"
 
 
-def user_with(hashed: str) -> dict:
-    return {"username": "u", "hashed_password": hashed, "role": "viewer"}
+def set_hash(user_id, value: str) -> None:
+    import sqlalchemy as sa
+    from app.database import SessionLocal, User
+    with SessionLocal() as session:
+        session.execute(sa.update(User).where(User.id == user_id).values(password_hash=value))
+        session.commit()
 
 
 def drain_slots(n: int):
@@ -41,51 +45,52 @@ def test_the_configured_bound_is_sane():
     assert 1 <= VERIFY_CONCURRENCY <= 16
 
 
-def test_a_saturated_process_sheds_the_request():
+def test_a_saturated_process_sheds_the_request(make_account):
     """Queueing would turn memory pressure into latency for everyone."""
-    users = {"u": user_with(_hash_password(PASSWORD))}
+    user = make_account()
     drain_slots(VERIFY_CONCURRENCY)
     try:
         with pytest.raises(HTTPException) as excinfo:
-            authenticate("u", PASSWORD, users)
+            authenticate(user.username, PASSWORD)
         assert excinfo.value.status_code == 503
         assert int(excinfo.value.headers["Retry-After"]) > 0
     finally:
         release_slots(VERIFY_CONCURRENCY)
 
 
-def test_an_unknown_account_is_shed_identically():
+def test_an_unknown_account_is_shed_identically(make_account):
     """Otherwise saturation behaviour tells an attacker which accounts exist."""
+    user = make_account()
     drain_slots(VERIFY_CONCURRENCY)
     try:
         with pytest.raises(HTTPException) as known:
-            authenticate("u", PASSWORD, {"u": user_with(_hash_password(PASSWORD))})
+            authenticate(user.username, PASSWORD)
         with pytest.raises(HTTPException) as unknown:
-            authenticate("nobody", PASSWORD, {})
+            authenticate("nobody-at-all", PASSWORD)
         assert known.value.status_code == unknown.value.status_code
         assert known.value.detail == unknown.value.detail
     finally:
         release_slots(VERIFY_CONCURRENCY)
 
 
-@pytest.mark.parametrize("password,users", [
-    (PASSWORD, {"u": None}),          # success
-    ("wrong", {"u": None}),           # wrong password
-    (PASSWORD, {}),                   # unknown account
+@pytest.mark.parametrize("password,exists", [
+    (PASSWORD, True),          # success
+    ("wrong", True),           # wrong password
+    (PASSWORD, False),         # unknown account
 ])
-def test_the_slot_is_returned_on_every_path(password, users):
-    if "u" in users:
-        users = {"u": user_with(_hash_password(PASSWORD))}
+def test_the_slot_is_returned_on_every_path(make_account, password, exists):
+    name = make_account().username if exists else "nobody-at-all"
     before = _slots_free()
 
-    authenticate("u", password, users)
+    authenticate(name, password)
 
     assert _slots_free() == before, "a slot leaked"
 
 
-def test_the_slot_is_returned_when_verification_raises(monkeypatch):
+def test_the_slot_is_returned_when_verification_raises(monkeypatch, make_account):
     import app.auth as auth_module
 
+    user = make_account()
     before = _slots_free()
 
     def boom(*a, **kw):
@@ -93,14 +98,14 @@ def test_the_slot_is_returned_when_verification_raises(monkeypatch):
 
     monkeypatch.setattr(auth_module, "verify_password", boom)
     with pytest.raises(ValueError):
-        authenticate("u", PASSWORD, {"u": user_with(_hash_password(PASSWORD))})
+        authenticate(user.username, PASSWORD)
 
     assert _slots_free() == before, "a slot leaked on the exception path"
 
 
-def test_no_more_than_the_bound_run_at_once():
+def test_no_more_than_the_bound_run_at_once(make_account):
     """Measured on the real gate rather than inferred from the semaphore."""
-    users = {f"u{i}": user_with(_hash_password(PASSWORD)) for i in range(16)}
+    users = [make_account().username for _ in range(16)]
     peak = 0
     live = 0
     lock = threading.Lock()
@@ -122,7 +127,7 @@ def test_no_more_than_the_bound_run_at_once():
     auth_module.verify_password = counting_verify
     try:
         threads = [
-            threading.Thread(target=lambda i=i: _swallow(users, f"u{i}"))
+            threading.Thread(target=lambda i=i: _swallow(users[i]))
             for i in range(16)
         ]
         for t in threads:
@@ -135,9 +140,9 @@ def test_no_more_than_the_bound_run_at_once():
     assert peak <= VERIFY_CONCURRENCY, f"{peak} verifications ran at once"
 
 
-def _swallow(users, name):
+def _swallow(name):
     try:
-        authenticate(name, PASSWORD, users)
+        authenticate(name, PASSWORD)
     except HTTPException:
         pass
 
@@ -181,13 +186,13 @@ def test_the_absent_account_hash_is_built_once_at_import():
     assert "_password_hasher.hash" not in source
     assert "_ABSENT_ACCOUNT_HASH" in source
 
-    gate = inspect.getsource(auth._verify_and_upgrade_under_gate)
+    gate = inspect.getsource(auth._verify_under_gate)
     assert "_password_hasher.hash" not in gate
 
 
 def test_the_absent_account_hash_is_stable_and_valid():
     first = _ABSENT_ACCOUNT_HASH
-    authenticate("nobody", "x", {})
+    authenticate("nobody-at-all", "x")
     from app.auth import _ABSENT_ACCOUNT_HASH as second
 
     assert first == second, "the dummy hash was rebuilt"
@@ -202,7 +207,7 @@ def test_an_unknown_account_costs_exactly_one_verification(monkeypatch):
     monkeypatch.setattr(auth_module, "verify_password",
                         lambda p, h: (calls.append(h), real(p, h))[1])
 
-    authenticate("nobody-at-all", "x", {})
+    authenticate("nobody-at-all", "x")
 
     assert len(calls) == 1, f"{len(calls)} verifications for one unknown user"
     assert calls[0] == _ABSENT_ACCOUNT_HASH
@@ -214,24 +219,25 @@ def test_verify_and_rehash_share_one_slot():
 
     from app import auth
 
-    gate = inspect.getsource(auth._verify_and_upgrade_under_gate)
+    gate = inspect.getsource(auth._verify_under_gate)
     assert gate.count("_verify_slots.acquire") == 1
     assert gate.count("_verify_slots.release") == 1
-    assert "upgrade_password_hash" in gate, "the rehash must happen inside the slot"
+    assert "_hash_password(plain)" in gate, "the rehash must be computed inside the slot"
 
     caller = inspect.getsource(auth.authenticate)
     assert "_verify_slots" not in caller, "the caller must not take a second slot"
 
 
-def test_a_damaged_stored_hash_fails_the_login_and_is_reported(caplog):
+def test_a_damaged_stored_hash_fails_the_login_and_is_reported(caplog, make_account):
     """Folding it into bad credentials would hide a corrupt record until
     somebody noticed they could never log in."""
     import logging
 
-    users = {"u": user_with("$argon2id$v=19$m=65536,t=3,p=4$not-real-base64$xx")}
+    user = make_account()
+    set_hash(user.id, "$argon2id$v=19$m=65536,t=3,p=4$not-real-base64$xx")
 
     with caplog.at_level(logging.ERROR, logger="sora_earth"):
-        assert authenticate("u", PASSWORD, users) is None
+        assert authenticate(user.username, PASSWORD) is None
 
     assert any("could not be evaluated" in r.message for r in caplog.records)
     for record in caplog.records:
@@ -239,12 +245,12 @@ def test_a_damaged_stored_hash_fails_the_login_and_is_reported(caplog):
         assert "argon2id" not in record.getMessage()
 
 
-def test_a_wrong_password_is_not_reported_as_a_backend_failure(caplog):
+def test_a_wrong_password_is_not_reported_as_a_backend_failure(caplog, make_account):
     import logging
 
-    users = {"u": user_with(_hash_password(PASSWORD))}
+    user = make_account()
 
     with caplog.at_level(logging.ERROR, logger="sora_earth"):
-        assert authenticate("u", "wrong", users) is None
+        assert authenticate(user.username, "wrong") is None
 
     assert not any("could not be evaluated" in r.message for r in caplog.records)

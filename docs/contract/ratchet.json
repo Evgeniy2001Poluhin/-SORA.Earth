@@ -11,8 +11,8 @@
     "WS /ws/live @app/api/infra.py": "websocket"
   },
   "counts": {
-    "considered": 173,
-    "with_response_model": 28
+    "considered": 176,
+    "with_response_model": 32
   },
   "uncovered": [
     "DELETE /api/v1/webhooks/{sub_id} @app/api/webhooks.py",
@@ -27,7 +27,6 @@
     "GET /admin/diagnostics @app/api/admin_diagnostics.py",
     "GET /admin/stats @app/auth_routes.py",
     "GET /admin/timeline @app/api/admin_timeline.py",
-    "GET /admin/users @app/auth_routes.py",
     "GET /analytics/country-benchmark/{country} @app/api/analytics.py",
     "GET /analytics/country-ranking @app/api/analytics.py",
     "GET /analytics/data-health @app/api/analytics.py",

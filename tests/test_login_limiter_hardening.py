@@ -210,15 +210,14 @@ def test_an_exhausted_address_creates_no_account_buckets():
 
     _login_limiter.requests.clear()
     ip = "203.0.113.200"
-    users = {}
 
     for i in range(_login_limiter.max_requests):
-        authenticate(f"name{i}", "x", users, client_ip=ip)
+        authenticate(f"name{i}", "x", client_ip=ip)
     buckets_after_budget = len(_login_limiter.requests)
 
     for i in range(500):
         try:
-            authenticate(f"blocked{i}", "x", users, client_ip=ip)
+            authenticate(f"blocked{i}", "x", client_ip=ip)
         except HTTPException:
             pass
 
@@ -246,12 +245,12 @@ def test_the_lock_is_not_held_during_password_verification():
     from app import auth
 
     source = inspect.getsource(auth.authenticate)
-    assert source.index("_login_limiter.check") < source.index("_verify_and_upgrade_under_gate"), \
+    assert source.index("_login_limiter.check") < source.index("_verify_under_gate"), \
         "the rate limit must be spent before the expensive work, not after"
     assert "with _login_limiter" not in source, "the lock must not span the verify"
 
     # The verification itself must not reach for the limiter at all.
-    gate = inspect.getsource(auth._verify_and_upgrade_under_gate)
+    gate = inspect.getsource(auth._verify_under_gate)
     assert "_login_limiter" not in gate
     assert "_lock" not in gate
 

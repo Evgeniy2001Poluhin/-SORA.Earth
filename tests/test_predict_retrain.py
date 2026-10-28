@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 import app.main as main_module
 from app.main import app
-from app.auth import create_access_token
+from tests._auth_tokens import access_token_for
 
 client = TestClient(app)
 
@@ -130,13 +130,13 @@ class TestPredict:
         assert "feature_names" in d
 
     def test_predictions_history(self):
-        token = create_access_token({"sub": "viewer", "role": "viewer"})
+        token = access_token_for("viewer")
         r = client.get("/api/v1/predictions/history", headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 200
 
     def test_predictions_export_csv(self):
         client.post("/api/v1/predict", json=SAMPLE)
-        token = create_access_token({"sub": "viewer", "role": "viewer"})
+        token = access_token_for("viewer")
         r = client.get("/api/v1/predictions/export/csv", headers={"Authorization": f"Bearer {token}"})
         assert r.status_code in [200, 404]
 

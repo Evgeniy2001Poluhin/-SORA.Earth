@@ -10,7 +10,7 @@ rotated.
 | `SORA_JWT_SECRET` | `app/auth.py` — signs access and refresh tokens | **production** | environment | platform |
 | `SORA_ADMIN_TOKEN` | admin-only endpoints | **production** | environment | platform |
 | `POSTGRES_PASSWORD` | application and backup connections | **production** | environment / Docker secret | platform |
-| `SORA_DEFAULT_{ADMIN,ANALYST,VIEWER}_PASSWORD` | seeds the built-in accounts | production | environment | platform |
+| `SORA_DEFAULT_{ADMIN,ANALYST,VIEWER}_PASSWORD` | `scripts/bootstrap_users.py` (the `bootstrap-users` service) — creates the built-in accounts in an empty `users` table, once. Not passed to the backend or scheduler; changing it after the first deployment changes no password — reset through `POST /api/v1/admin/users/{id}/reset-password` | first deployment | environment | platform |
 | `SENTRY_DSN` | error reporting | optional | environment | platform |
 | `COPILOT_LLM_API_KEY` | optional Co-Pilot prose rewrite | **no** — off by default | environment | whoever owns the chosen provider |
 | `OPENAQ_API_KEY` | air-quality ingestion | optional | environment | account holder |

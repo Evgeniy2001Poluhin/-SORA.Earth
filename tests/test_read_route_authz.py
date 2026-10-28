@@ -11,7 +11,7 @@ decision.
 import pytest
 from fastapi.routing import APIRoute
 
-from app.auth import create_access_token
+from tests._auth_tokens import access_token_for
 
 # --- the policy, one entry per GET route (path, method-agnostic) route ---
 
@@ -216,9 +216,9 @@ def test_protected_read_routes_reject_anonymous(client):
 
 def test_authenticated_read_routes_accept_signed_in_users(client):
     """Authenticated GET (viewer, analyst, admin) → 200 with the same payload shape."""
-    viewer_token = create_access_token({"sub": "viewer", "role": "viewer"})
-    analyst_token = create_access_token({"sub": "analyst", "role": "analyst"})
-    admin_token = create_access_token({"sub": "admin", "role": "admin"})
+    viewer_token = access_token_for("viewer")
+    analyst_token = access_token_for("analyst")
+    admin_token = access_token_for("admin")
 
     for token_name, token in [("viewer", viewer_token), ("analyst", analyst_token), ("admin", admin_token)]:
         for path in sorted(AUTHENTICATED):

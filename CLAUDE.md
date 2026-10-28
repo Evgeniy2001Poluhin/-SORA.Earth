@@ -13,7 +13,7 @@ before measuring readiness against anything.
 
 ```
 Product      SORA.Earth ESG platform -- this file and README.md
-             In production, 163 published endpoints -- that is 163 (path,
+             In production, 166 published endpoints -- that is 166 (path,
              method) pairs under /api/, HEAD and OPTIONS excluded. The bare
              number was right and said nothing about what it counted; the app
              also has 180 unique paths and 157 of them under /api/ (#292).
@@ -314,7 +314,7 @@ Feature engineering: `make_features()` computes derived features (budget_per_mon
 
 ### Database Schema
 
-Seventeen SQLAlchemy models in `app/database.py`, with the table each one
+Eighteen SQLAlchemy models in `app/database.py`, with the table each one
 creates. The table names are what `psql` needs, and they are not the class
 names lowercased: most are plural, two are not.
 
@@ -337,6 +337,7 @@ names lowercased: most are plural, two are not.
 | `HealthPing` | `health_pings` |
 | `EnvironmentalObservation` | `environmental_observations` |
 | `EnvironmentalJobLog` | `environmental_job_log` |
+| `User` | `users` |
 
 The table is read from `__tablename__` and checked against the module by
 `tests/test_docs_name_real_tables.py`, which also refuses any SQL in this file
@@ -413,27 +414,40 @@ defaults apply, `pool_size=5` and `max_overflow=10`. This paragraph said "async
 engine. Pool size: 10, max overflow: 20", and all three numbers were figures
 nobody had set. `create_async_engine` appears nowhere in the codebase.
 
-**There is no `User` table, and user accounts are not persisted.** This list
-named one, "Auth users (hashed passwords with bcrypt)"; both halves were wrong,
-and the second is the kind of error that gets repeated into a security review.
+**Accounts live in the `users` table** (`app/database.py:User`). Until the
+specialist pilot they did not: this section read "There is no `User` table, and
+user accounts are not persisted", and that was true -- `USERS_DB` was a dict in
+`app/auth.py` rebuilt on every import from `SORA_DEFAULT_*_PASSWORD`, so an
+account created at runtime was gone after the next restart.
 
 ```
-USERS_DB      in-memory, module-level dict in app/auth.py, rebuilt on every
-              import from SORA_DEFAULT_{ADMIN,ANALYST,VIEWER}_PASSWORD.
-              Production refuses to start if those are unset; the literal dev
-              passwords apply only outside production.
-hashing       Argon2id (argon2-cffi), not bcrypt. Two legacy SHA-256 verify
-              paths remain in the code and are unreachable: all five writes of
-              `hashed_password` go through _hash_password, and nothing loads a
-              hash from anywhere else.
-accounts      three roles, and only those three. POST /auth/register was
-              removed in #169 -- it answered 200 and lost the account on the
-              next restart.
+store         PostgreSQL, table `users`: UUID id, unique lower-case username,
+              Argon2id hash (a CHECK refuses anything else), role, is_blocked,
+              token_version. app/accounts.py is the only writer.
+roles         admin, analyst, viewer, specialist. `specialist` is the pilot
+              participant and is not admitted by require_analyst_or_admin.
+creation      by an administrator only: POST /api/v1/admin/users. There is
+              still no self-service registration.
+bootstrap     scripts/bootstrap_users.py, the `bootstrap-users` compose service,
+              run by deploy_production.sh after `migrate`. Creates admin,
+              analyst and viewer from SORA_DEFAULT_*_PASSWORD in an EMPTY table,
+              once; on a table with accounts it changes nothing and only
+              requires an active administrator. The backend never reads those
+              variables. Development: `python scripts/bootstrap_users.py --dev`.
+sessions      JWT `sub` = the account's UUID, `ver` = its token_version. Every
+              request reads the row, uncached: reset, role change, block and
+              unblock increment the version, so the commit revokes every token
+              the account holds, in every worker. A token without `ver`, or
+              with the old `sub=<username>`, is refused -- the first deployment
+              of this asks everyone to log in again.
+hashing       Argon2id only (app/passwords.py). The two SHA-256 verify paths
+              and legacy_hash_count() are gone: no store ever held such a hash.
 ```
 
-`legacy_hash_count()` therefore cannot return anything but zero. That is a
-property of the architecture, not evidence that a migration finished, and it is
-why the removal plan in #25 has nothing to measure.
+**Rolling back past this change re-opens what it closed.** Code from before it
+reads accounts from the environment and ignores `users`, so a block or reset
+done since would stop applying. Do not roll back across it once an account has
+been blocked or reset, and never drop the table to "undo" it.
 
 ### API Organization
 
@@ -648,8 +662,8 @@ Optional:
    computed in `_do_retrain` as `datetime.utcnow().year` and the quarter of the
    same moment — the retrain's own clock, identical for every row in the frame.
    A constant column cannot separate anything, so the model fits on seven.
-   Measured 2026-08-14; the shape of the defect is the same as
-   `legacy_hash_count()`, which returns a number that cannot be other than
+   Measured 2026-08-14; the shape of the defect is the same as the former
+   `legacy_hash_count` function, which returned a number that could not be other than
    zero: code that exists, looks like a feature, and does not do what its name
    says.
 

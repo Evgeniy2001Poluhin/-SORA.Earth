@@ -34,7 +34,7 @@ class TestAuthRoutesDirect:
         from app.auth_routes import login
         from fastapi import Request
         from unittest.mock import MagicMock
-        from app.auth import verify_password, USERS_DB
+        from app.auth import verify_password
 
         form = MagicMock()
         form.username = "admin"
@@ -95,7 +95,7 @@ class TestAuthRoutesDirect:
         assert exc.value.status_code == 401
 
     # test_auth_routes_register and _dup called register_user directly. The
-    # route was removed in #169; see tests/test_accounts_are_not_persisted.py.
+    # route was removed in #169; see tests/test_registration_stays_closed.py.
 
 
 # === HTTP-level tests for endpoints needing auth ===

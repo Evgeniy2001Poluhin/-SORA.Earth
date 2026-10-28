@@ -65,9 +65,9 @@ def test_the_omission_is_stated_not_silent(client):
 def test_an_admin_receives_the_breakdown(client):
     """Otherwise the withholding is satisfied by an endpoint that returns
     nothing to anyone, which is a different defect."""
-    from app.auth import create_access_token
+    from tests._auth_tokens import access_token_for
 
-    token = create_access_token({"sub": "admin", "role": "admin"})
+    token = access_token_for("admin")
     body = client.get("/api/v1/metrics",
                       headers={"Authorization": f"Bearer {token}"}).json()
 
@@ -76,9 +76,9 @@ def test_an_admin_receives_the_breakdown(client):
 
 
 def test_a_non_admin_token_gets_no_breakdown(client):
-    from app.auth import create_access_token
+    from tests._auth_tokens import access_token_for
 
-    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    token = access_token_for("viewer")
     body = client.get("/api/v1/metrics",
                       headers={"Authorization": f"Bearer {token}"}).json()
 

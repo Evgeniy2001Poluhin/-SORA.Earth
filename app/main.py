@@ -105,6 +105,13 @@ def _compile_type(type_, engine):
 def _type_family(type_):
     import sqlalchemy as sa
 
+    # Uuid first: the ORM declares `sa.Uuid`, PostgreSQL reflects `UUID`, and
+    # their class names differ although the column is the same. SQLite has no
+    # UUID type and stores `sa.Uuid` as CHAR(32), which reflects as a String;
+    # that pairing is accepted in _type_is_compatible rather than here, so a
+    # real string column is never mistaken for a UUID on PostgreSQL.
+    if isinstance(type_, sa.Uuid):
+        return "Uuid"
     for base in (sa.String, sa.Boolean, sa.Integer, sa.Float, sa.Numeric,
                  sa.DateTime, sa.Date, sa.Time, sa.LargeBinary, sa.JSON):
         if isinstance(type_, base):
@@ -130,6 +137,9 @@ def _type_is_compatible(model_type, db_type):
     So: same family, and the database no narrower than the models. Under that
     relation 40 of the 42 vanish and 2 remain, both genuine.
     """
+    if (_type_family(model_type) == "Uuid" and _type_family(db_type) == "String"
+            and getattr(db_type, "length", None) == 32):
+        return True  # SQLite's storage of sa.Uuid
     if _type_family(model_type) != _type_family(db_type):
         return False
 

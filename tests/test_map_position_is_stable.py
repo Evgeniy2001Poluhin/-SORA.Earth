@@ -20,7 +20,7 @@ import sys
 import pytest
 
 from app.map_position import marker_offset
-from app.auth import create_access_token
+from tests._auth_tokens import access_token_for
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PROBE = "from app.map_position import marker_offset; print(repr(marker_offset('Solar Farm Almaty')))"
@@ -61,7 +61,7 @@ def test_evaluate_stores_the_marker_at_that_offset(client):
     r = client.post("/api/v1/evaluate", json={"name": name, "budget": 100000, "co2_reduction": 50,
                                               "social_impact": 7, "duration_months": 24, "region": "Germany"})
     assert r.status_code == 200, r.text
-    token = create_access_token({"sub": "viewer", "role": "viewer"})
+    token = access_token_for("viewer")
     items = client.get("/api/v1/history", headers={"Authorization": f"Bearer {token}"}).json()["items"]
     row = next(i for i in items if i.get("name") == name)
     assert row["lat"] == pytest.approx(COUNTRIES["Germany"]["lat"] + marker_offset(name))
