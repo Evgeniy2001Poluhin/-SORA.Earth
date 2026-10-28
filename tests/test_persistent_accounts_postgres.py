@@ -124,14 +124,28 @@ def test_the_table_refuses_what_the_code_would_never_write(scratch_db, column, v
             conn.execute(sa.insert(User.__table__).values(**row))
 
 
-def test_existing_rows_are_untouched_by_the_migration(scratch_db):
-    """The migration adds a table and links nothing: no other table gains a
-    column pointing at users in this change."""
+#: Every foreign key that points at `users`, and what deleting a referenced
+#: account does. The accounts migration linked nothing; project ownership
+#: (b7d41f2e9c35) added the three below. RESTRICT throughout: an account with
+#: saved evaluations or recorded access cannot be deleted, only blocked --
+#: SET NULL would erase whose a row was, CASCADE would delete it.
+EXPECTED_REFERENCES_TO_USERS = {
+    ("evaluations", "fk_evaluations_owner_user", ("owner_user_id",), "RESTRICT"),
+    ("predictions_log", "fk_predictions_log_owner_user", ("owner_user_id",), "RESTRICT"),
+    ("project_access_events", "fk_project_access_events_actor", ("actor_user_id",), "RESTRICT"),
+}
+
+
+def test_only_the_declared_tables_point_at_users(scratch_db):
+    """No table gains a column pointing at users without being named above."""
     engine, _url = scratch_db
     inspector = sa.inspect(engine)
-    referencing = [t for t in inspector.get_table_names() if t != "users"
-                   and any(f["referred_table"] == "users" for f in inspector.get_foreign_keys(t))]
-    assert referencing == []
+    referencing = {
+        (t, f["name"], tuple(f["constrained_columns"]), f["options"].get("ondelete"))
+        for t in inspector.get_table_names() if t != "users"
+        for f in inspector.get_foreign_keys(t) if f["referred_table"] == "users"
+    }
+    assert referencing == EXPECTED_REFERENCES_TO_USERS
 
 
 # --------------------------------------------------------- another process

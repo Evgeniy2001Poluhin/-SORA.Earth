@@ -1,5 +1,6 @@
 from datetime import datetime
 import os
+import uuid
 
 import sqlalchemy as sa
 from sqlalchemy import (
@@ -7,6 +8,7 @@ from sqlalchemy import (
     BigInteger, Boolean, Column, DateTime, Float, Index, Integer, String, Text,
     JSON, create_engine, func,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv(
@@ -41,6 +43,30 @@ class Evaluation(Base):
     lon = Column(Float, default=10.0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Ownership: see the note after PredictionLog.
+    owner_user_id = Column(
+        sa.Uuid(as_uuid=True),
+        sa.ForeignKey("users.id", name="fk_evaluations_owner_user", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    data_scope = Column(String(16), nullable=False, default="pilot",
+                        server_default="pilot")
+
+    __table_args__ = (
+        CheckConstraint(
+            "(data_scope = 'public' AND owner_user_id IS NULL) OR "
+            "(data_scope = 'pilot' AND owner_user_id IS NOT NULL)",
+            name="ck_evaluations_owner_scope",
+        ),
+        # An owner's history and its CSV, newest first, ties broken by id.
+        Index("ix_evaluations_owner_recent",
+              "owner_user_id", created_at.desc(), id.desc()),
+        # The shared readers -- history for analyst and viewer, trends, the
+        # forecast series -- all start with `data_scope = 'public'`.
+        Index("ix_evaluations_scope_recent",
+              "data_scope", created_at.desc(), id.desc()),
+    )
+
 
 class PredictionLog(Base):
     __tablename__ = "predictions_log"
@@ -61,6 +87,54 @@ class PredictionLog(Base):
     esg_total_score = Column(Float, nullable=True)
     confidence = Column(Float, nullable=True)
     latency_ms = Column(Float, nullable=True)
+
+    owner_user_id = Column(
+        sa.Uuid(as_uuid=True),
+        sa.ForeignKey("users.id", name="fk_predictions_log_owner_user", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    data_scope = Column(String(16), nullable=False, default="pilot",
+                        server_default="pilot")
+
+    __table_args__ = (
+        CheckConstraint(
+            "(data_scope = 'public' AND owner_user_id IS NULL) OR "
+            "(data_scope = 'pilot' AND owner_user_id IS NOT NULL)",
+            name="ck_predictions_log_owner_scope",
+        ),
+        Index("ix_predictions_log_owner_recent",
+              "owner_user_id", timestamp.desc(), id.desc()),
+        # Data health and the time-windowed aggregates.
+        Index("ix_predictions_log_scope_recent",
+              "data_scope", timestamp.desc(), id.desc()),
+        # The KS drift window: the last N public rows by id. The filter has to
+        # run before the LIMIT, and this is the index that lets it.
+        Index("ix_predictions_log_scope_id", "data_scope", id.desc()),
+    )
+
+
+# Ownership of `evaluations` and `predictions_log`.
+#
+# Two scopes, and a row is in exactly one:
+#
+#   public   the shared corpus -- every row that existed before ownership, and
+#            rows a maintenance script writes on purpose. No owner.
+#   pilot    an evaluation a signed-in person saved. Always an owner, and never
+#            read by anything shared: trends, data health, drift, forecasts,
+#            training. Those filter on `data_scope = 'public'` -- a positive
+#            match, so a scope added later is excluded until someone decides
+#            otherwise, which `!= 'pilot'` or `owner_user_id IS NULL` would not
+#            do.
+#
+# The CHECK makes the pairing a property of the table, not of the writers. The
+# default is `pilot` in both the model and the database, and a pilot row needs
+# an owner, so a writer that forgets to say which scope it means fails on
+# insert instead of quietly publishing into the shared corpus.
+#
+# RESTRICT, not SET NULL or CASCADE. Accounts are blocked, never deleted
+# through the API; SET NULL would erase who a row belongs to, and CASCADE would
+# let deleting an account delete its projects.
+OWNERSHIP_SCOPES = ("public", "pilot")
 
 
 class DataRefreshLog(Base):
@@ -693,6 +767,100 @@ class User(Base):
         CheckConstraint("token_version > 0", name="ck_users_token_version"),
         CheckConstraint("password_hash LIKE '$argon2id$%'",
                         name="ck_users_password_argon2id"),
+    )
+
+
+class ProjectAccessEvent(Base):
+    """One administrator request that read or removed project rows.
+
+    Durable, unlike app/audit.py, whose deque lives in one worker and is gone
+    on restart. An administrator can read every specialist's projects; this is
+    what makes that reading traceable after the fact.
+
+    Written before the data leaves the server: the route records the event and
+    its targets and commits, and only then returns. If the commit fails the
+    request fails with it (app/project_audit.py). For a deletion the event and
+    the DELETE are one transaction.
+
+    No credentials, request body, project names or computed values are stored
+    -- the event names who did what to which ids, nothing about their content.
+    There is no API to edit or delete these rows.
+    """
+    __tablename__ = "project_access_events"
+
+    id = Column(sa.Uuid(as_uuid=True), primary_key=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    actor_user_id = Column(
+        sa.Uuid(as_uuid=True),
+        sa.ForeignKey("users.id", name="fk_project_access_events_actor", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    # A snapshot of who they were at the time. A later rename or role change
+    # does not rewrite what the event says.
+    actor_username = Column(String(50), nullable=False)
+    actor_role = Column(String(16), nullable=False)
+    # Generated here, per request, by the server -- never taken from a header
+    # a client could set.
+    request_id = Column(sa.Uuid(as_uuid=True), nullable=False, default=uuid.uuid4)
+    action = Column(String(16), nullable=False)
+    method = Column(String(8), nullable=False)
+    route_template = Column(String(255), nullable=False)
+    status_code = Column(Integer, nullable=False)
+    outcome = Column(String(16), nullable=False)
+    filters = Column(sa.JSON().with_variant(postgresql.JSONB(), "postgresql"), nullable=True)
+    returned_count = Column(Integer, nullable=True)
+    matched_count = Column(Integer, nullable=True)
+    affected_count = Column(Integer, nullable=True)
+    reason = Column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('list', 'detail', 'export', 'delete', 'clear', 'log_read')",
+            name="ck_project_access_events_action",
+        ),
+        CheckConstraint("outcome IN ('ok', 'not_found')",
+                        name="ck_project_access_events_outcome"),
+        Index("ix_project_access_events_recent", occurred_at.desc(), "id"),
+        Index("ix_project_access_events_actor", "actor_user_id", occurred_at.desc()),
+    )
+
+
+class ProjectAccessTarget(Base):
+    """Which rows one ProjectAccessEvent touched, and what happened to each.
+
+    One row per id, not a truncated list in a text column: a CSV export of
+    four hundred evaluations names all four hundred.
+
+    `resource_id` deliberately has no foreign key. The record of a deletion has
+    to outlive the row it deleted. `owner_user_id` and `data_scope` are a
+    snapshot taken at the time, for the same reason. A `not_found` target is
+    an id that was asked for and did not exist, so it has neither.
+    """
+    __tablename__ = "project_access_targets"
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"),
+                primary_key=True, autoincrement=True)
+    event_id = Column(
+        sa.Uuid(as_uuid=True),
+        sa.ForeignKey("project_access_events.id", name="fk_project_access_targets_event",
+                      ondelete="RESTRICT"),
+        nullable=False,
+    )
+    resource_type = Column(String(16), nullable=False)
+    resource_id = Column(BigInteger, nullable=False)
+    owner_user_id = Column(sa.Uuid(as_uuid=True), nullable=True)
+    data_scope = Column(String(16), nullable=True)
+    effect = Column(String(16), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("resource_type IN ('evaluation', 'prediction_log')",
+                        name="ck_project_access_targets_resource_type"),
+        CheckConstraint(
+            "(effect = 'not_found' AND data_scope IS NULL AND owner_user_id IS NULL) OR "
+            "(effect IN ('returned', 'deleted') AND data_scope IN ('public', 'pilot'))",
+            name="ck_project_access_targets_effect",
+        ),
+        Index("ix_project_access_targets_resource", "resource_type", "resource_id", "event_id"),
     )
 
 

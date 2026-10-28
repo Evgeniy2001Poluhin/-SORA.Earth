@@ -314,7 +314,7 @@ Feature engineering: `make_features()` computes derived features (budget_per_mon
 
 ### Database Schema
 
-Eighteen SQLAlchemy models in `app/database.py`, with the table each one
+Twenty SQLAlchemy models in `app/database.py`, with the table each one
 creates. The table names are what `psql` needs, and they are not the class
 names lowercased: most are plural, two are not.
 
@@ -338,6 +338,8 @@ names lowercased: most are plural, two are not.
 | `EnvironmentalObservation` | `environmental_observations` |
 | `EnvironmentalJobLog` | `environmental_job_log` |
 | `User` | `users` |
+| `ProjectAccessEvent` | `project_access_events` |
+| `ProjectAccessTarget` | `project_access_targets` |
 
 The table is read from `__tablename__` and checked against the module by
 `tests/test_docs_name_real_tables.py`, which also refuses any SQL in this file

@@ -9,6 +9,7 @@ existed, every statement afterwards failed silently, and all ten assertions
 reported a mismatch -- ten failures that said nothing about the code under test.
 `_migrate` asserts the return code and puts alembic's own stderr in the message.
 """
+import contextlib
 import os
 import subprocess
 import sys
@@ -30,12 +31,12 @@ requires_postgres = pytest.mark.skipif(
 )
 
 
-def _migrate(url):
+def _migrate(url, target="head"):
     result = subprocess.run(
         # Through this interpreter, not whatever `alembic` PATH resolves to: the
         # console script may be absent, and if present it can belong to a
         # different environment than the one running the tests.
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        [sys.executable, "-m", "alembic", "upgrade", target],
         cwd=REPO_ROOT,
         env={**os.environ, "DATABASE_URL": url.render_as_string(hide_password=False)},
         capture_output=True,
@@ -43,7 +44,7 @@ def _migrate(url):
         timeout=300,
     )
     assert result.returncode == 0, (
-        "alembic upgrade head failed, so nothing below tests what it names:\n"
+        "alembic upgrade %s failed, so nothing below tests what it names:\n" % target
         + result.stdout
         + result.stderr
     )
@@ -52,6 +53,23 @@ def _migrate(url):
 @pytest.fixture
 def scratch_db():
     """(engine, url) for a fresh database at head. Dropped afterwards."""
+    with empty_scratch_database() as scratch:
+        _migrate(scratch)
+        engine = create_engine(scratch)
+        try:
+            yield engine, scratch
+        finally:
+            engine.dispose()
+
+
+@contextlib.contextmanager
+def empty_scratch_database():
+    """The url of a new, empty database, dropped on the way out.
+
+    For tests that migrate in steps -- to a revision, seed rows the way that
+    revision's code wrote them, then upgrade -- which the head-only fixture
+    above cannot express. Migrate it with `_migrate(url, target)`.
+    """
     url = make_url(DATABASE_URL)
     name = "sora_period_%s" % uuid.uuid4().hex[:12]
     admin = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
@@ -59,14 +77,9 @@ def scratch_db():
         conn.execute(text('CREATE DATABASE "%s"' % name))
 
     scratch = url.set(database=name)
-    engine = None
     try:
-        _migrate(scratch)
-        engine = create_engine(scratch)
-        yield engine, scratch
+        yield scratch
     finally:
-        if engine is not None:
-            engine.dispose()
         with admin.connect() as conn:
             # Anything still connected would make the drop fail and leak the
             # database into the next run.
