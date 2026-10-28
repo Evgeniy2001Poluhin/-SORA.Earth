@@ -74,7 +74,7 @@ function ResultCard(props: { side: Side; result: EvaluateResponse | undefined; l
 function useSide(initial: EvaluateRequest, presetId: string) {
   const [form, setForm] = useState<EvaluateRequest>(initial);
   const [active, setActive] = useState(presetId);
-  const mut = useMutation({ mutationFn: evaluateApi.evaluate });
+  const mut = useMutation({ mutationFn: (b: EvaluateRequest) => evaluateApi.evaluate(b) });
   return { form, setForm, active, setActive, mut };
 }
 

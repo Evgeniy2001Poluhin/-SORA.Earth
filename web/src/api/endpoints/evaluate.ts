@@ -113,7 +113,7 @@ let mockSavedId = 1000;
 export const evaluateApi = {
   countries: () => isMock ? delay(COUNTRIES, 100) : api<CountriesMap>("/countries"),
   /** Computes and writes nothing. */
-  evaluate: (b: EvaluateRequest) => isMock ? delay(mockEvaluate(b)) : api<EvaluateResponse>("/evaluate", { method:"POST", body: JSON.stringify(b), cache:"no-store" }),
+  evaluate: (b: EvaluateRequest, opts: { signal?: AbortSignal } = {}) => isMock ? delay(mockEvaluate(b)) : api<EvaluateResponse>("/evaluate", { method:"POST", body: JSON.stringify(b), cache:"no-store", signal: opts.signal }),
   /** Computes again and saves under the signed-in account (specialist, admin). */
   save: async (b: EvaluateRequest): Promise<SavedEvaluation> => {
     if (isMock) return delay(confirmSaved(201, { ...mockEvaluate(b), saved: true, evaluation_id: ++mockSavedId }));

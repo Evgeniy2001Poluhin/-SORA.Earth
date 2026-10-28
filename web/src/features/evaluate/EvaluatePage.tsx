@@ -112,7 +112,7 @@ export function EvaluatePage() {
     setActivePreset("");
   };
 
-  const evalMut = useMutation({ mutationFn: evaluateApi.evaluate });
+  const evalMut = useMutation({ mutationFn: (b: EvaluateRequest) => evaluateApi.evaluate(b) });
   const saveMut = useMutation({ mutationFn: evaluateApi.save });
   const rankMut = useMutation({ mutationFn: evaluateApi.ranking });
   const mcMut = useMutation({ mutationFn: evaluateApi.monteCarlo });
