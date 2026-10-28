@@ -326,11 +326,11 @@ def test_an_audit_that_cannot_commit_is_a_503_and_undoes_the_deletion(scratch_db
 
     ghost = SimpleNamespace(user_id=str(uuid.uuid4()), username="ghost", role="admin")
     with Session() as s:
-        victim = s.get(Evaluation, row_id)
-        project_audit.record(s, actor=ghost, request=_request(), action="delete", status_code=200,
-                             targets=[project_audit.target("evaluation", victim, effect="deleted")])
-        s.query(Evaluation).filter(Evaluation.id == row_id).delete(synchronize_session=False)
+        # The route's own sequence: DELETE ... RETURNING, the record built from
+        # it, then one commit. A hand-built record-then-delete flushes the
+        # record early, on the DELETE's autoflush, and never reaches the commit.
         with pytest.raises(HTTPException) as refused:
+            project_audit.delete_evaluation(s, actor=ghost, request=_request(), eval_id=row_id)
             project_audit.commit_or_refuse(s)
     assert refused.value.status_code == 503
     with engine.connect() as conn:
