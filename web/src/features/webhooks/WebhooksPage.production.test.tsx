@@ -13,16 +13,22 @@
  * Measured with transport stubs, not deduced.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 vi.mock("@/api/mock", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/mock")>();
   return { ...actual, isMock: false };
 });
+vi.mock("@/components/ModelBadge", () => ({ ModelBadge: () => null }));
+vi.mock("@/app/OnboardingTour", () => ({ default: () => null }));
 
 import WebhooksPage from "./WebhooksPage";
 import { isMock } from "@/api/mock";
-import { renderWithQuery } from "@/test/utils";
+import { ADMIN, jsonResponse, renderApp, renderWithQuery, routeFetch, seedSession } from "@/test/utils";
+import { App } from "@/app/App";
+import { useAuth } from "@/store/auth";
+import type { UserInfo } from "@/api/types";
 
 const SUB = {
   id: 1, url: "https://hook.example.com/a", event_type: "drift", active: true,
@@ -121,5 +127,58 @@ describe("WebhooksPage with real answers", () => {
     expect(screen.queryByText("No subscriptions yet")).not.toBeInTheDocument();
     expect(screen.queryByText("No deliveries yet")).not.toBeInTheDocument();
     expect(screen.queryByText(/Loading/)).not.toBeInTheDocument();
+  });
+});
+
+describe("a webhook secret belongs to the session that created it", () => {
+  const OTHER_ADMIN: UserInfo = { user_id: "55555555-5555-4555-8555-555555555555", username: "root-b", role: "admin" };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("is gone after an account switch", async () => {
+    routeFetch(
+      [
+        ["GET", "/api/v1/webhooks", () => jsonResponse([SUB])],
+        ["GET", "/api/v1/webhooks/deliveries", () => jsonResponse([DEL])],
+        ["POST", "/api/v1/webhooks", () => jsonResponse({ id: 2, secret: "whsec_of_A" }, 201)],
+        ["POST", "/api/v1/auth/login-json", () => jsonResponse({ access_token: "tok-b", refresh_token: "r", token_type: "bearer", expires_in: 1 })],
+        ["GET", "/api/v1/auth/me", () => jsonResponse(OTHER_ADMIN)],
+      ],
+      () => jsonResponse({}),
+    );
+    seedSession(ADMIN, "tok-admin");
+    renderApp("/webhooks", <App />);
+    await userEvent.type(await screen.findByPlaceholderText("https://your-endpoint.com/hook"), "https://hook.example.com/b");
+    await userEvent.click(screen.getByRole("button", { name: "Subscribe" }));
+    expect(await screen.findByText("whsec_of_A")).toBeInTheDocument();
+
+    await act(async () => { await useAuth.getState().login("root-b", "pw", "/webhooks"); });
+
+    expect(await screen.findByText("Webhook Subscriptions")).toBeInTheDocument();
+    expect(screen.queryByText("whsec_of_A")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [403, { detail: "admin token required" }, "admin token required"],
+    [401, { detail: "Not authenticated" }, "Not authenticated"],
+  ])("a %i on create is a refusal, not a subscription", async (status, body, said) => {
+    routeFetch(
+      [
+        ["GET", "/api/v1/webhooks", () => jsonResponse([SUB])],
+        ["GET", "/api/v1/webhooks/deliveries", () => jsonResponse([DEL])],
+        ["POST", "/api/v1/webhooks", () => jsonResponse(body, status)],
+      ],
+    );
+    seedSession(ADMIN, "tok-admin");
+    renderWithQuery(<WebhooksPage />);
+    const box = await screen.findByPlaceholderText("https://your-endpoint.com/hook");
+    await userEvent.type(box, "https://hook.example.com/b");
+    await userEvent.click(screen.getByRole("button", { name: "Subscribe" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(said));
+    expect(screen.queryByText(/shown once/)).not.toBeInTheDocument();
+    expect(box).toHaveValue("https://hook.example.com/b");
   });
 });

@@ -15,7 +15,7 @@
  * - a sessions response without a list is an error, not an empty history (F078).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 vi.mock("@/api/mock", async (importOriginal) => {
@@ -24,7 +24,8 @@ vi.mock("@/api/mock", async (importOriginal) => {
 });
 
 import { CopilotPage } from "./CopilotPage";
-import { renderWithQuery } from "@/test/utils";
+import { ANALYST, renderWithQuery, seedSession } from "@/test/utils";
+import { useAuth } from "@/store/auth";
 import { callsOf } from "@/test/http";
 
 // The first test in this file pays one-time render costs (about 4.5 s measured on
@@ -428,5 +429,79 @@ describe("CopilotPage (production path)", () => {
     expect(screen.getByText(/Recommended for/)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  });
+});
+
+/** A stream the test feeds by hand, which -- like a fetch that resolved before
+ *  the abort -- keeps delivering whatever it is given. */
+function feedableStream() {
+  const encoder = new TextEncoder();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({ start(c) { controller = c; } });
+  return {
+    response: new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }),
+    send: (event: unknown) => controller.enqueue(encoder.encode("data: " + JSON.stringify(event) + "\n\n")),
+    close: () => controller.close(),
+  };
+}
+
+describe("the stream belongs to the session that asked for it", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    seedSession(ANALYST, "tok-ana");
+  });
+
+  it("carries the session's Bearer, so the server can refuse a role it does not serve", async () => {
+    const stub = backend();
+    renderPage();
+    await streamOnce();
+    await screen.findByText(/Recommended for funding/);
+    const [call] = callsTo(stub, "/copilot/explain/stream");
+    expect(call.headers["Authorization"]).toBe("Bearer tok-ana");
+  });
+
+  it("is aborted by a sign-out", async () => {
+    const seen: { signal?: AbortSignal } = {};
+    backend({ stream: (init) => { seen.signal = init?.signal ?? undefined; return hangingStream(init); } });
+    renderPage();
+    await streamOnce();
+    await screen.findByText(/Recommended for/);
+    expect(seen.signal?.aborted).toBe(false);
+
+    await act(async () => { await useAuth.getState().logout(); });
+    expect(seen.signal?.aborted).toBe(true);
+  });
+
+  it("is aborted when the page goes", async () => {
+    const seen: { signal?: AbortSignal } = {};
+    backend({ stream: (init) => { seen.signal = init?.signal ?? undefined; return hangingStream(init); } });
+    const { unmount } = renderPage();
+    await streamOnce();
+    await screen.findByText(/Recommended for/);
+
+    unmount();
+    expect(seen.signal?.aborted).toBe(true);
+  });
+
+  it("acts on no event that arrives after the session ended", async () => {
+    const feed = feedableStream();
+    backend({ stream: () => feed.response });
+    renderPage();
+    await streamOnce();
+    feed.send({ type: "meta", probability: 0.87, rag_query: "q", session_id: "sess-a" });
+    feed.send({ type: "token", value: "A's opening. " });
+    await screen.findByText(/A's opening/);
+
+    await act(async () => { await useAuth.getState().logout(); });
+    await act(async () => {
+      feed.send({ type: "token", value: "Late words for nobody." });
+      feed.send({ type: "done", sources: [], compliance: CLEAN_SCREEN });
+      feed.close();
+      await new Promise((r) => setTimeout(r, 30));
+    });
+
+    expect(screen.queryByText(/Late words for nobody/)).toBeNull();
+    expect(screen.queryByText("Streamed")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { api } from "../client";
+import { api, apiBlob } from "../client";
 import type { ExplainLocalRequest, ExplainLocalResponse } from "../types";
 import { isMock } from "../mock";
 const delay=<T,>(v:T,ms=300)=>new Promise<T>(r=>setTimeout(()=>r(v),ms));
@@ -12,8 +12,9 @@ const mockLocal=(b:ExplainLocalRequest):ExplainLocalResponse=>({
 });
 async function fetchWaterfallBlob(b:ExplainLocalRequest):Promise<Blob>{
   if(isMock){const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="200"><rect width="600" height="200" fill="#F4ECDA"/><text x="20" y="30" font-family="sans-serif" fill="#28200E">SHAP Waterfall (mock)</text></svg>`;return new Blob([svg],{type:"image/svg+xml"});}
-  const res=await fetch("/api/v1/predict/explain/waterfall",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-  if(!res.ok)throw new Error(`waterfall HTTP ${res.status}`);return res.blob();
+  // With the session's Bearer: a signed-in waterfall is drawn privately on the
+  // server, outside the shared PNG cache an anonymous one goes through.
+  return apiBlob("/predict/explain/waterfall",{method:"POST",body:JSON.stringify(b)});
 }
 export const explainApi={
   local:(b:ExplainLocalRequest)=>isMock?delay(mockLocal(b)):api<ExplainLocalResponse>("/explain/local",{method:"POST",body:JSON.stringify(b)}),

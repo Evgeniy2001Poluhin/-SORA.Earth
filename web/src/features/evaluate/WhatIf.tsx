@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceDot, ResponsiveContainer } from "recharts";
 import { evaluateApi } from "@/api/endpoints/evaluate";
 import type { EvaluateRequest, EvaluateProjectRequest } from "@/api/types";
+import { ApiError } from "@/api/client";
+import { isSessionEnded, session } from "@/lib/session";
 
 /** The evaluate form and the last scored run, both possibly incomplete. */
 type EvalInput = Partial<EvaluateRequest> & { total_score?: number };
@@ -39,6 +41,9 @@ export function WhatIf({ form, lastRun }: Props) {
   const [paramKey, setParamKey] = useState<SweepKey>("budget_usd");
   const [sweepData, setSweepData] = useState<Array<{x:number; total:number}>>([]);
   const [sweepLoading, setSweepLoading] = useState(false);
+  const [sweepError, setSweepError] = useState<string | null>(null);
+  const sweepAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => sweepAbort.current?.abort(), []);
 
   const param = PARAMS.find(p=>p.key===paramKey)!;
 
@@ -75,7 +80,20 @@ export function WhatIf({ form, lastRun }: Props) {
   // position the axis has, and on a category axis that is just the ticks, so a
   // baseline that is not exactly one of them was never drawn.
   const sweepXs = Array.from({ length: 12 }, (_, i) => param.min + ((param.max - param.min) * i) / 11);
+  // The sweep is twelve requests in a row, so it is bound to the session and to
+  // this component for its whole length: it stops at a session change, at a
+  // 401 or 403, and when the component goes. Swallowing every error used to
+  // keep it going -- after a 401 ended the session the remaining requests went
+  // out without a Bearer, and after an account switch with the next account's.
   const runSweep = async () => {
+    sweepAbort.current?.abort();
+    const ctrl = new AbortController();
+    sweepAbort.current = ctrl;
+    const epoch = session.epoch();
+    const live = () => !ctrl.signal.aborted && session.isCurrent(epoch);
+    // A stopped sweep shows none of its points; only the newest sweep owns the spinner.
+    const stop = () => { if (sweepAbort.current === ctrl) setSweepLoading(false); };
+    setSweepError(null);
     setSweepLoading(true);
     const points: Array<{x:number; total:number}> = [];
     const xs = sweepXs;
@@ -93,8 +111,22 @@ export function WhatIf({ form, lastRun }: Props) {
       project_duration_months: duration as number,
     };
     for (const x of xs) {
+      if (!live()) return stop();
       const override: Partial<EvaluateRequest> = { [param.key]: x };
-      const r = await evaluateApi.evaluate({ ...sweepBase, ...override }).catch(()=>null);
+      let r: { total_score: number } | null = null;
+      try {
+        r = await evaluateApi.evaluate({ ...sweepBase, ...override }, { signal: ctrl.signal });
+      } catch (e) {
+        if (!live() || isSessionEnded(e)) return stop();
+        if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+          // The session or the role refused it: the remaining points would be
+          // refused too, or sent under a different session. Stop, and say so.
+          setSweepError(e.status === 401 ? "Sweep stopped: sign in again." : "Sweep stopped: not available for your role.");
+          return stop();
+        }
+        // Any other failure loses this point only, as before.
+      }
+      if (!live()) return stop();
       if (r) points.push({ x, total: r.total_score });
     }
     setSweepData(points);
@@ -177,6 +209,7 @@ export function WhatIf({ form, lastRun }: Props) {
           {sweepLoading ? "Sweeping…" : "Run sweep"}
         </button>
       </div>
+      {sweepError && <div role="alert" style={{color:"#EF4444",fontSize:13,marginBottom:8}}>{sweepError}</div>}
       {sweepData.length>0 && (
         <div style={{height:260,marginTop:8}}>
           <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>

@@ -36,7 +36,7 @@ import { SUCCESS_PROBABILITY_LABEL, SUCCESS_PROBABILITY_NOTE } from "./successPr
 const renderPage = () => renderWithQuery(<MemoryRouter><EvaluatePage /></MemoryRouter>);
 const runEvaluation = async () => {
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "Run evaluation" }));
+  await user.click(screen.getByRole("button", { name: "Calculate" }));
 };
 
 describe("the guard on these tests", () => {

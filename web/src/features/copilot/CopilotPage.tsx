@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { MarkdownAnswer } from "./MarkdownAnswer";
 import { SessionsSidebar } from "./SessionsSidebar";
 import { useMutation } from "@tanstack/react-query";
@@ -8,6 +8,7 @@ import { copilotApi, shapValuesFromExplain } from "@/api/endpoints/copilot";
 import type { CopilotCompliance, CopilotRequest, CopilotResponse, CopilotShapValue } from "@/api/endpoints/copilot";
 import "./copilot.css";
 import { errorMessage } from "@/lib/errors";
+import { isSessionEnded } from "@/lib/session";
 
 interface FormValues {
   probability: number;
@@ -119,6 +120,16 @@ export function CopilotPage() {
   const abortRef = useRef<AbortController | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sidebarTick, setSidebarTick] = useState(0);
+  // Leaving the page -- or a session change unmounting it -- stops the stream,
+  // and nothing that arrives afterwards is acted on.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      abortRef.current?.abort();
+    };
+  }, []);
 
   const loadSession = useCallback(async (id: string) => {
     try {
@@ -143,6 +154,7 @@ export function CopilotPage() {
       }
       toast.success("Loaded chat");
     } catch (e: unknown) {
+      if (isSessionEnded(e) || !mounted.current) return;
       toast.error("Load failed: " + errorMessage(e));
     }
   }, []);
@@ -163,8 +175,9 @@ export function CopilotPage() {
       return fromExplain(await copilotApi.explain(body));
     },
     onMutate: () => { setFailure(null); setStoppedText(null); },
-    onSuccess: (r) => { setResult(r); if (r.session_id) setCurrentSessionId(r.session_id); setSidebarTick(t=>t+1); toast.success("Explanation generated"); },
+    onSuccess: (r) => { if (!mounted.current) return; setResult(r); if (r.session_id) setCurrentSessionId(r.session_id); setSidebarTick(t=>t+1); toast.success("Explanation generated"); },
     onError: (e: unknown) => {
+      if (isSessionEnded(e) || !mounted.current) return;
       // The previous explanation was for other inputs; do not leave it on screen beside the error.
       setResult(null);
       setFailure(failureText(e));
@@ -191,6 +204,7 @@ export function CopilotPage() {
       const body = requestFor(v, await shapFor(v));
       if (currentSessionId) body.session_id = currentSessionId;
       for await (const ev of copilotApi.explainStream(body, { signal: controller.signal })) {
+        if (!mounted.current) return;
         if (ev.type === "meta") {
           if (ev.session_id) { setCurrentSessionId(ev.session_id); setSidebarTick(t=>t+1); }
         } else if (ev.type === "token") {
@@ -213,6 +227,7 @@ export function CopilotPage() {
           });
         }
       }
+      if (!mounted.current) return;
       if (controller.signal.aborted && !finished) {
         // The stream closed after Stop, before done: keep what arrived, marked as incomplete.
         setStoppedText(acc.trim());
@@ -221,6 +236,7 @@ export function CopilotPage() {
         toast.success("Stream complete");
       }
     } catch (e: unknown) {
+      if (!mounted.current || (isSessionEnded(e) && !controller.signal.aborted)) return;
       if (controller.signal.aborted && !finished) {
         // A fetch aborted by Stop rejects here. That is the user's choice, not a failure.
         setStoppedText(acc.trim());
@@ -230,8 +246,8 @@ export function CopilotPage() {
         toast.error(e instanceof ExplainUnavailableError ? failureText(e) : "Stream failed: " + errorMessage(e));
       }
     } finally {
-      abortRef.current = null;
-      setStreaming(false);
+      if (abortRef.current === controller) abortRef.current = null;
+      if (mounted.current) setStreaming(false);
     }
   };
 

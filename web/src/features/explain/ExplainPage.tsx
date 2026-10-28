@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -6,6 +6,7 @@ import { explainApi } from "@/api/endpoints/explain";
 import type { ExplainLocalContribution, ExplainLocalRequest, ExplainLocalResponse } from "@/api/types";
 import "./explain.css";
 import { errorMessage } from "@/lib/errors";
+import { isSessionEnded, session } from "@/lib/session";
 
 interface FormValues {
   budget: number;
@@ -33,24 +34,44 @@ export function ExplainPage() {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [json, setJson] = useState<ExplainLocalResponse | null>(null);
   const [elapsed, setElapsed] = useState<number | null>(null);
+  // The object URL this page owns, so it is revoked when replaced and when the
+  // page goes -- including when a session change unmounts it.
+  const urlRef = useRef<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      urlRef.current = null;
+    };
+  }, []);
 
   const mut = useMutation({
     mutationFn: async (b: ExplainLocalRequest) => {
       const t0 = performance.now();
+      const epoch = session.epoch();
       const [j, blob] = await Promise.all([
         explainApi.local(b),
         explainApi.waterfallBlob(b),
       ]);
-      return { j, blob, ms: performance.now() - t0 };
+      return { j, blob, ms: performance.now() - t0, epoch };
     },
-    onSuccess: ({ j, blob, ms }) => {
+    onSuccess: ({ j, blob, ms, epoch }) => {
+      // A result for a page that is gone, or a session that ended, is dropped:
+      // no state, and no object URL nobody would revoke.
+      if (!mounted.current || !session.isCurrent(epoch)) return;
       setJson(j);
-      if (imgUrl) URL.revokeObjectURL(imgUrl);
-      setImgUrl(URL.createObjectURL(blob));
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      urlRef.current = URL.createObjectURL(blob);
+      setImgUrl(urlRef.current);
       setElapsed(ms);
       toast.success("Rendered in " + ms.toFixed(0) + "ms");
     },
-    onError: (e: unknown) => toast.error("Explain failed: " + errorMessage(e)),
+    onError: (e: unknown) => {
+      if (isSessionEnded(e) || !mounted.current) return;
+      toast.error("Explain failed: " + errorMessage(e));
+    },
   });
 
   const submit = (v: FormValues) => mut.mutate(v);

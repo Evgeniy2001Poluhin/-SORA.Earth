@@ -13,7 +13,8 @@ vi.mock("@/api/mock", async (importOriginal) => {
 import HistoryPage from "@/features/history/HistoryPage";
 import { isMock } from "@/api/mock";
 import { stubStatus } from "@/test/http";
-import { shouldRetry } from "./queryClient";
+import { createAppQueryClient, shouldRetry } from "./queryClient";
+import { SessionChangedError } from "@/lib/session";
 import { ApiError } from "@/api/client";
 import { Providers } from "./providers";
 
@@ -76,5 +77,21 @@ describe("shouldRetry predicate", () => {
   it("returns true for a generic Error when failureCount is 0", () => {
     const error = new Error("network");
     expect(shouldRetry(0, error)).toBe(true);
+  });
+
+  // A request from a session that has ended, retried, would go out again under
+  // the next account's session.
+  it("returns false for an answer that outlived its session", () => {
+    expect(shouldRetry(0, new SessionChangedError())).toBe(false);
+  });
+
+  it("returns false for a cancelled request", () => {
+    expect(shouldRetry(0, new DOMException("aborted", "AbortError"))).toBe(false);
+  });
+});
+
+describe("the application's mutations", () => {
+  it("are never retried: a save retried after a dropped connection could save twice", () => {
+    expect(createAppQueryClient().getDefaultOptions().mutations?.retry).toBe(false);
   });
 });

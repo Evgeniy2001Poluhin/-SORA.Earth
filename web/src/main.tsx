@@ -9,7 +9,9 @@ import { auth as _client } from "@/api/client";
 import { useAuth as _useAuth } from "@/store/auth";
 const _devKey = import.meta.env.VITE_DEV_API_KEY as string | undefined;
 if (_devKey) _client.setApiKey(_devKey);
-_useAuth.getState().hydrate();
+// The one bootstrap check of a stored token. SessionBoundary shows a waiting
+// screen until it settles, so nothing protected is requested before it.
+void _useAuth.getState().hydrate();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

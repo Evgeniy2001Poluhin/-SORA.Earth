@@ -18,7 +18,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, api } from "./client";
+import { ApiError, api, auth } from "./client";
 
 /** A failing response with a body, built as a real `Response` so `text()` works. */
 function stubFailure(status: number, body: string) {
@@ -127,5 +127,29 @@ describe("ApiError", () => {
     ) as unknown as typeof fetch;
 
     await expect(api("/x")).resolves.toEqual({ ok: 1 });
+  });
+});
+
+describe("the shared transport's other shapes", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    auth.set("tok-session");
+  });
+
+  it("sends no Bearer when a call asks for none, even with a session open", async () => {
+    // The login call: signing in as B must not carry A's token.
+    const stub = vi.fn(async () => new Response("{}", { status: 200 }));
+    globalThis.fetch = stub as unknown as typeof fetch;
+
+    await api("/auth/login-json", { method: "POST", bearer: null });
+
+    const headers = (stub.mock.calls[0] as unknown as [string, RequestInit])[1].headers as Record<string, string>;
+    expect(headers["Authorization"]).toBeUndefined();
+  });
+
+  it("answers undefined for an empty 204, rather than failing to parse it", async () => {
+    globalThis.fetch = vi.fn(async () => new Response(null, { status: 204 })) as unknown as typeof fetch;
+
+    await expect(api("/webhooks/1", { method: "DELETE" })).resolves.toBeUndefined();
   });
 });
