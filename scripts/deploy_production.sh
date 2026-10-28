@@ -309,6 +309,9 @@ step() { echo; echo "== $* =="; }
 accounts_downgrade_blocked() {
     local to="$1" exists
     git cat-file -e "$to:app/accounts.py" 2>/dev/null && return 1
+    # shellcheck disable=SC2016
+    #   Single quotes on purpose: $POSTGRES_USER, $POSTGRES_DB and $0 belong to
+    #   the postgres container's shell, not this one.
     exists="$("${DC[@]}" exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$0"' \
         "SELECT to_regclass('public.users') IS NOT NULL" < /dev/null 2>/dev/null || true)"
     [ "$exists" = f ] && return 1
