@@ -985,3 +985,30 @@ def test_the_marker_holds_back_the_deployment_and_says_why():
     with open(os.path.join(REPO_ROOT, ".deploy-blocked"), encoding="utf-8") as fh:
         first = fh.readline().strip()
     assert first == "ownership cutover incomplete; requires PR2c"
+
+
+def test_a_signed_in_waterfall_neither_reads_nor_writes_the_shared_png_cache(
+        client, world, monkeypatch, tmp_path):
+    """data/explanations/wf_<hash>.png is served to any later anonymous request
+    with the same payload, and its Last-Modified dates the earlier computation."""
+    monkeypatch.setenv("SORA_DATA_DIR", str(tmp_path / "data"))
+    cache = tmp_path / "data" / "explanations"
+    body = {"budget": 250000, "co2_reduction": 120, "social_impact": 7, "duration_months": 24}
+
+    r = client.post("/api/v1/predict/explain/waterfall", json=body, headers=H(world.people.a))
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "image/png" and r.content[:4] == b"\x89PNG"
+    assert "no-store" in r.headers["cache-control"]
+    assert not cache.exists() or list(cache.iterdir()) == []
+
+    # Nor does it read the cache: a planted file for the same payload is not
+    # what a signed-in caller gets back.
+    client.post("/api/v1/predict/explain/waterfall", json=body)
+    planted = list(cache.iterdir())
+    assert len(planted) == 1, "the anonymous control did not write the cache"
+    planted[0].write_bytes(b"\x89PNG planted")
+    r = client.post("/api/v1/predict/explain/waterfall", json=body, headers=H(world.people.a))
+    assert r.status_code == 200 and r.content != b"\x89PNG planted"
+
+    assert client.post("/api/v1/predict/explain/waterfall", json=body,
+                       headers={"Authorization": "Bearer not.a.token"}).status_code == 401
