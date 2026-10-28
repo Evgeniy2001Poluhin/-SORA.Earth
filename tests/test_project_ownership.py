@@ -768,6 +768,34 @@ def test_a_signed_in_ab_prediction_leaves_the_public_stats_alone(client, world):
     assert client.get("/api/v1/ab/stats").json() != before
 
 
+def test_a_signed_in_v2_prediction_is_not_written_to_the_shared_request_log(
+        client, world, monkeypatch):
+    """The JSONL request log is read back by the public /api/v2/drift routes."""
+    import numpy as np
+
+    import app.ml.routes as v2
+
+    class _Model:
+        def predict_proba(self, X):
+            return np.array([[0.3, 0.7]])
+
+    monkeypatch.setattr(v2, "get_bundle", lambda: {"model": _Model(), "version": 3})
+    monkeypatch.setattr(v2, "build_features", lambda payload, bundle: [[0.0]])
+    written = []
+    monkeypatch.setattr(v2, "log_prediction", lambda **kw: written.append(kw))
+    body = {"budget": 250000, "co2_reduction": 120, "social_impact": 7, "duration_months": 24}
+
+    r = client.post("/api/v2/predict", json=body, headers=H(world.people.a))
+    assert r.status_code == 200, r.text
+    assert written == []
+    assert client.post("/api/v2/predict", json=body,
+                       headers={"Authorization": "Bearer not.a.token"}).status_code == 401
+    assert written == []
+
+    assert client.post("/api/v2/predict", json=body).status_code == 200
+    assert len(written) == 1, "the anonymous control was not logged"
+
+
 # ------------------------------------------- 19: surfaces outside ownership
 
 
