@@ -52,19 +52,22 @@ describe("Export CSV", () => {
     expect((stub.mock.calls.find(([u]) => String(u) === EXPORT)![1] as RequestInit).cache).toBe("no-store");
   });
 
-  it("does not download A's file after A signed out", async () => {
-    const file = deferred<Response>();
+  it("does not download A's file when the response is in but its body finishes after A signed out", async () => {
+    // fetch resolved inside A's session; only reading the body outlives it --
+    // the case an abort cannot stop and a check after fetch does not see.
+    const file = deferred<Blob>();
     routeFetch([
       ["GET", /^\/api\/v1\/history\?/, () => jsonResponse(EMPTY)],
-      ["GET", EXPORT, () => file.promise],
+      ["GET", EXPORT, () => ({ ok: true, status: 200, blob: () => file.promise }) as unknown as Response],
     ]);
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     renderWithQuery(<MemoryRouter><HistoryPage /></MemoryRouter>);
     await userEvent.click(screen.getByRole("button", { name: /Export CSV/ }));
+    await new Promise((r) => setTimeout(r, 10));
 
     await act(async () => { await useAuth.getState().logout(); });
     await act(async () => {
-      file.resolve(new Response("ID,Name\n1,A's row\n", { status: 200 }));
+      file.resolve(new Blob(["ID,Name\n1,A's row\n"], { type: "text/csv" }));
       await new Promise((r) => setTimeout(r, 20));
     });
 

@@ -9,7 +9,7 @@
  * is "not confirmed", with no id on screen and nothing sent again.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
@@ -128,6 +128,25 @@ describe("a confirmed save", () => {
 
     answer.resolve(jsonResponse(SAVED(5), 201));
     expect(await screen.findByText(/Saved as evaluation #5/)).toBeInTheDocument();
+    expect(saves(stub)).toHaveLength(1);
+  });
+
+  it("sends one request for two clicks before React re-renders the disabled button", async () => {
+    // Both clicks land in one batch, so the button is still enabled for the
+    // second: only the in-flight guard stands between them and two records.
+    const answer = deferred<Response>();
+    const stub = serve(() => answer.promise);
+    renderAs(SPECIALIST_A);
+    const button = saveButton();
+    act(() => {
+      button.click();
+      button.click();
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(saves(stub)).toHaveLength(1);
+
+    answer.resolve(jsonResponse(SAVED(6), 201));
+    expect(await screen.findByText(/Saved as evaluation #6/)).toBeInTheDocument();
     expect(saves(stub)).toHaveLength(1);
   });
 
