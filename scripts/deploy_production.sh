@@ -56,6 +56,8 @@ ABORTING=0
 # this run created from what was already there. Stopping "anything unexpected"
 # would reach containers this deployment does not own.
 PRE_CIDS=""
+OWNERSHIP_MIGRATION_STARTED=0
+OWNERSHIP_BARRIER="$MANIFEST_DIR/ownership-cutover-required"
 
 # Every refusal goes through here, and after mutation begins it does not simply
 # exit. Eight checks sit after `up` -- the port property, the nginx checksum,
@@ -220,6 +222,17 @@ abort_deployment() {
     # mktemp would then make a new file per command.
     rollback_log > /dev/null
 
+    # A failed ownership migration may have changed the schema even when its
+    # command failed. Do not put an old reader/writer back over private rows.
+    # Keep the barrier across process/host restarts; recovery is a forward fix.
+    if [ "$OWNERSHIP_MIGRATION_STARTED" = 1 ]; then
+        echo "  ROLLBACK REFUSED: ownership cutover requires compatible code; backend and scheduler stop requested. Fix forward after inspecting the schema." >&2
+        logged "${DC[@]}" stop backend scheduler || true
+        stop_containers_created_by_this_run
+        journal_write rollback-refused "ownership cutover; automatic restore refused; application stop requested"
+        exit 76
+    fi
+
     if [ -z "$PREV_COMMIT" ]; then
         # Nothing recorded to go back to -- the first deployment, or a manifest
         # directory that was lost. There is no previous state to restore, so the
@@ -240,6 +253,14 @@ abort_deployment() {
         echo "  still running: fix forward, closing external access if need be. See" >&2
         echo "  CLAUDE.md, 'Accounts live in the users table'." >&2
         journal_write rollback-refused "previous code predates persistent accounts and the users table exists"
+        exit 76
+    fi
+
+    if ownership_downgrade_blocked "$PREV_COMMIT"; then
+        echo "  ROLLBACK REFUSED: previous code cannot enforce project ownership; application stop requested. Fix forward." >&2
+        logged "${DC[@]}" stop backend scheduler || true
+        stop_containers_created_by_this_run
+        journal_write rollback-refused "previous code lacks ownership cutover capability"
         exit 76
     fi
 
@@ -316,6 +337,83 @@ accounts_downgrade_blocked() {
         "SELECT to_regclass('public.users') IS NOT NULL" < /dev/null 2>/dev/null || true)"
     [ "$exists" = f ] && return 1
     return 0
+}
+
+# The capability belongs to the target commit, not the current checkout.
+# A schema may have been migrated outside this script: the database check is
+# independent of the durable deployment barrier, and an unreadable answer
+# refuses a downgrade. No application rows are read.
+ownership_capable() {
+    [ "$(git cat-file -p "$1:.ownership-cutover-v1" 2>/dev/null)" = "ownership-cutover-v1" ]
+}
+
+ownership_downgrade_blocked() {
+    local to="$1" exists
+    ownership_capable "$to" && return 1
+    [ ! -e "$OWNERSHIP_BARRIER" ] && [ ! -L "$OWNERSHIP_BARRIER" ] || return 0
+    # shellcheck disable=SC2016
+    # The quoted variables belong to the postgres container.
+    exists="$("${DC[@]}" exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$0"' \
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name IN ('evaluations', 'predictions_log') AND column_name IN ('owner_user_id', 'data_scope')) OR to_regclass('public.project_access_events') IS NOT NULL" < /dev/null 2>/dev/null || true)"
+    [ "$exists" = f ] && return 1
+    return 0
+}
+
+stop_ownership_writers() {
+    local svc running
+    "${DC[@]}" stop backend scheduler || fail "could not stop ownership writers before migration"
+    for svc in backend scheduler; do
+        running="$(docker ps --quiet --filter "label=com.docker.compose.project=$PROJECT" \
+            --filter "label=com.docker.compose.service=$svc")" \
+            || fail "could not verify that $svc is stopped; migration refused"
+        [ -z "$running" ] || fail "$svc is still running; ownership migration refused"
+    done
+}
+
+persist_ownership_barrier() {
+    # Mark the in-process refusal first as well, so a failed write or signal
+    # cannot enter the automatic old-image restore path.
+    OWNERSHIP_MIGRATION_STARTED=1
+    python3 - "$OWNERSHIP_BARRIER" "$TARGET" <<'PY_BARRIER'
+import os
+import sys
+import tempfile
+from pathlib import Path
+path = Path(sys.argv[1])
+if path.is_symlink():
+    raise SystemExit("ownership barrier must not be a symlink")
+if not path.exists():
+    fd, temporary = tempfile.mkstemp(prefix=".ownership-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write("ownership-cutover-v1\n" + sys.argv[2] + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+elif not path.is_file():
+    raise SystemExit("ownership barrier must be a regular file")
+directory = os.open(path.parent, os.O_RDONLY)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+PY_BARRIER
+}
+
+refuse_ownership_target() {
+    local to="$1"
+    if ownership_downgrade_blocked "$to"; then
+        fail "ownership schema exists, is uncertain, or has a durable cutover barrier; target lacks ownership-cutover-v1. No incompatible code may be started."
+    fi
+    if git cat-file -e "$to:alembic/versions/b7d41f2e9c35_project_ownership_and_access_audit.py" 2>/dev/null; then
+        ownership_capable "$to" || fail "ownership migration requires ownership-cutover-v1 capability"
+        OWNERSHIP_TARGET=1
+    else
+        OWNERSHIP_TARGET=0
+    fi
 }
 
 # A commit can be merged before it may be deployed.
@@ -575,6 +673,7 @@ if [ "$MODE" = finalize ]; then
     HEAD_SHA="$(git rev-parse HEAD)"
     [ "$HEAD_SHA" = "$TARGET" ] \
         || fail "the checkout is at $HEAD_SHA and the interrupted run targeted $TARGET; the record cannot be reconciled from a tree that has moved"
+    refuse_ownership_target "$TARGET"
     echo "  finalizing the record for ${TARGET:0:12}"
 elif [ "$MODE" = deploy ]; then
     BRANCH="$(git rev-parse --abbrev-ref HEAD)"
@@ -584,6 +683,7 @@ elif [ "$MODE" = deploy ]; then
         || fail "HEAD ($HEAD_SHA) is not origin/main ($ORIGIN_MAIN); merge first, then deploy"
     TARGET="$HEAD_SHA"
     refuse_blocked_target "$TARGET"
+    refuse_ownership_target "$TARGET"
     echo "  deploying origin/main @ ${TARGET:0:12}"
 else
     # An earlier version required HEAD == origin/main unconditionally, which
@@ -609,6 +709,7 @@ else
     if accounts_downgrade_blocked "$TARGET"; then
         fail "${TARGET:0:12} predates persistent accounts and the users table exists (or could not be checked): that code refuses the migrated schema and would ignore every block and reset. Roll back to a commit that has app/accounts.py, or fix forward."
     fi
+    refuse_ownership_target "$TARGET"
     # The journal records deployments this script made. One made by hand leaves
     # no entry, and the next scripted run then names the last *scripted* commit
     # as the one it replaced, skipping everything in between (#133). The "to
@@ -1034,11 +1135,19 @@ APP_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null
 "${DC[@]}" up -d --wait postgres \
     || fail "postgres would not start, so migrations cannot run"
 
+# Build and database startup happen before the maintenance outage. Stopping
+# both old writers is verified, not inferred from Compose's exit status.
+if [ "$OWNERSHIP_TARGET" = 1 ]; then
+    stop_ownership_writers
+    persist_ownership_barrier || fail "could not persist ownership rollback barrier; migration refused"
+fi
+
 # One migrator, from that exact image, before anything is recreated.
 #
-# A failure here stops the deployment and rolls the *containers* back. It does
-# not undo DDL: a migration that failed partway, or one whose statements are not
-# transactional, leaves the schema where it left it. What this buys is that the
+# A failure here stops the deployment. For ownership cutover it keeps the
+# rollback barrier and requests application stop; it cannot restore old images.
+# Other releases retain the existing rollback path. Neither path undoes DDL:
+# a failed or nontransactional migration leaves the schema where it left it. What this buys is that the
 # schema is never changed by two processes at once and never changed after the
 # new code is already serving -- not that a half-applied migration repairs
 # itself.
@@ -1061,6 +1170,12 @@ APP_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null
 # --no-build, because everything that builds was built above. A rebuild here
 # could produce a different image than the one just migrated from, which is the
 # gap this arrangement closes.
+# A plain up can restart a stopped container on its OLD image before the
+# identity check below. Recreate the application services first on cutover.
+if [ "$OWNERSHIP_TARGET" = 1 ]; then
+    "${DC[@]}" up -d --no-build --force-recreate backend scheduler \
+        || fail "ownership application containers could not be recreated"
+fi
 "${DC[@]}" up -d --no-build --remove-orphans
 
 # `up` did not necessarily move backend and scheduler onto that build.

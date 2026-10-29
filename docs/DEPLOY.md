@@ -43,29 +43,58 @@ Two options:
 
 ## Update
 ```bash
-git pull
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build backend nginx
-docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+./scripts/deploy_production.sh
 ```
 
 ### A commit carrying `.deploy-blocked` is not deployable
 
 Production is deployed with `./scripts/deploy_production.sh` (see CLAUDE.md,
-"Production Server"); the commands above are for a fresh single host. That
-script reads `.deploy-blocked` from the **target** commit -- for a deploy and
+"Production Server"). Do not run the application and then migrate underneath
+it. The script reads `.deploy-blocked` from the **target** commit -- for a deploy and
 for `--rollback` alike -- and refuses before checkout, build, migration or any
 container change, quoting the file's first line. There is no override.
 
 The marker is how staged work is merged before it may run. It is present now
 because the project-ownership change landed in parts: the schema, the access
-rules and the audit are merged, and the cutover that makes them safe to switch
-on -- stopping the old backend and scheduler before the migration, and a
-rollback barrier for the new schema -- is not. **It is removed by the change
-that delivers that cutover, and by nothing else.** Removing it to get a
-deployment through deploys the half that was deliberately held back.
+rules and the audit are merged. The local cutover implementation now stops and
+verifies the old writers and persists the schema rollback barrier. The marker
+remains until the populated-copy migration rehearsal has established migration
+time and lock behaviour and the operator has checked the provenance of existing
+rows. Neither rehearsal nor production migration has been performed by this
+change. Removing the marker merely to pass the guard is forbidden.
 
 The guard lives in the script, so a copy of the script from before it existed
 does not read the file.
+
+### Ownership cutover and recovery
+
+The target must carry `.ownership-cutover-v1` with the value
+`ownership-cutover-v1` to declare support for this cutover. After building the
+image and waiting for PostgreSQL, the deployer stops backend and scheduler,
+checks that no running container with either service label remains in this
+Compose project, and persists `ownership-cutover-required` in `MANIFEST_DIR`
+(default `/var/lib/sora/deployments`). The file and its directory are synced
+before any ownership migration can run. It is not removed after success.
+
+The first application start forces backend and scheduler to be recreated on
+the new image: a plain `up` could briefly restart the stopped old containers.
+If migration or a later step fails, the deployer requests application stop,
+retains the journal and barrier, and exits 76. It does not automatically restore
+old images or undo DDL. Inspect the actual schema and fix forward. A failed
+stop is reported in the rollback log; it is not proof that the service stopped.
+
+Explicit rollback to a reviewed compatible commit is still possible. A target
+without the capability is refused before checkout if the durable barrier exists,
+if ownership columns/audit tables exist in PostgreSQL, or if that database check
+cannot be read. This protects manually migrated databases as well as scripted
+cutovers. Never delete the barrier or run the ownership downgrade to make old
+code fit: that would lose ownership and audit history.
+
+An old copy of the deployment script and manual Docker commands do not enforce
+these controls. The operator must use this version of the deployer for the
+initial cutover and subsequent recovery; the marker is not a host-wide execution
+policy. A populated restored-copy rehearsal is still required before lifting
+`.deploy-blocked`; synthetic tests do not measure real table update/index cost.
 
 ### Rolling back past `f2c9a1d47b30`
 

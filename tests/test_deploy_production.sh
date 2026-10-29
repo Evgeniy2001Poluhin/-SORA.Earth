@@ -210,15 +210,45 @@ case "$argv" in
     *"build backend"*)
         [ -f "$STUB_DIR/build_fails" ] && exit 1
         exit 0 ;;
+    *"stop backend scheduler"*)
+        [ -f "$STUB_DIR/writer_stop_fails" ] && exit 1
+        touch "$STUB_DIR/writers_stopped"; exit 0 ;;
+    *"ps --quiet --filter label=com.docker.compose.project="*)
+        [ -f "$STUB_DIR/writer_ps_fails" ] && exit 1
+        case "$argv" in
+            *"service=backend"*) [ -f "$STUB_DIR/backend_survives_stop" ] && echo still-running ;;
+            *"service=scheduler"*) [ -f "$STUB_DIR/scheduler_survives_stop" ] && echo still-running ;;
+        esac
+        exit 0 ;;
+    *"up -d --no-build --force-recreate backend scheduler"*)
+        touch "$STUB_DIR/app_recreated"
+        [ -f "$STUB_DIR/app_recreate_fails" ] && exit 1
+        exit 0 ;;
     *"run --rm --no-deps migrate"*|*"run --rm --build migrate"*|*"run --rm migrate"*)
         n=$(( $(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0) + 1 ))
         echo "$n" > "$STUB_DIR/migrate_calls"
+        if [ -f "$STUB_DIR/check_ownership_cutover" ]; then
+            [ -f "$STUB_DIR/writers_stopped" ] || exit 1
+            [ -f "$MANIFEST_DIR/ownership-cutover-required" ] || exit 1
+            touch "$STUB_DIR/cutover_order_verified"
+            if [ -f "$STUB_DIR/migration_signal" ]; then
+                kill -"$(cat "$STUB_DIR/migration_signal")" "$PPID"
+                sleep 0.1
+                exit 1
+            fi
+        fi
         [ -f "$STUB_DIR/migrate_fails" ] && exit 1
         exit 0 ;;
     # The persistent-accounts rollback barrier asks whether `users` exists.
     # "f" unless a case says otherwise; a failing query prints nothing, which
     # the barrier must treat as a refusal.
     *"exec -T postgres sh -c"*)
+        case "$argv" in
+            *"information_schema.columns"*)
+                [ -f "$STUB_DIR/ownership_schema_unreadable" ] && exit 1
+                cat "$STUB_DIR/ownership_schema" 2>/dev/null || echo f
+                exit 0 ;;
+        esac
         [ -f "$STUB_DIR/users_table_unreadable" ] && exit 1
         cat "$STUB_DIR/users_table" 2>/dev/null || echo f
         exit 0 ;;
@@ -2398,3 +2428,110 @@ PROBE
 bash "$_TALLY_PROBE" >/dev/null 2>&1
 check "and a run with no failures still succeeds" "$?" "0"
 rm -f "$_TALLY_PROBE"
+
+
+echo "== ownership cutover =="
+# The remote is the disposable bare repository created by new_sandbox above.
+# For these extra fixture commits, disallow every non-file Git transport.
+publish_local_fixture() {
+    git -C "$REPO" add -A
+    git -C "$REPO" commit -qm 'ownership test fixture'
+    git -C "$REPO" -c protocol.allow=never -c protocol.file.allow=always push -q "$ORIGIN" main
+}
+ownership_sandbox() {
+    new_sandbox
+    mkdir -p "$REPO/alembic/versions"
+    echo '# fixture' > "$REPO/alembic/versions/b7d41f2e9c35_project_ownership_and_access_audit.py"
+    echo ownership-cutover-v1 > "$REPO/.ownership-cutover-v1"
+    publish_local_fixture
+    touch "$STUB_DIR/check_ownership_cutover"
+}
+
+ownership_sandbox
+run_guard
+check "ownership cutover succeeds" "$RC" 0
+check "stopped writers and persisted barrier precede DDL" "$([ -f "$STUB_DIR/cutover_order_verified" ] && echo yes || echo no)" yes
+MIG_LINE="$(grep -n 'run --rm --no-deps migrate' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+RECREATE_LINE="$(grep -n 'up -d --no-build --force-recreate backend scheduler' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+UP_LINE="$(grep -n 'up -d --no-build --remove-orphans' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+check "new containers precede generic up" "$([ -n "$RECREATE_LINE" ] && [ "$MIG_LINE" -lt "$RECREATE_LINE" ] && [ "$RECREATE_LINE" -lt "$UP_LINE" ] && echo yes || echo no)" yes
+check "successful cutover retains barrier" "$([ -f "$SANDBOX/manifests/ownership-cutover-required" ] && echo yes || echo no)" yes
+rm -rf "$SANDBOX"
+
+for defect in writer_stop_fails backend_survives_stop scheduler_survives_stop writer_ps_fails; do
+    ownership_sandbox
+    touch "$STUB_DIR/$defect"
+    run_guard
+    case "$defect" in
+        writer_stop_fails) reason='could not stop ownership writers' ;;
+        backend_survives_stop) reason='backend is still running' ;;
+        scheduler_survives_stop) reason='scheduler is still running' ;;
+        writer_ps_fails) reason='could not verify that backend is stopped' ;;
+    esac
+    refused_because "$defect refuses for the intended reason" "$reason"
+    check "$defect prevents migration" "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" 0
+    rm -rf "$SANDBOX"
+done
+
+ownership_sandbox
+mkdir -p "$SANDBOX/manifests/ownership-cutover-required"
+run_guard
+refused_because "invalid barrier refuses before DDL" "could not persist ownership rollback barrier"
+check "invalid barrier prevents migration" "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" 0
+rm -rf "$SANDBOX"
+
+for defect in migrate_fails bootstrap_fails app_recreate_fails; do
+    ownership_sandbox
+    mkdir -p "$SANDBOX/manifests"
+    printf 'commit %s\nimages\n' "$SECOND" > "$SANDBOX/manifests/previous.txt"
+    ln -s previous.txt "$SANDBOX/manifests/latest"
+    touch "$STUB_DIR/$defect"
+    run_guard
+    check "$defect reports incomplete recovery" "$RC" 76
+    check "$defect never restores old images" "$([ -f "$STUB_DIR/rolled_back" ] && echo yes || echo no)" no
+    check "$defect leaves barrier" "$([ -f "$SANDBOX/manifests/ownership-cutover-required" ] && echo yes || echo no)" yes
+    check "$defect records ownership refusal" "$(grep -c '^state          rollback-refused' "$SANDBOX/manifests/in-progress")" 1
+    check "$defect preserves previous success" "$(readlink "$SANDBOX/manifests/latest")" previous.txt
+    rm -rf "$SANDBOX"
+done
+
+for evidence in barrier schema unreadable; do
+    new_sandbox
+    mkdir -p "$SANDBOX/manifests"
+    case "$evidence" in
+        barrier) echo ownership-cutover-v1 > "$SANDBOX/manifests/ownership-cutover-required" ;;
+        schema) echo t > "$STUB_DIR/ownership_schema" ;;
+        unreadable) touch "$STUB_DIR/ownership_schema_unreadable" ;;
+    esac
+    run_guard --rollback "$FIRST"
+    refused_because "$evidence blocks incompatible rollback" "target lacks ownership-cutover-v1"
+    check "$evidence refuses before checkout" "$(git -C "$REPO" rev-parse HEAD)" "$SECOND"
+    check "$evidence prevents migration" "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" 0
+    rm -rf "$SANDBOX"
+done
+
+ownership_sandbox
+COMPATIBLE="$(git -C "$REPO" rev-parse HEAD)"
+echo next > "$REPO/next.txt"
+publish_local_fixture
+mkdir -p "$SANDBOX/manifests"
+echo ownership-cutover-v1 > "$SANDBOX/manifests/ownership-cutover-required"
+run_guard --rollback "$COMPATIBLE"
+check "explicit compatible rollback remains possible" "$RC" 0
+check "compatible rollback still stops old writers" "$([ -f "$STUB_DIR/cutover_order_verified" ] && echo yes || echo no)" yes
+rm -rf "$SANDBOX"
+
+for signal in TERM KILL; do
+    ownership_sandbox
+    echo "$signal" > "$STUB_DIR/migration_signal"
+    run_guard
+    check "$signal interrupts the migration" "$([ "$RC" -ne 0 ] && echo yes || echo no)" yes
+    check "$signal cannot erase durable barrier" "$([ -f "$SANDBOX/manifests/ownership-cutover-required" ] && echo yes || echo no)" yes
+    check "$signal does not restart old images" "$([ -f "$STUB_DIR/rolled_back" ] && echo yes || echo no)" no
+    # Even losing the interrupted-run journal cannot remove the independent
+    # schema barrier. Only the disposable fixture's journal is removed here.
+    rm -f "$SANDBOX/manifests/in-progress"
+    run_guard --rollback "$FIRST"
+    refused_because "$signal barrier survives the interrupted process" "target lacks ownership-cutover-v1"
+    rm -rf "$SANDBOX"
+done
