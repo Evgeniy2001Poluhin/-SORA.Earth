@@ -5,6 +5,10 @@ import type { EvaluateProjectRequest } from "../types";
 /** POST /api/v1/report/pdf renders a scored project. */
 export type ReportRequest = EvaluateProjectRequest;
 export const reportApi={
+  savedPdf:async(id:number):Promise<Blob>=>{
+    if(!Number.isSafeInteger(id)||id<=0) throw new Error("Invalid evaluation ID");
+    return apiBlob(`/history/${id}/report.pdf`,{method:"GET",cache:"no-store"});
+  },
   pdf:async(body:ReportRequest):Promise<Blob>=>{
     if(isMock){const txt=`SORA.earth ESG Report (mock)\nProject: ${body.project_name||"-"}\nScore: 72.3 / 100\nGenerated: ${new Date().toISOString()}`;return new Blob([txt],{type:"application/pdf"});}
     // The shared transport: Bearer, session abort, typed errors. The route itself

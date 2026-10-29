@@ -378,6 +378,18 @@ def get_evaluation_by_id(eval_id: int, request: Request, response: Response,
         db.close()
 
 
+@router.get("/history/{eval_id}/report.pdf")
+def saved_evaluation_pdf(eval_id: int, request: Request, response: Response,
+                         actor: UserInfo = Depends(require_auth)):
+    # Reuse the SQL ownership predicate, indistinguishable 404 and mandatory
+    # administrator read audit of the detail endpoint before rendering bytes.
+    row = get_evaluation_by_id(eval_id, request, response, actor)
+    from app.services.evaluation_report import render_saved_evaluation
+    return Response(render_saved_evaluation(row), media_type="application/pdf",
+                    headers={**NO_STORE,
+                             "Content-Disposition": f'attachment; filename="SORA_Evaluation_{eval_id}.pdf"'})
+
+
 @router.delete("/history/{eval_id}", response_model=HistoryDeleted)
 def delete_evaluation(eval_id: int, request: Request, response: Response,
                       actor: UserInfo = Depends(require_admin)):

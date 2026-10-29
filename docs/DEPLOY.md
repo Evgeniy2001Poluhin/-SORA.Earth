@@ -94,7 +94,18 @@ An old copy of the deployment script and manual Docker commands do not enforce
 these controls. The operator must use this version of the deployer for the
 initial cutover and subsequent recovery; the marker is not a host-wide execution
 policy. A populated restored-copy rehearsal is still required before lifting
-`.deploy-blocked`; synthetic tests do not measure real table update/index cost.
+`.deploy-blocked`; synthetic tests do not establish production table cost.
+
+Local rehearsal on 2026-10-29 used a new PostgreSQL 14 cluster reachable only
+through a temporary Unix socket. A database with 50,000 synthetic evaluations
+and 50,000 synthetic prediction rows was dumped and restored before upgrading
+from `a1c5e9f3b7d2` to `b7d41f2e9c35`. Restore took 1.88 seconds; the ownership
+upgrade took 6.87 seconds including the migration process startup. Row counts,
+IDs and budget checksums were unchanged; every legacy row became public with
+no owner. A competing ACCESS EXCLUSIVE lock caused the configured 10-second
+lock timeout and a refused migration; releasing it allowed the same migration
+to succeed without data loss. These measurements describe this synthetic local
+copy, not a production duration or a decision that real legacy rows are public.
 
 ### Rolling back past `f2c9a1d47b30`
 

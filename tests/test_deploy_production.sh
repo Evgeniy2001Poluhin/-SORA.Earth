@@ -2528,6 +2528,17 @@ for signal in TERM KILL; do
     check "$signal interrupts the migration" "$([ "$RC" -ne 0 ] && echo yes || echo no)" yes
     check "$signal cannot erase durable barrier" "$([ -f "$SANDBOX/manifests/ownership-cutover-required" ] && echo yes || echo no)" yes
     check "$signal does not restart old images" "$([ -f "$STUB_DIR/rolled_back" ] && echo yes || echo no)" no
+    # SIGKILL can leave the child migrator holding inherited fd 9 briefly.
+    # Contention is then the correct refusal. Prove it has ended before asking
+    # the separate question about the durable ownership barrier.
+    released=0
+    for _ in $(seq 1 50); do
+        if ( exec 9>"$SANDBOX/lockdir/deploy.lock"; flock -n 9 ); then
+            released=1; break
+        fi
+        sleep 0.1
+    done
+    check "$signal child released its deployment lock" "$released" 1
     # Even losing the interrupted-run journal cannot remove the independent
     # schema barrier. Only the disposable fixture's journal is removed here.
     rm -f "$SANDBOX/manifests/in-progress"
