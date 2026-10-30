@@ -205,3 +205,30 @@ describe("a save that is not confirmed is not shown as one", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Saving is not available for your role"));
   });
 });
+
+
+describe("saved PDF download", () => {
+  it("downloads the saved ID without calculating again", async () => {
+    const item = {id:42,name:"Persisted Solar",budget:250000,co2_reduction:120,
+      social_impact:7,duration_months:24,total_score:61.5,environment_score:55.5,
+      social_score:70.5,economic_score:58.5,success_probability:66.5,
+      risk_level:"Medium",region:"Europe",created_at:"2026-10-29T10:00:00",
+      recommendation:"Stored recommendation",lat:50,lon:10};
+    const stub=routeFetch([
+      ["GET","/api/v1/history/42",()=>jsonResponse(item)],
+      ["GET","/api/v1/history/42/report.pdf",()=>new Response("%PDF-1.4 persisted",{headers:{"content-type":"application/pdf"}})],
+    ],()=>jsonResponse({}));
+    const create=vi.fn(()=>"blob:saved-pdf"); const revoke=vi.fn();
+    Object.defineProperty(URL,"createObjectURL",{configurable:true,value:create});
+    Object.defineProperty(URL,"revokeObjectURL",{configurable:true,value:revoke});
+    const click=vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(()=>{});
+    seedSession(SPECIALIST_A,"tok-spec-a");
+    renderWithQuery(<MemoryRouter initialEntries={["/evaluate?snapshot=42"]}><EvaluatePage /></MemoryRouter>);
+    await userEvent.click(await screen.findByRole("button",{name:"Download saved PDF"}));
+    await waitFor(()=>expect(click).toHaveBeenCalledTimes(1));
+    expect(create).toHaveBeenCalledTimes(1); expect(revoke).toHaveBeenCalledWith("blob:saved-pdf");
+    expect(callsOf(stub).filter(c=>c.method==="POST"&&c.url.includes("/evaluate"))).toHaveLength(0);
+    expect(callsOf(stub).filter(c=>c.url.endsWith("/history/42/report.pdf"))).toHaveLength(1);
+    click.mockRestore();
+  });
+});

@@ -1,3 +1,4 @@
+import { reportApi } from "../../api/endpoints/report";
 import Combobox from "../../components/Combobox";
 import CountryRanking from "./CountryRanking";
 import MonteCarlo from "./MonteCarlo";
@@ -261,7 +262,7 @@ export function EvaluatePage() {
       </section>
 
       {snapshotParam != null && (
-        <SnapshotCard
+        <SnapshotCard key={`${user?.user_id}:${epoch}:${snapshotId}`}
           query={snapshot}
           invalid={snapshotId == null}
           onClose={closeSnapshot}
@@ -436,7 +437,23 @@ function SnapshotCard({ query, invalid, onClose, onUseInputs }: {
   onClose: () => void;
   onUseInputs: (it: HistoryItem) => void;
 }) {
+  const [pdfPending, setPdfPending] = useState(false);
+  const [pdfError, setPdfError] = useState("");
   const it = query.data;
+  const downloadSavedPdf = async () => {
+    if (!it || pdfPending) return;
+    setPdfPending(true); setPdfError("");
+    try {
+      const blob = await reportApi.savedPdf(it.id);
+      const url = URL.createObjectURL(blob);
+      try {
+        const link = document.createElement("a");
+        link.href = url; link.download = `SORA_Evaluation_${it.id}.pdf`;
+        document.body.appendChild(link); link.click(); link.remove();
+      } finally { URL.revokeObjectURL(url); }
+    } catch (error) { if (!isSessionEnded(error)) setPdfError("Could not download the saved report. Please try again."); }
+    finally { setPdfPending(false); }
+  };
   const complete = !!it && it.budget != null && it.co2_reduction != null && it.social_impact != null && it.duration_months != null;
   let body: React.ReactNode;
   if (invalid) body = <p role="alert" className="ev-snapshot-error">Evaluation not found or not available.</p>;
@@ -463,6 +480,10 @@ function SnapshotCard({ query, invalid, onClose, onUseInputs }: {
         As stored when it was saved; not recalculated. The record keeps the region, not the country,
         so a new calculation needs a country chosen.
       </p>
+      <button type="button" className="ev-btn" disabled={pdfPending} onClick={downloadSavedPdf}>
+        {pdfPending ? "Preparing report…" : "Download saved PDF"}
+      </button>
+      {pdfError && <p role="alert">{pdfError}</p>}
       <button type="button" className="ev-btn" disabled={!complete} onClick={() => onUseInputs(it)}>
         {complete ? "Use these inputs in the form" : "Inputs incomplete: cannot reuse"}
       </button>

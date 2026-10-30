@@ -1167,3 +1167,88 @@ def test_the_application_initialises_sentry_with_those_options(monkeypatch):
 
     import app.main as main
     assert "sentry_sdk.init(**sentry_init_kwargs())" in inspect.getsource(main)
+
+
+# Saved PDF is the same persisted assessment even after the serving model changes.
+def test_saved_pdf_does_not_recompute_and_matches_history(client, world, monkeypatch):
+    import app.main as main
+    from pypdf import PdfReader
+    from io import BytesIO
+    def forbidden(*args, **kwargs):
+        raise AssertionError("saved PDF must not recalculate")
+    monkeypatch.setattr(main, "calculate_esg", forbidden)
+    h = H(world.people.a)
+    before = client.get(f"/api/v1/history/{world.a_eval}", headers=h).json()
+    r = client.get(f"/api/v1/history/{world.a_eval}/report.pdf", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.headers["cache-control"] == "private, no-store"
+    text = "\n".join(p.extract_text() for p in PdfReader(BytesIO(r.content)).pages)
+    assert before["name"] in text
+    assert f"Total ESG score: {before['total_score']}" in text
+    assert f"Success probability (%): {before['success_probability']}" in text
+    assert "not recalculated" in text
+    assert world.count(Evaluation) == 5
+
+
+@pytest.mark.parametrize("which", ["foreign", "missing"])
+def test_saved_pdf_never_exposes_another_specialist(client, world, which):
+    key = world.b_eval if which == "foreign" else 999999999
+    r = client.get(f"/api/v1/history/{key}/report.pdf", headers=H(world.people.a))
+    assert r.status_code == 404
+    assert r.json() == {"detail": "Evaluation not found"}
+    assert r.headers["cache-control"] == "private, no-store"
+
+
+def test_saved_pdf_requires_login(client, world):
+    r = client.get(f"/api/v1/history/{world.a_eval}/report.pdf")
+    assert r.status_code == 401
+
+
+def test_saved_pdf_administrator_read_is_audited(client, world):
+    r = client.get(f"/api/v1/history/{world.b_eval}/report.pdf", headers=H(world.people.admin))
+    assert r.status_code == 200
+    assert world.events(action="detail")[-1].targets[0].resource_id == world.b_eval
+
+
+
+def test_saved_pdf_audit_failure_returns_no_document(client, world):
+    _break_the_audit(world)
+    r = client.get(f"/api/v1/history/{world.b_eval}/report.pdf", headers=H(world.people.admin))
+    assert r.status_code == 503
+    assert not r.content.startswith(b"%PDF")
+    assert "pilot-b-sentinel" not in r.text
+
+
+def test_pilot_workflow_save_history_pdf_and_account_isolation(client, world, monkeypatch):
+    from io import BytesIO
+    from pypdf import PdfReader
+    import app.main as main
+    login = client.post("/api/v1/auth/login", data={
+        "username": world.people.a.username, "password": "correct horse battery staple"})
+    assert login.status_code == 200, login.text
+    a = {"Authorization": "Bearer " + login.json()["access_token"]}
+    b = H(world.people.b)
+    result = client.post("/api/v1/evaluate?save=true", json=PROJECT, headers=a)
+    assert result.status_code == 201, result.text
+    saved = result.json(); key = saved["evaluation_id"]
+    history = client.get(f"/api/v1/history/{key}", headers=a)
+    assert history.status_code == 200
+    assert history.json()["total_score"] == saved["total_score"]
+    def no_inference(*args, **kwargs):
+        raise AssertionError("reading a saved assessment must not run scoring")
+    monkeypatch.setattr(main, "calculate_esg", no_inference)
+    pdf = client.get(f"/api/v1/history/{key}/report.pdf", headers=a)
+    assert pdf.status_code == 200
+    text = "\n".join(p.extract_text() for p in PdfReader(BytesIO(pdf.content)).pages)
+    assert PROJECT["name"] in text
+    assert f"Total ESG score: {saved['total_score']}" in text
+    assert client.get(f"/api/v1/history/{key}", headers=b).status_code == 404
+    assert client.get(f"/api/v1/history/{key}/report.pdf", headers=b).status_code == 404
+    assert client.get(f"/api/v1/history/{key}/report.pdf").status_code == 401
+    assert world.count(Evaluation) == 6
+
+
+def test_saved_pdf_openapi_declares_binary_document(client):
+    operation = client.get("/openapi.json").json()["paths"][
+        "/api/v1/history/{eval_id}/report.pdf"]["get"]
+    assert set(operation["responses"]["200"]["content"]) == {"application/pdf"}
