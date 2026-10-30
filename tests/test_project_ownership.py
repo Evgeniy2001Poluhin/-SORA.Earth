@@ -1246,3 +1246,9 @@ def test_pilot_workflow_save_history_pdf_and_account_isolation(client, world, mo
     assert client.get(f"/api/v1/history/{key}/report.pdf", headers=b).status_code == 404
     assert client.get(f"/api/v1/history/{key}/report.pdf").status_code == 401
     assert world.count(Evaluation) == 6
+
+
+def test_saved_pdf_openapi_declares_binary_document(client):
+    operation = client.get("/openapi.json").json()["paths"][
+        "/api/v1/history/{eval_id}/report.pdf"]["get"]
+    assert set(operation["responses"]["200"]["content"]) == {"application/pdf"}

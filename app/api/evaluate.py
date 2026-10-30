@@ -378,7 +378,8 @@ def get_evaluation_by_id(eval_id: int, request: Request, response: Response,
         db.close()
 
 
-@router.get("/history/{eval_id}/report.pdf")
+@router.get("/history/{eval_id}/report.pdf", response_class=Response,
+            responses={200: {"content": {"application/pdf": {}}}})
 def saved_evaluation_pdf(eval_id: int, request: Request, response: Response,
                          actor: UserInfo = Depends(require_auth)):
     # Reuse the SQL ownership predicate, indistinguishable 404 and mandatory
