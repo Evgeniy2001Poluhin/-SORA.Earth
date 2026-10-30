@@ -102,7 +102,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install pytest pytest-cov pytest-timeout
+          pip install pytest pytest-cov pytest-timeout pypdf==5.1.0
 
       - name: Verify backend model loading
         env:
