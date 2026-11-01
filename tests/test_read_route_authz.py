@@ -77,6 +77,7 @@ AUTHENTICATED = {
     # Guarded by this fix: GET routes that return stored evaluations or predictions.
     "/api/v1/history",
     "/api/v1/history/{eval_id}",
+    "/api/v1/history/{eval_id}/report.pdf",
     "/api/v1/export/csv",
     "/api/v1/predictions/history",
     "/api/v1/predictions/export/csv",
