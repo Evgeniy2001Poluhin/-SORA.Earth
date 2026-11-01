@@ -1219,7 +1219,8 @@ def test_saved_pdf_audit_failure_returns_no_document(client, world):
     assert "pilot-b-sentinel" not in r.text
 
 
-def test_pilot_workflow_save_history_pdf_and_account_isolation(client, world, monkeypatch):
+@pytest.mark.parametrize("payload_style", ["legacy", "frontend"])
+def test_pilot_workflow_save_history_pdf_and_account_isolation(client, world, monkeypatch, payload_style):
     from io import BytesIO
     from pypdf import PdfReader
     import app.main as main
@@ -1228,11 +1229,19 @@ def test_pilot_workflow_save_history_pdf_and_account_isolation(client, world, mo
     assert login.status_code == 200, login.text
     a = {"Authorization": "Bearer " + login.json()["access_token"]}
     b = H(world.people.b)
-    result = client.post("/api/v1/evaluate?save=true", json=PROJECT, headers=a)
+    payload = dict(PROJECT)
+    if payload_style == "frontend":
+        payload = {"project_name": PROJECT["name"], "budget_usd": PROJECT["budget"],
+                   "co2_reduction_tons_per_year": PROJECT["co2_reduction"],
+                   "social_impact_score": PROJECT["social_impact"],
+                   "project_duration_months": PROJECT["duration_months"],
+                   "country": PROJECT["region"]}
+    result = client.post("/api/v1/evaluate?save=true", json=payload, headers=a)
     assert result.status_code == 201, result.text
     saved = result.json(); key = saved["evaluation_id"]
     history = client.get(f"/api/v1/history/{key}", headers=a)
     assert history.status_code == 200
+    assert history.json()["name"] == PROJECT["name"]
     assert history.json()["total_score"] == saved["total_score"]
     def no_inference(*args, **kwargs):
         raise AssertionError("reading a saved assessment must not run scoring")
