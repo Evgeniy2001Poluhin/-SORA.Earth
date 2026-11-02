@@ -1042,20 +1042,22 @@ curl -X POST http://localhost:8000/api/v1/model/retrain \
 ## Production Server
 
 **Server Details:**
-- Host: `77.110.118.93` (Ubuntu 24.04, hostname: internal-amarant, Aeza NLs-3, Netherlands)
-- SSH: `ssh root@77.110.118.93` — **key only**, password authentication is disabled
+- Host: `109.120.147.12`
+- SSH: `ssh root@109.120.147.12` — **key only**, password authentication is disabled
 - Project directory: `/opt/sora_earth_ai_platform`
 - Domain: https://sora-earth.online
 
-The previous host, `45.137.60.67`, was **deleted for non-payment** around
-2026-08-16 and the provider confirmed on 2026-09-02 that deleted services cannot
-be restored. Everything on it is gone: the database, every environmental
-observation collected since 2026-07-30, and the days that had started the M3 §7
-clock. Nothing was held off the server. That address appears in the dated
-reports under `.claude/`; those describe the world as it was and are left alone.
+The host `45.137.60.67` was **deleted for non-payment** around 2026-08-16 and
+the provider confirmed on 2026-09-02 that deleted services cannot be restored.
+Everything on it was lost: the database, every environmental observation
+collected since 2026-07-30, and the days that had started the M3 §7 clock.
+Nothing was held off the server. That address appears in the dated reports
+under `.claude/`; those describe the world as it was and are left alone.
 
-Two things about this host that are not guesses and will waste an hour if
-rediscovered:
+Production previously ran on `77.110.118.93`. The two observations below were
+made there; they are not guesses about that host, and they have **not** been
+re-verified on `109.120.147.12` -- check each before relying on it, and replace
+this sentence with what was found:
 
 - **GitHub refuses anonymous `git-upload-pack` from this IP.** A public
   third-party repository fails identically, so it is the address and not this
@@ -1124,6 +1126,128 @@ Recreating a single container by hand for a quick check is still recreating it:
 if you do it, reload nginx afterwards and verify the public endpoint, or expect
 the same failure.
 
+**The cutover: what runs, in what order**
+
+`scripts/deploy_production.sh` builds the application image once, reads its
+id, and **pins** `migrate`, `bootstrap-users`, `backend` and `scheduler` to that
+id in a generated compose override that every later `run` and `up` of the
+deployment carries -- so a tag that moves mid-run (another build, a pull) cannot
+put a different image behind the migration than behind the application. It
+then waits for PostgreSQL to be healthy. Nothing that serves has changed yet:
+a failure in the build or the PostgreSQL wait refuses with exit 1 and rolls
+nothing back.
+
+From the first stop on, the run is `mutating`, journalled, and a refusal goes
+through the rollback:
+
+```
+stop nginx -> stop -t 60 backend scheduler -> confirm every container stopped
+-> wait for open transactions to end -> one named migrator, under a deadline
+-> bootstrap-users -> start dependencies with --no-deps
+-> force-recreate backend and scheduler -> check images and schema head
+-> the remaining services, nginx, prometheus -> health checks -> manifest
+```
+
+The old backend and scheduler are stopped **before** the migration: since
+project ownership the old backend's INSERT is refused by the new schema and its
+reads ignore the scope, so old code beside or after the migration is a mixed
+rollout the schema was designed to make impossible.
+
+**After a refusal: what is left running**
+
+It depends on where the refusal came and on whether the rollback is allowed.
+
+- **The rollback is allowed** (no barrier below applies): the images that were
+  running are restored by id, nginx included, and the script exits 1 -- the
+  previous state is serving again.
+- **The rollback is barred** -- the schema already has what the previous code
+  cannot run against -- or there is no previous deployment to restore: nothing
+  old is started, and the script exits 76 with `rollback-refused` (or
+  `rollback-impossible`) in the journal. If the refusal came between the stop
+  and a verified start, backend and scheduler are **stopped and the site is not
+  serving**. A start that failed partway is stopped again first.
+- The script says `STOPPED` only when docker confirms every backend and
+  scheduler container stopped. If it cannot confirm that, it says so instead,
+  and the journal's `apps` line reads `unknown`: inspect with
+  `docker compose -p sora_earth_ai_platform ps -a` before anything else.
+- After the new code has started (`apps started`), a barred rollback leaves it
+  running: fix forward, closing external access if need be.
+
+In the stopped state the schema may or may not have been migrated: the pending
+revisions run in one transaction and commit whole or not at all, and the
+barriers read the catalogue, not what was intended. Fix forward with a
+corrected release through `./scripts/deploy_production.sh`; restoring a backup
+is a separate emergency operation (`docs/BACKUP_RESTORE.md`). **Do not start
+containers by hand.**
+
+**Cutover budgets**
+
+The stop-migrate-start window is bounded by timeouts, each ending in a refusal
+rather than a wait without end:
+
+- `DEPLOY_STOP_TIMEOUT=60` — seconds `compose stop` gives backend and scheduler
+- `DEPLOY_DRAIN_SECONDS=30` — wait for client transactions to end after the stop
+- `DEPLOY_MIGRATE_DEADLINE=120` — the whole migrator, start to exit
+- `DEPLOY_MIGRATOR_GONE_SECONDS=30` — wait for the migrator's container and
+  database session to disappear
+- `DEPLOY_MIGRATOR_CREATE_SECONDS=60` — how long the client creating the
+  migrator (`compose run -d`, in a session of its own) may take to return. It
+  is never killed; past this the migrator's existence is unknown and the run
+  refuses with every rollback forbidden (exit 76)
+
+These are conservative upper bounds chosen before any measurement; they were
+**not** derived from a rehearsal. `scripts/rehearse_ownership_cutover.sh`
+measures the migration, the bootstrap and the backend's start on a restored
+production dump, adds the stop and drain budgets at their maxima, and refuses a
+window over 300 s -- see docs/DEPLOY.md, "Rehearsing the cutover". An override
+must be a whole number written without leading zeros; anything else refuses
+before the run touches anything (a non-numeric deadline used to disable the
+deadline silently).
+
+**Rollback barriers and fix-forward**
+
+Two barriers prevent reverting to code that cannot run against the current
+schema. Both are asked before the checkout, before any image is restored and
+before any fallback build, in the explicit `--rollback` and in the automatic
+rollback alike:
+
+1. **Accounts barrier** — the target predates persistent accounts and the
+   `users` table exists
+2. **Ownership barrier** — the target lacks any of `app/project_access.py`,
+   `app/services/evaluation_store.py` or the ownership migration, and the
+   catalogue has any of `evaluations.owner_user_id`, `evaluations.data_scope`,
+   `predictions_log.owner_user_id`, `predictions_log.data_scope`, or the audit
+   tables `project_access_events` / `project_access_targets`
+
+A barrier allows only on an exact answer from a psql that exited 0
+(`users:false`, `ownership:0`); an error, a non-zero exit with any output, or
+anything else refuses. Before the automatic rollback reads the schema, the
+migrator is confirmed gone positively: its creating client has returned on its
+own (it is never killed -- a client killed mid-request leaves an outcome
+nobody can know, and no number of empty `docker ps` answers settles it), the
+container it created is removed and docker reports that id as no longer
+existing, and its database session is terminated until none remains. If the
+creating client never returns, the migrator's existence is unknown and the
+rollback is refused (76) without reading the schema -- otherwise
+uncommitted ownership columns are invisible and the probe would let old code
+back onto a schema about to change under it.
+
+What a barred rollback does depends on which one:
+
+- **Explicit** `--rollback SHA`: refused with **exit 1** before the checkout,
+  the build or any container change, and before any journal is written --
+  nothing has changed.
+- **Automatic**, inside a failed deployment: **exit 76**, journal
+  `rollback-refused`, no checkout, no image restored, no rebuild; the state left
+  running is as described above.
+
+The production strategy after these barriers is **fix-forward**: ship a
+corrected release that works with the current schema. Schema downgrades for
+these changes are unsupported, and a rollback target from before project
+ownership -- which includes every commit before it, the persistent-accounts
+release among them -- is refused once the ownership columns exist.
+
+
 **Production Containers (9):**
 - `backend` - FastAPI application
 - `scheduler` - APScheduler worker
@@ -1191,7 +1315,7 @@ git diff  # DO NOT USE over SSH
 Add to `~/.ssh/config` to prevent timeout disconnects:
 ```
 Host sora
-    HostName 77.110.118.93
+    HostName 109.120.147.12
     User root
     IdentityFile ~/.ssh/id_ed25519
     IdentitiesOnly yes
@@ -1228,6 +1352,6 @@ docker compose -f docker-compose.prod.yml exec postgres \
 ### Monitoring Production
 
 - **Application logs**: `docker compose -f docker-compose.prod.yml logs -f backend`
-- **Grafana**: SSH tunnel required - `ssh -L 3000:127.0.0.1:3000 root@77.110.118.93`
-- **Prometheus**: SSH tunnel required - `ssh -L 9090:127.0.0.1:9090 root@77.110.118.93`
+- **Grafana**: SSH tunnel required - `ssh -L 3000:127.0.0.1:3000 root@109.120.147.12`
+- **Prometheus**: SSH tunnel required - `ssh -L 9090:127.0.0.1:9090 root@109.120.147.12`
 - **Health check**: `curl https://sora-earth.online/health`
