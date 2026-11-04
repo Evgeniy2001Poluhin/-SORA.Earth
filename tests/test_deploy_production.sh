@@ -283,6 +283,7 @@ case "$argv" in
     # Before the generic `ps -aq` branch, which would answer for the project.
     *"ps -aq --no-trunc --filter name="*)
         [ -f "$STUB_DIR/migrator_ps_unreadable" ] && { echo "stub: cannot connect" >&2; exit 1; }
+        [ -f "$STUB_DIR/migrator_name_ps_fails" ] && { echo "stub: cannot connect" >&2; exit 1; }
         [ -f "$STUB_DIR/migrator_container" ] && echo "cidmigrator0001"
         exit 0 ;;
     "inspect -f {{.Id}} "*)
@@ -2740,6 +2741,22 @@ echo 8 > "$STUB_DIR/slow_migrate"
 touch "$STUB_DIR/migrator_inspect_by_id_fails"
 DEPLOY_MIGRATE_DEADLINE=2 DEPLOY_MIGRATOR_GONE_SECONDS=2 run_guard
 check "a removal docker cannot confirm refuses the rollback" "$RC" "76"
+check "  the schema was not read" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "0"
+check "  nothing old was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+rm -rf "$SANDBOX"
+
+# The id is known and removable, but the second question -- does anything
+# else carry this run's name -- cannot be answered. Unanswered is not "no".
+# (The earlier name-lookup case could not isolate this: its fault also hid the
+# id, so the identification refused first and this guard was never reached.)
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migration_adds_ownership"
+echo 8 > "$STUB_DIR/slow_migrate"
+touch "$STUB_DIR/migrator_name_ps_fails"
+DEPLOY_MIGRATE_DEADLINE=2 run_guard
+check "a name lookup docker cannot answer refuses the rollback" "$RC" "76"
 check "  the schema was not read" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "0"
 check "  nothing old was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
 rm -rf "$SANDBOX"
