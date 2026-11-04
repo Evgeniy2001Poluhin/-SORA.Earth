@@ -21,6 +21,7 @@ SCRIPT="$REPO/scripts/rehearse_ownership_cutover.sh"
 IMAGE="${REHEARSAL_TEST_IMAGE:-}"
 PG16="${REHEARSAL_TEST_PG_IMAGE:-postgres:16}"
 PG15="${REHEARSAL_TEST_PG15_IMAGE:-postgres:15}"
+REDIS_IMG="${REHEARSAL_TEST_REDIS_IMAGE:-redis:7-alpine}"
 ONLY="${REHEARSAL_TEST_ONLY:-}"
 # Limits small enough for a laptop's docker VM: the rehearsal refuses unless
 # twice their sum is available, and a synthetic database needs little.
@@ -122,7 +123,7 @@ rehearse() {
         REHEARSAL_MONITOR_INTERVAL=2 \
         "${EXTRA_ENV[@]}" \
         bash "$SCRIPT" --dump "$DUMP" --dump-sha256 "$DSHA" --image "$IMAGE" --release-sha "$SHA" \
-            --pg-image "$PG16" --memory "$PG_MEM" --app-memory "$APP_MEM" --app-workers 1 --cpus 2 \
+            --pg-image "$PG16" --redis-image "$REDIS_IMG" --memory "$PG_MEM" --app-memory "$APP_MEM" --app-workers 1 --cpus 2 \
             --disk-reserve-bytes 1073741824 --max-load 1000 --report "$REPORT" "$@" > "$OUT" 2>&1
     RC=$?
     ELAPSED=$(( $(date +%s) - start ))
@@ -140,7 +141,7 @@ in_bg() {   # like rehearse, in the background; sets PID
         REHEARSAL_MONITOR_INTERVAL=2 \
         "${EXTRA_ENV[@]}" \
         bash "$SCRIPT" --dump "$DUMP" --dump-sha256 "$DSHA" --image "$IMAGE" --release-sha "$SHA" \
-            --pg-image "$PG16" --memory "$PG_MEM" --app-memory "$APP_MEM" --app-workers 1 --cpus 2 \
+            --pg-image "$PG16" --redis-image "$REDIS_IMG" --memory "$PG_MEM" --app-memory "$APP_MEM" --app-workers 1 --cpus 2 \
             --disk-reserve-bytes 1073741824 --max-load 1000 --report "$REPORT" "$@" > "$OUT" 2>&1 &
     PID=$!
 }

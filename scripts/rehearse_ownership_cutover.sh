@@ -6,7 +6,7 @@
 #       --dump /path/to/sora_earth_YYYYMMDD.dump --dump-sha256 <hex> \
 #       --image sora_earth_app:<release> --release-sha <full sha> \
 #       [--runs 3] [--report /path/report.json] [--pg-user sora] \
-#       [--pg-image postgres:16-alpine] [--cpus 2] [--memory 2g] \
+#       [--pg-image postgres:16-alpine] [--redis-image redis:7-alpine] [--cpus 2] [--memory 2g] \
 #       [--app-memory 4g] [--app-workers 4] [--source-db-bytes N] \
 #       [--disk-reserve-bytes N] [--max-load N] [--min-mem-kb N] \
 #       [--health-url URL]
@@ -113,6 +113,7 @@ step() { echo; echo "== $* =="; }
 # ------------------------------------------------------------- arguments
 DUMP=""; DUMP_SHA=""; APP_IMAGE=""; RELEASE_SHA=""; RUNS=3; REPORT=""
 PG_IMAGE="postgres:16-alpine"; PG_USER="sora"; CPUS=2; MEMORY=2g
+REDIS_IMAGE="redis:7-alpine"
 APP_MEMORY=4g; APP_WORKERS=4; SOURCE_DB_BYTES=0
 DISK_RESERVE="$DISK_RESERVE_DEFAULT"; MAX_LOAD=""; MIN_MEM_KB=524288; HEALTH_URL=""
 while [ $# -gt 0 ]; do
@@ -125,6 +126,7 @@ while [ $# -gt 0 ]; do
         --runs)               RUNS="$2" ;;
         --report)             REPORT="$2" ;;
         --pg-image)           PG_IMAGE="$2" ;;
+        --redis-image)        REDIS_IMAGE="$2" ;;
         --pg-user)            PG_USER="$2" ;;
         --cpus)               CPUS="$2" ;;
         --memory)             MEMORY="$2" ;;
@@ -188,6 +190,11 @@ HEAD_SHA="$(git -C "$REPO" rev-parse HEAD 2>/dev/null)" || die "$REPO is not a g
 # Present already. A pull on the production host is a change nobody reviewed.
 docker image inspect "$APP_IMAGE" >/dev/null 2>&1 || die "the release image $APP_IMAGE is not present; this script does not pull"
 docker image inspect "$PG_IMAGE" >/dev/null 2>&1 || die "$PG_IMAGE is not present; this script does not pull"
+# The backend starts against a redis, as production's does: its import builds
+# a redis client from REDIS_URL, and an empty one is not a redis URL -- the
+# first CI run of this rehearsal had every backend fail to boot on exactly that.
+docker image inspect "$REDIS_IMAGE" >/dev/null 2>&1 || die "$REDIS_IMAGE is not present; this script does not pull"
+REDIS_IMAGE_ID="$(docker image inspect -f '{{.Id}}' "$REDIS_IMAGE")"
 APP_IMAGE_ID="$(docker image inspect -f '{{.Id}}' "$APP_IMAGE")"
 PG_IMAGE_ID="$(docker image inspect -f '{{.Id}}' "$PG_IMAGE")"
 # Production runs PostgreSQL 16; a measurement on another major is about
@@ -643,6 +650,7 @@ umask 077
 {
     echo "REHEARSAL_NONCE=$NONCE"
     echo "REHEARSAL_PG_IMAGE=$PG_IMAGE_ID"
+    echo "REHEARSAL_REDIS_IMAGE=$REDIS_IMAGE_ID"
     echo "REHEARSAL_APP_IMAGE=$APP_IMAGE_ID"
     echo "REHEARSAL_PG_USER=$PG_USER"
     echo "REHEARSAL_PG_PASSWORD=$(rand)"
@@ -745,6 +753,7 @@ assert_disposable() {
 
 step "a disposable PostgreSQL 16"
 bounded 180 DCR up -d --wait pg >/dev/null 2>&1 || die "the rehearsal postgres would not start"
+bounded 120 DCR --profile rehearsal-run up -d --wait --no-deps redis >/dev/null 2>&1 || die "the rehearsal redis would not start"
 PG_CID="$(DCR ps -q pg | head -1)"
 [ -n "$PG_CID" ] || die "the rehearsal postgres has no container"
 PG_CID="$(docker inspect -f '{{.Id}}' "$PG_CID")"
@@ -1007,7 +1016,7 @@ for n in range(1, runs + 1):
     # What the migrator and the backend said, the end of it: a failure here
     # is otherwise a boolean with no reason once the work directory is gone.
     run["log_tail"] = {k: "\n".join((rd(n, k + ".log", "") or "").splitlines()[-30:])
-                       for k in ("migrate", "bootstrap", "verify", "backend")}
+                       for k in ("migrate", "bootstrap", "verify", "backend-up", "backend")}
     run["sampler"] = sampler(n, run["migrate_ms"] / 1000)
     run["stop_window_s"] = {
         "stop_budget": $DEPLOY_STOP_BUDGET_S, "drain_budget": $DEPLOY_DRAIN_BUDGET_S,
@@ -1103,6 +1112,7 @@ doc = {
     "dump": {"path": "$DUMP_ABS", "sha256": "$DUMP_SHA", "bytes": $DUMP_BYTES},
     "release": {"sha": "$RELEASE_SHA", "image": "$APP_IMAGE", "image_id": "$APP_IMAGE_ID", "alembic_head": head,
                 "image_matches_release_files": True},
+    "redis": {"image": "$REDIS_IMAGE", "image_id": "$REDIS_IMAGE_ID"},
     "postgres": {"image": "$PG_IMAGE", "image_id": "$PG_IMAGE_ID", "server_version_num": "$PG_VERSION_NUM",
                  "settings": """$PG_SETTINGS"""},
     "resources": {"cpus_limit": "$CPUS", "memory_limit": "$MEMORY", "app_memory_limit": "$APP_MEMORY",

@@ -111,6 +111,25 @@ services:
   # Offline, on the internal network, with secrets generated for this run.
   # The model seed is mounted read-only exactly as docker-compose.prod.yml
   # mounts it; it is the checkout's own `models/`, not production data.
+  # The backend's redis, as production gives it one: in memory only, on the
+  # internal network, removed with everything else.
+  redis:
+    profiles: ["rehearsal-run"]
+    image: ${REHEARSAL_REDIS_IMAGE:?}
+    restart: "no"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    labels:
+      sora.rehearsal.nonce: ${REHEARSAL_NONCE:?}
+    cpus: ${REHEARSAL_CPUS:?}
+    mem_limit: 256m
+    networks:
+      - rehearsal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
   backend:
     profiles: ["rehearsal-run"]
     image: ${REHEARSAL_APP_IMAGE:?}
@@ -119,7 +138,7 @@ services:
     environment:
       WORKERS: ${REHEARSAL_APP_WORKERS:?}
       DATABASE_URL: postgresql+psycopg://${REHEARSAL_PG_USER:?}:${REHEARSAL_PG_PASSWORD:?}@pg:5432/${REHEARSAL_DB:?}
-      REDIS_URL: ""
+      REDIS_URL: redis://redis:6379/0
       SORA_ENV: production
       SORA_OFFLINE: "1"
       RUN_SCHEDULER: "false"
