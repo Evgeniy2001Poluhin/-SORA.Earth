@@ -1390,6 +1390,121 @@ jobs:
           grep -q 'DO \$migration\$' /tmp/offline_catchup.sql
           echo "Catch-up offline script generated without an Inspector"
 
+  e2e-ownership:
+    name: e2e ownership browser tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sora
+          POSTGRES_PASSWORD: sora2026
+          POSTGRES_DB: sora_earth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          lfs: true
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install backend dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-timeout
+
+      - name: Run migrations
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
+      - name: Bootstrap development accounts
+        run: python scripts/bootstrap_users.py --dev
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build SPA in production mode
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+      - name: Install Playwright dependencies
+        run: |
+          cd e2e/ownership
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Start backend with SPA
+        run: |
+          # Start uvicorn in background serving the built SPA
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          echo $! > uvicorn.pid
+
+          # Wait for server to be ready
+          timeout 30 bash -c 'until curl -sf http://localhost:8000/health; do sleep 1; done'
+        env:
+          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+          REDIS_URL: ""
+          SECRET_KEY: "ci-test-secret"
+          SORA_ADMIN_TOKEN: "ci-test-admin"
+          SORA_OFFLINE: "1"
+          RUN_SCHEDULER: "false"
+
+      - name: Run Playwright tests
+        run: |
+          cd e2e/ownership
+          npx playwright test
+        env:
+          BASE_URL: "http://localhost:8000"
+
+      - name: Generate report artifact
+        if: always()
+        run: |
+          cd e2e/ownership
+          npx ts-node generate-report.ts
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-ownership-report
+          path: e2e/ownership/e2e-ownership-report.json
+          retention-days: 30
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/ownership/playwright-report/
+          retention-days: 14
+
+      - name: Stop backend
+        if: always()
+        run: |
+          if [ -f uvicorn.pid ]; then
+            kill $(cat uvicorn.pid) || true
+          fi
+
   # One context for branch protection to require, instead of six.
   #
   # Requiring the six jobs directly means six names that must match exactly and
@@ -1418,6 +1533,7 @@ jobs:
       - frontend-checks
       - production-spa-build
       - api-contract-ratchet
+      - e2e-ownership
     steps:
       - name: Every job must have succeeded
         env:
