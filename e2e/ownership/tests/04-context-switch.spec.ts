@@ -1,99 +1,98 @@
-import { test, expect } from '@playwright/test';
 import {
-  getAdminToken,
-  createSpecialistAccount,
-  signInUI,
-  signOutUI,
-  fillEvaluationForm,
-  assertNotContains,
+  test, expect,
+  getAdminToken, createSpecialist, uniqueName, SPECIALIST_PASSWORD, signInUI, signOutUI,
+  saveThroughUI, projectNameInput, isCalculateRequest, getHistoryIds, sessionToken,
 } from './helpers';
 
 /**
- * Scenario 4: Switching A→B and sign-out clears all A's context
- *
- * - None of A's results, form values or history are visible after switch to B
- * - A What-If sweep started by A sends no further requests after sign-out
+ * Scenario 4: signing out ends A's What-If sweep, and after switching to B
+ * none of A's form values, results or history are on screen.
  */
-test('context switch: A→B clears all A data, stops in-flight requests', async ({ page, baseURL }) => {
-  if (!baseURL) throw new Error('BASE_URL not set');
+test('context switch: sign-out stops A\'s sweep; B sees none of A\'s form, result or history', async ({ page, baseURL }) => {
+  const adminToken = await getAdminToken(baseURL!);
+  const userA = uniqueName('spec_a');
+  const userB = uniqueName('spec_b');
+  await createSpecialist(baseURL!, adminToken, userA);
+  await createSpecialist(baseURL!, adminToken, userB);
 
-  const adminToken = await getAdminToken(baseURL);
-  const timestamp = Date.now();
-  const usernameA = `specialist_a_${timestamp}`;
-  const usernameB = `specialist_b_${timestamp}`;
+  await signInUI(page, userA, SPECIALIST_PASSWORD, '/history');
+  const nameA = `SpecialistA-Unique-${Date.now()}`;
+  await saveThroughUI(page, nameA);
+  await expect(page.locator('.ev-result h2')).toHaveText(nameA);
 
-  await createSpecialistAccount(baseURL, adminToken, usernameA, 'specialista123456');
-  await createSpecialistAccount(baseURL, adminToken, usernameB, 'specialistb123456');
+  // What-If is a tab of the result card (WhatIf.tsx), not a page of its own.
+  await page.getByRole('button', { name: 'What-If', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 2, name: 'What-If Sensitivity' })).toBeVisible();
 
-  // ===== SPECIALIST A: Save a project, start a What-If sweep =====
-  await signInUI(page, usernameA, 'specialista123456');
-
-  await page.goto('/evaluate');
-  const projectNameA = `SpecialistA-Unique-${Date.now()}`;
-  await fillEvaluationForm(page, projectNameA);
-
-  // Save
-  await page.getByRole('button', { name: /calculate and save|save/i }).click();
-  await page.waitForResponse((resp) =>
-    resp.url().includes('/api/v1/evaluate') && resp.url().includes('save=true')
-  );
-
-  // Navigate to What-If page - required, do not skip
-  const whatIfLink = page.getByRole('link', { name: /what-if|scenario/i });
-  await expect(whatIfLink).toBeVisible({ timeout: 5000 });
-  await whatIfLink.click();
-
-  // Start a sweep - track requests to verify they stop after sign-out
-  const requestsAfterSignOut: string[] = [];
-  let signedOut = false;
-
-  page.on('request', (req) => {
-    if (signedOut && req.url().includes('/api/v1')) {
-      requestsAfterSignOut.push(req.url());
+  let heldAndAborted = 0;
+  // Each sweep point is a real POST /evaluate, held 1.5 s on its way out so
+  // the twelve-point sweep is still running when A signs out. Nothing is
+  // mocked. A point the page aborts while it is held cannot be continued;
+  // that is the expected outcome for it, not an error of the test.
+  await page.route((url) => url.pathname === '/api/v1/evaluate' && !url.searchParams.has('save'), async (route) => {
+    await new Promise((r) => setTimeout(r, 1500));
+    try {
+      await route.continue();
+    } catch {
+      heldAndAborted += 1;
     }
   });
 
-  const sweepBtn = page.getByRole('button', { name: /run sweep|start|analyze/i });
-  await expect(sweepBtn).toBeVisible({ timeout: 5000 });
+  let signedOut = false;
+  let sweepSentBefore = 0;
+  const sweepAfter: string[] = [];
+  const authorizedAfter: string[] = [];
+  const failedAfter: string[] = [];
+  page.on('requestfailed', (req) => { if (signedOut && isCalculateRequest(req)) failedAfter.push(req.url()); });
+  page.on('request', (req) => {
+    if (!signedOut) {
+      if (isCalculateRequest(req)) sweepSentBefore += 1;
+      return;
+    }
+    if (isCalculateRequest(req)) sweepAfter.push(req.url());
+    if (req.headers()['authorization'] !== undefined) authorizedAfter.push(req.url());
+  });
 
-  // Start the sweep
-  await sweepBtn.click();
+  const firstPoint = page.waitForResponse((r) => isCalculateRequest(r.request()));
+  await page.getByRole('button', { name: 'Run sweep', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Sweeping…', exact: true })).toBeVisible();
+  expect((await firstPoint).status()).toBe(200);
+  // The second point is out and held: the loop cannot send a third until it
+  // returns, so everything observed from here on was sent after sign-out.
+  await expect.poll(() => sweepSentBefore).toBe(2);
 
-  // Wait for the sweep to actually start (at least one request)
-  await page.waitForResponse((resp) =>
-    resp.url().includes('/api/v1/') && !resp.url().includes('/auth/'),
-    { timeout: 5000 }
-  );
-
-  // Sign out while sweep is running
   signedOut = true;
   await signOutUI(page);
+  expect(sweepSentBefore).toBe(2); // two of twelve points: cut short, not finished
 
-  // Wait to ensure no more requests are sent after sign-out
+  // Long enough for several more held sweep points, had the loop gone on.
   await page.waitForTimeout(3000);
+  expect(sweepAfter).toEqual([]);
+  expect(authorizedAfter).toEqual([]);
+  // The held second point was aborted by the sign-out, not answered.
+  expect(failedAfter).toHaveLength(1);
+  expect(heldAndAborted).toBeLessThanOrEqual(1);
+  await page.unroute((url) => url.pathname === '/api/v1/evaluate' && !url.searchParams.has('save'));
 
-  // Verify no API requests after sign-out (except auth/health)
-  const unauthorizedRequests = requestsAfterSignOut.filter(url =>
-    !url.includes('/auth/') && !url.includes('/health')
-  );
-  expect(unauthorizedRequests.length).toBe(0);
+  // The anonymous page that remains holds nothing of A's.
+  expect(page.url()).toMatch(/\/evaluate$/);
+  await expect(projectNameInput(page)).toHaveValue('Solar Farm');
+  await expect(page.locator('.ev-empty h4')).toHaveText('No evaluation yet');
+  await expect(page.getByText(nameA)).toHaveCount(0);
 
-  // ===== SPECIALIST B: Sign in and verify no A data visible =====
-  await signInUI(page, usernameB, 'specialistb123456');
+  // B: history, form and result card carry nothing of A's.
+  await signInUI(page, userB, SPECIALIST_PASSWORD, '/history');
+  const tokenB = (await sessionToken(page))!;
+  await expect(page.locator('.cr-empty')).toHaveText('No evaluations match the current filters.');
+  await expect(page.locator('.hist-item')).toHaveCount(0);
+  await expect(page.getByText(nameA)).toHaveCount(0);
+  expect(await getHistoryIds(baseURL!, tokenB)).toEqual([]);
 
-  // Check History - should NOT show A's project
-  await page.goto('/history');
-  await assertNotContains(page, projectNameA, { timeout: 3000 });
-
-  // Check Evaluate form - should NOT show A's form values
-  await page.goto('/evaluate');
-  const projectNameInput = page.getByLabel(/project name/i);
-  await expect(projectNameInput).toHaveValue('');
-
-  // Check that any cached results are cleared
-  const resultSection = page.locator('[data-testid="evaluation-result"]');
-  if (await resultSection.isVisible({ timeout: 1000 }).catch(() => false)) {
-    // Should not show A's project name in results
-    await assertNotContains(page, projectNameA);
-  }
+  await page.getByRole('navigation').getByRole('link', { name: 'Evaluate', exact: true }).click();
+  await page.waitForURL((u) => u.pathname === '/evaluate');
+  await expect(projectNameInput(page)).toHaveValue('Solar Farm');
+  await expect(page.locator('.ev-empty h4')).toHaveText('No evaluation yet');
+  await expect(page.getByRole('button', { name: 'What-If', exact: true })).toHaveCount(0);
+  await expect(page.locator('.ev-save-ok')).toHaveCount(0);
+  await expect(page.getByText(nameA)).toHaveCount(0);
 });
