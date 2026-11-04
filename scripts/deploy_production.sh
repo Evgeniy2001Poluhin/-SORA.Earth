@@ -824,7 +824,7 @@ pin_application_image() {
     {
         echo "services:"
         for svc in migrate bootstrap-users backend scheduler; do
-            if printf '%s\n' "$all" | grep -qxF -- "$svc"; then
+            if grep -qxF -- "$svc" <<<"$all"; then
                 printf '  %s:\n    image: "%s"\n' "$svc" "$APP_IMAGE_ID"
                 pinned="$pinned $svc"
             fi

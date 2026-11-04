@@ -140,16 +140,17 @@ while [ $# -gt 0 ]; do
     shift 2
 done
 is_uint() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; [ "${#1}" -le 18 ]; }
-[ -n "$DUMP" ] && [ -n "$DUMP_SHA" ] && [ -n "$APP_IMAGE" ] && [ -n "$RELEASE_SHA" ] \
-    || die "--dump, --dump-sha256, --image and --release-sha are required"
+if ! { [ -n "$DUMP" ] && [ -n "$DUMP_SHA" ] && [ -n "$APP_IMAGE" ] && [ -n "$RELEASE_SHA" ]; }; then
+    die "--dump, --dump-sha256, --image and --release-sha are required"
+fi
 [[ "$DUMP_SHA" =~ ^[0-9a-f]{64}$ ]] || die "--dump-sha256 must be 64 lower-case hex characters"
 [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || die "--release-sha must be a full 40-character commit id"
-is_uint "$RUNS" && [ "$RUNS" -ge 1 ] && [ "$RUNS" -le 10 ] || die "--runs must be a number from 1 to 10"
+if ! { is_uint "$RUNS" && [ "$RUNS" -ge 1 ] && [ "$RUNS" -le 10 ]; }; then die "--runs must be a number from 1 to 10"; fi
 [[ "$PG_USER" =~ ^[a-z_][a-z0-9_]*$ ]] || die "--pg-user must be a plain role name"
 [[ "$CPUS" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "--cpus must be a number"
 [[ "$MEMORY" =~ ^[0-9]+[kmg]$ ]] || die "--memory must look like 2g"
 [[ "$APP_MEMORY" =~ ^[0-9]+[kmg]$ ]] || die "--app-memory must look like 4g"
-is_uint "$APP_WORKERS" && [ "$APP_WORKERS" -ge 1 ] && [ "$APP_WORKERS" -le 16 ] || die "--app-workers must be 1..16"
+if ! { is_uint "$APP_WORKERS" && [ "$APP_WORKERS" -ge 1 ] && [ "$APP_WORKERS" -le 16 ]; }; then die "--app-workers must be 1..16"; fi
 is_uint "$SOURCE_DB_BYTES" || die "--source-db-bytes must be a number of bytes"
 is_uint "$DISK_RESERVE" || die "--disk-reserve-bytes must be a number of bytes"
 [ "$DISK_RESERVE" -ge "$DISK_RESERVE_MIN" ] || die "--disk-reserve-bytes may not be below $DISK_RESERVE_MIN"
@@ -157,11 +158,11 @@ is_uint "$MIN_MEM_KB" || die "--min-mem-kb must be a number"
 [ -z "$MAX_LOAD" ] || [[ "$MAX_LOAD" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "--max-load must be a number"
 [ -z "$HEALTH_URL" ] || [[ "$HEALTH_URL" =~ ^https?://[^[:space:]]+$ ]] || die "--health-url must be an http(s) URL"
 WALL="${REHEARSAL_WALL_SECONDS:-$WALL_MAX}"
-is_uint "$WALL" && [ "$WALL" -ge 30 ] || die "REHEARSAL_WALL_SECONDS must be a number of at least 30"
+if ! { is_uint "$WALL" && [ "$WALL" -ge 30 ]; }; then die "REHEARSAL_WALL_SECONDS must be a number of at least 30"; fi
 [ "$WALL" -le "$WALL_MAX" ] || WALL="$WALL_MAX"   # lowered, never raised
 CLEANUP_RESERVE=$(( WALL / 3 < CLEANUP_RESERVE_MAX ? WALL / 3 : CLEANUP_RESERVE_MAX ))
 MONITOR_INTERVAL="${REHEARSAL_MONITOR_INTERVAL:-5}"
-is_uint "$MONITOR_INTERVAL" && [ "$MONITOR_INTERVAL" -ge 1 ] || die "REHEARSAL_MONITOR_INTERVAL must be a number"
+if ! { is_uint "$MONITOR_INTERVAL" && [ "$MONITOR_INTERVAL" -ge 1 ]; }; then die "REHEARSAL_MONITOR_INTERVAL must be a number"; fi
 # Where production keeps the signs of a deployment and a backup. Overridable
 # only so the refusals can be tested away from /run; the paths used are
 # recorded in the report.
@@ -196,7 +197,7 @@ PG_MAJOR="$(docker image inspect -f '{{range .Config.Env}}{{println .}}{{end}}' 
 [ "$PG_MAJOR" = 16 ] || die "$PG_IMAGE is PostgreSQL ${PG_MAJOR:-of unknown version}, not 16"
 
 # ------------------------------------------------------------- the files
-[ -f "$DUMP" ] && [ ! -L "$DUMP" ] || die "no such regular file: $DUMP"
+if ! { [ -f "$DUMP" ] && [ ! -L "$DUMP" ]; }; then die "no such regular file: $DUMP"; fi
 DUMP_ABS="$(cd "$(dirname "$DUMP")" && pwd)/$(basename "$DUMP")"
 NONCE="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 [ "${#NONCE}" -eq 16 ] || die "could not generate a nonce"
@@ -221,7 +222,7 @@ if [ -e "$REPORT" ] || [ -L "$REPORT" ]; then
     fi
     die "the report $REPORT already exists; give a new path"
 fi
-[ "$REPORT" != "$DUMP_ABS" ] && [ "$REPORT" != "$DUMP_ABS.sha256" ] || die "the report path names the dump"
+if ! { [ "$REPORT" != "$DUMP_ABS" ] && [ "$REPORT" != "$DUMP_ABS.sha256" ]; }; then die "the report path names the dump"; fi
 _probe_file="$(mktemp "$REPORT_DIR/.rehearsal-report-probe.XXXXXX" 2>/dev/null)" \
     || die "cannot write in the report's directory $REPORT_DIR"
 rm -f "$_probe_file"
@@ -345,6 +346,7 @@ inventory() {   # file; fails if any listing failed
 # Every object of this run that still exists, one per line. Non-zero when any
 # listing failed: the old version sent docker's errors to /dev/null, and a
 # daemon that could not answer read as "nothing left behind".
+# shellcheck disable=SC2317  # called from cleanup; ShellCheck sees no direct call
 ours() {
     local rc=0 kind filter out
     for kind in container volume network; do
@@ -360,9 +362,11 @@ ours() {
     return "$rc"
 }
 
+# shellcheck disable=SC2317  # called from cbounded during cleanup; ShellCheck sees no direct call
 remaining() { echo $((DEADLINE - $(date +%s))); }
 # A cleanup command, bounded by what is left of the wall clock and never by
 # more than 60 seconds. Skipped -- and so unconfirmed -- when nothing is left.
+# shellcheck disable=SC2317  # called from cleanup; ShellCheck sees no direct call
 cbounded() {
     local left
     left=$(( $(remaining) - 5 ))
@@ -373,6 +377,7 @@ cbounded() {
 
 # ------------------------------------------------------------- cleanup
 CLEANED=0
+# shellcheck disable=SC2317  # invoked by trap EXIT; ShellCheck sees no direct call
 cleanup() {
     local rc=$?
     [ "$CLEANED" = 1 ] && return
@@ -493,6 +498,7 @@ PY
     echo "  removed: containers, network, volumes and the dump copy of $PROJ"
     exit "$rc"
 }
+# shellcheck disable=SC2317  # invoked by trap INT/TERM/HUP; ShellCheck sees no direct call
 on_signal() { echo "  interrupted by SIG$1" >&2; exit $((128 + $2)); }
 trap cleanup EXIT
 trap 'on_signal INT 2' INT
@@ -594,8 +600,9 @@ FREE_BYTES=$((FREE_KB * 1024))
 is_uint "$MEM_AVAIL_K" || die "available memory could not be read ('$MEM_AVAIL_K')"
 # An inode count that is unknown, or zero -- what some filesystems report when
 # they do not count inodes -- is not "plenty".
-is_uint "$FREE_INODES" && [ "$FREE_INODES" -gt 0 ] \
-    || die "free inodes on the docker data root are unknown ('${FREE_INODES}'); refusing rather than assuming"
+if ! { is_uint "$FREE_INODES" && [ "$FREE_INODES" -gt 0 ]; }; then
+    die "free inodes on the docker data root are unknown ('${FREE_INODES}'); refusing rather than assuming"
+fi
 WORK_FREE_BYTES="$(( $(df -Pk "$WORK" | awk 'NR==2 {print $4}') * 1024 ))"
 # The database the dump becomes: the operator's measurement of production when
 # given, else a conservative expansion of the compressed dump, whichever is
@@ -714,11 +721,12 @@ MONITOR=$!
 assert_disposable() {
     local cid nonce proj ports mounts nets internal members
     cid="$(DCR ps -q pg 2>/dev/null | head -1)"
-    [ -n "$cid" ] && [ "${cid:0:12}" = "${PG_CID:0:12}" ] \
-        || die "the rehearsal postgres is not the container this run created"
+    if ! { [ -n "$cid" ] && [ "${cid:0:12}" = "${PG_CID:0:12}" ]; }; then
+        die "the rehearsal postgres is not the container this run created"
+    fi
     nonce="$(docker inspect -f '{{index .Config.Labels "sora.rehearsal.nonce"}}' "$PG_CID")"
     proj="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$PG_CID")"
-    [ "$nonce" = "$NONCE" ] && [ "$proj" = "$PROJ" ] || die "container $PG_CID does not carry this run's nonce and project"
+    if ! { [ "$nonce" = "$NONCE" ] && [ "$proj" = "$PROJ" ]; }; then die "container $PG_CID does not carry this run's nonce and project"; fi
     ports="$(docker inspect -f '{{range $p, $b := .HostConfig.PortBindings}}{{$p}} {{end}}' "$PG_CID")"
     [ -z "${ports// /}" ] || die "the rehearsal postgres publishes ports: $ports"
     mounts="$(docker inspect -f '{{range .Mounts}}{{.Type}}:{{.Name}} {{end}}' "$PG_CID")"
@@ -755,11 +763,13 @@ restore() {
 }
 
 OWNED_TABLES="evaluations predictions_log"
+# shellcheck disable=SC2317  # invoked through must; ShellCheck sees no direct call
 cols_of() { psql_q "SELECT string_agg(quote_ident(column_name), ',' ORDER BY ordinal_position) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '$1'"; }
 data_of() { # table, column list: count|md5 of ids|md5 of the rows over those columns
     psql_q "SELECT count(*), coalesce(md5(string_agg(id::text, ',' ORDER BY id)), '-'), coalesce(md5(string_agg(row($2)::text, E'\n' ORDER BY id)), '-') FROM public.$1"
 }
 scalar() { psql_q "$1" | tr -d '\r'; }
+# shellcheck disable=SC2317  # invoked through must; ShellCheck sees no direct call
 fingerprint() { PG_CONTAINER="$PG_CID" PGUSER="$PG_USER" pg_fingerprint "$DB"; }
 # A value that must exist: written, and refused if empty. A check that reads
 # two empty files and finds them equal has checked nothing.
