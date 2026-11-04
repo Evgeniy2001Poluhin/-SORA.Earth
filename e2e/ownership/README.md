@@ -15,13 +15,20 @@ Six scenarios covering the ownership isolation model introduced in PRs #510, #51
 
 ## Running locally
 
-Cannot run against PostgreSQL on this Mac (owner constraint). Type-check and lint only:
-
 ```bash
-cd e2e/ownership
-npm install
-npx tsc --noEmit
+bash e2e/ownership/run-local.sh
 ```
+
+It starts a disposable PostgreSQL 16 container (`sora-e2e-integration`,
+127.0.0.1:15433), runs migrations and `bootstrap_users.py --dev`, builds the
+SPA with `VITE_API_BASE=/api/v1`, serves it with uvicorn on 127.0.0.1:18765
+(`REDIS_URL` unset), runs every spec with retries 0, writes the report, and
+removes everything it started. `E2E_VENV` names the Python venv (it needs
+`requirements.txt` and `pypdf==5.1.0`).
+
+Each person in a scenario sends its own `X-Real-IP`: the per-address rate
+limit counts SPA assets too, and one loopback address is refused with 429
+part-way through the suite.
 
 ## Running in CI
 
@@ -38,11 +45,12 @@ e2e/ownership/
 │   ├── helpers.ts              # Shared utilities (admin API, sign-in, etc.)
 │   ├── 01-anonymous.spec.ts    # Anonymous user scenario
 │   ├── 02-specialist-a-saves.spec.ts
-│   ├── 03-isolation.spec.ts
+│   ├── 03-isolation.spec.ts    # isolation + the saved-PDF test
 │   ├── 04-context-switch.spec.ts
 │   ├── 05-revocation.spec.ts
 │   └── 06-error-handling.spec.ts
-├── generate-report.ts          # Produces e2e-ownership-report.json
+├── pdf_text.py                 # pypdf text extraction for the PDF test
+├── generate-report.ts          # node --experimental-strip-types generate-report.ts
 ├── playwright.config.ts
 ├── package.json
 └── tsconfig.json

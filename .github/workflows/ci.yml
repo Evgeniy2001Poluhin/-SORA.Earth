@@ -1393,7 +1393,7 @@ jobs:
   e2e-ownership:
     name: e2e ownership browser tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
@@ -1408,6 +1408,8 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+    env:
+      DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1421,31 +1423,39 @@ jobs:
           cache: pip
 
       - name: Install backend dependencies
+        # pypdf reads the saved report's text in the PDF test (pdf_text.py).
         run: |
           pip install -r requirements.txt
-          pip install pytest pytest-timeout
+          pip install pypdf==5.1.0
 
       - name: Run migrations
         run: alembic upgrade head
-        env:
-          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
 
       - name: Bootstrap development accounts
         run: python scripts/bootstrap_users.py --dev
-        env:
-          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            e2e/ownership/package-lock.json
 
       - name: Build SPA in production mode
+        # Without VITE_API_BASE web/src/api/mock.ts turns the whole frontend
+        # into canned data, and the suite would test the mock. VITE_USE_MOCK
+        # is deliberately not set. The bundle lands in app/static/spa, which
+        # app/main.py serves at / and every SPA route.
+        env:
+          VITE_API_BASE: /api/v1
         run: |
           cd web
           npm ci
           npm run build
+          if grep -rqF --include='*.js' 'mockEvaluate' ../app/static/spa/assets/; then
+            echo "FATAL: the SPA bundle is a mock build"; exit 1
+          fi
 
       - name: Install Playwright dependencies
         run: |
@@ -1454,33 +1464,40 @@ jobs:
           npx playwright install chromium --with-deps
 
       - name: Start backend with SPA
-        run: |
-          # Start uvicorn in background serving the built SPA
-          uvicorn app.main:app --host 127.0.0.1 --port 8000 &
-          echo $! > uvicorn.pid
-
-          # Wait for server to be ready
-          timeout 30 bash -c 'until curl -sf http://localhost:8000/health; do sleep 1; done'
+        # REDIS_URL is not set at all: an empty value fails startup.
+        # Importing app.main loads torch, SHAP and the models, so readiness
+        # is bounded at 240 s rather than 30.
         env:
-          DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
-          REDIS_URL: ""
           SECRET_KEY: "ci-test-secret"
           SORA_ADMIN_TOKEN: "ci-test-admin"
           SORA_OFFLINE: "1"
           RUN_SCHEDULER: "false"
+        run: |
+          nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
+          echo $! > uvicorn.pid
+          if ! timeout 240 bash -c 'until curl -sf http://127.0.0.1:8000/health >/dev/null; do sleep 1; done'; then
+            echo "backend not ready within 240 s"; tail -100 uvicorn.log; exit 1
+          fi
+          for route in / /evaluate /history /login; do
+            if ! curl -sf "http://127.0.0.1:8000$route" | grep -qi '<div id="root"'; then
+              echo "FATAL: $route does not serve the SPA"; exit 1
+            fi
+          done
 
       - name: Run Playwright tests
         run: |
           cd e2e/ownership
           npx playwright test
         env:
-          BASE_URL: "http://localhost:8000"
+          BASE_URL: "http://127.0.0.1:8000"
+          E2E_PYTHON: python
 
       - name: Generate report artifact
+        # Fails when the results JSON is missing or empty.
         if: always()
         run: |
           cd e2e/ownership
-          npx ts-node generate-report.ts
+          node --experimental-strip-types generate-report.ts
 
       - name: Upload report artifact
         if: always()
@@ -1490,19 +1507,21 @@ jobs:
           path: e2e/ownership/e2e-ownership-report.json
           retention-days: 30
 
-      - name: Upload Playwright report
+      - name: Upload Playwright results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: e2e/ownership/playwright-report/
+          name: playwright-results
+          path: |
+            e2e/ownership/test-results/
+            uvicorn.log
           retention-days: 14
 
       - name: Stop backend
         if: always()
         run: |
           if [ -f uvicorn.pid ]; then
-            kill $(cat uvicorn.pid) || true
+            kill "$(cat uvicorn.pid)" || true
           fi
 
   # One context for branch protection to require, instead of six.
