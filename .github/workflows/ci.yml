@@ -950,7 +950,21 @@ jobs:
           REHEARSAL_TEST_IMAGE: sora-rehearsal:ci
           REHEARSAL_TEST_PG_IMAGE: postgres:16
           REHEARSAL_TEST_PG15_IMAGE: postgres:15
-        run: bash tests/test_rehearse_ownership_cutover.sh
+          REHEARSAL_TEST_KEEP_DIR: ${{ runner.temp }}/rehearsal-evidence
+        run: |
+          mkdir -p "$REHEARSAL_TEST_KEEP_DIR"
+          bash tests/test_rehearse_ownership_cutover.sh
+
+      # Each case's output, its JSON report and the fixture's build log. The dump
+      # is synthetic and is not uploaded; the reports carry its checksum only.
+      - name: Keep the rehearsal's own output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rehearsal-evidence
+          path: ${{ runner.temp }}/rehearsal-evidence
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Remove anything a failed case left behind
         if: always()

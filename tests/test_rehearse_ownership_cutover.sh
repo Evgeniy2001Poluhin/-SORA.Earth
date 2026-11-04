@@ -37,7 +37,15 @@ _report_tally() {
 }
 trap _report_tally EXIT
 ok()    { PASS=$((PASS+1)); printf '  ok    %s\n' "$1"; }
-bad()   { FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; }
+bad()   { FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; show_out; }
+# The first failure of a run shows that run's own last lines: the checks only
+# say what was expected, and a rehearsal that failed in CI said nothing else.
+show_out() {
+    [ -n "${OUT:-}" ] && [ -f "$OUT" ] && [ "${SHOWN_OUT:-}" != "$OUT" ] || return 0
+    SHOWN_OUT="$OUT"
+    echo "  --- last 40 lines of $(basename "$OUT") ---"
+    tail -n 40 "$OUT" | sed 's/^/  | /'
+}
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 — expected [$3], got [$2]"; fi; }
 has()   { if grep -qF -- "$2" "$OUT"; then ok "$1"; else bad "$1 — '$2' not in the output: $(grep REFUSED "$OUT" | head -1)"; fi; }
 want()  { [ -z "$ONLY" ] || [[ " $ONLY " == *" $1 "* ]]; }
