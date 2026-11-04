@@ -112,7 +112,7 @@ done
 # The SPA itself, at every route the suite opens.
 for route in / /evaluate /history /login; do
   body="$(curl -sf "$BASE$route" || true)"
-  if ! printf '%s' "$body" | grep -qi '<div id="root"'; then
+  if ! grep -qi '<div id="root"' <<<"$body"; then
     echo "ERROR: $route does not serve the SPA"; exit 1
   fi
 done

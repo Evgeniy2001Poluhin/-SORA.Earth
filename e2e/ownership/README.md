@@ -4,7 +4,7 @@ Browser-based end-to-end tests for SORA.Earth accounts and project ownership.
 
 ## What it tests
 
-Six scenarios covering the ownership isolation model introduced in PRs #510, #511, #512:
+Six scenarios covering the ownership isolation model introduced by the accounts, ownership backend and ownership frontend changes:
 
 1. **Anonymous**: Calculate works, save requires auth
 2. **Specialist A**: Saves once on double-click, persists across sessions
