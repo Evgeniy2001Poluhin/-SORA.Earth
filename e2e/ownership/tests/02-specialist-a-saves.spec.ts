@@ -1,91 +1,64 @@
-import { test, expect } from '@playwright/test';
 import {
-  getAdminToken,
-  createSpecialistAccount,
-  signInUI,
-  signOutUI,
-  fillEvaluationForm,
-  waitForResponse,
-  getHistory,
+  test, expect, apiHeaders,
+  getAdminToken, createSpecialist, uniqueName, SPECIALIST_PASSWORD, signInUI, signOutUI,
+  fillEvaluationForm, saveButton, isSaveRequest, getHistory, getHistoryIds, sessionToken,
 } from './helpers';
 
 /**
- * Scenario 2: Specialist A saves once even on double-click
- *
- * - Save creates exactly one row (no duplicate on double-click)
- * - After sign-out and sign-in, the record opens from History
+ * Scenario 2: specialist A saves once even on a double-click, and the record
+ * opens from History after signing out and in again.
  */
-test('specialist A: saves once, persists across sessions', async ({ page, baseURL }) => {
-  if (!baseURL) throw new Error('BASE_URL not set');
+test('specialist A: double-click saves exactly once; the record reopens after a new sign-in', async ({ page, baseURL }) => {
+  const adminToken = await getAdminToken(baseURL!);
+  const username = uniqueName('spec_a');
+  await createSpecialist(baseURL!, adminToken, username);
+  const allBefore = await getHistoryIds(baseURL!, adminToken);
 
-  const adminToken = await getAdminToken(baseURL);
-  const username = `specialist_a_${Date.now()}`;
-  const password = 'specialista123456';
+  await signInUI(page, username, SPECIALIST_PASSWORD, '/history');
+  const tokenA = (await sessionToken(page))!;
+  expect(await getHistoryIds(baseURL!, tokenA)).toEqual([]);
 
-  // Create account
-  await createSpecialistAccount(baseURL, adminToken, username, password);
-
-  // Sign in
-  await signInUI(page, username, password);
-
-  // Navigate to evaluation form
   await page.goto('/evaluate');
-
-  // Fill form
   const projectName = `SpecialistA-Project-${Date.now()}`;
   await fillEvaluationForm(page, projectName);
 
-  // Double-click "Calculate and save"
-  const saveBtn = page.getByRole('button', { name: /calculate and save|save/i });
-  await expect(saveBtn).toBeVisible();
+  const saveRequests: string[] = [];
+  page.on('request', (req) => { if (isSaveRequest(req)) saveRequests.push(req.url()); });
+  const saved = page.waitForResponse((r) => isSaveRequest(r.request()));
 
-  // Set up request counter
-  let saveRequestCount = 0;
-  page.on('request', (req) => {
-    if (req.url().includes('/api/v1/evaluate') && req.url().includes('save=true')) {
-      saveRequestCount++;
-    }
-  });
+  // A real double-click on the one "Calculate and save" button.
+  await saveButton(page).dblclick();
+  const res = await saved;
+  expect(res.status()).toBe(201);
+  const body = await res.json();
+  expect(body.saved).toBe(true);
+  const evalId: number = body.evaluation_id;
+  expect(Number.isSafeInteger(evalId) && evalId > 0).toBe(true);
+  await expect(page.locator('.ev-save-ok')).toContainText(`Saved as evaluation #${evalId}.`);
 
-  // Double-click (simulate accidental double-click)
-  await saveBtn.click();
-  await saveBtn.click({ force: true, timeout: 500 }).catch(() => {}); // may be disabled after first click
+  // Give a second request every chance to appear, then count.
+  await page.waitForTimeout(1500);
+  expect(saveRequests).toHaveLength(1);
 
-  // Wait for response
-  await waitForResponse(page, '/api/v1/evaluate?save=true', 'POST');
+  // Exactly one new row in the whole table, and it is this id, owned by A.
+  const allAfter = await getHistoryIds(baseURL!, adminToken);
+  expect(allAfter.filter((id) => !allBefore.includes(id))).toEqual([evalId]);
+  const mine = await getHistory(baseURL!, tokenA);
+  expect(mine.map((r) => r.id)).toEqual([evalId]);
+  expect(mine[0].name).toBe(projectName);
 
-  // Wait a bit to catch any duplicate requests
-  await page.waitForTimeout(2000);
-
-  // Verify at most one request was made
-  expect(saveRequestCount).toBeLessThanOrEqual(1);
-
-  // Navigate to history
+  // History lists exactly one row.
   await page.goto('/history');
+  await expect(page.locator('.hist-item')).toHaveCount(1);
 
-  // Verify the project appears exactly once
-  const projectRows = page.getByText(projectName);
-  await expect(projectRows).toHaveCount(1);
-
-  const savedId = await projectRows.first().getAttribute('data-eval-id') ||
-                   await page.locator(`text=${projectName}`).first().locator('..').getAttribute('data-id');
-
-  // Sign out
   await signOutUI(page);
+  await signInUI(page, username, SPECIALIST_PASSWORD, '/history');
 
-  // Sign in again
-  await signInUI(page, username, password);
-
-  // Navigate to history
-  await page.goto('/history');
-
-  // Verify the project still appears
-  await expect(page.getByText(projectName)).toBeVisible();
-
-  // Click to open detail
-  await page.getByText(projectName).click();
-
-  // Verify detail page opens
-  await page.waitForURL(`**/history/${savedId || ''}`);
-  await expect(page.getByText(projectName)).toBeVisible();
+  // The single row opens the saved record by its id.
+  await expect(page.locator('.hist-item')).toHaveCount(1);
+  await page.locator('.hist-item').click();
+  await page.waitForURL((u) => u.pathname === '/evaluate' && u.searchParams.get('snapshot') === String(evalId));
+  const card = page.getByRole('region', { name: 'Saved evaluation' });
+  await expect(card.getByRole('heading', { level: 2 })).toHaveText(projectName);
+  await expect(card.getByRole('alert')).toHaveCount(0);
 });

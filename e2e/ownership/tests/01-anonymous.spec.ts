@@ -1,61 +1,52 @@
-import { test, expect } from '@playwright/test';
 import {
-  getAdminToken,
-  countAllEvaluations,
-  fillEvaluationForm,
-  waitForResponse,
-  assertContains,
+  test, expect, apiHeaders,
+  getAdminToken, getHistoryIds, countPredictionLog, fillEvaluationForm,
+  calculateButton, saveButton, isCalculateRequest, isSaveRequest,
 } from './helpers';
 
 /**
- * Scenario 1: Anonymous user
- *
- * - Calculate shows a result and writes nothing (verified via admin API count before/after)
- * - "Calculate and save" requires sign-in
+ * Scenario 1: anonymous.
+ * Calculate shows a result and writes nothing; saving is not offered and is
+ * pointed at sign-in instead.
  */
-test('anonymous: calculate works but save requires auth', async ({ page, baseURL }) => {
-  if (!baseURL) throw new Error('BASE_URL not set');
+test('anonymous: calculate shows a result, writes nothing, save requires sign-in', async ({ page, baseURL }) => {
+  const adminToken = await getAdminToken(baseURL!);
+  const idsBefore = await getHistoryIds(baseURL!, adminToken);
+  const logBefore = await countPredictionLog(baseURL!, adminToken);
 
-  const adminToken = await getAdminToken(baseURL);
-  const countBefore = await countAllEvaluations(baseURL, adminToken);
+  const saveRequests: string[] = [];
+  page.on('request', (req) => { if (isSaveRequest(req)) saveRequests.push(req.url()); });
 
-  // Navigate to evaluation form
   await page.goto('/evaluate');
-
-  // Fill form with synthetic data
+  await expect(page.locator('header').getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
   await fillEvaluationForm(page, 'Anonymous Test Project');
 
-  // Click "Calculate" (not "Calculate and save")
-  const calculateBtn = page.getByRole('button', { name: /^calculate$/i });
-  await expect(calculateBtn).toBeVisible();
+  // Saving is not offered to an anonymous visitor, only pointed at sign-in.
+  await expect(saveButton(page)).toHaveCount(0);
+  const note = page.locator('.ev-save-note', { hasText: 'Sign in to save evaluations.' });
+  await expect(note).toHaveText('Sign in to save evaluations. Calculating saves nothing.');
+  await expect(note.getByRole('link', { name: 'Sign in', exact: true })).toHaveAttribute('href', '/login?next=%2Fevaluate');
 
-  // Wait for evaluation response
-  const responsePromise = waitForResponse(page, '/api/v1/evaluate', 'POST');
-  await calculateBtn.click();
-  const response = await responsePromise;
+  const calculated = page.waitForResponse((r) => isCalculateRequest(r.request()));
+  await calculateButton(page).click();
+  const res = await calculated;
+  expect(res.status()).toBe(200);
+  const body = await res.json();
+  expect(body.saved).toBe(false);
+  expect(body.evaluation_id).toBeNull();
+  expect(res.request().headers()['authorization']).toBeUndefined();
 
-  expect(response.status()).toBe(200);
+  await expect(page.locator('.ev-score-sub')).toHaveText('/ 100 · ESG SCORE');
+  await expect(page.locator('.ev-result h2')).toHaveText('Anonymous Test Project');
+  await expect(page.locator('.ev-save-ok')).toHaveCount(0);
 
-  // Verify result is displayed (real UI: "ESG SCORE" and "Calculating saves nothing")
-  await assertContains(page, /ESG SCORE/i);
-  await assertContains(page, /Calculating saves nothing/i);
-  await assertContains(page, /Sign in/i);
+  // Nothing was written: the same evaluation ids and the same log size.
+  expect(await getHistoryIds(baseURL!, adminToken)).toEqual(idsBefore);
+  expect(await countPredictionLog(baseURL!, adminToken)).toBe(logBefore);
+  expect(saveRequests).toEqual([]);
 
-  // Verify no row was written
-  const countAfter = await countAllEvaluations(baseURL, adminToken);
-  expect(countAfter).toBe(countBefore);
-
-  // Attempt to save (should require auth)
-  const saveBtn = page.getByRole('button', { name: /save|calculate and save/i });
-  const saveBtnVisible = await saveBtn.isVisible().catch(() => false);
-  if (saveBtnVisible) {
-    await saveBtn.click();
-
-    // Should redirect to login or show auth error
-    await page.waitForTimeout(1000);
-    const currentUrl = page.url();
-    const authErrorVisible = await page.getByText(/sign in|unauthorized/i).isVisible().catch(() => false);
-    const hasAuthError = currentUrl.includes('login') || authErrorVisible;
-    expect(hasAuthError).toBe(true);
-  }
+  // The sign-in link from the note leads to the login page and back to /evaluate.
+  await note.getByRole('link', { name: 'Sign in', exact: true }).click();
+  await page.waitForURL((u) => u.pathname === '/login' && u.searchParams.get('next') === '/evaluate');
+  await expect(page.getByRole('heading', { level: 1, name: 'Sign in', exact: true })).toBeVisible();
 });

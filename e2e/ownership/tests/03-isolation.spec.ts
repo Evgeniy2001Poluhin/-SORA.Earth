@@ -1,151 +1,132 @@
-import { test, expect } from '@playwright/test';
 import {
-  getAdminToken,
-  createSpecialistAccount,
-  getUserId,
-  signInUI,
-  fillEvaluationForm,
-  waitForResponse,
+  test, expect, apiHeaders,
+  API, ADMIN, getAdminToken, createSpecialist, uniqueName, SPECIALIST_PASSWORD, signInUI, signOutUI,
+  saveThroughUI, getHistoryIds, getRecord, sessionToken, pdfText,
 } from './helpers';
 
 /**
- * Scenario 3: Specialist B cannot access A's records
- *
- * - Specialist B's history does not show A's records
- * - Direct GET /api/v1/history/{id} with B's token returns 404
- * - B's CSV export does not contain A's records
- * - Admin can read A's record, and the audit log shows it
+ * Scenario 3: specialist B cannot reach specialist A's record, by History,
+ * by id, by CSV or by PDF; the administrator can, and the read is audited.
  */
-test('specialist B: cannot access specialist A records', async ({ page, baseURL, request }) => {
-  if (!baseURL) throw new Error('BASE_URL not set');
 
-  const adminToken = await getAdminToken(baseURL);
-  const timestamp = Date.now();
-  const usernameA = `specialist_a_${timestamp}`;
-  const usernameB = `specialist_b_${timestamp}`;
-
-  // Create both accounts
-  await createSpecialistAccount(baseURL, adminToken, usernameA, 'specialista123456');
-  await createSpecialistAccount(baseURL, adminToken, usernameB, 'specialistb123456');
-
-  // ===== SPECIALIST A: Create a record =====
-  await signInUI(page, usernameA, 'specialista123456');
-
-  await page.goto('/evaluate');
-  const projectNameA = `SpecialistA-Private-${Date.now()}`;
-  await fillEvaluationForm(page, projectNameA);
-
-  // Save and capture the evaluation_id from response
-  const saveBtnA = page.getByRole('button', { name: /calculate and save|save/i });
-
-  const saveResponsePromise = page.waitForResponse(resp =>
-    resp.url().includes('/api/v1/evaluate') && resp.url().includes('save=true') && resp.status() === 201
-  );
-
-  await saveBtnA.click();
-  const saveResponse = await saveResponsePromise;
-  const saveData = await saveResponse.json();
-  const evalId = saveData.evaluation_id;
-
-  if (!evalId) {
-    throw new Error('Save response did not include evaluation_id');
-  }
-
-  // Get A's token for positive controls
-  const tokenA = await page.evaluate(() => sessionStorage.getItem('sora.token'));
-
-  // POSITIVE CONTROL: A can access their own record
-  const aDetailResp = await request.get(`${baseURL}/api/v1/history/${evalId}`, {
-    headers: { 'Authorization': `Bearer ${tokenA}` },
+async function auditDetailEvents(baseURL: string, adminToken: string, evalId: number) {
+  const res = await fetch(`${baseURL}${API}/admin/project-access-log?action=detail&resource_id=${evalId}&limit=500`, {
+    headers: apiHeaders(adminToken),
   });
-  expect(aDetailResp.ok()).toBe(true);
-  const aDetail = await aDetailResp.json();
-  expect(aDetail.name).toBe(projectNameA);  // Verify project name was saved
+  expect(res.status).toBe(200);
+  const page = await res.json() as { items: any[]; total: number };
+  expect(page.items.length).toBe(page.total);
+  return page.items;
+}
 
-  // POSITIVE CONTROL: A can get their PDF (endpoint from PR 513)
-  const aPdfResp = await request.get(`${baseURL}/api/v1/history/${evalId}/report.pdf`, {
-    headers: { 'Authorization': `Bearer ${tokenA}` },
-  });
-  if (aPdfResp.status() === 404) {
-    // Endpoint doesn't exist yet (awaiting PR 513 integration) - skip PDF checks
-    test.skip();
-  }
-  expect(aPdfResp.status()).toBe(200);
-  expect(aPdfResp.headers()['content-type']).toContain('application/pdf');
-  const pdfBytes = await aPdfResp.body();
-  const pdfText = pdfBytes.toString('latin1');
-  expect(pdfText).toMatch(/^%PDF/);  // Valid PDF header
-  expect(pdfText).toContain(projectNameA);  // Contains saved project name
+test('isolation: B sees none of A\'s record; admin reads it and the read is audited', async ({ page, baseURL }) => {
+  const adminToken = await getAdminToken(baseURL!);
+  const userA = uniqueName('spec_a');
+  const userB = uniqueName('spec_b');
+  await createSpecialist(baseURL!, adminToken, userA);
+  await createSpecialist(baseURL!, adminToken, userB);
 
-  // Sign out A
-  await page.getByRole('button', { name: /sign out|logout/i }).click();
-  await page.waitForURL('/');
+  // A saves one evaluation.
+  await signInUI(page, userA, SPECIALIST_PASSWORD, '/history');
+  const tokenA = (await sessionToken(page))!;
+  const nameA = `SpecialistA-Private-${Date.now()}`;
+  const evalId = await saveThroughUI(page, nameA);
+  const recordBefore = await getRecord(baseURL!, tokenA, evalId);
+  expect(recordBefore.status).toBe(200); // positive control: the owner can read it
+  expect(recordBefore.body.name).toBe(nameA);
+  const allBefore = await getHistoryIds(baseURL!, adminToken);
+  expect(allBefore).toContain(evalId);
+  expect(await auditDetailEvents(baseURL!, adminToken, evalId)).toEqual([]);
+  await signOutUI(page);
 
-  // ===== SPECIALIST B: Try to access A's record =====
-  await signInUI(page, usernameB, 'specialistb123456');
+  // B: history in the UI and the API holds nothing of A's.
+  await signInUI(page, userB, SPECIALIST_PASSWORD, '/history');
+  const tokenB = (await sessionToken(page))!;
+  await expect(page.getByRole('heading', { level: 1, name: 'My evaluations' })).toBeVisible();
+  await expect(page.locator('.cr-empty')).toHaveText('No evaluations match the current filters.');
+  await expect(page.locator('.hist-item')).toHaveCount(0);
+  await expect(page.getByText(nameA)).toHaveCount(0);
+  expect(await getHistoryIds(baseURL!, tokenB)).toEqual([]);
 
-  // Get B's token for API calls (real session is sessionStorage["sora.token"])
-  const tokenB = await page.evaluate(() => sessionStorage.getItem('sora.token'));
+  // B by id: 404, through the API and through the UI's snapshot view.
+  const byId = await getRecord(baseURL!, tokenB, evalId);
+  expect(byId.status).toBe(404);
+  await page.goto(`/evaluate?snapshot=${evalId}`);
+  await expect(page.getByRole('region', { name: 'Saved evaluation' }).getByRole('alert'))
+    .toHaveText('Evaluation not found or not available.');
+  await expect(page.getByText(nameA)).toHaveCount(0);
 
-  // Check B's history via UI - should NOT contain A's project
-  // (History shows time/region/scores/budget/duration, not project name in list)
-  await page.goto('/history');
+  // B's CSV export: a header and no rows -- neither A's id nor A's name.
+  const csvRes = await fetch(`${baseURL}${API}/export/csv`, { headers: apiHeaders(tokenB) });
+  expect(csvRes.status).toBe(200);
+  const csv = await csvRes.text();
+  const lines = csv.trim().split(/\r?\n/);
+  expect(lines[0].startsWith('ID,Name,')).toBe(true);
+  expect(lines.slice(1).map((l) => l.split(',')[0])).not.toContain(String(evalId));
+  expect(csv).not.toContain(nameA);
+  expect(lines).toHaveLength(1);
 
-  // Verify A's project is not in the visible table/list
-  const historyContent = await page.textContent('body');
-  expect(historyContent).not.toContain(projectNameA);
+  // B's refused requests changed nothing: A's record is identical, B owns nothing new.
+  expect(await getRecord(baseURL!, tokenA, evalId)).toEqual(recordBefore);
+  expect(await getHistoryIds(baseURL!, tokenB)).toEqual([]);
+  expect(await getHistoryIds(baseURL!, adminToken)).toEqual(allBefore);
+  await signOutUI(page);
 
-  // Direct API call to A's eval_id with B's token - should be 404
-  const detailResp = await request.get(`${baseURL}/api/v1/history/${evalId}`, {
-    headers: { 'Authorization': `Bearer ${tokenB}` },
-  });
-  expect(detailResp.status()).toBe(404);
+  // Admin opens the record by id in the UI; the read is recorded.
+  await signInUI(page, ADMIN.username, ADMIN.password, '/mlops');
+  await page.goto(`/evaluate?snapshot=${evalId}`);
+  await expect(page.getByRole('region', { name: 'Saved evaluation' }).getByRole('heading', { level: 2 })).toHaveText(nameA);
 
-  // CSV export should not contain A's project
-  const csvResp = await request.get(`${baseURL}/api/v1/export/csv`, {
-    headers: { 'Authorization': `Bearer ${tokenB}` },
-  });
-  expect(csvResp.ok()).toBe(true);
-  const csvText = await csvResp.text();
-  expect(csvText).not.toContain(projectNameA);
+  const events = await auditDetailEvents(baseURL!, adminToken, evalId);
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ action: 'detail', actor_username: ADMIN.username, actor_role: 'admin', status_code: 200, outcome: 'ok' });
+  expect(events[0].targets).toEqual([expect.objectContaining({ resource_id: evalId, effect: 'returned', data_scope: 'pilot' })]);
+});
 
-  // PDF request for A's record should be strictly 404 with B's token (correct endpoint)
-  const bPdfResp = await request.get(`${baseURL}/api/v1/history/${evalId}/report.pdf`, {
-    headers: { 'Authorization': `Bearer ${tokenB}` },
-  });
-  expect(bPdfResp.status()).toBe(404);
+test('saved PDF: owner gets the stored report, B gets 404, anonymous gets 401', async ({ page, baseURL }) => {
+  const adminToken = await getAdminToken(baseURL!);
+  const userA = uniqueName('spec_a');
+  const userB = uniqueName('spec_b');
+  await createSpecialist(baseURL!, adminToken, userA);
+  await createSpecialist(baseURL!, adminToken, userB);
 
-  // Anonymous PDF request should be 401
-  const anonPdfResp = await request.get(`${baseURL}/api/v1/history/${evalId}/report.pdf`);
-  expect(anonPdfResp.status()).toBe(401);
+  await signInUI(page, userA, SPECIALIST_PASSWORD, '/history');
+  const tokenA = (await sessionToken(page))!;
+  // Non-Latin text, so the parser has to decode the embedded font, not match bytes.
+  const nameA = `Проект-А-${Date.now()}`;
+  const evalId = await saveThroughUI(page, nameA);
+  const record = await getRecord(baseURL!, tokenA, evalId);
+  expect(record.status).toBe(200);
+  expect(typeof record.body.total_score).toBe('number');
+  const allBefore = await getHistoryIds(baseURL!, adminToken);
+  await signOutUI(page);
 
-  // Sign out B
-  await page.getByRole('button', { name: /sign out|logout/i }).click();
+  const pdfUrl = `${baseURL}${API}/history/${evalId}/report.pdf`;
+  const ownRes = await fetch(pdfUrl, { headers: apiHeaders(tokenA) });
+  expect(ownRes.status).toBe(200);
+  expect(ownRes.headers.get('content-type')).toBe('application/pdf');
+  const bytes = Buffer.from(await ownRes.arrayBuffer());
+  expect(bytes.subarray(0, 5).toString('latin1')).toBe('%PDF-');
 
-  // ===== ADMIN: Can read A's record, audit logged =====
-  await signInUI(page, 'admin', 'sora2026');
+  const text = pdfText(bytes);
+  expect(text).toContain(`Evaluation ID: ${evalId}`);
+  expect(text).toContain(`Project: ${nameA}`);
+  const score = text.match(/Total ESG score: ([0-9]+(?:\.[0-9]+)?)\b/);
+  expect(score).not.toBeNull();
+  expect(Number(score![1])).toBe(record.body.total_score);
 
-  // Admin history should show A's project
-  await page.goto('/history');
-  await expect(page.getByText(projectNameA)).toBeVisible();
+  await signInUI(page, userB, SPECIALIST_PASSWORD, '/history');
+  const tokenB = (await sessionToken(page))!;
+  const bRes = await fetch(pdfUrl, { headers: apiHeaders(tokenB) });
+  expect(bRes.status).toBe(404);
+  expect(bRes.headers.get('content-type')).not.toBe('application/pdf');
 
-  // Admin detail request
-  const adminDetailResp = await request.get(`${baseURL}/api/v1/history/${evalId}`, {
-    headers: { 'Authorization': `Bearer ${adminToken}` },
-  });
-  expect(adminDetailResp.ok()).toBe(true);
+  const anonRes = await fetch(pdfUrl, { headers: apiHeaders() });
+  expect(anonRes.status).toBe(401);
+  expect(anonRes.headers.get('content-type')).not.toBe('application/pdf');
 
-  // Check audit log shows the read
-  const auditResp = await request.get(`${baseURL}/api/v1/admin/project-access-log?limit=10`, {
-    headers: { 'Authorization': `Bearer ${adminToken}` },
-  });
-  expect(auditResp.ok()).toBe(true);
-  const auditData = await auditResp.json();
-
-  // Find an entry for this eval_id with action=detail
-  const auditEntry = auditData.items?.find((entry: any) =>
-    entry.action === 'detail' &&
-    entry.targets?.some((t: any) => t.resource_id === parseInt(evalId, 10))
-  );
-  expect(auditEntry).toBeTruthy();
+  // The refused reads changed nothing.
+  expect(await getRecord(baseURL!, tokenA, evalId)).toEqual(record);
+  expect(await getHistoryIds(baseURL!, tokenB)).toEqual([]);
+  expect(await getHistoryIds(baseURL!, adminToken)).toEqual(allBefore);
 });

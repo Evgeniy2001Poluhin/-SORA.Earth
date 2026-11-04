@@ -10,7 +10,7 @@ export default defineConfig({
   testDir: './tests',
   fullyParallel: false, // Sequential execution to avoid DB state conflicts
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  retries: 0, // also in CI: a retry would hide a flaky ownership guarantee
   workers: 1, // Single worker to ensure deterministic state
   reporter: [
     ['list'],
@@ -28,7 +28,7 @@ export default defineConfig({
         localStorage: [{ name: 'sora_tour_done', value: '1' }],
       }],
     },
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
