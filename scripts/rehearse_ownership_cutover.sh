@@ -77,6 +77,9 @@
 #   Functions reached only from traps and from `must`/`bounded` arguments --
 #   cleanup, on_signal, ours, cols_of -- read as unused to ShellCheck.
 set -euo pipefail
+# The run's own stdout and stderr, kept for the signal handler and the
+# cleanup, which can fire inside a command's redirection (see cleanup).
+exec 3>&1 4>&2
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE_FILE_REHEARSAL="$REPO/infra/rehearsal/docker-compose.rehearsal.yml"
@@ -391,6 +394,11 @@ cleanup() {
     CLEANED=1
     trap - EXIT INT TERM HUP
     set +e
+    # Back to the run's own output. A trap fires when the foreground command
+    # returns, inside whatever redirection that command ran under: a signal
+    # during `DCR run ... migrate > migrate.log` ran this whole cleanup, and
+    # its every message, into migrate.log -- which the cleanup then deleted.
+    exec 1>&3 2>&4
     [ -f "$WORK/timed_out" ] && rc=124
     [ -f "$WORK/degraded" ] && rc=5
     echo; echo "== removing what this run created =="
@@ -506,7 +514,7 @@ PY
     exit "$rc"
 }
 # shellcheck disable=SC2317  # invoked by trap INT/TERM/HUP; ShellCheck sees no direct call
-on_signal() { echo "  interrupted by SIG$1" >&2; exit $((128 + $2)); }
+on_signal() { echo "  interrupted by SIG$1" >&4; exit $((128 + $2)); }
 trap cleanup EXIT
 trap 'on_signal INT 2' INT
 trap 'on_signal TERM 15' TERM
@@ -520,6 +528,7 @@ trap 'on_signal HUP 1' HUP
 MAIN_PID=$$
 (
     trap 'kill "$sp" 2>/dev/null; exit 0' TERM
+    set +e   # a failed `docker kill` must not end the watchdog before its TERM
     sleep $((WALL - CLEANUP_RESERVE)) & sp=$!
     wait "$sp" || exit 0
     : > "$WORK/timed_out"
@@ -690,6 +699,10 @@ PY
 # script, which then exits 5 through the cleanup.
 (
     trap 'exit 0' TERM
+    # Not under the script's `set -e`: the first `cat` of a pg_cid file that
+    # does not exist yet ended this subshell silently, and a deployment that
+    # began mid-run was never noticed.
+    set +e
     high=0; unhealthy=0
     while :; do
         sleep "$MONITOR_INTERVAL" & wait $! || exit 0
