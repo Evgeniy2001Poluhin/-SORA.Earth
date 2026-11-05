@@ -2546,7 +2546,21 @@ sync "$MANIFEST_DIR" 2>/dev/null || sync
 cat "$MANIFEST"
 echo
 echo "manifest: $MANIFEST"
-if [ -n "$PREV_COMMIT" ]; then
+# The suggestion is asked of the same barriers a rollback would meet. After
+# the ownership release it printed `--rollback <previous>` for a commit both
+# barriers refuse -- advice that fails at the moment it is followed, and
+# reads as if going back were an option. A probe that cannot answer counts as
+# a refusal here too: "could not tell" is not "go ahead". This runs after the
+# deployment is complete, inside `if`, so it cannot fail the run it reports.
+if [ -n "$PREV_COMMIT" ] && accounts_downgrade_blocked "$PREV_COMMIT"; then
+    echo "to undo:  no rollback -- ${PREV_COMMIT:0:12} predates persistent accounts and the users"
+    echo "          table exists (or could not be read: ${PG_ANSWER:-no answer}). Fix forward with a"
+    echo "          corrected release through this script; see docs/DEPLOY.md"
+elif [ -n "$PREV_COMMIT" ] && ownership_downgrade_blocked "$PREV_COMMIT"; then
+    echo "to undo:  no rollback -- ${PREV_COMMIT:0:12} predates project ownership and the schema has"
+    echo "          it (answer: ${OWNERSHIP_PROBE_ANSWER:-none}). Fix forward with a corrected release"
+    echo "          through this script; see docs/DEPLOY.md"
+elif [ -n "$PREV_COMMIT" ]; then
     echo "to undo:  $0 --rollback $PREV_COMMIT"
 else
     echo "to undo:  no previous deployment is recorded; nothing to roll back to"

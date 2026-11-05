@@ -2282,6 +2282,40 @@ previous_is() {
     ln -sf prev.txt "$SANDBOX/manifests/latest"
 }
 
+echo "== the undo suggestion is asked of the rollback barriers =="
+# Control: nothing bars going back, so the suggestion is the rollback itself.
+new_sandbox
+previous_is "$FIRST"
+run_guard
+check "control: a deploy over an unbarred previous succeeds" "$RC" "0"
+check "  and suggests --rollback to it" \
+    "$(grep -c "^to undo:  .* --rollback $FIRST\$" "$SANDBOX/out")" "1"
+rm -rf "$SANDBOX"
+
+# The previous release predates accounts and the users table exists: the
+# accounts barrier would refuse, so the suggestion must say fix forward.
+new_sandbox
+previous_is "$FIRST"
+echo t > "$STUB_DIR/users_table"
+run_guard
+check "a previous release the accounts barrier refuses: the deploy still succeeds" "$RC" "0"
+check "  no --rollback is suggested" "$(grep -c '^to undo:  .*--rollback' "$SANDBOX/out")" "0"
+check "  it says why and what to do" \
+    "$(grep -c '^to undo:  no rollback -- .* predates persistent accounts' "$SANDBOX/out")" "1"
+rm -rf "$SANDBOX"
+
+# The previous release has accounts but not ownership, and the schema has it.
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+echo evaluations.owner_user_id > "$STUB_DIR/schema"
+run_guard
+check "a previous release the ownership barrier refuses: the deploy still succeeds" "$RC" "0"
+check "  no --rollback is suggested" "$(grep -c '^to undo:  .*--rollback' "$SANDBOX/out")" "0"
+check "  it says why" \
+    "$(grep -c '^to undo:  no rollback -- .* predates project ownership' "$SANDBOX/out")" "1"
+rm -rf "$SANDBOX"
+
 for item in evaluations.owner_user_id evaluations.data_scope \
             predictions_log.owner_user_id predictions_log.data_scope \
             table:project_access_events table:project_access_targets; do
