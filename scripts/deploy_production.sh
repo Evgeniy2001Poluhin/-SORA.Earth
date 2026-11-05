@@ -635,8 +635,13 @@ ensure_migrator_gone() {
                 docker stop -t 10 "$id" >/dev/null 2>&1 || true
                 docker rm -f "$id" >/dev/null 2>&1 || true
             else
+                # Both spellings. Docker 29 writes "error: no such object: <id>"
+                # in lower case; matching only "No such" read a confirmed removal
+                # as an unanswered question, and on 2026-11-05 the first
+                # production cutover stopped there with the migration committed
+                # and every service down.
                 case "$gone" in
-                    *"No such"*) break ;;
+                    *"No such"*|*"no such"*) break ;;
                     *) echo "  docker cannot say whether ${id:0:12} still exists: $gone" >&2 ;;
                 esac
             fi
