@@ -85,20 +85,62 @@ def test_the_deploy_script_and_the_compose_file_name_the_same_image():
     )
 
 
+def _main_flow(source):
+    """The deployment's own sequence, not the functions defined above it.
+
+    Anchored on the line that opens the mutating phase. Earlier anchors were
+    the first `journal_write mutating` in the file, which since the cutover is
+    inside a helper function defined a thousand lines before the flow -- an
+    order check measured from there compares definitions, not steps.
+    """
+    phase_at = source.find("\nPHASE=mutating\n")
+    end_at = source.find("\nfi   # end of the mutating section", phase_at)
+    assert phase_at != -1, "the mutating phase is no longer opened by PHASE=mutating"
+    assert end_at != -1, "the end of the mutating section is no longer marked"
+    return phase_at, end_at
+
+
 def test_the_deployment_starts_without_rebuilding():
-    """A rebuild at start could differ from the image just migrated from."""
+    """A rebuild at start could differ from the image just migrated from.
+
+    The build itself comes before the mutating phase: it changes nothing that
+    serves, so a failed build has nothing to roll back.
+    """
     source = open(DEPLOY).read()
+    phase_at, end_at = _main_flow(source)
 
-    phase_at = source.find("journal_write mutating")
-    build_at = source.find('"${DC[@]}" build backend', phase_at)
-    start_at = source.find("up -d --no-build --remove-orphans", phase_at)
+    build_at = source.rfind('"${DC[@]}" build backend', 0, phase_at)
+    start_at = source.find("up -d --no-build --remove-orphans", phase_at, end_at)
 
-    assert build_at != -1, "the explicit build step is gone"
+    assert build_at != -1, "the explicit build step is gone, or moved past the stop"
     assert start_at != -1, (
         "the deployment start rebuilds; it must reuse the image that was "
         "migrated from"
     )
-    assert build_at < start_at
+    assert "--build" not in source[phase_at:end_at].replace("--no-build", ""), (
+        "something in the mutating section builds again"
+    )
+
+
+def test_every_compose_run_and_up_after_the_build_carries_the_pin():
+    """The image is pinned by id, not by tag, from the build to the last `up`.
+
+    tests/test_deploy_production.sh moves the tag after the build and checks
+    what each step ran; this is the cheap static half. Between the pin and the
+    end of the mutating section the only `${DC[@]}` up or run allowed is the
+    PostgreSQL wait, which does not use the application image.
+    """
+    source = open(DEPLOY).read()
+    pin_at = source.find("\npin_application_image\n")
+    _phase_at, end_at = _main_flow(source)
+    assert pin_at != -1, "the image is no longer pinned after the build"
+
+    unpinned = [
+        line.strip() for line in source[pin_at:end_at].splitlines()
+        if re.search(r'"\$\{DC\[@\]\}" (up|run)\b', line)
+        and "up -d --wait postgres" not in line
+    ]
+    assert not unpinned, f"compose commands that resolve the tag again: {unpinned}"
 
 
 def test_the_migrator_carries_no_secrets_it_does_not_need(compose):
@@ -226,21 +268,40 @@ def test_the_deploy_script_migrates_before_it_recreates():
     # `up -d --build --remove-orphans` of its own, so a naive `find` compared
     # the migration against the rollback's call and failed for a reason that
     # had nothing to do with the order it names.
-    phase_at = source.find("journal_write mutating")
-    migrate_at = source.find("run --rm --no-deps migrate", phase_at)
-    recreate_at = source.find("up -d --no-build --remove-orphans", phase_at)
+    phase_at, end_at = _main_flow(source)
+    stop_at = source.find("stop -t \"$STOP_TIMEOUT\" backend scheduler", phase_at, end_at)
+    migrate_at = source.find("\nrun_migrator ", phase_at, end_at)
+    force_at = source.find("--force-recreate backend scheduler", phase_at, end_at)
+    recreate_at = source.find("up -d --no-build --remove-orphans", phase_at, end_at)
 
-    assert phase_at != -1, "the mutating phase is no longer marked"
+    assert stop_at != -1, "the deploy script no longer stops the old code before migrating"
     assert migrate_at != -1, "the deploy script no longer runs the migrator"
+    assert force_at != -1, "the first start is no longer a forced recreate"
     assert recreate_at != -1, "the deploy script no longer recreates the containers"
-    assert migrate_at < recreate_at, (
-        "the migration step is below the container recreate, so the new code "
-        "starts against the old schema"
-    )
     # After the journal is written, not before: a migration is a mutation, and
     # a run that dies between it and the recreate has to leave a record saying
-    # so.
-    assert phase_at < migrate_at
+    # so. And after the old code stopped, before anything new starts.
+    assert phase_at < stop_at < migrate_at < force_at < recreate_at, (
+        "the cutover is out of order: stop, migrate, forced start, the rest"
+    )
+
+    # The migrator itself: one detached `compose run` of the migrate service,
+    # by name, from the pinned image, its creating client in a session of its
+    # own -- and never killed: nothing in the function signals it.
+    body_at = source.find("\nrun_migrator() {")
+    body = source[body_at:source.find("\n}\n", body_at)]
+    assert body_at != -1, "run_migrator is gone"
+    assert re.search(r'setsid -w "\$\{DCP\[@\]\}" run -d --no-deps -T --name "\$MIGRATOR_NAME"', body), (
+        "the migrator is no longer a named, pinned, detached `compose run` in its own session"
+    )
+    assert re.search(r"\bmigrate < /dev/null ", body), "the migrator no longer runs the migrate service"
+    gone_at = source.find("\nensure_migrator_gone() {")
+    gone = source[gone_at:source.find("\n}\n", gone_at)]
+    signals = re.compile(r"^[^#]*\bkill\s+-(?!0\b)", re.M)
+    assert gone_at != -1 and not signals.search(body) and not signals.search(gone), (
+        "the migrator's creating client is signalled; a client killed mid-request leaves "
+        "an outcome nobody can know"
+    )
 
 
 # --- the verification itself ------------------------------------------------

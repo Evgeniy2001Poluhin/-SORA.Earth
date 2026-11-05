@@ -1,0 +1,171 @@
+# The ownership cutover rehearsal: a disposable PostgreSQL 16 and the release
+# image's migrator, bootstrap and schema check against it. Nothing else.
+#
+# Used only by scripts/rehearse_ownership_cutover.sh, which generates the
+# project name (`sora-rehearsal-<nonce>`), the environment file and every value
+# below, and removes all of it on exit. It is never started by hand and never
+# combined with docker-compose.prod.yml.
+#
+# What keeps it away from production, by construction rather than by care:
+#
+#   project   its own name, never sora_earth_ai_platform, so compose cannot
+#             address a production container, volume or network
+#   network   one, `internal: true`: no route out, and the only names that
+#             resolve on it are the containers of this project. `pg` is this
+#             project's postgres and nothing else
+#   volume    one named volume of this project; no bind mount of the production
+#             volumes or of /etc. The only bind mount is the release
+#             checkout's models/ into the backend, read-only, as production
+#             mounts it
+#   ports     none published
+#   env       nothing interpolated from the production .env: the script passes
+#             its own generated --env-file and runs compose under `env -i`, so a
+#             value in the operator's shell cannot leak in either
+#   limits    cpus and memory on every container, recorded in the report, so
+#             the rehearsal cannot starve the production stack on the same host
+#
+# Every object carries the label sora.rehearsal.nonce, which is how the script
+# proves a container is one it created before it restores into it, and how it
+# finds exactly its own objects to remove.
+services:
+  pg:
+    image: ${REHEARSAL_PG_IMAGE:?}
+    restart: "no"
+    environment:
+      POSTGRES_USER: ${REHEARSAL_PG_USER:?}
+      POSTGRES_PASSWORD: ${REHEARSAL_PG_PASSWORD:?}
+      # A bootstrap database of its own. The restore target is dropped and
+      # recreated on every run, and a database cannot be dropped while it is
+      # the one connected to.
+      POSTGRES_DB: rehearsal_boot
+    labels:
+      sora.rehearsal.nonce: ${REHEARSAL_NONCE:?}
+    cpus: ${REHEARSAL_CPUS:?}
+    mem_limit: ${REHEARSAL_MEMORY:?}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - rehearsal
+    healthcheck:
+      # TCP, for the reason docker-compose.prod.yml gives: the initdb server
+      # listens on the socket only.
+      test: ["CMD-SHELL", "pg_isready -U ${REHEARSAL_PG_USER:?} -h 127.0.0.1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # The release image's own migrator, exactly as production runs it: alembic
+  # upgrade head, connected to PostgreSQL directly.
+  migrate:
+    profiles: ["rehearsal-run"]
+    image: ${REHEARSAL_APP_IMAGE:?}
+    entrypoint: ["alembic", "upgrade", "head"]
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${REHEARSAL_PG_USER:?}:${REHEARSAL_PG_PASSWORD:?}@pg:5432/${REHEARSAL_DB:?}
+    labels:
+      sora.rehearsal.nonce: ${REHEARSAL_NONCE:?}
+    cpus: ${REHEARSAL_CPUS:?}
+    mem_limit: ${REHEARSAL_MEMORY:?}
+    networks:
+      - rehearsal
+
+  # The account bootstrap, with passwords the script generates for this run
+  # and never prints. Not the production values.
+  bootstrap-users:
+    profiles: ["rehearsal-run"]
+    image: ${REHEARSAL_APP_IMAGE:?}
+    entrypoint: ["python3", "scripts/bootstrap_users.py"]
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${REHEARSAL_PG_USER:?}:${REHEARSAL_PG_PASSWORD:?}@pg:5432/${REHEARSAL_DB:?}
+      SORA_ENV: production
+      SORA_DEFAULT_ADMIN_PASSWORD: ${REHEARSAL_ADMIN_PASSWORD:?}
+      SORA_DEFAULT_ANALYST_PASSWORD: ${REHEARSAL_ANALYST_PASSWORD:?}
+      SORA_DEFAULT_VIEWER_PASSWORD: ${REHEARSAL_VIEWER_PASSWORD:?}
+    labels:
+      sora.rehearsal.nonce: ${REHEARSAL_NONCE:?}
+    cpus: ${REHEARSAL_CPUS:?}
+    mem_limit: ${REHEARSAL_MEMORY:?}
+    networks:
+      - rehearsal
+
+  # The check every application container makes before it starts.
+  verify-head:
+    profiles: ["rehearsal-run"]
+    image: ${REHEARSAL_APP_IMAGE:?}
+    entrypoint: ["python3", "scripts/verify_schema_head.py"]
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${REHEARSAL_PG_USER:?}:${REHEARSAL_PG_PASSWORD:?}@pg:5432/${REHEARSAL_DB:?}
+    labels:
+      sora.rehearsal.nonce: ${REHEARSAL_NONCE:?}
+    cpus: ${REHEARSAL_CPUS:?}
+    mem_limit: ${REHEARSAL_MEMORY:?}
+    networks:
+      - rehearsal
+
+  # The release's backend, started from its own entrypoint -- schema check,
+  # model check, gunicorn -- as production starts it, so the time from the
+  # forced recreate to a healthy database is measured rather than assumed.
+  # Offline, on the internal network, with secrets generated for this run.
+  # The model seed is mounted read-only exactly as docker-compose.prod.yml
+  # mounts it; it is the checkout's own `models/`, not production data.
+  # The backend's redis, as production gives it one: in memory only, on the
+  # internal network, removed with everything else.
+  redis:
+    profiles: ["rehearsal-run"]
+    image: ${REHEARSAL_REDIS_IMAGE:?}
+    restart: "no"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    labels:
+      sora.rehearsal.nonce: ${REHEARSAL_NONCE:?}
+    cpus: ${REHEARSAL_CPUS:?}
+    mem_limit: 256m
+    networks:
+      - rehearsal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  backend:
+    profiles: ["rehearsal-run"]
+    image: ${REHEARSAL_APP_IMAGE:?}
+    restart: "no"
+    user: "1000:1000"
+    environment:
+      WORKERS: ${REHEARSAL_APP_WORKERS:?}
+      DATABASE_URL: postgresql+psycopg://${REHEARSAL_PG_USER:?}:${REHEARSAL_PG_PASSWORD:?}@pg:5432/${REHEARSAL_DB:?}
+      REDIS_URL: redis://redis:6379/0
+      SORA_ENV: production
+      SORA_OFFLINE: "1"
+      RUN_SCHEDULER: "false"
+      SORA_RUNTIME_DIR: /app/runtime
+      SORA_JWT_SECRET: ${REHEARSAL_JWT_SECRET:?}
+      SORA_ADMIN_TOKEN: ${REHEARSAL_ADMIN_TOKEN:?}
+      POSTGRES_PASSWORD: ${REHEARSAL_PG_PASSWORD:?}
+      ADMIN_API_KEY: ${REHEARSAL_ADMIN_API_KEY:?}
+    volumes:
+      - ${REHEARSAL_MODELS_DIR:?}:/app/models:ro
+    tmpfs:
+      - /app/runtime:mode=0700,uid=1000,gid=1000,size=256m
+      - /tmp/prometheus_multiproc:mode=0700,uid=1000,gid=1000,size=16m
+    labels:
+      sora.rehearsal.nonce: ${REHEARSAL_NONCE:?}
+    cpus: ${REHEARSAL_CPUS:?}
+    mem_limit: ${REHEARSAL_APP_MEMORY:?}
+    networks:
+      - rehearsal
+
+networks:
+  rehearsal:
+    internal: true
+    labels:
+      sora.rehearsal.nonce: ${REHEARSAL_NONCE:?}
+
+volumes:
+  pgdata:
+    labels:
+      sora.rehearsal.nonce: ${REHEARSAL_NONCE:?}

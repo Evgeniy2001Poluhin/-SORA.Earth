@@ -43,6 +43,31 @@ HEALTH_DELAY="${HEALTH_DELAY:-3}"
 APP_IMAGE="${SORA_APP_IMAGE:-sora_earth_app:current}"
 DC=(docker compose -p "$PROJECT" -f "$COMPOSE")
 
+# The cutover budgets. Old code is stopped before the schema changes, so these
+# bound how long the site is down, and each one ends in a refusal rather than a
+# wait without end.
+#
+#   STOP_TIMEOUT       seconds `compose stop` gives backend and scheduler to
+#                      finish their requests before they are killed
+#   DRAIN_SECONDS      how long, after they stop, to wait for every other
+#                      client transaction on the database to end
+#   MIGRATE_DEADLINE   the whole migrator, start to exit. `lock_timeout` in the
+#                      migration bounds the wait for a lock, not a backfill or
+#                      an index build; this bounds everything
+STOP_TIMEOUT="${DEPLOY_STOP_TIMEOUT:-60}"
+DRAIN_SECONDS="${DEPLOY_DRAIN_SECONDS:-30}"
+MIGRATE_DEADLINE="${DEPLOY_MIGRATE_DEADLINE:-120}"
+# How long to wait for a stopped migrator to disappear, container and session.
+MIGRATOR_GONE_SECONDS="${DEPLOY_MIGRATOR_GONE_SECONDS:-30}"
+# How long the client creating the migrator (`compose run -d`) may take to
+# return. It is never killed; past this the migrator's existence is unknown and
+# the run refuses with every rollback forbidden.
+MIGRATOR_CREATE_SECONDS="${DEPLOY_MIGRATOR_CREATE_SECONDS:-60}"
+# The image every application service of this run is pinned to, by id, once it
+# is built; and the override file that pins it. Empty until the build.
+APP_IMAGE_ID=""
+PIN_FILE=""
+
 cd "$REPO"
 
 # Which phase the run is in, so a refusal knows whether anything needs undoing.
@@ -56,6 +81,33 @@ ABORTING=0
 # this run created from what was already there. Stopping "anything unexpected"
 # would reach containers this deployment does not own.
 PRE_CIDS=""
+# Where the cutover is, for the journal and for the refusal messages.
+#
+#   untouched  nothing has been stopped; what ran before still runs
+#   stopping   nginx, backend or scheduler is being stopped
+#   stopped    all three are stopped, and stay so until the new code starts
+#   started    the new backend and scheduler have been started
+#
+# After a refusal the services may be left stopped -- deliberately, when the
+# schema can no longer serve the old code -- and the message has to say so.
+# "The new code is still running" was the only sentence this script had, and
+# it is false for every refusal between the stop and the start.
+APPS_STATE=untouched
+CUTOVER_STAGE=none
+# The one migrator of this run, by name, so that a deadline or a signal can stop
+# exactly it and confirm it is gone before anything reads the schema. Until the
+# migrator's transaction has ended its columns are invisible to every other
+# session, and a probe made earlier would allow the old code back onto a schema
+# that is about to change under it.
+MIGRATOR_NAME=""
+MIGRATOR_ID=""
+# none, running (its creating client has not returned), returned, or unknown
+# (the client outlived MIGRATOR_CREATE_SECONDS).
+MIGRATOR_CREATE=none
+MIGRATOR_CREATE_PID=""
+MIGRATOR_CREATE_STARTED=0
+MIGRATOR_GONE=0
+MIGRATE_TIMED_OUT=0
 
 # Every refusal goes through here, and after mutation begins it does not simply
 # exit. Eight checks sit after `up` -- the port property, the nginx checksum,
@@ -119,6 +171,10 @@ journal_write() {
         echo "target         ${TARGET:-unset}"
         echo "previous       ${PREV_COMMIT:-none}"
         echo "pre_containers ${PRE_CIDS:-none}"
+        echo "cutover        $CUTOVER_STAGE"
+        echo "apps           $APPS_STATE"
+        [ -n "$MIGRATOR_NAME" ] && echo "migrator       $MIGRATOR_NAME"
+        [ -n "$APP_IMAGE_ID" ] && echo "image_pin      $APP_IMAGE_ID"
         [ -n "$detail" ] && echo "detail         $detail"
         echo "images"
         printf '%s\n' "${PREV_IMAGE_IDS:-}" | sed 's/^/  /'
@@ -169,7 +225,9 @@ logged() {
 restore_recorded_images() {
     [ -n "$PREV_IMAGE_IDS" ] || return 1
     local ovr
-    ovr="$(mktemp)" || return 1
+    # Named, so the restore can be told from the deployment's own image pin in
+    # a list of calls -- both are a second -f on the same `up`.
+    ovr="$(mktemp "${TMPDIR:-/tmp}/sora-image-restore.XXXXXX")" || return 1
     {
         echo "services:"
         while IFS="$(printf '\t')" read -r svc img; do
@@ -220,6 +278,25 @@ abort_deployment() {
     # mktemp would then make a new file per command.
     rollback_log > /dev/null
 
+    # The migrator first, and confirmed gone, before anything below reads the
+    # schema. A signal or a deadline can arrive while its transaction is open:
+    # the ownership columns are then invisible to every other session, the
+    # probe would answer "absent", and the old code would be started onto a
+    # schema that commits a moment later. If it cannot be confirmed, nothing
+    # can be decided, so nothing is.
+    local gone=0
+    ensure_migrator_gone || gone=$?
+    if [ "$gone" = 2 ]; then
+        echo "  ROLLBACK REFUSED: whether the migrator $MIGRATOR_NAME exists cannot be known --" >&2
+        echo "  it was never positively identified -- so the schema may still change and no" >&2
+        echo "  code may be started onto it." >&2
+        refuse_rollback "migrator unknown: never positively identified, so its create may still land; the schema was not read"
+    elif [ "$gone" != 0 ]; then
+        echo "  ROLLBACK REFUSED: the migrator $MIGRATOR_NAME could not be confirmed stopped," >&2
+        echo "  so the schema cannot be read reliably and no code may be started onto it." >&2
+        refuse_rollback "the migrator could not be confirmed stopped; the schema was not read"
+    fi
+
     if [ -z "$PREV_COMMIT" ]; then
         # Nothing recorded to go back to -- the first deployment, or a manifest
         # directory that was lost. There is no previous state to restore, so the
@@ -227,6 +304,14 @@ abort_deployment() {
         echo "  no previous deployment recorded; nothing to restore" >&2
         journal_write rollback-impossible "no previous manifest"
         stop_containers_created_by_this_run
+        settle_partial_start
+        # The cutover may have stopped containers that predate this run; they
+        # stay stopped, and the operator has to know that. Written again after
+        # the stop, so the journal's `apps` line is what was observed.
+        if [ "$APPS_STATE" != untouched ]; then
+            state_after_refusal >&2
+            journal_write rollback-impossible "no previous manifest"
+        fi
         exit 76
     fi
 
@@ -236,11 +321,20 @@ abort_deployment() {
     if accounts_downgrade_blocked "$PREV_COMMIT"; then
         echo "  ROLLBACK REFUSED: ${PREV_COMMIT:0:12} predates persistent accounts and the" >&2
         echo "  users table now exists (or its existence could not be read). That code would" >&2
-        echo "  refuse the migrated schema and ignore every block and reset. The new code is" >&2
-        echo "  still running: fix forward, closing external access if need be. See" >&2
+        echo "  refuse the migrated schema and ignore every block and reset. See" >&2
         echo "  CLAUDE.md, 'Accounts live in the users table'." >&2
-        journal_write rollback-refused "previous code predates persistent accounts and the users table exists"
-        exit 76
+        refuse_rollback "previous code predates persistent accounts and the users table exists"
+    fi
+
+    # Independent of the accounts barrier, and asked even when that one
+    # allows: code with persistent accounts and without project ownership --
+    # the release before ownership -- passes the first and fails this one.
+    if ownership_downgrade_blocked "$PREV_COMMIT"; then
+        echo "  ROLLBACK REFUSED: ${PREV_COMMIT:0:12} has no project ownership, and the database" >&2
+        echo "  has ownership columns or audit tables (probe answered '${OWNERSHIP_PROBE_ANSWER:-nothing}')." >&2
+        echo "  That code would write rows the schema refuses and show every specialist's" >&2
+        echo "  saved project to everyone. See CLAUDE.md, 'Project ownership'." >&2
+        refuse_rollback "previous code has no project ownership and the schema has it (or it could not be read)"
     fi
 
     git --no-pager checkout --quiet --detach "$PREV_COMMIT" 2>/dev/null \
@@ -250,6 +344,9 @@ abort_deployment() {
              # that the checkout is what broke.
              journal_write rollback-failed "cannot check out ${PREV_COMMIT:0:12}"
              stop_containers_created_by_this_run
+             settle_partial_start
+             [ "$APPS_STATE" = untouched ] || state_after_refusal >&2
+             journal_write rollback-failed "cannot check out ${PREV_COMMIT:0:12}"
              exit 76; }
 
     # The recorded images, by id, without building.
@@ -291,7 +388,65 @@ abort_deployment() {
     exit 76
 }
 
+# A refused rollback: nothing old is restored, and what is left running is
+# established and said, not assumed.
+refuse_rollback() {
+    settle_partial_start
+    state_after_refusal >&2
+    journal_write rollback-refused "$1"
+    exit 76
+}
+
+# The start of the new backend and scheduler failed partway: one may be
+# running and the other not -- `up` reports failure for the pair, not for each.
+# A refusal that leaves them so would print "STOPPED" over a running backend.
+# Stopped and confirmed here; if that cannot be confirmed the state is
+# `unknown`, and the message says so instead.
+settle_partial_start() {
+    [ "$APPS_STATE" = starting ] || return 0
+    echo "  the new backend and scheduler may be partly running; stopping them" >&2
+    if logged "${DC[@]}" stop -t "$STOP_TIMEOUT" backend scheduler \
+        && confirm_apps_stopped backend scheduler; then
+        APPS_STATE=stopped
+    else
+        APPS_STATE=unknown
+    fi
+}
+
 step() { echo; echo "== $* =="; }
+
+# One question to the production database, asked of PostgreSQL itself rather
+# than through the pooler or the application, and accepted only whole.
+#
+#   pg_ask SQL REGEX
+#
+# Succeeds only when psql exited 0 AND the whole answer matches REGEX, an
+# extended regular expression the caller anchors with ^ and $ -- which in bash
+# bind to the ends of the string, not of a line, so a second line fails it. The
+# answer is left in PG_ANSWER either way, prefixed with the exit status when
+# that was not 0, so a refusal can quote what came back.
+#
+# Both halves, because each was the whole check once: `pg_scalar ... || true`
+# kept the text and dropped the status, so `ownership:0` printed by a psql that
+# then failed -- an error after the row, a broken pipe, a container stopping --
+# read as "no ownership schema" and allowed the old code back.
+PG_ANSWER=""
+pg_ask() {
+    local sql="$1" want="$2" out rc=0
+    # shellcheck disable=SC2016
+    #   Single quotes on purpose: $POSTGRES_USER, $POSTGRES_DB and $0 belong to
+    #   the postgres container's shell, not this one.
+    out="$("${DC[@]}" exec -T postgres sh -c \
+        'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$0"' \
+        "$sql" < /dev/null 2>/dev/null)" || rc=$?
+    out="${out//$'\r'/}"
+    if [ "$rc" -ne 0 ]; then
+        PG_ANSWER="(exit $rc) $out"
+        return 1
+    fi
+    PG_ANSWER="$out"
+    [[ "$out" =~ $want ]]
+}
 
 # Code from before persistent accounts cannot be restored once `users` exists.
 #
@@ -305,18 +460,385 @@ step() { echo; echo "== $* =="; }
 # fails outright where it is absent, CASE or not, and an absent table is the
 # one case where going back is still fine -- the migration never got there.
 # Succeeds (refuse) when the table exists or the answer cannot be read; fails
-# (allow) when the target has the accounts code or the table is absent.
+# (allow) when the target has the accounts code or the table is absent -- and
+# "absent" means psql exited 0 and answered exactly `users:false`.
 accounts_downgrade_blocked() {
-    local to="$1" exists
+    local to="$1"
     git cat-file -e "$to:app/accounts.py" 2>/dev/null && return 1
-    # shellcheck disable=SC2016
-    #   Single quotes on purpose: $POSTGRES_USER, $POSTGRES_DB and $0 belong to
-    #   the postgres container's shell, not this one.
-    exists="$("${DC[@]}" exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$0"' \
-        "SELECT to_regclass('public.users') IS NOT NULL" < /dev/null 2>/dev/null || true)"
-    [ "$exists" = f ] && return 1
+    if pg_ask "SELECT 'users:' || (to_regclass('public.users') IS NOT NULL)::text" \
+        '^users:(true|false)$' && [ "$PG_ANSWER" = users:false ]; then
+        return 1
+    fi
     return 0
 }
+
+# Code from before project ownership cannot be restored once the schema has it.
+#
+# Any one of the four columns -- owner_user_id or data_scope, on evaluations or
+# predictions_log -- or either audit table is enough. That code inserts rows
+# without an owner into a column whose default is `pilot` and whose CHECK then
+# refuses them, and it reads both tables without the scope filter, so every
+# specialist's saved project would be served to everybody. Pilot rows are not
+# counted: the barrier is about the schema the old code would meet, and an
+# empty pilot changes nothing about that. Nor is alembic_version consulted --
+# a revision number says what was recorded, the catalogue says what exists.
+#
+# Asked of pg_catalog, so a partially applied schema -- one column of four --
+# still blocks. The answer carries a prefix and must be exactly
+# `ownership:<count>` from a psql that exited 0: an error, a non-zero status
+# with any output, an empty reply or anything else is a refusal, because
+# "could not tell" is not "absent".
+#
+# Succeeds (refuse) when the schema has any of it or cannot be read; fails
+# (allow) when the target carries the ownership code or the schema has none.
+# The answer is left in OWNERSHIP_PROBE_ANSWER for the message.
+OWNERSHIP_PROBE_SQL="SELECT 'ownership:' || ((SELECT count(*) FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid = a.attrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname IN ('evaluations', 'predictions_log') AND a.attname IN ('owner_user_id', 'data_scope') AND a.attnum > 0 AND NOT a.attisdropped) + (SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname IN ('project_access_events', 'project_access_targets')))"
+OWNERSHIP_PROBE_ANSWER=""
+ownership_downgrade_blocked() {
+    local to="$1"
+    # All three, read from the target commit and not from the working tree:
+    # the access rules, the only writer of the owned rows, and the migration
+    # that creates the columns. A commit with one of them is a commit from the
+    # middle of the change.
+    if git cat-file -e "$to:app/project_access.py" 2>/dev/null \
+        && git cat-file -e "$to:app/services/evaluation_store.py" 2>/dev/null \
+        && git cat-file -e "$to:alembic/versions/b7d41f2e9c35_project_ownership_and_access_audit.py" 2>/dev/null; then
+        return 1
+    fi
+    local ok=0
+    pg_ask "$OWNERSHIP_PROBE_SQL" '^ownership:[0-9]+$' || ok=1
+    OWNERSHIP_PROBE_ANSWER="$PG_ANSWER"
+    [ "$ok" = 0 ] && [ "$PG_ANSWER" = "ownership:0" ] && return 1
+    return 0
+}
+
+# What is left running after a refusal, said plainly. The operator reads this
+# at the moment the site is down, and the wrong sentence sends them the wrong
+# way: before the cutover there was only one, "the new code is still running".
+#
+# Between the stop and a verified start the state is observed, not assumed:
+# "STOPPED" is printed only when docker confirms every backend and scheduler
+# container stopped. Anything else is `unknown`, and said to be.
+state_after_refusal() {
+    case "$APPS_STATE" in
+        started)
+            echo "  The new backend and scheduler are running: fix forward, closing external"
+            echo "  access if need be." ;;
+        untouched)
+            echo "  Nothing had been stopped yet: what ran before this run is still running." ;;
+        *)
+            if [ "$APPS_STATE" != unknown ] && confirm_apps_stopped backend scheduler; then
+                APPS_STATE=stopped
+                echo "  backend, scheduler and nginx are STOPPED and the site is not serving. That"
+                echo "  is deliberate: neither the old code (refused above) nor the new one (not"
+                echo "  verified) is started without an operator. Fix forward with a corrected"
+                echo "  release through this script; restoring a backup is a separate, emergency"
+                echo "  operation. Do not start containers by hand. See docs/DEPLOY.md."
+            else
+                APPS_STATE=unknown
+                echo "  backend and scheduler could NOT be confirmed stopped (see above), and nginx"
+                echo "  may be stopped too. Code may be running on a schema this run cannot vouch"
+                echo "  for. Inspect with \`docker compose -p $PROJECT ps -a\` before anything"
+                echo "  else; do not start containers by hand. See docs/DEPLOY.md."
+            fi ;;
+    esac
+}
+
+cutover_stage() {
+    CUTOVER_STAGE="$1"
+    echo "  cutover: $1"
+    journal_write mutating "cutover: $1"
+}
+
+# Every client transaction on the database has ended, other than this
+# question's own. Polled for DRAIN_SECONDS. Returns 0 when quiet, 1 when the
+# time ran out, 2 when the answer could not be read -- which must refuse, not
+# pass, because an unreadable count of zero is how a check stops checking.
+SESSIONS_SQL="SELECT 'active:' || count(*) FROM pg_catalog.pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND backend_type = 'client backend' AND state IS DISTINCT FROM 'idle'"
+wait_for_quiet_database() {
+    local i=0
+    while :; do
+        if ! pg_ask "$SESSIONS_SQL" '^active:[0-9]+$'; then
+            echo "  could not count open transactions (answer '${PG_ANSWER:-nothing}')" >&2
+            return 2
+        fi
+        [ "$PG_ANSWER" = active:0 ] && return 0
+        i=$((i + 1))
+        if [ "$i" -ge "$DRAIN_SECONDS" ]; then
+            echo "  ${PG_ANSWER#active:} client transaction(s) still open after ${DRAIN_SECONDS}s" >&2
+            return 1
+        fi
+        sleep 1
+    done
+}
+
+# The migrator is gone, and that is known rather than inferred: the client that
+# created it has returned on its own, every container that client could have
+# made is found and removed, docker confirms the container is no longer there,
+# no database session carries its application_name -- and, while the
+# applications are stopped, no open transaction from anyone. Idempotent.
+#
+# Returns 0 when that is confirmed, 1 when it is not, and 2 when it cannot be
+# known -- the creating client has not returned, so a create or start it sent
+# may still land after any check made now. No number of empty `docker ps`
+# answers removes that doubt: an earlier version killed the client and then
+# waited a fixed settle window for a late create to appear, and a create
+# accepted later than the window would have been missed. Every caller treats 1
+# and 2 as "the schema may not be read and no old code may start".
+ensure_migrator_gone() {
+    [ -n "$MIGRATOR_NAME" ] || return 0
+    [ "$MIGRATOR_GONE" = 1 ] && return 0
+    local i=0 ids="" id gone ans
+    # The creating client is never killed. If it is still running, wait for it
+    # -- it is in its own session, so the operator's Ctrl-C did not reach it --
+    # up to what is left of its budget; if it has still not returned, nothing
+    # can be confirmed.
+    if [ "$MIGRATOR_CREATE" = running ]; then
+        echo "  waiting for the migrator's creating client to return" >&2
+        while kill -0 "$MIGRATOR_CREATE_PID" 2>/dev/null; do
+            if [ $((SECONDS - MIGRATOR_CREATE_STARTED)) -ge "$MIGRATOR_CREATE_SECONDS" ]; then
+                MIGRATOR_CREATE=unknown
+                break
+            fi
+            sleep 1
+        done
+        if [ "$MIGRATOR_CREATE" = running ]; then
+            local crc=0
+            wait "$MIGRATOR_CREATE_PID" 2>/dev/null || crc=$?
+            identify_migrator "$crc"
+        fi
+    fi
+    if [ "$MIGRATOR_CREATE" = unknown ]; then
+        echo "  the migrator $MIGRATOR_NAME was never positively identified: its creating" >&2
+        echo "  client did not return, or returned without a container docker can name, so" >&2
+        echo "  a create or start it sent may still land; whether a migrator exists cannot" >&2
+        echo "  be known" >&2
+        return 2
+    fi
+    # A known object from here: the id docker gave for this run's own name.
+    # It is removed and its absence confirmed below; the name is asked again in
+    # case the same name names something else as well.
+    [ -z "$MIGRATOR_ID" ] || ids="$MIGRATOR_ID"
+    if ! ans="$(docker ps -aq --no-trunc --filter "name=^/${MIGRATOR_NAME}\$" 2>/dev/null)"; then
+        echo "  docker cannot say whether a container named $MIGRATOR_NAME exists" >&2
+        return 1
+    fi
+    for id in $ans; do case " $ids " in *" $id "*) ;; *) ids="$ids $id" ;; esac; done
+    for id in $ids; do
+        i=0
+        while :; do
+            # Positive: the daemon says this id no longer exists. A removed
+            # container cannot be started again, so nothing it was asked to do
+            # can still happen.
+            if gone="$(docker inspect -f '{{.Id}}' "$id" 2>&1)"; then
+                echo "  stopping and removing the migrator container ${id:0:12}" >&2
+                docker stop -t 10 "$id" >/dev/null 2>&1 || true
+                docker rm -f "$id" >/dev/null 2>&1 || true
+            else
+                # Both spellings. Docker 29 writes "error: no such object: <id>"
+                # in lower case; matching only "No such" read a confirmed removal
+                # as an unanswered question, and on 2026-11-05 the first
+                # production cutover stopped there with the migration committed
+                # and every service down.
+                case "$gone" in
+                    *"No such"*|*"no such"*) break ;;
+                    *) echo "  docker cannot say whether ${id:0:12} still exists: $gone" >&2 ;;
+                esac
+            fi
+            i=$((i + 1))
+            if [ "$i" -ge "$MIGRATOR_GONE_SECONDS" ]; then
+                echo "  the migrator container ${id:0:12} could not be confirmed removed within ${MIGRATOR_GONE_SECONDS}s" >&2
+                return 1
+            fi
+            sleep 1
+        done
+    done
+    MIGRATOR_ID=""
+    # Its server-side session. A backend whose client vanished mid-statement
+    # can run on until it next touches the socket; terminating it rolls its
+    # transaction back now rather than whenever it notices. Repeated until the
+    # same question finds no such session at all.
+    i=0
+    while :; do
+        if ! pg_ask "SELECT 'migrator:' || count(pg_terminate_backend(pid)) FROM pg_catalog.pg_stat_activity WHERE application_name = '$MIGRATOR_NAME'" '^migrator:[0-9]+$'; then
+            echo "  could not ask the database about the migrator's session (answer '${PG_ANSWER:-nothing}')" >&2
+            return 1
+        fi
+        [ "$PG_ANSWER" = migrator:0 ] && break
+        echo "  terminated ${PG_ANSWER#migrator:} session(s) of the migrator; asking again" >&2
+        i=$((i + 1))
+        if [ "$i" -ge "$MIGRATOR_GONE_SECONDS" ]; then
+            echo "  the migrator's database session survived ${MIGRATOR_GONE_SECONDS}s of termination" >&2
+            return 1
+        fi
+        sleep 1
+    done
+    # And, while nothing else should be talking to the database, nobody else.
+    if [ "$APPS_STATE" != started ]; then
+        wait_for_quiet_database || return 1
+    fi
+    MIGRATOR_GONE=1
+    echo "  the migrator is gone and its transaction has ended" >&2
+    return 0
+}
+
+# Every container of these services is stopped -- replicas included, which is
+# why this lists containers by label rather than asking `ps -q <service>` for
+# one. Refuses when the list cannot be read: "could not see one running" is
+# not "none running".
+confirm_apps_stopped() {
+    local svc out live=""
+    for svc in "$@"; do
+        out="$(docker ps -a \
+            --filter "label=com.docker.compose.project=$PROJECT" \
+            --filter "label=com.docker.compose.service=$svc" \
+            --format '{{.ID}} {{.State}}' 2>/dev/null)" \
+            || { echo "  cannot read the state of $svc's containers" >&2; return 1; }
+        while read -r cid state; do
+            [ -n "$cid" ] || continue
+            case "$state" in
+                exited|created|dead) ;;
+                *) live="$live $svc:$cid:${state:-unknown}" ;;
+            esac
+        done <<< "$out"
+    done
+    if [ -n "$live" ]; then
+        echo "  still alive after stop:$live" >&2
+        return 1
+    fi
+    return 0
+}
+
+# The one migrator, under a name tied to this run, from the pinned image,
+# against a deadline -- and with an identity this script holds.
+#
+# Created detached (`run -d`), so the client's work ends when the container
+# exists and has been started, and the container is then a thing with an id
+# that can be waited on, stopped and removed. The creating client runs in its
+# own session, so a Ctrl-C at the terminal reaches this script and not it, and
+# it is never killed: a client killed mid-request is exactly the case whose
+# outcome nobody can know. A client that does not return within
+# MIGRATOR_CREATE_SECONDS leaves the migrator's existence unknown, and that is
+# reported as such -- never resolved by waiting a little and assuming.
+#
+# PGAPPNAME tags its session, so ensure_migrator_gone can find it on the
+# server. Returns the migrator's exit code, 124 when the deadline passed (it is
+# then still running and the caller must stop it), 125 when it could not be
+# created or its creation could not be confirmed.
+#
+# What the creating client left behind, decided once it has returned with
+# status $1. The only state that lets anything proceed is a container docker
+# names for this run's own name: an object with an id, which can be removed and
+# whose absence can then be confirmed. Anything else -- the client exited
+# non-zero after a lost response, exited 0 yet docker names nothing, or docker
+# cannot be asked -- is `unknown`, whatever the status said: a client that
+# failed does not show that the daemon did not accept its create or start, and
+# a create accepted then can still land later.
+identify_migrator() {
+    local rc="$1" got
+    MIGRATOR_ID=""
+    if got="$(docker inspect -f '{{.Id}}' "$MIGRATOR_NAME" 2>/dev/null)" \
+        && [[ "$got" =~ ^[A-Za-z0-9]+$ ]]; then
+        MIGRATOR_ID="$got"
+        MIGRATOR_CREATE=returned
+    else
+        MIGRATOR_CREATE=unknown
+        echo "  no container is named $MIGRATOR_NAME after its client exited $rc" >&2
+    fi
+}
+
+run_migrator() {
+    MIGRATOR_NAME="$(printf '%s-migrate-%s' "$PROJECT" "$RUN_ID" | tr -cd 'A-Za-z0-9_.-')"
+    MIGRATOR_GONE=0
+    MIGRATOR_ID=""
+    journal_write mutating "cutover: migrating with $MIGRATOR_NAME"
+    local out rc=0 state started
+    out="$(mktemp)" || return 125
+    MIGRATOR_CREATE=running
+    MIGRATOR_CREATE_STARTED=$SECONDS
+    setsid -w "${DCP[@]}" run -d --no-deps -T --name "$MIGRATOR_NAME" \
+        -e "PGAPPNAME=$MIGRATOR_NAME" migrate < /dev/null > "$out" 2>&1 &
+    MIGRATOR_CREATE_PID=$!
+    while kill -0 "$MIGRATOR_CREATE_PID" 2>/dev/null; do
+        if [ $((SECONDS - MIGRATOR_CREATE_STARTED)) -ge "$MIGRATOR_CREATE_SECONDS" ]; then
+            MIGRATOR_CREATE=unknown
+            echo "  the migrator's creating client did not return within ${MIGRATOR_CREATE_SECONDS}s" >&2
+            rm -f "$out"
+            return 125
+        fi
+        sleep 1
+    done
+    wait "$MIGRATOR_CREATE_PID" || rc=$?
+    sed 's/^/  migrate: /' "$out" >&2
+    rm -f "$out"
+    identify_migrator "$rc"
+    if [ "$MIGRATOR_CREATE" = unknown ]; then
+        echo "  the migrator's creating client exited $rc and docker names no container" >&2
+        echo "  $MIGRATOR_NAME; a client that failed does not show that its create was refused" >&2
+        return 125
+    fi
+    if [ "$rc" -ne 0 ]; then
+        echo "  the migrator was created (${MIGRATOR_ID:0:12}) but its client exited $rc" >&2
+        return 125
+    fi
+    started=$SECONDS
+    while :; do
+        state="$(docker inspect -f '{{.State.Status}}' "$MIGRATOR_ID" 2>/dev/null || echo unreadable)"
+        case "$state" in
+            exited|dead) break ;;
+            created|running|restarting|paused) ;;
+            *) echo "  the migrator's state cannot be read ('$state')" >&2; return 125 ;;
+        esac
+        if [ $((SECONDS - started)) -ge "$MIGRATE_DEADLINE" ]; then
+            MIGRATE_TIMED_OUT=1
+            echo "  the migrator passed its ${MIGRATE_DEADLINE}s deadline" >&2
+            return 124
+        fi
+        sleep 1
+    done
+    docker logs "$MIGRATOR_ID" 2>&1 | sed 's/^/  migrate: /' >&2 || true
+    rc="$(docker inspect -f '{{.State.ExitCode}}' "$MIGRATOR_ID" 2>/dev/null || echo unreadable)"
+    case "$rc" in
+        ''|*[!0-9]*) echo "  the migrator's exit code cannot be read ('$rc')" >&2; return 125 ;;
+    esac
+    return "$rc"
+}
+
+# The image of every application service of this run, pinned by id.
+#
+# A tag is a pointer. Building once and naming the result `sora_earth_app:current`
+# made the migrator, the bootstrap and the applications share a *name*; each
+# `run` and `up` still resolved that name when it ran, so a build, a pull or a
+# retag between them -- another deployment's, an operator's -- would migrate
+# with one image and serve another, and the id comparison afterwards would only
+# report it. The override below names the id itself for every service that
+# uses the image, and every compose command of the cutover from the migrator
+# to the last `up` carries it: DCP, never DC.
+#
+# Only for services the configuration declares, profiles included: an override
+# for a service the base file lacks creates that service -- with an image and no
+# command -- and the next `up --remove-orphans` would start it.
+pin_application_image() {
+    [[ "$APP_IMAGE_ID" =~ ^sha256:[A-Za-z0-9._-]+$ ]] \
+        || fail "the built image id '$APP_IMAGE_ID' is not an image id; nothing can be pinned to it"
+    local all svc pinned=""
+    all="$("${DC[@]}" --profile '*' config --services 2>/dev/null)" \
+        || fail "the services of $COMPOSE could not be listed, so the image cannot be pinned"
+    PIN_FILE="$(mktemp "${TMPDIR:-/tmp}/sora-image-pin.XXXXXX")" \
+        || fail "cannot create the image pin override"
+    {
+        echo "services:"
+        for svc in migrate bootstrap-users backend scheduler; do
+            if grep -qxF -- "$svc" <<<"$all"; then
+                printf '  %s:\n    image: "%s"\n' "$svc" "$APP_IMAGE_ID"
+                pinned="$pinned $svc"
+            fi
+        done
+    } > "$PIN_FILE" || fail "cannot write the image pin override"
+    DCP=("${DC[@]}" -f "$PIN_FILE")
+    echo "  pinned${pinned:- nothing} to ${APP_IMAGE_ID:0:19}"
+}
+DCP=("${DC[@]}")
 
 # A commit can be merged before it may be deployed.
 #
@@ -379,6 +901,9 @@ trap 'on_signal HUP' HUP
 # thought of.
 on_unexpected_exit() {
     local rc=$?
+    # The pin override is this run's alone, and every path out passes here --
+    # abort_deployment's `exit` included.
+    [ -z "$PIN_FILE" ] || rm -f "$PIN_FILE"
     # Success, or a phase where nothing has been changed yet: nothing to undo.
     [ "$rc" -eq 0 ] && exit 0
     [ "$PHASE" = mutating ] || exit "$rc"
@@ -409,6 +934,27 @@ while [ $# -gt 0 ]; do
         *) fail "unknown argument '$1'" ;;
     esac
 done
+
+# The budgets are numbers, checked before anything is read or locked. Each is
+# used in an arithmetic comparison, and a value that is not a plain decimal
+# integer does not fail there safely: `[ "$i" -ge abc ]` is an error that
+# `while` reads as false, so a mistyped deadline silently became no deadline;
+# and a leading zero is octal to bash arithmetic, so 08 is an error and 010 is
+# eight.
+require_seconds() {   # name value minimum
+    case "$2" in
+        ''|*[!0-9]*|0?*) fail "$1 must be a whole number written without leading zeros, not '$2'" ;;
+    esac
+    [ "${#2}" -le 5 ] || fail "$1 is implausibly large: '$2'"
+    [ "$2" -ge "$3" ] || fail "$1 must be at least $3, not '$2'"
+}
+require_seconds DEPLOY_STOP_TIMEOUT "$STOP_TIMEOUT" 1
+require_seconds DEPLOY_DRAIN_SECONDS "$DRAIN_SECONDS" 1
+require_seconds DEPLOY_MIGRATE_DEADLINE "$MIGRATE_DEADLINE" 1
+require_seconds DEPLOY_MIGRATOR_GONE_SECONDS "$MIGRATOR_GONE_SECONDS" 1
+require_seconds DEPLOY_MIGRATOR_CREATE_SECONDS "$MIGRATOR_CREATE_SECONDS" 1
+require_seconds HEALTH_ATTEMPTS "$HEALTH_ATTEMPTS" 1
+require_seconds HEALTH_DELAY "$HEALTH_DELAY" 0
 
 # ---------------------------------------------------------------- serialisation
 
@@ -609,6 +1155,12 @@ else
     if accounts_downgrade_blocked "$TARGET"; then
         fail "${TARGET:0:12} predates persistent accounts and the users table exists (or could not be checked): that code refuses the migrated schema and would ignore every block and reset. Roll back to a commit that has app/accounts.py, or fix forward."
     fi
+    # And, independently, code from before project ownership once the schema
+    # has any part of it (ownership_downgrade_blocked). Also before the
+    # checkout, so a refusal leaves the tree and every container as they were.
+    if ownership_downgrade_blocked "$TARGET"; then
+        fail "${TARGET:0:12} has no project ownership and the database has ownership columns or audit tables (probe answered '${OWNERSHIP_PROBE_ANSWER:-nothing}', and anything but ownership:0 refuses): that code would write rows the schema refuses and serve every saved project to everyone. Roll back to a commit with app/project_access.py, or fix forward."
+    fi
     # The journal records deployments this script made. One made by hand leaves
     # no entry, and the next scripted run then names the last *scripted* commit
     # as the one it replaced, skipping everything in between (#133). The "to
@@ -797,6 +1349,9 @@ step "what this configuration would publish"
 
 command -v python3 >/dev/null 2>&1 \
     || fail "python3 is required to read the rendered compose configuration"
+# The migrator's creating client runs in a session of its own (run_migrator).
+command -v setsid >/dev/null 2>&1 \
+    || fail "setsid (util-linux) is required to keep the migrator's creating client out of reach of signals"
 
 # The rendered document carries interpolated environment values, so it is never
 # printed, logged or written to a manifest. Only the port tuple leaves this
@@ -870,6 +1425,25 @@ fi
 [ "$NGINX_80" = 1 ]  || fail "this configuration publishes no off-host 80/tcp for nginx"
 [ "$NGINX_443" = 1 ] || fail "this configuration publishes no off-host 443/tcp for nginx"
 echo "  only nginx 80/tcp and 443/tcp would be published off-host"
+
+# What backend and scheduler need running before they start, transitively, from
+# the rendered configuration. The cutover starts these on their own and then
+# the two applications with --no-deps, so no `up` between the stop and the
+# forced recreate has backend or scheduler -- or anything that depends on them,
+# such as nginx or prometheus -- in its plan. A generic `up` there would start
+# the stopped old containers again on the new schema.
+APP_DEPS="$("${DC[@]}" config --format json 2>/dev/null | python3 -c '
+import json, sys
+svc = json.load(sys.stdin).get("services") or {}
+seen, todo = set(), [s for s in ("backend", "scheduler") if s in svc]
+while todo:
+    for dep in (svc.get(todo.pop()) or {}).get("depends_on") or {}:
+        if dep not in seen:
+            seen.add(dep)
+            todo.append(dep)
+print(" ".join(sorted(seen - {"backend", "scheduler", "nginx"})))
+')" || fail "the dependencies of backend and scheduler could not be read from the configuration"
+echo "  backend and scheduler depend on: ${APP_DEPS:-nothing declared}"
 
 # The guards must be armed in the configuration about to be deployed.
 #
@@ -986,35 +1560,40 @@ if [ "$MODE" = finalize ]; then
     "${DC[@]}" exec -T backend python3 ./scripts/verify_schema_head.py \
         || fail "the running backend does not consider the schema to be at head; the migration this run applied cannot be confirmed"
 else
-PHASE=mutating
-# Written before the first change, not after: a journal that appears only once
-# the mutation succeeded records nothing about the case it exists for.
-journal_write mutating
-
-# One migrator, before anything is recreated (#125).
+# The cutover, in this order and no other (#125 for the one migrator; project
+# ownership for the stop before it):
 #
-# The application entrypoint used to run `alembic upgrade head`, and the backend
-# and the scheduler share that file, so `up -d` started two migrators against
-# one database at the same moment. Alembic takes no lock spanning that: the
-# loser died, `restart: unless-stopped` brought it back, and by then the
-# migration had usually been applied. That converged; it was never designed to.
+#   build once, pin the id     the migration and the applications are one image,
+#                              named by id in an override every later compose
+#                              command carries
+#   postgres healthy           `run --no-deps` bypasses compose's health gate
+#   -- PHASE=mutating and the journal: nothing above changed a container --
+#   stop nginx                 no new request reaches anything
+#   stop backend, scheduler    -t $STOP_TIMEOUT to finish what they hold, then
+#                              confirmed stopped -- every container, replicas too
+#   database quiet             no client transaction left open
+#   one migrator               named for this run, under a deadline
+#   bootstrap-users            from the same image
+#   dependencies               started on their own, --no-deps
+#   backend, scheduler         --force-recreate from the pinned image: the first
+#                              start after the migration is never a revival of
+#                              the stopped old containers
+#   everything else, nginx     only once the new code runs on that image
 #
-# Three properties this arrangement has and that one did not:
+# Why the old code stops first. Since project ownership the old backend's
+# INSERT into evaluations and predictions_log is refused by the new schema --
+# the default scope is `pilot`, which needs an owner -- and its reads ignore the
+# scope; the old scheduler reads the same tables into shared forecasts and
+# metrics. Running either beside the migration, or after it, is a mixed rollout
+# the schema was designed to make impossible. So no code serves while the
+# schema changes, and a refusal from here on may leave the site stopped: the
+# messages say which (state_after_refusal).
 #
-#   once      `run --rm migrate` is a single container, and the `migration`
-#             profile keeps the service out of `up` so it cannot become a third
-#             migrator.
-#   first     the schema is at head before any application container starts.
-#             The entrypoint now verifies and refuses rather than migrating, so
-#             an out-of-order deploy stops here instead of crash-looping.
-#   fatal     a failed migration ends the deployment through the same rollback
-#             as any other refusal, rather than restarting a container until it
-#             works.
-#
-# `--build` because the migration has to come from the image being deployed, not
-# from whatever was cached. The service connects to `postgres` directly: the
-# pooler runs `pool_mode = transaction`, where session state does not survive
-# between transactions.
+# What this does not do: undo DDL. A migration that failed partway leaves the
+# schema where it left it -- the pending revisions run in one transaction, so
+# they commit whole or not at all -- and the rollback barriers decide from what
+# the catalogue shows, not from what was intended.
+echo "  building the application image"
 # Built once, here, and not again. backend, scheduler and migrate all reference
 # ${SORA_APP_IMAGE}, so the image the migration runs from and the image the
 # application starts from are the same by construction. Two `--build`
@@ -1027,6 +1606,7 @@ journal_write mutating
 APP_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null || true)"
 [ -n "$APP_IMAGE_ID" ] \
     || fail "built $APP_IMAGE but cannot read its id, so nothing below can be verified against it"
+pin_application_image
 
 # `run --no-deps migrate` deliberately bypasses compose's dependency health
 # gate. On a fresh volume initdb takes long enough for a TCP connection to be
@@ -1034,16 +1614,62 @@ APP_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null
 "${DC[@]}" up -d --wait postgres \
     || fail "postgres would not start, so migrations cannot run"
 
-# One migrator, from that exact image, before anything is recreated.
-#
-# A failure here stops the deployment and rolls the *containers* back. It does
-# not undo DDL: a migration that failed partway, or one whose statements are not
-# transactional, leaves the schema where it left it. What this buys is that the
-# schema is never changed by two processes at once and never changed after the
-# new code is already serving -- not that a half-applied migration repairs
-# itself.
-"${DC[@]}" run --rm --no-deps migrate \
-    || fail "alembic upgrade head failed; nothing has been recreated. The schema is wherever the migration left it -- inspect it before retrying."
+# From here a refusal has something to undo -- the first stop is the first
+# change to what serves -- so `fail` routes through abort_deployment. Not
+# earlier: a build that fails, or a database that will not come up, has
+# changed nothing that runs, and "rolling back" from there would restore and
+# restart the very containers that were never touched.
+PHASE=mutating
+# Written before the first change, not after: a journal that appears only once
+# the mutation succeeded records nothing about the case it exists for.
+journal_write mutating
+
+# Incoming requests first, so nothing new reaches a backend that is about to
+# stop. nginx is recreated, never restarted, further down.
+cutover_stage "stopping nginx"
+APPS_STATE=stopping
+"${DC[@]}" stop nginx \
+    || fail "nginx would not stop; nothing was migrated"
+
+cutover_stage "stopping backend and scheduler"
+"${DC[@]}" stop -t "$STOP_TIMEOUT" backend scheduler \
+    || fail "backend and scheduler would not stop; nothing was migrated"
+# Asked, not assumed from the exit status: `restart: unless-stopped`, a replica,
+# or a container started by hand would each leave old code writing to the
+# tables the migration is about to change.
+confirm_apps_stopped backend scheduler \
+    || fail "backend or scheduler is still running, or their state cannot be read; nothing was migrated"
+APPS_STATE=stopped
+
+# And what they held. A stopped container's connections close, but a
+# transaction the pooler was still finishing, or an operator's session, would
+# otherwise make the migration wait on its lock and then fail.
+cutover_stage "waiting for open transactions"
+_quiet=0
+wait_for_quiet_database || _quiet=$?
+case "$_quiet" in
+    0) ;;
+    1) fail "client transactions were still open ${DRAIN_SECONDS}s after the applications stopped; nothing was migrated" ;;
+    *) fail "the database could not be asked whether transactions are open; nothing was migrated" ;;
+esac
+
+# One migrator, from that exact image, with nothing else connected to change.
+cutover_stage "migrating"
+_mig=0
+run_migrator || _mig=$?
+if [ "$_mig" -ne 0 ]; then
+    if [ "$MIGRATE_TIMED_OUT" = 1 ]; then
+        # Stopped here, and again, idempotently, at the top of the rollback.
+        ensure_migrator_gone || true
+        fail "the migration did not finish within ${MIGRATE_DEADLINE}s and was stopped. The schema is whatever the catalogue shows once its transaction ended -- inspect it before retrying."
+    fi
+    if [ "$_mig" = 125 ]; then
+        fail "the migrator could not be created, or its creation could not be confirmed; nothing has been recreated."
+    fi
+    fail "alembic upgrade head failed (exit $_mig); nothing has been recreated. The schema is wherever the migration left it -- inspect it before retrying."
+fi
+ensure_migrator_gone \
+    || fail "the migrator exited but could not be confirmed gone; nothing has been started"
 
 # The built-in accounts, once, into an empty `users` table -- and on every
 # deployment after that, a check that an active administrator still exists.
@@ -1054,54 +1680,83 @@ APP_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null
 # accounts exist.
 # Only where the checked-out code has the step: a rollback to a commit from
 # before persistent accounts has neither the script nor the service.
+cutover_stage "bootstrapping accounts"
 [ ! -f scripts/bootstrap_users.py ] \
-    || "${DC[@]}" run --rm --no-deps bootstrap-users \
+    || "${DCP[@]}" run --rm --no-deps bootstrap-users \
     || fail "the account bootstrap refused; nothing has been recreated. Either the SORA_DEFAULT_*_PASSWORD values are missing on a first deployment, or no active administrator exists."
 
-# --no-build, because everything that builds was built above. A rebuild here
-# could produce a different image than the one just migrated from, which is the
-# gap this arrangement closes.
-"${DC[@]}" up -d --no-build --remove-orphans
+# What the applications need, and nothing that needs them. `--no-deps` with the
+# list computed in the preflight, so this cannot reach backend, scheduler or
+# nginx however compose resolves dependencies.
+cutover_stage "starting dependencies"
+if [ -n "$APP_DEPS" ]; then
+    read -r -a _deps <<< "$APP_DEPS"
+    "${DCP[@]}" up -d --no-build --no-deps "${_deps[@]}" \
+        || fail "the services backend and scheduler depend on would not start: $APP_DEPS"
+fi
 
-# `up` did not necessarily move backend and scheduler onto that build.
-#
-# Compose decides whether to recreate a service from its configuration hash and
-# the image it recorded on the container, not from what the tag points at now.
-# Measured on production 2026-10-26 (Compose v5.6.0): a release that changed only
-# Grafana provisioning built a new image under the same tag, `up --no-build` left
-# backend and scheduler on the previous one, and the identity check below refused
-# the release. So when either disagrees with the build, recreate exactly those
-# two -- not the stack -- and do it here, before nginx is recreated to resolve
-# their addresses (the 2026-08-09 incident is nginx holding an address that a
-# later recreate took away).
+# The first start of backend and scheduler after the migration, and it is a
+# forced recreate from the pinned image -- never `up` on its own, which decides
+# from a configuration hash and the image it recorded on the container, and can
+# simply start the stopped old container again. Measured on production
+# 2026-10-26 (Compose v5.6.0): a release that changed only Grafana provisioning
+# built a new image under the same tag, and `up --no-build` left backend and
+# scheduler on the previous one. Before the cutover that was a refused release;
+# after it, it would be the old code on the new schema.
+cutover_stage "starting the new backend and scheduler"
+# `starting` until compose says both are up. If it fails partway one of them
+# may be running; the refusal then stops and confirms both rather than
+# describing a stopped site over a running backend (settle_partial_start).
+APPS_STATE=starting
+"${DCP[@]}" up -d --no-build --no-deps --force-recreate backend scheduler \
+    || fail "backend and scheduler could not be recreated on the built image"
+APPS_STATE=started
+journal_write mutating "cutover: new backend and scheduler started"
+
 app_image_of() {
     local cid
     cid="$("${DC[@]}" ps -q "$1" 2>/dev/null || true)"
     [ -n "$cid" ] || return 0
     docker inspect -f '{{.Image}}' "$cid" 2>/dev/null || true
 }
-_stale=""
 for svc in backend scheduler; do
     _img="$(app_image_of "$svc")"
     [ -n "$_img" ] || fail "$svc has no container, or its image cannot be read, after start"
-    [ "$_img" = "$APP_IMAGE_ID" ] || _stale="$_stale $svc"
+    [ "$_img" = "$APP_IMAGE_ID" ] || fail \
+        "$svc is running image $_img, not the $APP_IMAGE_ID the migration ran from"
 done
-if [ -n "$_stale" ]; then
-    echo "  still on a previous image:$_stale; recreating backend and scheduler on ${APP_IMAGE_ID:0:19}"
-    "${DC[@]}" up -d --no-build --no-deps --force-recreate backend scheduler \
-        || fail "backend and scheduler could not be recreated on the built image"
-    for svc in backend scheduler; do
-        _img="$(app_image_of "$svc")"
-        [ "$_img" = "$APP_IMAGE_ID" ] || fail \
-            "$svc is running image $_img, not the $APP_IMAGE_ID the migration ran from"
-    done
-fi
+
+# The schema, asked of the code that now runs. The entrypoint refuses to start
+# on any other head; this makes the answer part of the run's own evidence.
+"${DC[@]}" exec -T backend python3 ./scripts/verify_schema_head.py \
+    || fail "the new backend does not consider the schema to be at head"
+
+# Everything else -- grafana, mlflow, an orphan to remove -- only now, when the
+# one generic `up` of this run can no longer revive anything old: backend and
+# scheduler are already the new containers, on the pinned image. --no-build,
+# because everything that builds was built above.
+cutover_stage "starting the remaining services"
+"${DCP[@]}" up -d --no-build --remove-orphans \
+    || fail "the remaining services would not start"
+# And it did not move them. Compose may still recreate a service it considers
+# diverged; if it did, it must have been onto the same image.
+for svc in backend scheduler; do
+    _img="$(app_image_of "$svc")"
+    [ "$_img" = "$APP_IMAGE_ID" ] || fail \
+        "$svc is running image $_img, not the $APP_IMAGE_ID the migration ran from"
+done
 
 # nginx is recreated, not restarted. Its configuration is a bind-mounted single
 # file, so the container stays pinned to the inode that existed when it was
 # created; a git pull replaces the file and the container keeps reading the old
 # one. Observed, with `nginx -s reload` re-reading the stale copy.
-"${DC[@]}" up -d --force-recreate nginx
+#
+# With the pin, like every `up` after the build. nginx depends on backend, so
+# this `up` also decides whether backend matches its configuration -- and
+# without the override the configuration names the tag, not the id the
+# running container was created from, which is a difference compose resolves
+# by recreating backend from whatever the tag means now.
+"${DCP[@]}" up -d --force-recreate nginx
 
 # prometheus, for the same reason and with one difference.
 #
@@ -1127,7 +1782,7 @@ fi
 # incident exactly (#129). Measured on the host with `--dry-run` on 2026-09-07:
 # with and without the flag, only prometheus is touched. The flag is there so
 # that stays true rather than because it is true today.
-if "${DC[@]}" up -d --force-recreate --no-deps prometheus >/dev/null 2>&1; then
+if "${DCP[@]}" up -d --force-recreate --no-deps prometheus >/dev/null 2>&1; then
     echo "  prometheus recreated, so it reads the current infra/prometheus.yml"
 else
     echo "  WARNING: prometheus was not recreated; it is still running with the" >&2
@@ -1891,7 +2546,21 @@ sync "$MANIFEST_DIR" 2>/dev/null || sync
 cat "$MANIFEST"
 echo
 echo "manifest: $MANIFEST"
-if [ -n "$PREV_COMMIT" ]; then
+# The suggestion is asked of the same barriers a rollback would meet. After
+# the ownership release it printed `--rollback <previous>` for a commit both
+# barriers refuse -- advice that fails at the moment it is followed, and
+# reads as if going back were an option. A probe that cannot answer counts as
+# a refusal here too: "could not tell" is not "go ahead". This runs after the
+# deployment is complete, inside `if`, so it cannot fail the run it reports.
+if [ -n "$PREV_COMMIT" ] && accounts_downgrade_blocked "$PREV_COMMIT"; then
+    echo "to undo:  no rollback -- ${PREV_COMMIT:0:12} predates persistent accounts and the users"
+    echo "          table exists (or could not be read: ${PG_ANSWER:-no answer}). Fix forward with a"
+    echo "          corrected release through this script; see docs/DEPLOY.md"
+elif [ -n "$PREV_COMMIT" ] && ownership_downgrade_blocked "$PREV_COMMIT"; then
+    echo "to undo:  no rollback -- ${PREV_COMMIT:0:12} predates project ownership and the schema has"
+    echo "          it (answer: ${OWNERSHIP_PROBE_ANSWER:-none}). Fix forward with a corrected release"
+    echo "          through this script; see docs/DEPLOY.md"
+elif [ -n "$PREV_COMMIT" ]; then
     echo "to undo:  $0 --rollback $PREV_COMMIT"
 else
     echo "to undo:  no previous deployment is recorded; nothing to roll back to"
