@@ -107,6 +107,37 @@ describe("EvaluatePage when the API answers with nothing", () => {
   });
 });
 
+describe("every field on the form is named by its visible caption", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("finds each control through its label, not through the markup around it", () => {
+    stubJson({});
+    renderPage();
+
+    const inputs: Array<[string, string]> = [
+      ["Project name", "ev-project-name"],
+      ["Budget (USD)", "ev-budget"],
+      ["CO₂ Reduction (t/yr)", "ev-co2"],
+      ["Social Impact (1–10)", "ev-social"],
+      ["Duration (months)", "ev-duration"],
+    ];
+    for (const [caption, id] of inputs) {
+      const control = screen.getByLabelText(caption);
+      expect(control.tagName).toBe("INPUT");
+      expect(control.id).toBe(id);
+    }
+
+    // The country picker is a button; its name is the caption followed by
+    // what it currently shows, so the selection is announced with the field.
+    const country = screen.getByRole("button", { name: /^Country\b/ });
+    expect(country.id).toBe("ev-country");
+    expect(country).toHaveAttribute("aria-expanded", "false");
+    expect(country).toHaveAccessibleName(`Country ${country.textContent?.replace(/v$/, "").trim()}`);
+  });
+});
+
 describe("PDF download escaping (GHSA-jmpv-7wjf-87q9)", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -143,15 +174,11 @@ describe("PDF download escaping (GHSA-jmpv-7wjf-87q9)", () => {
       region: "Europe",
     });
 
-    const { container } = renderPage();
+    renderPage();
 
-    // Fill form with markup in the project name. The input has no accessible name/id,
-    // so we query by the label text and find the input inside the field.
+    // Fill form with markup in the project name.
     const user = userEvent.setup();
-    const fieldLabels = Array.from(container.querySelectorAll(".ev-field label"));
-    const projectNameField = fieldLabels.find((l) => l.textContent === "Project name")?.parentElement;
-    const nameInput = projectNameField?.querySelector("input");
-    if (!nameInput) throw new Error("Project name input not found");
+    const nameInput = screen.getByLabelText("Project name");
     await user.clear(nameInput);
     await user.type(nameInput, '<b id="x">x</b>');
 

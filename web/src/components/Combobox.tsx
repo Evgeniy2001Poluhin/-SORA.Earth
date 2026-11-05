@@ -6,9 +6,13 @@ type Props = {
   options: string[];
   groups?: Record<string, string>;
   placeholder?: string;
+  /** id of the trigger button, so a <label htmlFor> can point at it */
+  id?: string;
+  /** id of the visible caption; the trigger is then named "<caption> <value>" */
+  labelledBy?: string;
 };
 
-export default function Combobox({ value, onChange, options, groups, placeholder }: Props) {
+export default function Combobox({ value, onChange, options, groups, placeholder, id, labelledBy }: Props) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [hi, setHi] = useState(0);
@@ -51,8 +55,15 @@ export default function Combobox({ value, onChange, options, groups, placeholder
 
   return (
     <div className="cb" ref={ref}>
-      <button type="button" className="cb-trigger" onClick={() => setOpen(o => !o)}>
-        <span>{value || placeholder || "Select"}</span>
+      <button
+        type="button"
+        className="cb-trigger"
+        id={id}
+        aria-expanded={open}
+        aria-labelledby={labelledBy && id ? `${labelledBy} ${id}-value` : undefined}
+        onClick={() => setOpen(o => !o)}
+      >
+        <span id={id ? `${id}-value` : undefined}>{value || placeholder || "Select"}</span>
         <span className="cb-caret">v</span>
       </button>
       {open && (

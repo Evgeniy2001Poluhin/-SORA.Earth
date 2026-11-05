@@ -276,28 +276,30 @@ export function EvaluatePage() {
             <div className="ev-presets">
               {PRESETS.map(p => <button key={p.id} className={activePreset===p.id?"active":""} onClick={()=>applyPreset(p.id)}>{p.label}</button>)}
             </div>
-            <Field label="Project name">
-              <input value={form.project_name} onChange={e=>setField("project_name", e.target.value)}/>
+            <Field label="Project name" id="ev-project-name">
+              <input id="ev-project-name" value={form.project_name} onChange={e=>setField("project_name", e.target.value)}/>
             </Field>
-            <Field label="Country">
+            <Field label="Country" id="ev-country">
               <Combobox
+                id="ev-country"
+                labelledBy="ev-country-label"
                 value={form.country}
                 onChange={v => setField("country", v)}
                 options={countryList}
                 placeholder="Select country"
               />
             </Field>
-            <Field label="Budget (USD)">
-              <input type="number" value={form.budget_usd} onChange={e=>setField("budget_usd", Number(e.target.value))}/>
+            <Field label="Budget (USD)" id="ev-budget">
+              <input id="ev-budget" type="number" value={form.budget_usd} onChange={e=>setField("budget_usd", Number(e.target.value))}/>
             </Field>
-            <Field label="CO₂ Reduction (t/yr)">
-              <input type="number" value={form.co2_reduction_tons_per_year} onChange={e=>setField("co2_reduction_tons_per_year", Number(e.target.value))}/>
+            <Field label="CO₂ Reduction (t/yr)" id="ev-co2">
+              <input id="ev-co2" type="number" value={form.co2_reduction_tons_per_year} onChange={e=>setField("co2_reduction_tons_per_year", Number(e.target.value))}/>
             </Field>
-            <Field label="Social Impact (1–10)">
-              <input type="number" min={1} max={10} value={form.social_impact_score} onChange={e=>setField("social_impact_score", Number(e.target.value))}/>
+            <Field label="Social Impact (1–10)" id="ev-social">
+              <input id="ev-social" type="number" min={1} max={10} value={form.social_impact_score} onChange={e=>setField("social_impact_score", Number(e.target.value))}/>
             </Field>
-            <Field label="Duration (months)">
-              <input type="number" value={form.project_duration_months} onChange={e=>setField("project_duration_months", Number(e.target.value))}/>
+            <Field label="Duration (months)" id="ev-duration">
+              <input id="ev-duration" type="number" value={form.project_duration_months} onChange={e=>setField("project_duration_months", Number(e.target.value))}/>
             </Field>
             {!form.country && <p className="ev-save-note">Select a country to calculate.</p>}
             <div className="ev-actions">
@@ -489,8 +491,11 @@ function Skeleton(){
 function Row({k,v}:{k:string;v:React.ReactNode}) {
   return <div className="ev-hero-row"><div className="k mono">{k}</div><div className="v">{v}</div></div>;
 }
-function Field({label,children}:{label:string;children:React.ReactNode}) {
-  return <div className="ev-field"><label>{label}</label>{children}</div>;
+// `id` is the control's id: the label points at it, so a screen reader and
+// getByLabelText both find the field by its visible caption. The label's own
+// id (`${id}-label`) is for a control that is named by aria-labelledby.
+function Field({label,id,children}:{label:string;id:string;children:React.ReactNode}) {
+  return <div className="ev-field"><label htmlFor={id} id={`${id}-label`}>{label}</label>{children}</div>;
 }
 function Bar({kind,k,v}:{kind:"env"|"soc"|"eco";k:string;v:number}) {
   const w = clamp(v);
