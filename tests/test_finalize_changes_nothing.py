@@ -27,10 +27,16 @@ MUTATIONS = ("up -d", "run --rm", " build ", "git checkout", "alembic upgrade",
              "docker rm", "docker stop")
 
 
+#: Where the deployment branch begins. It was "else" followed by PHASE=mutating;
+#: the cutover moved PHASE=mutating down to where mutation actually starts, and
+#: the branch now opens with the comment that lays out the cutover's order.
+DEPLOYMENT_START = "\nelse\n# The cutover, in this order and no other"
+
+
 def _finalize_branch():
     source = open(SCRIPT).read()
     start = source.index('if [ "$MODE" = finalize ]; then\n    # Nothing below this point')
-    end = source.index("\nelse\nPHASE=mutating", start)
+    end = source.index(DEPLOYMENT_START, start)
     return source[start:end]
 
 
@@ -69,13 +75,20 @@ def test_the_deployment_branch_still_does_all_of_it():
     """The converse, so the test above cannot be satisfied by a script that
     stopped deploying altogether."""
     source = open(SCRIPT).read()
-    start = source.index("\nelse\nPHASE=mutating")
+    start = source.index(DEPLOYMENT_START)
     end = source.index("fi   # end of the mutating section")
     deployment = source[start:end]
 
-    for required in ("build backend", "run --rm --no-deps migrate",
+    for required in ("build backend", "run_migrator",
+                     "up -d --no-build --no-deps --force-recreate backend scheduler",
                      "up -d --no-build --remove-orphans"):
         assert required in deployment, required
+
+    # "run_migrator" alone is a name; the migration has to be in its body.
+    body_start = source.index("\nrun_migrator() {")
+    body = source[body_start:source.index("\n}\n", body_start)]
+    assert 'run -d --no-deps -T --name "$MIGRATOR_NAME"' in body
+    assert " migrate " in body
 
 
 def test_the_journal_is_cleared_after_the_manifest_is_published():

@@ -137,10 +137,66 @@ argv="$*"
 # unfalsifiable: the guard exits non-zero either way, and only the absence of an
 # `up` tells prevention from detection.
 printf '%s\n' "$argv" >> "$STUB_DIR/calls"
+
+# The image a compose command would run `$1` from. A real compose resolves the
+# tag when the command runs; with the deployment's pin override on the command
+# line (`-f .../sora-image-pin.*`) it takes the id written there instead. That
+# difference is the whole point of the pin, so the stub models both halves:
+# `tag_moved` is the tag pointing somewhere else after the build.
+pin_image_for() {
+    local f="" prev="" a
+    for a in $argv; do
+        if [ "$prev" = "-f" ]; then case "$a" in *sora-image-pin*) f="$a" ;; esac; fi
+        prev="$a"
+    done
+    [ -n "$f" ] && [ -f "$f" ] || return 0
+    awk -v s="  $1:" '$0 == s {on = 1; next} /^  [^ ]/ {on = 0}
+        on && /image:/ {gsub(/"/, "", $2); print $2; exit}' "$f"
+}
+tag_image() {
+    if [ -f "$STUB_DIR/tag_moved" ]; then cat "$STUB_DIR/tag_moved"
+    else cat "$STUB_DIR/app_image_id" 2>/dev/null || echo "sha256:image"; fi
+}
+image_for() {
+    local p; p="$(pin_image_for "$1")"
+    if [ -n "$p" ]; then echo "$p"; else tag_image; fi
+}
+# An `up` that is not the targeted recreate still decides whether backend
+# matches its configuration. Without the pin the configuration names the tag,
+# so once the tag has moved compose recreates backend from it.
+unpinned_up_moves_backend() {
+    if [ -f "$STUB_DIR/app_recreated" ] && [ -z "$(pin_image_for backend)" ] && [ -f "$STUB_DIR/tag_moved" ]; then
+        cat "$STUB_DIR/tag_moved" > "$STUB_DIR/recreated_image"
+        echo "unpinned up recreated backend" >> "$STUB_DIR/migration_log"
+    fi
+}
+# The state docker reports for one service's containers. `state_<service>` is a
+# test's fixed answer; otherwise `live_<service>`, which stop and recreate
+# maintain; otherwise running.
+service_state() {
+    if [ -f "$STUB_DIR/state_$1" ]; then cat "$STUB_DIR/state_$1"
+    elif [ -f "$STUB_DIR/live_$1" ]; then echo "cid-$1 $(cat "$STUB_DIR/live_$1")"
+    else echo "cid-$1 running"; fi
+}
+container_alive() {
+    kill -0 "$1" 2>/dev/null || return 1
+    case "$(ps -o stat= -p "$1" 2>/dev/null)" in Z*) return 1 ;; esac
+    return 0
+}
+# A probe answer, then the exit status a test asks for: the stdout of a psql
+# that then failed is the case `|| true` used to lose.
+answer() { printf '%s\n' "$2"; exit "$(cat "$STUB_DIR/${1}_exit" 2>/dev/null || echo 0)"; }
+
 case "$argv" in
     # Before "config --services", which would otherwise not match this at all --
     # kept adjacent so the two cannot drift apart.
     *"config --format json"*)  cat "$STUB_DIR/rendered"; exit 0 ;;
+    # Every service, profiles included: what the image pin may name. The
+    # one-shot services live behind profiles in docker-compose.prod.yml.
+    *"--profile * config --services"*)
+        if [ -f "$STUB_DIR/all_services" ]; then cat "$STUB_DIR/all_services"
+        else cat "$STUB_DIR/services"; printf '%s\n' scheduler migrate bootstrap-users; fi
+        exit 0 ;;
     *"config --services"*)  cat "$STUB_DIR/services"; exit 0 ;;
     *"ps --format {{.Service}}"*)
         cut -d'|' -f2 "$STUB_DIR/running"; exit 0 ;;
@@ -156,6 +212,118 @@ case "$argv" in
         awk -F'|' '{print $1"|"$3}' "$STUB_DIR/running"; exit 0 ;;
     *'{{.Names}} {{.Ports}}'*)
         awk -F'|' '{print "  "$1" "$3}' "$STUB_DIR/running"; exit 0 ;;
+    # The migrator: `compose run -d`, a creating client that returns once the
+    # container exists and has been started, and a container that then runs on
+    # its own. The container is the detached subshell below, its pid in
+    # `migrator_pid`, its existence in `migrator_container`, its exit code in
+    # `migrator_rc`; it is addressed by the id `cidmigrator0001`.
+    #
+    # The schema changes at the commit and not before: `slow_migrate` holds the
+    # transaction open for that many seconds, and a migrator stopped inside it
+    # leaves the schema as it was -- which is the whole question the rollback
+    # barrier has to get right. `migration_adds_ownership` is a release whose
+    # migration is the ownership revision; without it the stub migrates
+    # something unrelated, as every release before it did.
+    #
+    # The creating client can be slow: `migrate_create_delay` seconds before
+    # the daemon registers the container. A signal can land in that time, and
+    # the container still appears afterwards -- the case a fixed "settle"
+    # window after killing the client could miss whenever the registration came
+    # later than the window. The script now waits for the client instead, and
+    # refuses outright when it does not return.
+    *"run -d --no-deps"*" migrate")
+        n=$(( $(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0) + 1 ))
+        echo "$n" > "$STUB_DIR/migrate_calls"
+        printf 'migrate %s\n' "$(image_for migrate)" >> "$STUB_DIR/ran_images"
+        # `migrate_create_lost`: the response is lost -- the client exits 1
+        # having seen nothing -- and the create the daemon had accepted lands
+        # that many seconds later, then commits. Nothing the script can see at
+        # the client's exit tells this from a create that was refused.
+        if [ -f "$STUB_DIR/migrate_create_lost" ]; then
+            ( sleep "$(cat "$STUB_DIR/migrate_create_lost")"
+              : > "$STUB_DIR/migrator_container"
+              echo "registered" >> "$STUB_DIR/migration_log"
+              sleep 1
+              if [ -f "$STUB_DIR/migrator_container" ]; then
+                  printf '%s\n' evaluations.owner_user_id evaluations.data_scope \
+                      predictions_log.owner_user_id predictions_log.data_scope \
+                      table:project_access_events table:project_access_targets \
+                      >> "$STUB_DIR/schema"
+                  echo "committed" >> "$STUB_DIR/migration_log"
+              fi ) < /dev/null > /dev/null 2>&1 &
+            echo "stub: error during connect: unexpected EOF" >&2
+            exit 1
+        fi
+        [ -f "$STUB_DIR/migrate_create_delay" ] && sleep "$(cat "$STUB_DIR/migrate_create_delay")"
+        : > "$STUB_DIR/migrator_container"
+        echo "registered" >> "$STUB_DIR/migration_log"
+        # `migrate_start_fails`: the container exists and its start failed --
+        # a known object, which the rollback can remove and confirm gone.
+        [ -f "$STUB_DIR/migrate_start_fails" ] && { echo "stub: start failed" >&2; exit 1; }
+        (
+            [ -f "$STUB_DIR/slow_migrate" ] && sleep "$(cat "$STUB_DIR/slow_migrate")"
+            if [ -f "$STUB_DIR/migrate_fails" ]; then echo 1 > "$STUB_DIR/migrator_rc"; exit 1; fi
+            if [ -f "$STUB_DIR/migration_adds_ownership" ]; then
+                printf '%s\n' evaluations.owner_user_id evaluations.data_scope \
+                    predictions_log.owner_user_id predictions_log.data_scope \
+                    table:project_access_events table:project_access_targets \
+                    >> "$STUB_DIR/schema"
+                echo "committed" >> "$STUB_DIR/migration_log"
+            fi
+            # A signal that arrives after the commit, while the migrator is still
+            # finishing: the columns are visible and must block the old code.
+            [ -f "$STUB_DIR/slow_after_commit" ] && sleep "$(cat "$STUB_DIR/slow_after_commit")"
+            echo 0 > "$STUB_DIR/migrator_rc"
+            exit 0
+        ) < /dev/null > /dev/null 2>&1 &
+        echo "$!" > "$STUB_DIR/migrator_pid"
+        echo "p-migrate-run"
+        exit 0 ;;
+    # The migrator's container, by name (`ps -aq --filter name=`) or by id.
+    # Before the generic `ps -aq` branch, which would answer for the project.
+    *"ps -aq --no-trunc --filter name="*)
+        [ -f "$STUB_DIR/migrator_ps_unreadable" ] && { echo "stub: cannot connect" >&2; exit 1; }
+        [ -f "$STUB_DIR/migrator_name_ps_fails" ] && { echo "stub: cannot connect" >&2; exit 1; }
+        [ -f "$STUB_DIR/migrator_container" ] && echo "cidmigrator0001"
+        exit 0 ;;
+    "inspect -f {{.Id}} "*)
+        [ -f "$STUB_DIR/migrator_ps_unreadable" ] && { echo "stub: cannot connect" >&2; exit 1; }
+        # By id only: the run reads the id by name once, and every later
+        # question uses the id -- this fails the later ones.
+        case "$argv" in *cidmigrator0001*)
+            [ -f "$STUB_DIR/migrator_inspect_by_id_fails" ] && { echo "stub: cannot connect to the daemon" >&2; exit 1; } ;;
+        esac
+        if [ -f "$STUB_DIR/migrator_container" ]; then echo "cidmigrator0001"; exit 0; fi
+        echo "Error: No such object: ${argv##* }" >&2; exit 1 ;;
+    "inspect -f {{.State.Status}} "*)
+        [ -f "$STUB_DIR/migrator_container" ] || { echo "Error: No such object" >&2; exit 1; }
+        if [ -f "$STUB_DIR/migrator_pid" ] && container_alive "$(cat "$STUB_DIR/migrator_pid")"; then echo running
+        else echo exited; fi
+        exit 0 ;;
+    "inspect -f {{.State.ExitCode}} "*)
+        [ -f "$STUB_DIR/migrator_container" ] || { echo "Error: No such object" >&2; exit 1; }
+        cat "$STUB_DIR/migrator_rc" 2>/dev/null || echo 137
+        exit 0 ;;
+    "logs cidmigrator"*)
+        echo "stub migrator: alembic upgrade head"; exit 0 ;;
+    "stop -t 10 cidmigrator"*)
+        echo "migrator-stopped" >> "$STUB_DIR/migration_log"
+        [ -f "$STUB_DIR/migrator_unstoppable" ] && exit 1
+        if [ -f "$STUB_DIR/migrator_pid" ]; then
+            pid="$(cat "$STUB_DIR/migrator_pid")"
+            kill -TERM "$pid" 2>/dev/null
+            # `docker stop` returns once the container has stopped.
+            i=0
+            while container_alive "$pid" && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+            [ -f "$STUB_DIR/migrator_rc" ] || echo 137 > "$STUB_DIR/migrator_rc"
+        fi
+        exit 0 ;;
+    "rm -f cidmigrator"*)
+        [ -f "$STUB_DIR/migrator_unstoppable" ] && exit 1
+        [ -f "$STUB_DIR/migrator_pid" ] && kill -KILL "$(cat "$STUB_DIR/migrator_pid")" 2>/dev/null
+        rm -f "$STUB_DIR/migrator_container"
+        echo "migrator-removed" >> "$STUB_DIR/migration_log"
+        exit 0 ;;
     # Before the generic "ps -q": the rollback asks for ids, and a test needs to
     # be able to say a container existed before this run started.
     *"ps -aq"*)
@@ -205,26 +373,106 @@ case "$argv" in
         echo "schema check: schema is at head"
         exit 0 ;;
     *"image inspect"*)
-        cat "$STUB_DIR/app_image_id" 2>/dev/null || echo "sha256:image"
+        # `tag_moves_after_build`: something retags the image right after the
+        # deployment read its id -- another build, a pull, an operator. The
+        # first answer is the id that was built; the tag moves as soon as it
+        # has been given, and from then on names whatever the file says.
+        tag_image
+        if [ -f "$STUB_DIR/tag_moves_after_build" ] && [ ! -f "$STUB_DIR/tag_moved" ]; then
+            cat "$STUB_DIR/tag_moves_after_build" > "$STUB_DIR/tag_moved"
+        fi
         exit 0 ;;
     *"build backend"*)
         [ -f "$STUB_DIR/build_fails" ] && exit 1
         exit 0 ;;
-    *"run --rm --no-deps migrate"*|*"run --rm --build migrate"*|*"run --rm migrate"*)
-        n=$(( $(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0) + 1 ))
-        echo "$n" > "$STUB_DIR/migrate_calls"
-        [ -f "$STUB_DIR/migrate_fails" ] && exit 1
+    # The state of every container of a service, by label -- the replicas
+    # included (service_state above).
+    *"--format {{.ID}} {{.State}}"*)
+        [ -f "$STUB_DIR/app_state_unreadable" ] && exit 1
+        svc="${argv##*com.docker.compose.service=}"; svc="${svc%% *}"
+        service_state "$svc"
         exit 0 ;;
-    # The persistent-accounts rollback barrier asks whether `users` exists.
-    # "f" unless a case says otherwise; a failing query prints nothing, which
-    # the barrier must treat as a refusal.
+    *" stop nginx")
+        [ -f "$STUB_DIR/nginx_stop_fails" ] && exit 1
+        touch "$STUB_DIR/nginx_stopped"; exit 0 ;;
+    *" stop -t "*" backend scheduler")
+        [ -f "$STUB_DIR/app_stop_fails" ] && exit 1
+        # A second stop, after a start that failed partway, can fail on its own.
+        [ -f "$STUB_DIR/app_recreated" ] && [ -f "$STUB_DIR/restop_fails" ] && exit 1
+        echo exited > "$STUB_DIR/live_backend"
+        echo exited > "$STUB_DIR/live_scheduler"
+        touch "$STUB_DIR/apps_stopped"
+        if [ -f "$STUB_DIR/app_recreated" ]; then
+            echo "apps-stopped-after-start" >> "$STUB_DIR/migration_log"
+        else
+            echo "apps-stopped" >> "$STUB_DIR/migration_log"
+        fi
+        exit 0 ;;
+    # Questions to PostgreSQL. Each answers in the exact form the script
+    # requires, then exits with `<probe>_exit` when a test sets one -- valid
+    # stdout from a psql that failed afterwards.
     *"exec -T postgres sh -c"*)
-        [ -f "$STUB_DIR/users_table_unreadable" ] && exit 1
-        cat "$STUB_DIR/users_table" 2>/dev/null || echo f
-        exit 0 ;;
+        case "$argv" in
+            # The ownership barrier. Counted from `schema`, one line per column
+            # or table the catalogue holds -- and a line counts only if the
+            # question actually names it, so a probe that stopped asking about
+            # one of the four columns is caught by that column's case.
+            *"'ownership:'"*)
+                echo "ownership-probe" >> "$STUB_DIR/migration_log"
+                [ -f "$STUB_DIR/ownership_unreadable" ] && exit 1
+                if [ -f "$STUB_DIR/ownership_answer" ]; then
+                    cat "$STUB_DIR/ownership_answer"
+                    exit "$(cat "$STUB_DIR/ownership_exit" 2>/dev/null || echo 0)"
+                fi
+                n=0
+                while IFS= read -r item; do
+                    case "$item" in
+                        "") ;;
+                        table:*) case "$argv" in *"'${item#table:}'"*) n=$((n + 1)) ;; esac ;;
+                        *) t="${item%%.*}"; c="${item#*.}"
+                           case "$argv" in *"'$t'"*) case "$argv" in *"'$c'"*) n=$((n + 1)) ;; esac ;; esac ;;
+                    esac
+                done < <(cat "$STUB_DIR/schema" 2>/dev/null)
+                answer ownership "ownership:$n" ;;
+            *"'active:'"*)
+                [ -f "$STUB_DIR/active_unreadable" ] && exit 1
+                # `active_text`: an exact reply, malformed on purpose.
+                [ -f "$STUB_DIR/active_text" ] && { cat "$STUB_DIR/active_text"; exit 0; }
+                # `active_after_migrate`: sessions that appear only once the
+                # migrator has started -- its own, left behind when it is
+                # stopped, which the pre-migration drain cannot see.
+                if [ -f "$STUB_DIR/active_after_migrate" ] && [ -f "$STUB_DIR/migrate_calls" ]; then
+                    answer active "active:$(cat "$STUB_DIR/active_after_migrate")"
+                fi
+                answer active "active:$(cat "$STUB_DIR/active_sessions" 2>/dev/null || echo 0)" ;;
+            *"'migrator:'"*)
+                [ -f "$STUB_DIR/migrator_session_unreadable" ] && exit 1
+                # `migrator_sessions`: a server-side session that outlives its
+                # client. Each termination round reports what it terminated;
+                # the session is gone once the count reaches zero.
+                left="$(cat "$STUB_DIR/migrator_sessions" 2>/dev/null || echo 0)"
+                if [ "$left" -gt 0 ]; then
+                    echo $((left - 1)) > "$STUB_DIR/migrator_sessions"
+                    echo "migrator-session-terminated" >> "$STUB_DIR/migration_log"
+                    answer migrator "migrator:1"
+                fi
+                echo "migrator-session-gone" >> "$STUB_DIR/migration_log"
+                answer migrator "migrator:0" ;;
+            # The persistent-accounts barrier. `users_table` is t or f; a
+            # failing query prints nothing, which must refuse.
+            *"'users:'"*)
+                [ -f "$STUB_DIR/users_table_unreadable" ] && exit 1
+                case "$(cat "$STUB_DIR/users_table" 2>/dev/null || echo f)" in
+                    t) answer users "users:true" ;;
+                    *) answer users "users:false" ;;
+                esac ;;
+        esac
+        echo "stub: unrecognised question to postgres" >&2
+        exit 1 ;;
     *"run --rm --no-deps bootstrap-users"*)
         n=$(( $(cat "$STUB_DIR/bootstrap_calls" 2>/dev/null || echo 0) + 1 ))
         echo "$n" > "$STUB_DIR/bootstrap_calls"
+        printf 'bootstrap-users %s\n' "$(image_for bootstrap-users)" >> "$STUB_DIR/ran_images"
         [ -f "$STUB_DIR/bootstrap_fails" ] && exit 1
         exit 0 ;;
     *"up -d --wait postgres"*)
@@ -236,31 +484,49 @@ case "$argv" in
     # The targeted recreate of the two application services. Before the
     # `up -d --no-build` branches, which would take it for the rollback's
     # exact-image restore and mark a rollback that never happened.
+    #
+    # `app_recreate_partial`: compose fails the pair after starting backend
+    # and before scheduler -- the state a refusal must not describe as stopped.
     *"--no-deps --force-recreate backend scheduler"*)
         touch "$STUB_DIR/app_recreated"
+        image_for backend > "$STUB_DIR/recreated_image"
+        printf 'backend %s\nscheduler %s\n' "$(image_for backend)" "$(image_for scheduler)" >> "$STUB_DIR/ran_images"
+        if [ -f "$STUB_DIR/app_recreate_partial" ]; then
+            echo running > "$STUB_DIR/live_backend"
+            echo created > "$STUB_DIR/live_scheduler"
+            echo "partial-start" >> "$STUB_DIR/migration_log"
+            exit 1
+        fi
+        echo running > "$STUB_DIR/live_backend"
+        echo running > "$STUB_DIR/live_scheduler"
         [ -f "$STUB_DIR/app_recreate_fails" ] && exit 1
+        exit 0 ;;
+    *"up -d --no-build --no-deps "*)
+        printf '%s\n' "$argv" >> "$STUB_DIR/deps_started"
         exit 0 ;;
     *"up -d --no-build --remove-orphans"*)
         # Both the deployment start and the rollback restore spell this the same
-        # way. They differ in one thing only: the restore passes a second `-f`,
-        # the generated image-pin override. Matching on the text alone swallowed
-        # the restore, so `no_build_fails` was never read, `rolled_back` was
-        # never set, and four rollback cases quietly stopped testing anything.
-        # Counted as tokens: `grep -c` counts matching lines, and argv is one
-        # line, so it answers 1 for both spellings and decides nothing.
-        if [ "$(printf '%s' "$argv" | tr ' ' '\n' | grep -c -- '^-f$')" -ge 2 ]; then
-            touch "$STUB_DIR/rolled_back"
-            # Says why on stderr, as compose does, so a test can tell a log that
-            # kept the command's output from one that recorded only its status.
-            [ -f "$STUB_DIR/no_build_fails" ] && { echo "stub-compose: exact-image restore refused" >&2; exit 1; }
-            exit 0
-        fi
+        # way, each with a second `-f`: the deployment's is the image pin, the
+        # restore's the recorded images. Told apart by the override's name. The
+        # earlier rule -- "two -f means the restore" -- became wrong the moment
+        # the deployment pinned its image, and matching on the text alone once
+        # swallowed the restore so that four rollback cases tested nothing.
+        case "$argv" in
+            *sora-image-restore*)
+                touch "$STUB_DIR/rolled_back"
+                # Says why on stderr, as compose does, so a test can tell a log that
+                # kept the command's output from one that recorded only its status.
+                [ -f "$STUB_DIR/no_build_fails" ] && { echo "stub-compose: exact-image restore refused" >&2; exit 1; }
+                exit 0 ;;
+        esac
         # The deployment start.
+        unpinned_up_moves_backend
         [ -f "$STUB_DIR/slow_up" ] && sleep 6
         n=$(( $(cat "$STUB_DIR/up_calls" 2>/dev/null || echo 0) + 1 ))
         echo "$n" > "$STUB_DIR/up_calls"
         if [ -f "$STUB_DIR/up_fails_after_first" ] && [ "$n" -gt 1 ]; then exit 1; fi
         exit 0 ;;
+
     *"up -d --no-build"*)
         # The exact-image restore. Recorded so a test can tell it from a
         # rebuild, which is a different operation with a different verdict.
@@ -283,6 +549,10 @@ case "$argv" in
     # unconditionally. The change under test is that this failing must not roll
     # a good deployment back, and with no way to make it fail that assertion
     # would pass against a bare, unguarded command too.
+    # nginx depends on backend, so its `up` also reconciles backend.
+    *"up -d --force-recreate nginx")
+        unpinned_up_moves_backend
+        exit 0 ;;
     *"--force-recreate --no-deps prometheus"*)
         touch "$STUB_DIR/prometheus_recreated"
         [ -f "$STUB_DIR/prometheus_recreate_fails" ] && exit 1
@@ -331,7 +601,8 @@ case "$argv" in
         if [ -f "$STUB_DIR/rolled_back" ] && [ -f "$STUB_DIR/restored_image" ]; then
             cat "$STUB_DIR/restored_image"
         elif [ -f "$STUB_DIR/app_recreated" ] && [ ! -f "$STUB_DIR/recreate_does_not_fix" ]; then
-            cat "$STUB_DIR/app_image_id" 2>/dev/null || echo "sha256:image"
+            # What the recreate (or a later unpinned `up`) actually started from.
+            cat "$STUB_DIR/recreated_image" 2>/dev/null || tag_image
         elif [ -f "$STUB_DIR/stale_app_image" ]; then
             cat "$STUB_DIR/stale_app_image"
         else
@@ -1259,7 +1530,7 @@ check "it rolled back"      "$(grep -qc 'rolling back' "$SANDBOX/out" && echo ye
 check "the recorded images were restored" \
     "$(grep -qc 'restored the images that were running' "$SANDBOX/out" && echo yes || echo no)" "yes"
 check "without building" \
-    "$(grep -qc 'up -d --no-build' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
 
 new_sandbox
@@ -1431,7 +1702,7 @@ RC=$?
 check "it reports the interruption" \
     "$(grep -qc 'interrupted by SIGTERM' "$SANDBOX/out" && echo yes || echo no)" "yes"
 check "and rolled back rather than leaving it running" \
-    "$(grep -qc 'up -d --no-build' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
 
 echo "== a run killed outright leaves its journal behind =="
@@ -1487,7 +1758,7 @@ run_guard
 check "it says what happened"  \
     "$(grep -q 'unexpected failure' "$SANDBOX/out" && echo yes || echo no)" "yes"
 check "and rolled back rather than leaving the new version serving" \
-    "$(grep -q 'up -d --no-build' "$STUB_DIR/calls" && echo yes || echo no)" "yes"
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo yes || echo no)" "yes"
 # Cleared, not left. A verified rollback puts the previous state back, so
 # there is nothing for an operator to reconcile -- and a journal left behind
 # would refuse the next deployment, making exit 1 and exit 76 the same thing in
@@ -1566,14 +1837,14 @@ check "the migration step ran" \
     "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" "1"
 # Exactly once, not at least once. Two migrators is the defect.
 check "and no more than once" \
-    "$(grep -c 'run --rm --no-deps migrate' "$STUB_DIR/calls")" "1"
+    "$(grep -cE 'run -d --no-deps .* migrate$' "$STUB_DIR/calls")" "1"
 rm -rf "$SANDBOX"
 
 new_sandbox
 run_guard
 # Line numbers in the recorded call log, so this is about order in time and not
 # about the order the two greps happen to appear in.
-MIG_LINE="$(grep -n 'run --rm --no-deps migrate' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+MIG_LINE="$(grep -nE 'run -d --no-deps .* migrate$' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
 UP_LINE="$(grep -n 'up -d --no-build --remove-orphans' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
 check "the migration is recorded before the containers are recreated" \
     "$([ -n "$MIG_LINE" ] && [ -n "$UP_LINE" ] && [ "$MIG_LINE" -lt "$UP_LINE" ] && echo yes || echo no)" "yes"
@@ -1615,7 +1886,7 @@ new_sandbox
 run_guard
 check "the account bootstrap ran exactly once" \
     "$(cat "$STUB_DIR/bootstrap_calls" 2>/dev/null || echo 0)" "1"
-MIG_LINE="$(grep -n 'run --rm --no-deps migrate' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+MIG_LINE="$(grep -nE 'run -d --no-deps .* migrate$' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
 BOOT_LINE="$(grep -n 'run --rm --no-deps bootstrap-users' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
 UP_LINE="$(grep -n 'up -d --no-build --remove-orphans' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
 check "after the migration and before the containers are recreated" \
@@ -1672,6 +1943,922 @@ check "code without the bootstrap script does not ask for the service" \
     "$(cat "$STUB_DIR/bootstrap_calls" 2>/dev/null || echo 0)" "0"
 rm -rf "$SANDBOX"
 
+echo "== the cutover: build, stop, confirm, one migrator, bootstrap, forced start =="
+# Project ownership changes what the old code may do: its INSERT is refused by
+# the new schema and its reads ignore the scope. So the old backend and
+# scheduler are stopped -- and confirmed stopped -- before the one migrator
+# runs, and the first start afterwards is a forced recreate from the pinned
+# image, never an `up` that could start the stopped old containers again.
+
+# The line number of the first recorded call matching an extended regex, or
+# nothing.
+call_line() { grep -nE -- "$1" "$STUB_DIR/calls" 2>/dev/null | head -1 | cut -d: -f1; }
+# "a < b < c ...", for line numbers that must all be present.
+in_order() {
+    local prev="" n
+    for n in "$@"; do
+        [ -n "$n" ] || { echo "missing"; return; }
+        if [ -n "$prev" ] && [ "$prev" -ge "$n" ]; then echo "out of order: $*"; return; fi
+        prev="$n"
+    done
+    echo "in order"
+}
+L_BUILD='build backend$'
+L_STOP_NGINX=' stop nginx$'
+L_STOP_APPS=' stop -t 60 backend scheduler$'
+L_MIGRATE='run -d --no-deps .* migrate$'
+L_BOOT='run --rm --no-deps bootstrap-users$'
+L_FORCE='up -d --no-build --no-deps --force-recreate backend scheduler$'
+L_UP='up -d --no-build --remove-orphans$'
+L_NGINX='up -d --force-recreate nginx$'
+
+new_sandbox
+run_guard
+check "a cutover deployment succeeds" "$RC" "0"
+check "build, stop nginx, stop the applications, migrate, bootstrap, forced start, the rest, nginx" \
+    "$(in_order "$(call_line "$L_BUILD")" "$(call_line "$L_STOP_NGINX")" "$(call_line "$L_STOP_APPS")" \
+        "$(call_line "$L_MIGRATE")" "$(call_line "$L_BOOT")" "$(call_line "$L_FORCE")" \
+        "$(call_line "$L_UP")" "$(call_line "$L_NGINX")")" "in order"
+check "the migrator runs exactly once" \
+    "$(grep -cE -- "$L_MIGRATE" "$STUB_DIR/calls")" "1"
+check "under a name tied to this run, which is how a deadline or a signal finds it" \
+    "$(grep -cE -- 'run -d --no-deps -T --name p-migrate-20260803T120000Z-[0-9]+ -e PGAPPNAME=p-migrate-20260803T120000Z-[0-9]+ migrate$' "$STUB_DIR/calls")" "1"
+check "the applications are asked whether they stopped, by label, replicas included" \
+    "$(grep -c 'label=com.docker.compose.service=backend --format {{.ID}} {{.State}}' "$STUB_DIR/calls")" "1"
+check "and the database is asked whether transactions are still open before migrating" \
+    "$(in_order "$(call_line "$L_STOP_APPS")" "$(call_line "'active:'")" "$(call_line "$L_MIGRATE")")" "in order"
+# The window the plan names: a generic `up` between the stop and the forced
+# start can start the stopped old containers on the new schema. Every `up`
+# there must be a --no-deps start that names neither application nor nginx.
+#
+# Checked by name. The first version of this check discarded every
+# `up --no-deps` line unread, so `up --no-deps backend` -- a revival by name --
+# passed it.
+reviving_ups() {
+    local s f line w
+    s="$(call_line "$L_STOP_APPS")"; f="$(call_line "$L_FORCE")"
+    if [ -z "$s" ] || [ -z "$f" ]; then echo "the stop or the forced start is missing"; return; fi
+    sed -n "$((s + 1)),$((f - 1))p" "$STUB_DIR/calls" | grep -E ' up( |$)' | while IFS= read -r line; do
+        case " $line " in *" --no-deps "*) ;; *) echo "$line"; continue ;; esac
+        for w in ${line##* up }; do
+            case "$w" in backend|scheduler|nginx) echo "$line"; break ;; esac
+        done
+    done
+}
+check "no up between the stop and the forced start could revive an old container" \
+    "$(reviving_ups | tr '\n' '|')" ""
+check "the new backend checks the schema head" \
+    "$(in_order "$(call_line "$L_FORCE")" "$(call_line 'verify_schema_head.py')" "$(call_line "$L_UP")")" "in order"
+check "the cutover stages are reported" \
+    "$(grep -c '  cutover: ' "$SANDBOX/out")" "8"
+check "and the build is not one of them: it changes nothing that serves" \
+    "$(grep -c 'cutover: building' "$SANDBOX/out")" "0"
+rm -rf "$SANDBOX"
+
+echo "== a build or a database that will not start changes nothing, so undoes nothing =="
+# PHASE=mutating is set at the first stop, not before the build: a refusal in
+# the build or the PostgreSQL wait has nothing to roll back, and "rolling back"
+# from there restored and restarted containers nobody had touched.
+for _f in build_fails postgres_fails; do
+    new_sandbox
+    with_previous_deployment
+    touch "$STUB_DIR/$_f"
+    run_guard
+    check "$_f: refused with exit 1" "$RC" "1"
+    check "$_f: no rollback was attempted" "$(grep -c '== rolling back ==' "$SANDBOX/out")" "0"
+    check "$_f: no image was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+    check "$_f: nothing was stopped" "$(grep -cE ' stop ' "$STUB_DIR/calls")" "0"
+    check "$_f: no deployment journal was opened" \
+        "$([ -e "$SANDBOX/manifests/in-progress" ] && echo opened || echo none)" "none"
+    rm -rf "$SANDBOX"
+done
+
+echo "== the budgets are numbers =="
+for _bad in DEPLOY_STOP_TIMEOUT=abc DEPLOY_DRAIN_SECONDS=3s DEPLOY_MIGRATE_DEADLINE=08 \
+            DEPLOY_MIGRATOR_GONE_SECONDS=0 DEPLOY_MIGRATOR_CREATE_SECONDS=-1 \
+            DEPLOY_MIGRATE_DEADLINE=1e3 DEPLOY_STOP_TIMEOUT=999999 HEALTH_ATTEMPTS=x; do
+    new_sandbox
+    # shellcheck disable=SC2163
+    #   The name and the value come from the list: exporting "$_bad" is the point.
+    ( export "$_bad"; run_guard; echo "$RC" > "$SANDBOX/rc" )
+    RC="$(cat "$SANDBOX/rc")"
+    refused_because "a budget of ${_bad}" "${_bad%%=*}"
+    check "  ${_bad}: refused before anything was read or changed" "$(mutating_calls)" "0"
+    rm -rf "$SANDBOX"
+done
+new_sandbox
+DEPLOY_STOP_TIMEOUT=5 DEPLOY_DRAIN_SECONDS=1 DEPLOY_MIGRATE_DEADLINE=30 HEALTH_DELAY=0 run_guard
+check "plain decimal budgets are accepted" "$RC" "0"
+check "  and the stop uses the one given" "$(grep -c ' stop -t 5 backend scheduler$' "$STUB_DIR/calls")" "1"
+rm -rf "$SANDBOX"
+
+echo "== the image is pinned by id, from the build to the last up =="
+# A tag is a pointer. The deployment read the id once after the build; if the
+# tag moves after that -- another build, a pull, a retag -- every command that
+# resolved the tag again would run a different image than the one migrated
+# from. The pin override names the id; the stub resolves the tag at each
+# command unless the command carries it.
+new_sandbox
+echo "sha256:moved-after-the-build" > "$STUB_DIR/tag_moves_after_build"
+mkdir -p "$SANDBOX/tmp"
+TMPDIR="$SANDBOX/tmp" run_guard
+check "a tag moved after the build: the deployment still succeeds" "$RC" "0"
+check "  the tag did move" "$(cat "$STUB_DIR/tag_moved" 2>/dev/null)" "sha256:moved-after-the-build"
+check "  the migrator ran the built image" "$(awk '$1 == "migrate" {print $2}' "$STUB_DIR/ran_images")" "sha256:image"
+check "  the bootstrap ran the built image" "$(awk '$1 == "bootstrap-users" {print $2}' "$STUB_DIR/ran_images")" "sha256:image"
+check "  backend started from the built image" "$(awk '$1 == "backend" {print $2}' "$STUB_DIR/ran_images")" "sha256:image"
+check "  scheduler started from the built image" "$(awk '$1 == "scheduler" {print $2}' "$STUB_DIR/ran_images")" "sha256:image"
+check "  no later up moved backend onto the tag" \
+    "$(grep -c 'unpinned up recreated backend' "$STUB_DIR/migration_log" 2>/dev/null)" "0"
+check "  every run and up after the build carried the pin" \
+    "$(sed -n "$(call_line "$L_BUILD"),\$p" "$STUB_DIR/calls" | grep -E ' (run|up) ' \
+        | grep -v -e 'up -d --wait postgres' -e sora-image-restore | grep -vc sora-image-pin)" "0"
+check "  the override was used, from this run's temporary directory" \
+    "$(grep -c "sora-image-pin" "$STUB_DIR/calls" | awk '{print ($1 > 0) ? "used" : "unused"}')" "used"
+check "  and removed afterwards" "$(find "$SANDBOX/tmp" -name 'sora-image-pin.*' | wc -l | tr -d ' ')" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# A refusal after the build leaves the journal, and it names the pinned id.
+touch "$STUB_DIR/migrate_fails"
+mkdir -p "$SANDBOX/tmp"
+TMPDIR="$SANDBOX/tmp" run_guard
+check "a refused run's journal records the pinned image" \
+    "$(grep -c '^image_pin      sha256:image$' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+check "  and the override is removed on that path too" "$(find "$SANDBOX/tmp" -name 'sora-image-pin.*' | wc -l | tr -d ' ')" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# An override for a service the configuration does not declare creates it.
+printf '%s\n' nginx backend > "$STUB_DIR/all_services"
+run_guard
+check "the pin names only declared services" "$RC" "0"
+check "  backend is pinned" "$(grep -c 'pinned backend to' "$SANDBOX/out")" "1"
+check "  an undeclared migrate is not" "$(grep -c 'pinned migrate' "$SANDBOX/out")" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+echo "sha256:bad id" > "$STUB_DIR/app_image_id"
+run_guard
+refused_because "a built id that is not an image id is not pinned" "is not an image id"
+check "  and nothing was stopped" "$(grep -cE ' stop ' "$STUB_DIR/calls")" "0"
+rm -rf "$SANDBOX"
+
+# With dependencies declared, as production declares them.
+new_sandbox
+cat > "$STUB_DIR/rendered" <<'JSON'
+{"services": {
+  "nginx":     {"ports": [{"target": 80,  "published": "80",  "protocol": "tcp", "mode": "ingress"},
+                          {"target": 443, "published": "443", "protocol": "tcp", "mode": "ingress"}],
+                "depends_on": {"backend": {"condition": "service_started"}}},
+  "postgres":  {},
+  "pgbouncer": {"depends_on": {"postgres": {"condition": "service_healthy"}}},
+  "redis":     {},
+  "prometheus": {"depends_on": ["backend"]},
+  "backend":   {"environment": {"SORA_ENV": "production"},
+                "depends_on": {"pgbouncer": {"condition": "service_started"}, "redis": {"condition": "service_started"}}},
+  "scheduler": {"environment": {"SORA_ENV": "production"},
+                "depends_on": {"pgbouncer": {"condition": "service_started"}, "redis": {"condition": "service_started"}}}
+}}
+JSON
+run_guard
+check "with dependencies: the deployment succeeds" "$RC" "0"
+check "their dependencies, transitively and nothing that needs them, start on their own" \
+    "$(sed 's/.*--no-deps //' "$STUB_DIR/deps_started" 2>/dev/null)" "pgbouncer postgres redis"
+check "after the bootstrap and before the forced start" \
+    "$(in_order "$(call_line "$L_BOOT")" "$(call_line 'up -d --no-build --no-deps pgbouncer')" "$(call_line "$L_FORCE")")" "in order"
+rm -rf "$SANDBOX"
+
+echo "== no migration unless the old code is confirmed stopped =="
+# Each of these refuses before the migrator and the bootstrap, and never
+# reaches the forced start of the new code.
+refused_before_migrating() {
+    local label="$1"
+    check "$label: the migrator was not run" "$(cat "$STUB_DIR/migrate_calls" 2>/dev/null || echo 0)" "0"
+    check "$label: nor the bootstrap" "$(cat "$STUB_DIR/bootstrap_calls" 2>/dev/null || echo 0)" "0"
+    check "$label: nor was the new code started" "$(grep -cE -- "$L_FORCE" "$STUB_DIR/calls")" "0"
+}
+
+new_sandbox
+touch "$STUB_DIR/app_stop_fails"
+run_guard
+refused_because "a stop that fails" "backend and scheduler would not stop"
+refused_before_migrating "a stop that fails"
+rm -rf "$SANDBOX"
+
+new_sandbox
+touch "$STUB_DIR/nginx_stop_fails"
+run_guard
+refused_because "nginx that will not stop" "nginx would not stop"
+refused_before_migrating "nginx that will not stop"
+check "and the applications were not stopped behind a running nginx" \
+    "$(grep -cE -- "$L_STOP_APPS" "$STUB_DIR/calls")" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# `compose stop` returned 0 and a container is still up: a replica compose did
+# not stop, or one started by hand.
+printf 'cid-backend-1 exited\ncid-backend-2 running\n' > "$STUB_DIR/state_backend"
+run_guard
+refused_because "a replica still running after the stop" "still running, or their state cannot be read"
+check "and it is named" "$(grep -q 'backend:cid-backend-2:running' "$SANDBOX/out" && echo named || echo unnamed)" "named"
+refused_before_migrating "a replica still running"
+# Nothing to restore here, and the replica is still up: "STOPPED" would be a
+# description of what was intended, not of what docker reports.
+check "  STOPPED is not claimed over the running replica" \
+    "$(grep -c 'STOPPED and the site is not serving' "$SANDBOX/out")" "0"
+check "  the operator is told the state is not confirmed" \
+    "$(grep -c 'could NOT be confirmed stopped' "$SANDBOX/out")" "1"
+check "  and the journal says unknown" \
+    "$(grep -c '^apps           unknown' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+rm -rf "$SANDBOX"
+
+new_sandbox
+echo "cid-scheduler restarting" > "$STUB_DIR/state_scheduler"
+run_guard
+refused_because "a scheduler restarting after the stop" "still running, or their state cannot be read"
+refused_before_migrating "a restarting scheduler"
+rm -rf "$SANDBOX"
+
+new_sandbox
+touch "$STUB_DIR/app_state_unreadable"
+run_guard
+refused_because "a container state that cannot be read" "still running, or their state cannot be read"
+refused_before_migrating "an unreadable state"
+rm -rf "$SANDBOX"
+
+new_sandbox
+echo 3 > "$STUB_DIR/active_sessions"
+DEPLOY_DRAIN_SECONDS=2 run_guard
+refused_because "transactions still open after the drain" "client transactions were still open 2s"
+refused_before_migrating "open transactions"
+rm -rf "$SANDBOX"
+
+new_sandbox
+touch "$STUB_DIR/active_unreadable"
+run_guard
+refused_because "a transaction count that cannot be read" "could not be asked whether transactions are open"
+refused_before_migrating "an unreadable transaction count"
+rm -rf "$SANDBOX"
+
+# The answer the drain wants, printed by a psql that then failed. `|| true`
+# kept the text and lost the status, so this was "quiet".
+new_sandbox
+echo 0 > "$STUB_DIR/active_sessions"
+echo 2 > "$STUB_DIR/active_exit"
+run_guard
+refused_because "active:0 with a non-zero exit" "could not be asked whether transactions are open"
+check "  the answer is quoted with its status" "$(grep -c "answer '(exit 2) active:0'" "$SANDBOX/out")" "1"
+refused_before_migrating "active:0 with a non-zero exit"
+rm -rf "$SANDBOX"
+
+for _answer in "" "active:" "active:-1" "garbage" "$(printf 'active:0\nactive:0')"; do
+    new_sandbox
+    printf '%s' "$_answer" > "$STUB_DIR/active_text"
+    run_guard
+    refused_because "a drain answer [$(printf '%s' "$_answer" | tr '\n' '|')] refuses" "could not be asked whether transactions are open"
+    refused_before_migrating "drain answer [$(printf '%s' "$_answer" | tr '\n' '|')]"
+    rm -rf "$SANDBOX"
+done
+
+echo "== a failed migration or bootstrap never starts the applications =="
+new_sandbox
+with_previous_deployment
+touch "$STUB_DIR/migrate_fails"
+run_guard
+refused_because "a failed migration" "alembic upgrade head failed"
+check "the new code was not started" "$(grep -cE -- "$L_FORCE" "$STUB_DIR/calls")" "0"
+# The restore spells the same `up` with a second -f, its own override.
+check "no generic up ran in the deployment" \
+    "$(grep -E -- "$L_UP" "$STUB_DIR/calls" | grep -vc -- 'sora-image-restore')" "0"
+check "no new manifest was published" \
+    "$(find "$SANDBOX/manifests" -type f -name '*.txt' ! -name prev.txt | wc -l | tr -d ' ')" "0"
+check "the schema did not change, so the previous images came back" \
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "restored"
+check "and the migrator was confirmed gone before the schema was read" \
+    "$(in_order "$(call_line 'name=\^/p-migrate-')" "$(call_line "'ownership:'")")" "in order"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# No previous deployment: nothing to restore. The journal must say the
+# applications are stopped, because they are.
+touch "$STUB_DIR/migrate_fails"
+run_guard
+check "a failed first migration is an incomplete rollback" "$RC" "76"
+check "the journal says the applications are stopped" \
+    "$(grep -c '^apps           stopped' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+check "and at which stage" \
+    "$(grep -c '^cutover        migrating' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+check "and the operator is told the site is not serving" \
+    "$(grep -c 'STOPPED and the site is not serving' "$SANDBOX/out")" "1"
+rm -rf "$SANDBOX"
+
+echo "== code from before project ownership is not restored onto its schema =="
+# The old target in these cases HAS the accounts code. Without it the accounts
+# barrier would refuse first and hide whether this one exists at all.
+commit_files() {
+    local f
+    for f in "$@"; do
+        mkdir -p "$REPO/$(dirname "$f")"
+        echo "# stand-in" > "$REPO/$f"
+    done
+    git -C "$REPO" add -A >/dev/null
+    git -C "$REPO" commit -qm "add $*"
+    git -C "$REPO" push -q origin main 2>/dev/null
+    git -C "$REPO" rev-parse HEAD
+}
+OWNERSHIP_FILES="app/project_access.py app/services/evaluation_store.py alembic/versions/b7d41f2e9c35_project_ownership_and_access_audit.py"
+# ACCOUNTS: persistent accounts, no ownership -- the release before ownership.
+# A later commit on top, so ACCOUNTS is an ordinary --rollback target.
+accounts_target() {
+    ACCOUNTS="$(commit_files app/accounts.py)"
+    LATEST="$(commit_files later.txt)"
+}
+previous_is() {
+    mkdir -p "$SANDBOX/manifests"
+    printf 'commit %s\n' "$1" > "$SANDBOX/manifests/prev.txt"
+    ln -sf prev.txt "$SANDBOX/manifests/latest"
+}
+
+for item in evaluations.owner_user_id evaluations.data_scope \
+            predictions_log.owner_user_id predictions_log.data_scope \
+            table:project_access_events table:project_access_targets; do
+    new_sandbox
+    accounts_target
+    echo "$item" > "$STUB_DIR/schema"
+    run_guard --rollback "$ACCOUNTS"
+    refused_because "explicit rollback with only $item present" "has no project ownership"
+    check "  $item: not refused by the accounts barrier instead" \
+        "$(grep -c 'predates persistent accounts' "$SANDBOX/out")" "0"
+    check "  $item: the checkout did not move" "$(git -C "$REPO" rev-parse HEAD)" "$LATEST"
+    check "  $item: nothing was built, stopped or started" "$(mutating_calls)" "0"
+    rm -rf "$SANDBOX"
+
+    new_sandbox
+    accounts_target
+    previous_is "$ACCOUNTS"
+    echo "$item" > "$STUB_DIR/schema"
+    touch "$STUB_DIR/nginx_t_fails"
+    run_guard
+    check "automatic rollback with only $item present is refused" "$RC" "76"
+    check "  $item: rollback-refused in the journal" \
+        "$(grep -c '^state          rollback-refused' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+    check "  $item: the previous images were not restored" \
+        "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+    check "  $item: the checkout stayed on the new code" \
+        "$(git -C "$REPO" rev-parse HEAD)" "$LATEST"
+    rm -rf "$SANDBOX"
+done
+
+# The answer must be exactly `ownership:<n>`; anything else refuses.
+for answer in "" "ownership:" "garbage" "ownership:x" "$(printf 'ownership:0\nownership:0')"; do
+    new_sandbox
+    accounts_target
+    printf '%s' "$answer" > "$STUB_DIR/ownership_answer"
+    run_guard --rollback "$ACCOUNTS"
+    refused_because "an unexpected probe answer [$(printf '%s' "$answer" | tr '\n' '|')] refuses" "has no project ownership"
+    check "  and the checkout did not move" "$(git -C "$REPO" rev-parse HEAD)" "$LATEST"
+    rm -rf "$SANDBOX"
+done
+
+# And the same answers in the automatic rollback, which decides with the same
+# probe from inside abort_deployment.
+for answer in "" "ownership:" "garbage" "ownership:x" "$(printf 'ownership:0\nownership:0')"; do
+    new_sandbox
+    accounts_target
+    previous_is "$ACCOUNTS"
+    printf '%s' "$answer" > "$STUB_DIR/ownership_answer"
+    touch "$STUB_DIR/nginx_t_fails"
+    run_guard
+    _a="$(printf '%s' "$answer" | tr '\n' '|')"
+    check "automatic rollback, probe answer [$_a]: refused" "$RC" "76"
+    check "  [$_a]: rollback-refused" \
+        "$(grep -c '^state          rollback-refused' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+    check "  [$_a]: no old image restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+    check "  [$_a]: no fallback build" "$(grep -c 'up -d --build' "$STUB_DIR/calls")" "0"
+    rm -rf "$SANDBOX"
+done
+
+# The exact answer that allows -- `ownership:0` -- printed by a psql that then
+# exited non-zero. Reproduced by review: `pg_scalar ... || true` let it through.
+new_sandbox
+accounts_target
+echo "ownership:0" > "$STUB_DIR/ownership_answer"
+echo 1 > "$STUB_DIR/ownership_exit"
+run_guard --rollback "$ACCOUNTS"
+refused_because "explicit rollback: ownership:0 with exit 1 refuses" "has no project ownership"
+check "  the refusal quotes the status" "$(grep -c "probe answered '(exit 1) ownership:0'" "$SANDBOX/out")" "1"
+check "  the checkout did not move" "$(git -C "$REPO" rev-parse HEAD)" "$LATEST"
+check "  nothing was built, stopped or started" "$(mutating_calls)" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+echo "ownership:0" > "$STUB_DIR/ownership_answer"
+echo 1 > "$STUB_DIR/ownership_exit"
+touch "$STUB_DIR/nginx_t_fails"
+run_guard
+check "automatic rollback: ownership:0 with exit 1 is refused" "$RC" "76"
+check "  no old image restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+rm -rf "$SANDBOX"
+
+# The accounts barrier's question, the same way: `users:false` from a psql
+# that failed is not "the table is absent".
+new_sandbox
+echo f > "$STUB_DIR/users_table"
+echo 1 > "$STUB_DIR/users_exit"
+run_guard --rollback "$FIRST"
+refused_because "explicit rollback: users:false with exit 1 refuses" "predates persistent accounts"
+check "  nothing was built, stopped or started" "$(mutating_calls)" "0"
+rm -rf "$SANDBOX"
+
+# Each of the three capability files absent on its own. A target missing any
+# one of them is from the middle of the change and the schema decides; the
+# first version of this case removed only the migration.
+for _missing in $OWNERSHIP_FILES; do
+    new_sandbox
+    _have=""
+    for _f in $OWNERSHIP_FILES; do [ "$_f" = "$_missing" ] || _have="$_have $_f"; done
+    # shellcheck disable=SC2086
+    #   Deliberately split: two paths.
+    PARTIAL="$(commit_files app/accounts.py $_have)"
+    LATEST="$(commit_files later.txt)"
+    echo "predictions_log.owner_user_id" > "$STUB_DIR/schema"
+    run_guard --rollback "$PARTIAL"
+    refused_because "a target without $_missing" "has no project ownership"
+    check "  without $_missing: the probe was asked" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "1"
+    check "  without $_missing: the checkout did not move" "$(git -C "$REPO" rev-parse HEAD)" "$LATEST"
+    rm -rf "$SANDBOX"
+done
+
+new_sandbox
+accounts_target
+touch "$STUB_DIR/ownership_unreadable"
+run_guard --rollback "$ACCOUNTS"
+refused_because "an explicit rollback when the schema cannot be read" "has no project ownership"
+check "  and nothing was built, stopped or started" "$(mutating_calls)" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/ownership_unreadable"
+touch "$STUB_DIR/nginx_t_fails"
+run_guard
+check "an automatic rollback when the schema cannot be read is refused" "$RC" "76"
+check "  without restoring the old images" \
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+check "  and without a fallback build" "$(grep -c 'up -d --build' "$STUB_DIR/calls")" "0"
+rm -rf "$SANDBOX"
+
+echo "== a rollback the schema allows still happens =="
+new_sandbox
+accounts_target
+run_guard --rollback "$ACCOUNTS"
+check "no ownership schema: the explicit rollback runs" "$RC" "0"
+check "  and it checked out the target" "$(git -C "$REPO" rev-parse HEAD)" "$ACCOUNTS"
+check "  the probe was asked" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "1"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# shellcheck disable=SC2086
+#   Deliberately split: three paths.
+OWNED="$(commit_files app/accounts.py $OWNERSHIP_FILES)"
+LATEST="$(commit_files later.txt)"
+printf '%s\n' evaluations.owner_user_id evaluations.data_scope > "$STUB_DIR/schema"
+run_guard --rollback "$OWNED"
+check "an ownership-capable target is allowed onto the ownership schema" "$RC" "0"
+check "  without asking the database" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# Only two of the three files: a commit from the middle of the change is not
+# ownership-capable, and the schema decides.
+PARTIAL="$(commit_files app/accounts.py app/project_access.py app/services/evaluation_store.py)"
+LATEST="$(commit_files later.txt)"
+echo "evaluations.data_scope" > "$STUB_DIR/schema"
+run_guard --rollback "$PARTIAL"
+refused_because "a target with the routes but not the migration" "has no project ownership"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# shellcheck disable=SC2086
+OWNED="$(commit_files app/accounts.py $OWNERSHIP_FILES)"
+LATEST="$(commit_files later.txt)"
+previous_is "$OWNED"
+printf '%s\n' evaluations.owner_user_id > "$STUB_DIR/schema"
+touch "$STUB_DIR/nginx_t_fails"
+run_guard
+check "an automatic rollback to ownership-capable code restores it" "$RC" "1"
+check "  the recorded images came back" \
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "restored"
+rm -rf "$SANDBOX"
+
+echo "== the barrier after the migration commits =="
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migration_adds_ownership"
+touch "$STUB_DIR/bootstrap_fails"
+run_guard
+check "a bootstrap refused after the ownership migration committed" "$RC" "76"
+check "  rollback-refused" \
+    "$(grep -c '^state          rollback-refused' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+check "  no old image was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+check "  no old image was rebuilt" "$(grep -c 'up -d --build' "$STUB_DIR/calls")" "0"
+check "  the checkout did not move" "$(git -C "$REPO" rev-parse HEAD)" "$LATEST"
+check "  the new code was never started either" "$(grep -cE -- "$L_FORCE" "$STUB_DIR/calls")" "0"
+check "  and the operator is told everything is stopped" \
+    "$(grep -c 'STOPPED and the site is not serving' "$SANDBOX/out")" "1"
+check "  not that the new code is running" \
+    "$(grep -c 'new backend and scheduler are running' "$SANDBOX/out")" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migration_adds_ownership"
+touch "$STUB_DIR/nginx_t_fails"
+run_guard
+check "a refusal after the new code started, onto the migrated schema" "$RC" "76"
+check "  says the new code is running" \
+    "$(grep -c 'new backend and scheduler are running' "$SANDBOX/out")" "1"
+check "  and restored nothing" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+rm -rf "$SANDBOX"
+
+# The accounts barrier stays independent: a pre-accounts target is refused for
+# accounts even where the ownership probe would allow it.
+new_sandbox
+echo t > "$STUB_DIR/users_table"
+run_guard --rollback "$FIRST"
+refused_because "a pre-accounts target is still refused by the accounts barrier" "predates persistent accounts"
+rm -rf "$SANDBOX"
+
+echo "== the migrator is stopped, and gone, before the schema is read =="
+run_guard_bg() {
+    export STUB_DIR
+    # shellcheck disable=SC2030,SC2031
+    ( export PATH="$STUB_DIR/bin:$PATH"
+      DEPLOY_REPO="$REPO" COMPOSE_FILE="$REPO/compose.yml" COMPOSE_PROJECT_NAME=p \
+      SITE_URL="http://stand.invalid" MANIFEST_DIR="$SANDBOX/manifests" \
+      DEPLOY_LOCK_DIR="$SANDBOX/lockdir" HEALTH_ATTEMPTS=3 HEALTH_DELAY=0 \
+        bash "$SCRIPT" ) > "$SANDBOX/out" 2>&1 &
+    GUARD=$!
+}
+# Waits for a line in a file, up to ten seconds.
+wait_for_line() {
+    local i=0
+    while [ "$i" -lt 100 ]; do
+        grep -q -- "$2" "$1" 2>/dev/null && return 0
+        sleep 0.1; i=$((i + 1))
+    done
+    return 1
+}
+
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migration_adds_ownership"
+echo 8 > "$STUB_DIR/slow_migrate"
+run_guard_bg
+wait_for_line "$STUB_DIR/calls" ' migrate$'
+sleep 1
+kill -TERM "$GUARD" 2>/dev/null
+wait "$GUARD" 2>/dev/null
+RC=$?
+check "a signal during the migration is reported" "$(grep -c 'interrupted by SIGTERM' "$SANDBOX/out")" "1"
+check "  the migrator was stopped before the schema was read" \
+    "$(grep -n -e migrator-stopped -e ownership-probe "$STUB_DIR/migration_log" 2>/dev/null | head -1 | cut -d: -f2)" "migrator-stopped"
+check "  its transaction never committed" "$(grep -c committed "$STUB_DIR/migration_log")" "0"
+check "  and with the schema unchanged the previous images came back" \
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "restored"
+check "  only after the migrator was gone" \
+    "$(in_order "$(call_line 'stop -t 10 cidmigrator')" "$(call_line "'ownership:'")" "$(call_line 'up -d --no-build --remove-orphans$')")" "in order"
+check "  and the new code was never started" "$(grep -cE -- "$L_FORCE" "$STUB_DIR/calls")" "0"
+rm -rf "$SANDBOX"
+
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migration_adds_ownership"
+echo 8 > "$STUB_DIR/slow_after_commit"
+run_guard_bg
+wait_for_line "$STUB_DIR/migration_log" committed
+kill -TERM "$GUARD" 2>/dev/null
+wait "$GUARD" 2>/dev/null
+RC=$?
+check "a signal after the migration committed is a refused rollback" "$RC" "76"
+check "  rollback-refused" \
+    "$(grep -c '^state          rollback-refused' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+check "  no old image was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+check "  the applications stay stopped" "$(grep -c 'STOPPED and the site is not serving' "$SANDBOX/out")" "1"
+rm -rf "$SANDBOX"
+
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migration_adds_ownership"
+echo 8 > "$STUB_DIR/slow_migrate"
+DEPLOY_MIGRATE_DEADLINE=2 run_guard
+refused_because "a migration past its deadline" "did not finish within 2s"
+check "  the migrator was stopped before the schema was read" \
+    "$(grep -n -e migrator-stopped -e ownership-probe "$STUB_DIR/migration_log" 2>/dev/null | head -1 | cut -d: -f2)" "migrator-stopped"
+check "  its transaction never committed" "$(grep -c committed "$STUB_DIR/migration_log")" "0"
+check "  and the previous images came back, the schema being unchanged" \
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "restored"
+rm -rf "$SANDBOX"
+
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+echo 8 > "$STUB_DIR/slow_migrate"
+touch "$STUB_DIR/migrator_ps_unreadable"
+DEPLOY_MIGRATE_DEADLINE=2 DEPLOY_MIGRATOR_GONE_SECONDS=2 run_guard
+check "a migrator that cannot be confirmed gone refuses the rollback" "$RC" "76"
+check "  rollback-refused" \
+    "$(grep -c '^state          rollback-refused' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+check "  the schema was not read at all" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "0"
+check "  nothing old was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+rm -rf "$SANDBOX"
+
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+echo 8 > "$STUB_DIR/slow_migrate"
+touch "$STUB_DIR/migrator_session_unreadable"
+DEPLOY_MIGRATE_DEADLINE=2 run_guard
+check "a migrator session that cannot be asked about refuses the rollback" "$RC" "76"
+check "  the schema was not read" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "0"
+check "  nothing old was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+rm -rf "$SANDBOX"
+
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+echo 8 > "$STUB_DIR/slow_migrate"
+echo 1 > "$STUB_DIR/active_after_migrate"
+DEPLOY_MIGRATE_DEADLINE=2 DEPLOY_DRAIN_SECONDS=2 run_guard
+check "a transaction still open after the migrator stopped refuses the rollback" "$RC" "76"
+check "  the schema was not read" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "0"
+check "  nothing old was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+rm -rf "$SANDBOX"
+
+# The line of the first occurrence of each marker in migration_log, in order.
+log_order() {
+    local m n out=""
+    for m in "$@"; do
+        n="$(grep -nx -- "$m" "$STUB_DIR/migration_log" 2>/dev/null | head -1 | cut -d: -f1)"
+        out="$out ${n:-}"
+    done
+    # shellcheck disable=SC2086
+    #   Deliberately split into in_order's arguments; an empty one is "missing".
+    in_order $out
+}
+wait_for_file() {
+    local i=0
+    while [ "$i" -lt 150 ]; do [ -e "$1" ] && return 0; sleep 0.1; i=$((i + 1)); done
+    return 1
+}
+
+echo "== a signal while the migrator is being created =="
+# A signal between `compose run` starting and the daemon registering the
+# container. The earlier design killed the client and then believed a few empty
+# `docker ps` answers -- a fixed settle window -- and a registration that came
+# later than the window was missed and committed after the schema was read. The
+# client is now never killed: the rollback waits for it to return, and only
+# then looks, removes and confirms by id.
+
+# The passing control: the client returns two seconds after the signal; the
+# container it created is found, removed and confirmed gone before the probe,
+# and with the schema unchanged the previous release comes back.
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migration_adds_ownership"
+echo 2 > "$STUB_DIR/migrate_create_delay"
+echo 8 > "$STUB_DIR/slow_migrate"
+run_guard_bg
+wait_for_line "$STUB_DIR/calls" ' migrate$'
+kill -TERM "$GUARD" 2>/dev/null
+wait "$GUARD" 2>/dev/null
+RC=$?
+check "control, signal during the create: the signal is reported" "$(grep -c 'interrupted by SIGTERM' "$SANDBOX/out")" "1"
+check "  the rollback waited for the creating client, then removed what it made, before the schema was read" \
+    "$(log_order registered migrator-stopped migrator-removed ownership-probe)" "in order"
+check "  the container was confirmed gone by id" \
+    "$(in_order "$(call_line 'rm -f cidmigrator')" "$(grep -n 'inspect -f {{.Id}} cidmigrator' "$STUB_DIR/calls" | tail -1 | cut -d: -f1)" "$(call_line "'ownership:'")")" "in order"
+sleep 3
+check "  its transaction never committed" "$(grep -c '^committed$' "$STUB_DIR/migration_log")" "0"
+check "  and with the schema unchanged the previous images came back" \
+    "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "restored"
+check "  exit 1: the previous state is serving" "$RC" "1"
+rm -rf "$SANDBOX"
+
+# The negative: the registration comes later than the creating client's whole
+# budget -- later than any window a check could wait out. Nothing may be
+# decided: no probe, no restore, every rollback forbidden. And the
+# registration does then happen and commit, which is why.
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migration_adds_ownership"
+echo 6 > "$STUB_DIR/migrate_create_delay"
+DEPLOY_MIGRATOR_CREATE_SECONDS=2 run_guard_bg
+wait_for_line "$STUB_DIR/calls" ' migrate$'
+kill -TERM "$GUARD" 2>/dev/null
+wait "$GUARD" 2>/dev/null
+RC=$?
+check "negative, registration after the budget, with a signal: refused" "$RC" "76"
+check "  the schema was not read" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "0"
+check "  nothing old was restored or rebuilt" \
+    "$([ -f "$STUB_DIR/rolled_back" ] || grep -q 'up -d --build' "$STUB_DIR/calls" && echo restored || echo not)" "not"
+check "  the journal says rollback-refused" \
+    "$(grep -c '^state          rollback-refused' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+check "  and the operator is told why" "$(grep -c 'ROLLBACK REFUSED: whether the migrator' "$SANDBOX/out")" "1"
+wait_for_line "$STUB_DIR/migration_log" '^committed$'
+check "  the late registration did commit afterwards -- the doubt was real" \
+    "$(grep -c '^committed$' "$STUB_DIR/migration_log")" "1"
+rm -rf "$SANDBOX"
+
+# The same without a signal: the creating client simply outlives its budget.
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migration_adds_ownership"
+echo 6 > "$STUB_DIR/migrate_create_delay"
+DEPLOY_MIGRATOR_CREATE_SECONDS=2 run_guard
+check "negative, registration after the budget, no signal: refused" "$RC" "76"
+check "  the schema was not read" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "0"
+check "  nothing old was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+check "  the new code was never started" "$(grep -cE -- "$L_FORCE" "$STUB_DIR/calls")" "0"
+wait_for_line "$STUB_DIR/migration_log" '^committed$'
+rm -rf "$SANDBOX"
+
+# The creating client returning is not enough: what it returned has to name an
+# object. A client that exited non-zero after a lost response, with no
+# container docker can name, says nothing about whether the daemon accepted
+# the create -- and in this case it had, and the container lands later.
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migration_adds_ownership"
+echo 3 > "$STUB_DIR/migrate_create_lost"
+run_guard
+check "negative, the create's response lost (client exit 1, nothing named): refused" "$RC" "76"
+check "  the schema was not read" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "0"
+check "  nothing old was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+check "  the journal says rollback-refused" \
+    "$(grep -c '^state          rollback-refused' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+check "  and why: the migrator is unknown" \
+    "$(grep -c '^detail         migrator unknown' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+wait_for_line "$STUB_DIR/migration_log" '^committed$'
+check "  the accepted create did land and commit afterwards -- the doubt was real" \
+    "$(grep -c '^committed$' "$STUB_DIR/migration_log")" "1"
+rm -rf "$SANDBOX"
+
+# The control beside it: the client exits non-zero, but docker names the
+# container it made -- a known object. It is removed, confirmed gone by id,
+# and with the schema unchanged the previous release comes back.
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migrate_start_fails"
+run_guard
+check "control, created but the start failed: the previous release comes back" "$RC" "1"
+check "  the container was removed and confirmed gone before the probe" \
+    "$(in_order "$(call_line 'rm -f cidmigrator')" "$(grep -n 'inspect -f {{.Id}} cidmigrator' "$STUB_DIR/calls" | tail -1 | cut -d: -f1)" "$(call_line "'ownership:'")")" "in order"
+check "  the refusal named the failed creation" "$(grep -c 'could not be created, or its creation could not be confirmed' "$SANDBOX/out")" "1"
+rm -rf "$SANDBOX"
+
+# Removal confirmed positively: docker saying "No such object" for the id. An
+# id docker cannot answer about is not gone.
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migration_adds_ownership"
+echo 8 > "$STUB_DIR/slow_migrate"
+touch "$STUB_DIR/migrator_inspect_by_id_fails"
+DEPLOY_MIGRATE_DEADLINE=2 DEPLOY_MIGRATOR_GONE_SECONDS=2 run_guard
+check "a removal docker cannot confirm refuses the rollback" "$RC" "76"
+check "  the schema was not read" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "0"
+check "  nothing old was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+rm -rf "$SANDBOX"
+
+# The id is known and removable, but the second question -- does anything
+# else carry this run's name -- cannot be answered. Unanswered is not "no".
+# (The earlier name-lookup case could not isolate this: its fault also hid the
+# id, so the identification refused first and this guard was never reached.)
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migration_adds_ownership"
+echo 8 > "$STUB_DIR/slow_migrate"
+touch "$STUB_DIR/migrator_name_ps_fails"
+DEPLOY_MIGRATE_DEADLINE=2 run_guard
+check "a name lookup docker cannot answer refuses the rollback" "$RC" "76"
+check "  the schema was not read" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "0"
+check "  nothing old was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+rm -rf "$SANDBOX"
+
+echo "== the migrator's server-side session is terminated until it is gone =="
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+echo 8 > "$STUB_DIR/slow_migrate"
+echo 2 > "$STUB_DIR/migrator_sessions"
+DEPLOY_MIGRATE_DEADLINE=2 run_guard
+check "a session that survives two terminations: the rollback proceeds once it is gone" "$RC" "1"
+check "  terminated twice" "$(grep -c '^migrator-session-terminated$' "$STUB_DIR/migration_log")" "2"
+check "  and the schema was read only after it was confirmed gone" \
+    "$(log_order migrator-session-terminated migrator-session-gone ownership-probe)" "in order"
+rm -rf "$SANDBOX"
+
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+echo 8 > "$STUB_DIR/slow_migrate"
+echo 999 > "$STUB_DIR/migrator_sessions"
+DEPLOY_MIGRATE_DEADLINE=2 DEPLOY_MIGRATOR_GONE_SECONDS=2 run_guard
+check "a session that will not die refuses the rollback" "$RC" "76"
+check "  the schema was not read" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "0"
+check "  nothing old was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+rm -rf "$SANDBOX"
+
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+echo 8 > "$STUB_DIR/slow_migrate"
+echo 1 > "$STUB_DIR/migrator_exit"
+DEPLOY_MIGRATE_DEADLINE=2 run_guard
+check "migrator:0 from a psql that failed refuses the rollback" "$RC" "76"
+check "  the schema was not read" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "0"
+rm -rf "$SANDBOX"
+
+echo "== a start that fails partway: stopped, and the state said is the state observed =="
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migration_adds_ownership"
+touch "$STUB_DIR/app_recreate_partial"
+run_guard
+check "backend started and scheduler did not, onto the ownership schema: refused" "$RC" "76"
+check "  backend, which had started, is stopped again" "$(cat "$STUB_DIR/live_backend" 2>/dev/null)" "exited"
+check "  after the partial start" "$(log_order partial-start ownership-probe apps-stopped-after-start)" "in order"
+check "  the journal says stopped" \
+    "$(grep -c '^apps           stopped' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+check "  the operator is told STOPPED" "$(grep -c 'STOPPED and the site is not serving' "$SANDBOX/out")" "1"
+check "  and not that the new code runs" "$(grep -c 'new backend and scheduler are running' "$SANDBOX/out")" "0"
+check "  no old image was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+rm -rf "$SANDBOX"
+
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/migration_adds_ownership"
+touch "$STUB_DIR/app_recreate_partial"
+touch "$STUB_DIR/restop_fails"
+run_guard
+check "a partial start that cannot be stopped again: refused" "$RC" "76"
+check "  STOPPED is not claimed" "$(grep -c 'STOPPED and the site is not serving' "$SANDBOX/out")" "0"
+check "  the operator is told the state is not confirmed" "$(grep -c 'could NOT be confirmed stopped' "$SANDBOX/out")" "1"
+check "  the journal says unknown" \
+    "$(grep -c '^apps           unknown' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+rm -rf "$SANDBOX"
+
+new_sandbox
+# No previous deployment: nothing to restore, and the partial start is stopped.
+touch "$STUB_DIR/app_recreate_partial"
+run_guard
+check "a partial start on a first deployment: refused" "$RC" "76"
+check "  backend is stopped again" "$(cat "$STUB_DIR/live_backend" 2>/dev/null)" "exited"
+check "  the journal says stopped" \
+    "$(grep -c '^apps           stopped' "$SANDBOX/manifests/in-progress" 2>/dev/null)" "1"
+rm -rf "$SANDBOX"
+
+echo "== no dependency start names an application, even when the graph would =="
+# backend depending on scheduler and on nginx: the transitive closure contains
+# both, and starting them `--no-deps` by name is exactly the revival the
+# forced recreate exists to prevent.
+new_sandbox
+cat > "$STUB_DIR/rendered" <<'JSON'
+{"services": {
+  "nginx":     {"ports": [{"target": 80,  "published": "80",  "protocol": "tcp", "mode": "ingress"},
+                          {"target": 443, "published": "443", "protocol": "tcp", "mode": "ingress"}],
+                "depends_on": {"backend": {"condition": "service_started"}}},
+  "redis":     {},
+  "backend":   {"environment": {"SORA_ENV": "production"},
+                "depends_on": {"scheduler": {"condition": "service_started"}, "nginx": {"condition": "service_started"}, "redis": {"condition": "service_started"}}},
+  "scheduler": {"environment": {"SORA_ENV": "production"},
+                "depends_on": {"redis": {"condition": "service_started"}}}
+}}
+JSON
+run_guard
+check "backend depending on scheduler and nginx: the deployment succeeds" "$RC" "0"
+check "  only redis is started on its own" "$(sed 's/.*--no-deps //' "$STUB_DIR/deps_started" 2>/dev/null)" "redis"
+check "  and no up in the window names an application or nginx" "$(reviving_ups | tr '\n' '|')" ""
+rm -rf "$SANDBOX"
+
 echo "== the migration and the application are one image, not two builds =="
 # `migrate`, `backend` and `scheduler` share one tag and only `backend` builds
 # it, so "migrated from the image being deployed" is a fact rather than a
@@ -1686,7 +2873,7 @@ check "the image is built once, explicitly" \
 check "and the containers start without rebuilding" \
     "$(grep -c 'up -d --no-build --remove-orphans' "$STUB_DIR/calls")" "1"
 BUILD_LINE="$(grep -n 'build backend' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
-MIG_LINE="$(grep -n 'run --rm --no-deps migrate' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
+MIG_LINE="$(grep -nE 'run -d --no-deps .* migrate$' "$STUB_DIR/calls" | head -1 | cut -d: -f1)"
 check "and the build comes before the migration" \
     "$([ -n "$BUILD_LINE" ] && [ -n "$MIG_LINE" ] && [ "$BUILD_LINE" -lt "$MIG_LINE" ] && echo yes || echo no)" "yes"
 rm -rf "$SANDBOX"
@@ -1735,8 +2922,12 @@ rm -rf "$SANDBOX"
 new_sandbox
 run_guard
 check "images already right: the deployment succeeds" "$RC" "0"
-check "without a targeted recreate" \
-    "$(grep -c -- '--no-deps --force-recreate backend scheduler' "$STUB_DIR/calls")" "0"
+# Before the ownership cutover this was "without a targeted recreate": the
+# recreate ran only when `up` had left the old image. Now the first start after
+# the migration is always a forced recreate, because the alternative is `up`
+# deciding whether to revive the stopped old containers.
+check "and backend and scheduler are still force-recreated, exactly once" \
+    "$(grep -c -- '--no-deps --force-recreate backend scheduler' "$STUB_DIR/calls")" "1"
 rm -rf "$SANDBOX"
 
 new_sandbox
@@ -1824,7 +3015,7 @@ check "and removes the journal" \
     "$([ -f "$SANDBOX/manifests/in-progress" ] && echo present || echo gone)" "gone"
 # The whole point: nothing was deployed a second time.
 check "it did not build" "$(grep -c 'build backend' "$STUB_DIR/calls")" "0"
-check "it did not migrate" "$(grep -c 'run --rm --no-deps migrate' "$STUB_DIR/calls")" "0"
+check "it did not migrate" "$(grep -cE 'run -d --no-deps .* migrate$' "$STUB_DIR/calls")" "0"
 check "it did not recreate the services" \
     "$(grep -c 'up -d --no-build --remove-orphans' "$STUB_DIR/calls")" "0"
 # The value, not the presence of the field. There is no earlier manifest in this

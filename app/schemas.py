@@ -1,10 +1,10 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from typing import Annotated, Optional, List, Tuple, Dict, Any, Literal, Union
 
 class ProjectInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    name: str = "Project"
+    name: str = Field(default="Project", validation_alias=AliasChoices("name", "project_name"))
     budget: float = Field(
         default=50000,
         ge=1000,

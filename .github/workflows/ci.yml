@@ -102,7 +102,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install pytest pytest-cov pytest-timeout
+          pip install pytest pytest-cov pytest-timeout pypdf==5.1.0
 
       - name: Verify backend model loading
         env:
@@ -717,7 +717,7 @@ jobs:
 
   shell-scripts:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
@@ -754,6 +754,9 @@ jobs:
             scripts/deploy_production.sh \
             scripts/check_seed_materialized.sh \
             tests/test_deploy_production.sh \
+            scripts/rehearse_ownership_cutover.sh \
+            tests/test_rehearse_ownership_cutover.sh \
+            tests/rehearsal_synthetic_dump.sh \
             tools/mutation_backfill_periods.sh \
             tools/wait_for.sh \
             tests/test_wait_for.sh \
@@ -909,6 +912,69 @@ jobs:
         run: |
           docker ps -aq --filter 'name=sora-drill-it-' | xargs -r docker rm -f
           docker volume ls -q --filter 'name=sora-drill-it-' | xargs -r docker volume rm -f
+
+  # The ownership cutover's rehearsal, run for real: the release image built
+  # exactly as the deployment builds it, a synthetic dump at f4b7c2d91e06 made
+  # by that image's own alembic, and scripts/rehearse_ownership_cutover.sh
+  # through three restores, the negative run and every refusal and failure
+  # path tests/test_rehearse_ownership_cutover.sh drives. It proves the
+  # mechanics -- that the accounts and ownership revisions run from that
+  # revision, that the guards fire, that cleanup is confirmed -- and nothing
+  # about production's timings, which only the run on the production dump can.
+  ownership-rehearsal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      # LFS: the rehearsal starts the backend, which loads the model seed and
+      # refuses pointer files.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+          lfs: true
+
+      - name: Build the release image as the deployment does
+        run: |
+          base="$(python3 -c 'import yaml; print(yaml.safe_load(open("docker-compose.prod.yml"))["services"]["backend"]["build"]["args"]["VITE_API_BASE"])')"
+          docker build -f Dockerfile.prod --target runtime \
+            --build-arg VITE_API_BASE="$base" -t sora-rehearsal:ci .
+
+      # The rehearsal never pulls; the refusal of another major needs one.
+      - name: The PostgreSQL images, present before the rehearsal
+        run: |
+          docker pull -q postgres:16
+          docker pull -q postgres:15
+          docker pull -q redis:7-alpine
+
+      - name: The rehearsal against a synthetic dump
+        env:
+          REHEARSAL_TEST_IMAGE: sora-rehearsal:ci
+          REHEARSAL_TEST_PG_IMAGE: postgres:16
+          REHEARSAL_TEST_PG15_IMAGE: postgres:15
+          REHEARSAL_TEST_KEEP_DIR: ${{ runner.temp }}/rehearsal-evidence
+        run: |
+          mkdir -p "$REHEARSAL_TEST_KEEP_DIR"
+          bash tests/test_rehearse_ownership_cutover.sh
+
+      # Each case's output, its JSON report and the fixture's build log. The dump
+      # is synthetic and is not uploaded; the reports carry its checksum only.
+      - name: Keep the rehearsal's own output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rehearsal-evidence
+          path: ${{ runner.temp }}/rehearsal-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Remove anything a failed case left behind
+        if: always()
+        run: |
+          for l in sora.rehearsal.nonce sora.rehearsal.fixture; do
+            docker ps -aq --filter "label=$l" | xargs -r docker rm -f
+            docker volume ls -q --filter "label=$l" | xargs -r docker volume rm
+            docker network ls -q --filter "label=$l" | xargs -r docker network rm
+          done
 
   # A clean database must be reachable from migrations alone. Production was
   # bootstrapped with Base.metadata.create_all(), which is not reproducible from
@@ -1324,6 +1390,140 @@ jobs:
           grep -q 'DO \$migration\$' /tmp/offline_catchup.sql
           echo "Catch-up offline script generated without an Inspector"
 
+  e2e-ownership:
+    name: e2e ownership browser tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sora
+          POSTGRES_PASSWORD: sora2026
+          POSTGRES_DB: sora_earth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: "postgresql://sora:sora2026@localhost:5432/sora_earth"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          lfs: true
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install backend dependencies
+        # pypdf reads the saved report's text in the PDF test (pdf_text.py).
+        run: |
+          pip install -r requirements.txt
+          pip install pypdf==5.1.0
+
+      - name: Run migrations
+        run: alembic upgrade head
+
+      - name: Bootstrap development accounts
+        run: python scripts/bootstrap_users.py --dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            e2e/ownership/package-lock.json
+
+      - name: Build SPA in production mode
+        # Without VITE_API_BASE web/src/api/mock.ts turns the whole frontend
+        # into canned data, and the suite would test the mock. VITE_USE_MOCK
+        # is deliberately not set. The bundle lands in app/static/spa, which
+        # app/main.py serves at / and every SPA route.
+        env:
+          VITE_API_BASE: /api/v1
+        run: |
+          cd web
+          npm ci
+          npm run build
+          if grep -rqF --include='*.js' 'mockEvaluate' ../app/static/spa/assets/; then
+            echo "FATAL: the SPA bundle is a mock build"; exit 1
+          fi
+
+      - name: Install Playwright dependencies
+        run: |
+          cd e2e/ownership
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Start backend with SPA
+        # REDIS_URL is not set at all: an empty value fails startup.
+        # Importing app.main loads torch, SHAP and the models, so readiness
+        # is bounded at 240 s rather than 30.
+        env:
+          SECRET_KEY: "ci-test-secret"
+          SORA_ADMIN_TOKEN: "ci-test-admin"
+          SORA_OFFLINE: "1"
+          RUN_SCHEDULER: "false"
+        run: |
+          nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
+          echo $! > uvicorn.pid
+          if ! timeout 240 bash -c 'until curl -sf http://127.0.0.1:8000/health >/dev/null; do sleep 1; done'; then
+            echo "backend not ready within 240 s"; tail -100 uvicorn.log; exit 1
+          fi
+          for route in / /evaluate /history /login; do
+            if ! curl -sf "http://127.0.0.1:8000$route" | grep -qi '<div id="root"'; then
+              echo "FATAL: $route does not serve the SPA"; exit 1
+            fi
+          done
+
+      - name: Run Playwright tests
+        run: |
+          cd e2e/ownership
+          npx playwright test
+        env:
+          BASE_URL: "http://127.0.0.1:8000"
+          E2E_PYTHON: python
+
+      - name: Generate report artifact
+        # Fails when the results JSON is missing or empty.
+        if: always()
+        run: |
+          cd e2e/ownership
+          node --experimental-strip-types generate-report.ts
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-ownership-report
+          path: e2e/ownership/e2e-ownership-report.json
+          retention-days: 30
+
+      - name: Upload Playwright results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            e2e/ownership/test-results/
+            uvicorn.log
+          retention-days: 14
+
+      - name: Stop backend
+        if: always()
+        run: |
+          if [ -f uvicorn.pid ]; then
+            kill "$(cat uvicorn.pid)" || true
+          fi
+
   # One context for branch protection to require, instead of six.
   #
   # Requiring the six jobs directly means six names that must match exactly and
@@ -1348,9 +1548,11 @@ jobs:
       - migration-bootstrap
       - integration-tests
       - shell-scripts
+      - ownership-rehearsal
       - frontend-checks
       - production-spa-build
       - api-contract-ratchet
+      - e2e-ownership
     steps:
       - name: Every job must have succeeded
         env:
