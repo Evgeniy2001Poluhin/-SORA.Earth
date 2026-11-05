@@ -978,13 +978,21 @@ def test_the_synthetic_cleanup_spares_a_pilot_project_with_the_same_name(world, 
 # ----------------------------------------------------- the deploy marker
 
 
-def test_the_marker_holds_back_the_deployment_and_says_why():
-    """tests/test_deploy_production.sh proves the refusal; this pins that the
-    file is present and its first line is a reason, which is what the refusal
-    quotes."""
-    with open(os.path.join(REPO_ROOT, ".deploy-blocked"), encoding="utf-8") as fh:
-        first = fh.readline().strip()
-    assert first == "ownership cutover incomplete; requires PR2c"
+def test_the_marker_is_lifted_only_beside_the_release_record():
+    """The marker held ownership back until the cutover was delivered and
+    proved. It is removed by the change that records that proof, and by
+    nothing else: a tree without the marker must carry the record, and the
+    record must name the commit the production rehearsal ran on.
+
+    tests/test_deploy_production.sh still proves the refusal itself, on a
+    marker it writes into a scratch repository, so the guard stays tested
+    with the file gone from this tree."""
+    assert not os.path.exists(os.path.join(REPO_ROOT, ".deploy-blocked"))
+    record = os.path.join(REPO_ROOT, "docs", "OWNERSHIP_CUTOVER_RELEASE.md")
+    with open(record, encoding="utf-8") as fh:
+        text = fh.read()
+    assert "fb6fe4c7950eb1e7d50cde256d93c50dcc1b40ee" in text
+    assert "3 rows in `evaluations` and 3 in\n`predictions_log`" in text
 
 
 def test_a_signed_in_waterfall_neither_reads_nor_writes_the_shared_png_cache(
