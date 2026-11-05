@@ -294,6 +294,8 @@ case "$argv" in
             [ -f "$STUB_DIR/migrator_inspect_by_id_fails" ] && { echo "stub: cannot connect to the daemon" >&2; exit 1; } ;;
         esac
         if [ -f "$STUB_DIR/migrator_container" ]; then echo "cidmigrator0001"; exit 0; fi
+        # Docker 29 (production since 2026-11) spells it in lower case.
+        if [ -f "$STUB_DIR/docker29_messages" ]; then echo "error: no such object: ${argv##* }" >&2; exit 1; fi
         echo "Error: No such object: ${argv##* }" >&2; exit 1 ;;
     "inspect -f {{.State.Status}} "*)
         [ -f "$STUB_DIR/migrator_container" ] || { echo "Error: No such object" >&2; exit 1; }
@@ -2743,6 +2745,20 @@ DEPLOY_MIGRATE_DEADLINE=2 DEPLOY_MIGRATOR_GONE_SECONDS=2 run_guard
 check "a removal docker cannot confirm refuses the rollback" "$RC" "76"
 check "  the schema was not read" "$(grep -c "'ownership:'" "$STUB_DIR/calls")" "0"
 check "  nothing old was restored" "$([ -f "$STUB_DIR/rolled_back" ] && echo restored || echo not)" "not"
+rm -rf "$SANDBOX"
+
+# Docker 29 writes "error: no such object: <id>". That is the same positive
+# answer, and a deployment must go through on it. Before this case the guard
+# matched only "No such", and the first production cutover refused here with
+# the migration committed and every service stopped.
+new_sandbox
+accounts_target
+previous_is "$ACCOUNTS"
+touch "$STUB_DIR/docker29_messages"
+run_guard
+check "docker 29's lower-case 'no such object' confirms the migrator gone" "$RC" "0"
+check "  and no answer was read as unanswered" \
+    "$(grep -c 'docker cannot say whether' "$SANDBOX/out")" "0"
 rm -rf "$SANDBOX"
 
 # The id is known and removable, but the second question -- does anything
