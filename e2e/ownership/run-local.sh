@@ -50,7 +50,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+# Not `docker ps | grep -q`: under pipefail grep's early exit can SIGPIPE
+# docker, the pipeline then fails, and an existing container reads as absent.
+# A failing `docker ps` must stop the run rather than read as "no container".
+existing_names=$(docker ps -a --format '{{.Names}}')
+if grep -qx "$CONTAINER_NAME" <<<"$existing_names"; then
   echo "ERROR: container $CONTAINER_NAME already exists; remove it or set E2E_CONTAINER"; exit 1
 fi
 for p in "$PG_PORT" "$BACKEND_PORT"; do
