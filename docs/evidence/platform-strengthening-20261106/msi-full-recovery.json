@@ -1,0 +1,17 @@
+{
+  "kind": "synthetic-postgresql-dump-through-msi",
+  "dump_bytes_matched_source": true,
+  "fingerprint_matched": true,
+  "fingerprint_lines": 470,
+  "revision": "b7d41f2e9c35",
+  "table_rows": 85,
+  "view_rows": 85,
+  "restore_seconds": 0.828,
+  "total_probe_seconds": 8.242,
+  "network": "none",
+  "published_ports": [],
+  "production_contacted": false,
+  "decryption_key_left_mac": false,
+  "server_ssh_transport_exercised": false,
+  "temporary_container_removed": true
+}

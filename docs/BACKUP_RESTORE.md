@@ -11,23 +11,24 @@ point in it answers 530 or nothing (#286); that document is now in
 
 ---
 
-## Status: restore is proven, backup is not scheduled
+## Status checked 2026-11-06: local backups scheduled; off-site recovery unproved
 
-A full destroy-and-restore drill passes (numbers below). What does **not**
-exist is any automated backup: searching the compose files, the scheduler, CI
-and `scripts/` turns up no `pg_dump` on a timer, no `pg_basebackup`, no WAL
-archiving. The only mechanism documented anywhere before this file was a
-`pg_dump` line in `CLAUDE.md` that someone has to remember to type.
+A full destroy-and-restore drill passed (historical numbers below). The earlier
+statement that no automatic backup existed is obsolete. On production
+`109.120.147.12`, `sora-backup-local.timer` is active and enabled, with the latest
+successful run at 2026-11-06 03:30 UTC. The newest local dump was 6,104,986 bytes
+at the 10:18 UTC snapshot; `sora-backup-age.service` also completed successfully.
+See `PLATFORM_STRENGTHENING_2026-11-06.md` and its attached JSON snapshot.
 
-That makes the current recovery point objective **undefined, not merely
-poor**. If the database were lost right now, what could be recovered is
-whatever dump someone happens to have taken by hand, of unknown age. A fast
-restore does not compensate for having nothing to restore from.
+These files are on the same host as the database. They protect against some
+database failures, **not loss of the host**. `sora-backup.timer`, the off-site
+schedule described in `BACKUP_AUTOMATION.md`, is not installed on this host.
+No off-site recovery claim follows from the local timer or file size.
 
-Fixing that is a scheduling decision — how much data the project can afford
-to lose — and is deliberately left to the owner. Everything needed to
-implement it is here: `scripts/pg_backup.sh` is safe to run on a timer, and
-its output is exactly what `scripts/pg_restore.sh` consumes.
+The separate ownership rehearsal restored a real production dump on 2026-11-05;
+its evidence and boundaries are in `OWNERSHIP_CUTOVER_RELEASE.md`. This does
+not establish that the newest dump has been restored or that disaster recovery
+on another host has been rehearsed.
 
 ---
 
@@ -155,10 +156,12 @@ point `PYTHON` at one that has the application's dependencies.
 
 ## Recovery objectives
 
-**RPO — undefined.** No automated backup exists. Once `pg_backup.sh` runs on
-a schedule, the RPO becomes that interval, because this is dump-based backup
-with no WAL archiving: everything written since the last dump is lost. Getting
-below that means continuous archiving, which is a larger change than this.
+**Local RPO — nominally 24 hours, conditional on a successful usable daily dump.**
+The latest measured dump age was about 6 h 48 min on 2026-11-06. A missed run
+extends that loss window; the age check is not a replacement for a backup.
+**Host-loss RPO — not established:** no off-site copy was verified. No WAL
+archiving was verified. Achieving a smaller accepted loss window requires a
+separate owner decision and measurement.
 
 **RTO — dominated by everything except the restore.** The measured restore of
 a 105 MB database is under two seconds. A real recovery is noticing the
@@ -170,7 +173,8 @@ itself from the throughput above and treat the rest as the real cost.
 
 ## What this evidence does not cover
 
-- **Production was never touched.** No connection, no `pg_dump`, no read. The
+- **The July drill did not contact production.** The fresh November operational
+  check and the November ownership rehearsal are separate evidence. The July
   drill reproduces production's *shape* from the description in
   `HANDOFF_2026-07-27.md` §4a — `region_code text` as primary key, five `real`
   score columns, `id bigint` that is not the key — but the data is synthetic

@@ -1,0 +1,19 @@
+{
+  "observed_utc": "2026-11-06T11:34:12.608133+00:00",
+  "passed": true,
+  "checks": [
+    "INSTALL_PREFLIGHT_NO_SIDE_EFFECTS_OK",
+    "INSTALL_REPEAT_REFUSED_WITHOUT_OVERWRITE_OK",
+    "EXPORT_REAL_UNIX_PERMISSIONS_OK",
+    "REAL_OPENSSH_FORCED_COMMAND_AND_FORWARDING_OK",
+    "BACKUP_INSTALLATION_STAND_PASSED"
+  ],
+  "real_openssh": true,
+  "unix_permissions": true,
+  "systemd_unit_verification": true,
+  "systemctl_activation": "stubbed explicitly",
+  "production_contacted_by_stand": false,
+  "network": "none; loopback ssh only",
+  "container_cleanup": "docker run --rm",
+  "log_sha256": "e3e2ee51b100ea8b1853b5418a4a57861435cb36c603f0a7305fef3db691d337"
+}

@@ -1,11 +1,34 @@
 # Where the project stands, and what is worth doing next
 
     written    2026-08-14
+    checked    2026-11-06; production d29e0b9c
     supersedes ROADMAP.md, ROADMAP_DEFENSE_v6.md, ROADMAP_DEFENSE_v6.2.md,
                PROJECT_ANALYSIS_2026-07-17.md, IMPROVEMENTS_2026-07-17.md
     does not   supersede ROADMAP_ENV_CRISIS_2026.md, which remains the phase
                plan for the experiment, or the M1/M2/M3 documents, which are
                the record
+
+## Проверка состояния 2026-11-06
+
+Свежие доказательства и четыре согласованных направления усиления собраны в
+[`PLATFORM_STRENGTHENING_2026-11-06.md`](PLATFORM_STRENGTHENING_2026-11-06.md).
+Это дополнение к единому плану `DEVELOPMENT_ROADMAP.md`, не новая конкурирующая
+дорожная карта. Материалы пользовательского пилота находятся в `docs/pilot/`.
+
+- На проде проверен `d29e0b9c`; `/health` и `/api/v1/ready` ответили 200.
+- Релиз ownership и последующая живая проверка доступа 17/17 уже приняты.
+  Повторная проверка реальными специалистами — отдельный этап; участников пока нет.
+- Ежедневные локальные бэкапы и проверка их возраста работают. Защита от потери
+  всего хоста этим не доказана: off-site timer не установлен.
+- Покрытие наблюдений контролируется метриками **и правилами Grafana**.
+  В свежем снимке 26 завершённых дней, 21 точка, 0 неполных точко-дней.
+  Доставка уведомления человеку остаётся непроверенной.
+- Модельная вероятность не валидирована как реальный исход проекта; ограничения
+  и план независимой проверки изложены в `pilot/RESULTS_AND_VALIDATION.md`.
+
+Ниже сохранены основания и история решений. Старые численные оценки API,
+сроки «следующих N дней» и описания отсутствовавших механизмов нельзя читать
+как свежую проверку эксплуатации.
 
 This file exists because five planning documents were current at different
 times and none says so. A reader picking one up finds a confident plan with no
@@ -17,7 +40,7 @@ ingesters and the Phase 0 audit as outstanding, and all three had shipped.
 
 ```
 Product      SORA.Earth ESG platform -- README.md, CLAUDE.md
-             In production, 163 endpoints. Punch-list empty.
+             In production. Release accepted; strengthening work listed above.
 
 Experiment   Environmental crisis analytics -- ROADMAP_ENV_CRISIS_2026.md
              Phase 1 complete. M2 closed negative. M3 clock running.
@@ -34,7 +57,7 @@ The experiment does not gate the product and has not been promoted. See
 | M2 Forecasting | **CLOSED — NEGATIVE RESULT** | `e82d682` |
 | M3 Forecast target | declared; **§7 clock running from 2026-10-11**, restarted by measurement in amendment 1.4 (the 2026-09-03 start of amendment 1.2 is void) | `b08a050f` |
 | Phase 1 (env foundation) | all seven exit criteria met | |
-| Product punch-list | empty | |
+| Ownership release and live access check | accepted, 17/17 live checks reported 2026-11-05 | release record and owner acceptance; fresh operational snapshot above |
 
 M2's result is the load-bearing one: the ESG score is a structural index over
 static snapshots, 1.00 distinct values per region. Against a constant the
@@ -100,10 +123,14 @@ that tells "no day fell short" from "no day was examined". The count is
 therefore queryable, graphable and alertable instead of living only behind an
 admin endpoint nobody called.
 
-What is **not** done is the alerting rule. A gauge in Prometheus still requires
-someone to look, and choosing when a dip is worth waking someone for is the
-same kind of decision as the five forecast alerts in #284 — the owner's, not a
-side effect of adding the metric.
+**Update, 2026-11-06:** alerting rules have shipped. The provisioned rules are
+`sora-observation-coverage-gap` (gap count above zero for 30 minutes) and
+`sora-observation-coverage-stale` (last success older than 900 seconds, or absent,
+for 45 minutes). See `grafana/provisioning/alerting/alerts.yml`,
+`tests/test_observation_coverage_alerts.py` and the real evaluator checks in
+`tests/grafana_stand/RESULTS.md`. Those evaluator checks explicitly did **not**
+prove delivery to a contact point. Production delivery remains unverified;
+a healthy metric snapshot is not a notification receipt.
 
 ### B. Make the eventual measurement trustworthy — before it runs
 

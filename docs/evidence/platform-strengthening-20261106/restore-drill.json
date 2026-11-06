@@ -1,0 +1,13 @@
+{
+  "kind": "local-synthetic-postgresql16",
+  "production_contacted": false,
+  "revision": "b7d41f2e9c35",
+  "fingerprint_lines": 470,
+  "backup_duration": "0.25s",
+  "restore_duration": "0.74s",
+  "orm_and_view_rows": 85,
+  "passed": true,
+  "cleanup": "confirmed SYNTHETIC_POSTGRES_CONTAINER_REMOVED",
+  "rto_claim": false,
+  "full_log_sha256": "652850c47321b98b5cb3c515641acef5db8b8c526f4fa635ef8045692185f66d"
+}

@@ -1,0 +1,65 @@
+{
+  "observed_at": "2026-11-06T10:18:02.694857+00:00",
+  "release_sha": "d29e0b9caac5261b7249d627406cc02b88158a86",
+  "health_http": 200,
+  "ready_http": 200,
+  "metrics": {
+    "app_up": {
+      "status": "observed",
+      "values": [
+        1.0
+      ]
+    },
+    "scheduler_up": {
+      "status": "observed",
+      "values": [
+        1.0
+      ]
+    },
+    "gap_count": {
+      "status": "observed",
+      "values": [
+        0.0
+      ]
+    },
+    "days_examined": {
+      "status": "observed",
+      "values": [
+        26.0
+      ]
+    },
+    "points_examined": {
+      "status": "observed",
+      "values": [
+        21.0
+      ]
+    },
+    "last_success": {
+      "status": "observed",
+      "values": [
+        1793959977.2315931
+      ]
+    }
+  },
+  "checks": {
+    "app_up": "pass",
+    "scheduler_up": "pass",
+    "gap_count": "pass",
+    "days_examined": "pass",
+    "points_examined": "pass",
+    "last_success": "pass"
+  },
+  "local_backup": {
+    "status": "pass",
+    "count": 9,
+    "latest_name": "sora_earth_20261106T033002Z.dump",
+    "age_seconds": 24479,
+    "bytes": 6104986,
+    "archive_integrity": "not_checked",
+    "offsite_recovery": "not_checked"
+  },
+  "backup_units": "NextElapseUSecRealtime=Sat 2026-11-07 03:30:00 UTC\nLastTriggerUSec=Fri 2026-11-06 03:30:02 UTC\nResult=success\nId=sora-backup-local.timer\nLoadState=loaded\nActiveState=active\nUnitFileState=enabled\n\nResult=success\nExecMainStatus=0\nId=sora-backup-local.service\nLoadState=loaded\nActiveState=inactive\nUnitFileState=disabled\n\nNextElapseUSecRealtime=Sat 2026-11-07 07:30:00 UTC\nLastTriggerUSec=Fri 2026-11-06 07:30:09 UTC\nResult=success\nId=sora-backup-age.timer\nLoadState=loaded\nActiveState=active\nUnitFileState=enabled\n\nResult=success\nExecMainStatus=0\nId=sora-backup-age.service\nLoadState=loaded\nActiveState=inactive\nUnitFileState=disabled\n\nNextElapseUSecRealtime=\nLastTriggerUSec=\nResult=success\nId=sora-backup.timer\nLoadState=not-found\nActiveState=inactive\nUnitFileState=",
+  "notification_delivery": "not_verified",
+  "restore_drill": "not_run_by_this_collector",
+  "deployment_permission": "none"
+}

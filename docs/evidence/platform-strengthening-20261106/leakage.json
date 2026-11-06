@@ -1,0 +1,11 @@
+{
+  "rows_evaluated": 16203,
+  "mode": "approximate",
+  "success0_synthetic_duration": 3363,
+  "success0_real_duration": 1640,
+  "success1_synthetic_duration": 714,
+  "success1_real_duration": 10486,
+  "naive_rule_correct": 13849,
+  "naive_rule_accuracy": 0.8547,
+  "data_path": "data/projects.csv"
+}
