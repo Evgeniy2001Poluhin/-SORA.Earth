@@ -726,6 +726,21 @@ project ownership is now refused as a rollback target. The success record's "to
 undo" line asks the same barriers and says "no rollback ... fix forward" when one
 refuses.
 
+**Backups.** `sora-backup-local.timer` writes the dump to `/var/backups/sora` at
+03:30 UTC; `sora-backup-age.timer` checks its age. `sora-backup-export.timer`
+encrypts the newest dump into `/var/lib/sora-backup-export` at 03:45 UTC, and the
+MSI task `SoraEncryptedBackupPull` fetches it at 04:00 UTC, at logon and every 30
+minutes, as the restricted SSH account `sora-backup-reader` (forced command, no
+shell, no forwarding). The decryption key is on the Mac only; the VPS and the MSI
+hold ciphertext. Procedure and results: `docs/pilot/MSI_BACKUP_INSTALL.md`.
+
+- Test the pull through the scheduled task. Windows `ssh.exe` through WSL interop,
+  started from an SSH session, prints its output and never exits; from the task it
+  returns 0.
+- `backup_transport.py status` proves the newest ciphertext is present and fresh,
+  not that it decrypts. Only a restore proves that.
+- No alert reaches anyone yet, and the key has no second copy.
+
 **Production containers (9):** backend, scheduler, nginx, postgres, pgbouncer,
 redis, mlflow, prometheus, grafana. Only 80/443 are exposed (nginx); Grafana and
 Prometheus bind `127.0.0.1`; TLS by nginx from `/etc/letsencrypt/`.
