@@ -1,0 +1,8 @@
+{
+  "drvfs_binary_pull": true,
+  "repeat_without_redownload": true,
+  "overlap_refused": true,
+  "corruption_detected": true,
+  "production_contacted": false,
+  "temporary_directory_auto_cleanup": true
+}

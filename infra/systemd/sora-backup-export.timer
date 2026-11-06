@@ -1,0 +1,10 @@
+[Unit]
+Description=Prepare an encrypted independent copy after the local SORA dump
+
+[Timer]
+OnCalendar=*-*-* 03:45:00 UTC
+Persistent=true
+Unit=sora-backup-export.service
+
+[Install]
+WantedBy=timers.target

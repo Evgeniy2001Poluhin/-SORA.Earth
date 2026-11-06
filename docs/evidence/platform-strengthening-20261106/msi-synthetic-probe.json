@@ -1,0 +1,30 @@
+{
+  "kind": "synthetic-only",
+  "production_data_transferred": false,
+  "private_key_transferred": false,
+  "parts": {
+    "payload.mac": {
+      "bytes": 65,
+      "sha256": "4942dc476b0ccc2e3c80554d2406c1432b251883164119e6e7f71761c291e79c"
+    },
+    "payload.enc": {
+      "bytes": 96,
+      "sha256": "50a93f40277c3ffa1c212c16651f93cbf2f9743a3eead009e18eaa79b0b5a5cf"
+    },
+    "payload.hdr": {
+      "bytes": 63,
+      "sha256": "9dbee4664cf1c4a555d47045729a80489b20b22630fec8df7a58fe4ca67143a2"
+    },
+    "payload.key": {
+      "bytes": 384,
+      "sha256": "8537ffc3ce5833828e33da54b874949160cf6fc07001b137952c6bad04ca637a"
+    }
+  },
+  "msi_sha256_verified": true,
+  "roundtrip_plaintext_sha256": "d8ab472f2cc7163c8aabcebea7961d183d72f5cf7696433cfc984681049e3f98",
+  "plaintext_match": true,
+  "tamper_rejected_before_plaintext": true,
+  "remote_probe_cleanup": "confirmed MSI_SYNTHETIC_PROBE_CLEANED",
+  "regular_backup_installed": false,
+  "scope": "encrypted fixture transfer and file recovery; not a PostgreSQL restore from MSI"
+}

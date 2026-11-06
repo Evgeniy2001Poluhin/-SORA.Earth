@@ -1,0 +1,7 @@
+{
+  "windows_ssh_from_wsl": true,
+  "strict_host_key_checking": true,
+  "dedicated_identity_configured": true,
+  "pinned_host_store_configured": true,
+  "network_connection_attempted": false
+}

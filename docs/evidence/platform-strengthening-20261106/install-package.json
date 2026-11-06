@@ -1,0 +1,17 @@
+{
+  "bundle_path": "/Users/evgenijpoluhin/.local/share/sora-backup/install-20261106",
+  "bundle_sha256sums_sha256": "64ed059697e695567f37873b7242fcad8f65d71e07520d3af0cf9aec680f51d8",
+  "private_keys_included": false,
+  "vps_installed": false,
+  "msi_scheduler_enabled": false,
+  "mac_recovery_key_created": true,
+  "usb_copy_verified": false,
+  "local_pytest_passed": 141,
+  "synthetic_postgresql_recovery_from_msi_passed": true,
+  "limitations": [
+    "restricted SSH authentication on VPS not yet exercised",
+    "server installer and units not executed on production",
+    "real production archive not yet exported or restored",
+    "USB key copy deferred by owner"
+  ]
+}

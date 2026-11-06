@@ -762,6 +762,25 @@ jobs:
             tests/test_wait_for.sh \
             tools/mutation_wait_for.sh
 
+      # The installer must run in a disposable OS, never on the runner host.
+      # Only the image build has network access to signed Debian repositories;
+      # the test itself uses loopback SSH with no published ports or Docker socket.
+      - name: Build the isolated backup installation stand
+        run: docker build -t sora-backup-install-stand:ci tests/backup_installation_stand
+
+      - name: Backup installation with real SSH and Unix permissions
+        run: |
+          docker run --rm --name sora-backup-install-stand \
+            --network none --cpus 1 --memory 512m \
+            --tmpfs /tmp:rw,exec,nosuid,size=96m \
+            -e SORA_BACKUP_INSTALL_TEST=1 \
+            -v "${GITHUB_WORKSPACE}:/w:ro" -w /w \
+            sora-backup-install-stand:ci bash tests/test_backup_export_installation.sh
+
+      - name: Remove only the backup installation stand if interrupted
+        if: always()
+        run: docker rm -f sora-backup-install-stand >/dev/null 2>&1 || true
+
       # These skip on macOS -- flock does not exist there -- so this Linux job is
       # the only place they actually execute.
       - name: Behavioural tests for the daily local backup

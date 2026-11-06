@@ -1,0 +1,23 @@
+[Unit]
+Description=Encrypt the latest completed SORA local backup for independent pull
+After=sora-backup-local.service
+
+[Service]
+Type=oneshot
+User=root
+Group=sora-backup-reader
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/sora-backup/backup_transport.py export-latest --source /var/backups/sora --root /var/lib/sora-backup-export --recipient /etc/sora-backup/recipient.pem --reader-group sora-backup-reader
+TimeoutStartSec=15min
+CPUQuota=25%
+MemoryMax=384M
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateNetwork=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/var/backups/sora /etc/sora-backup /usr/local/lib/sora-backup
+StateDirectory=sora-backup-export
+StateDirectoryMode=0750
+ReadWritePaths=/var/lib/sora-backup-export
