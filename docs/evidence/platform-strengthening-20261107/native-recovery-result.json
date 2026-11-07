@@ -1,0 +1,31 @@
+{
+  "passed": true,
+  "local_rehearsal_only": true,
+  "runtime": "native Mac venv311; not production container",
+  "backup_id": "20261107T033009Z",
+  "production_database_contacted": false,
+  "checkout_sha": "10e87d959c13270dbaef6eed6bd1516b774ea215",
+  "source_dump_checksum_matched": true,
+  "schema_revision": "b7d41f2e9c35",
+  "health_readiness_database_ok": true,
+  "spa_routes_checked": 4,
+  "anonymous_calculation_ok": true,
+  "saved_rows_unchanged": true,
+  "model_source_and_version_match_public_production": true,
+  "outbound_network_restricted_to_temporary_database": true,
+  "sandbox_positive_negative_controls": true,
+  "local_recovery_seconds": 54.657,
+  "phases_seconds": {
+    "prepare_source": 1.434,
+    "fetch_from_msi": 0.964,
+    "decrypt_and_verify": 0.384,
+    "postgres_start": 10.256,
+    "restore_database": 14.461,
+    "sandbox_preflight": 0.116,
+    "application_start": 26.314,
+    "application_smoke": 0.703
+  },
+  "temporary_plaintext_removed": true,
+  "temporary_process_and_container_removed": true,
+  "observed_utc": "2026-11-07T06:47:01.928020+00:00"
+}
