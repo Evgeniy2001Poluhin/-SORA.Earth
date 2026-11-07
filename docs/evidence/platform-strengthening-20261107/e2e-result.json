@@ -1,0 +1,56 @@
+{
+  "timestamp": "2026-11-07T06:14:33.134Z",
+  "commit_sha": "10e87d959c13270dbaef6eed6bd1516b774ea215",
+  "node_version": "v24.13.0",
+  "playwright_version": "1.64.1",
+  "scenarios": [
+    {
+      "file": "01-anonymous.spec.ts",
+      "name": "anonymous: calculate shows a result, writes nothing, save requires sign-in",
+      "status": "passed",
+      "duration_ms": 3609
+    },
+    {
+      "file": "02-specialist-a-saves.spec.ts",
+      "name": "specialist A: double-click saves exactly once; the record reopens after a new sign-in",
+      "status": "passed",
+      "duration_ms": 6032
+    },
+    {
+      "file": "03-isolation.spec.ts",
+      "name": "isolation: B sees none of A's record; admin reads it and the read is audited",
+      "status": "passed",
+      "duration_ms": 7172
+    },
+    {
+      "file": "03-isolation.spec.ts",
+      "name": "saved PDF: owner gets the stored report, B gets 404, anonymous gets 401",
+      "status": "passed",
+      "duration_ms": 7519
+    },
+    {
+      "file": "04-context-switch.spec.ts",
+      "name": "context switch: sign-out stops A's sweep; B sees none of A's form, result or history",
+      "status": "passed",
+      "duration_ms": 11765
+    },
+    {
+      "file": "05-revocation.spec.ts",
+      "name": "revocation: a blocked specialist's next save ends the session and writes nothing",
+      "status": "passed",
+      "duration_ms": 5590
+    },
+    {
+      "file": "06-error-handling.spec.ts",
+      "name": "error handling: a 503 on save is reported, keeps the session and is not retried",
+      "status": "passed",
+      "duration_ms": 7946
+    }
+  ],
+  "summary": {
+    "total": 7,
+    "passed": 7,
+    "failed": 0,
+    "skipped": 0
+  }
+}

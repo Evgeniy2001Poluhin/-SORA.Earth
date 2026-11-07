@@ -1,0 +1,12 @@
+{
+  "installed": true,
+  "label": "online.sora.local-monitor",
+  "interval_seconds": 300,
+  "mac_must_be_awake_and_logged_in": true,
+  "vps_modified": false,
+  "external_messages_sent": false,
+  "files_sha256": {
+    "monitor.py": "6c25b0e320b81ffc754655c37c2f1eb5fe810c15c6b0b193c255c048c209ff33",
+    "collector.py": "a7c3dfc533c2312f1e9057630ea254ac97d41e15bd2b3b4d4894fd66b40afc8b"
+  }
+}

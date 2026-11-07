@@ -1,0 +1,12 @@
+{
+  "action_matches": true,
+  "last_result": 0,
+  "nonce_matches": true,
+  "observed_utc": "2026-11-07T06:19:41.4964455Z",
+  "test_task_removed": true,
+  "state": "Ready",
+  "success": true,
+  "task": "SoraBackupCatchupCheck20261107",
+  "last_run_utc": "2026-11-07T06:18:32.0000000Z",
+  "actual_reboot_tested": false
+}
