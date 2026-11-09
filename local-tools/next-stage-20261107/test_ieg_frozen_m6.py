@@ -78,6 +78,9 @@ class Frozen(unittest.TestCase):
             {'inputs': {'wdi_json_sha256': self.sha('wdi', 'wdi.json')}}))
         self.new_rows = self.new_projects(600, signal=True, prefix='N')
         self.noise_rows = self.new_projects(400, signal=False, prefix='Z')
+        self.few_country_rows = self.new_projects(400, signal=True, prefix='K',
+                                                  countries=COUNTRIES[:4],
+                                                  shift={'C0': 3, 'C1': -3, 'C2': 2, 'C3': -2})
         snapshot(self.tmp / 'projects', 'projects.json', self.projects)
         ieg_baseline.run(f, o, self.dirs['baseline'], n_boot=20, country_dir=self.dirs['country'])
 
@@ -89,17 +92,18 @@ class Frozen(unittest.TestCase):
         return {c: transform(self.wdi[CANDIDATES[c][0]].get(f'{country}|{year}'), CANDIDATES[c][1])
                 for c in COLUMNS}
 
-    def outcome(self, values, signal):
+    def outcome(self, values, signal, shift=0.0):
         if not signal or values['gdp_growth'] == '':
             return int(self.rng.random() < 0.7)
-        z = 1.0 + 1.2 * (float(values['gdp_growth']) - 3) / 3
+        z = 1.0 + shift + 1.2 * (float(values['gdp_growth']) - 3) / 3
         return int(self.rng.random() < 1 / (1 + math.exp(-z)))
 
-    def new_projects(self, n, signal, prefix):
+    def new_projects(self, n, signal, prefix, countries=COUNTRIES, shift=None):
         rows = []
         for i in range(n):
-            ident, country, approval = f'{prefix}{i:06d}', self.rng.choice(COUNTRIES), 2015 + i % 6
-            y = self.outcome(self.values(country, approval), signal)
+            ident, country, approval = f'{prefix}{i:06d}', self.rng.choice(countries), 2015 + i % 6
+            y = self.outcome(self.values(country, approval), signal,
+                             (shift or {}).get(country, 0.0))
             self.projects.append({'id': ident, 'countrycode': country})
             rows.append([ident, rating(y), 'ICRR', approval, 2027])
         return rows
@@ -178,6 +182,22 @@ class Frozen(unittest.TestCase):
         self.assertGreaterEqual(report['new_projects'], 300)
         self.assertEqual(report['negative'], 29)
         self.assertFalse(report['evaluated'])
+
+    def test_the_bootstrap_draws_whole_countries(self):
+        # 400 projects in 4 countries with strong country effects the model does not
+        # see: resampling countries must give a much wider interval than projects.
+        sha = self.frozen()['model_sha256']
+        report = self.run_eval(self.new_export(self.few_country_rows, 'four.csv'), sha)
+        self.assertEqual(report['countries'], 4)
+        with (self.tmp / 'eval' / 'new-test-predictions.csv').open() as s:
+            rows = list(csv.DictReader(s))
+        y = np.array([int(r['outcome']) for r in rows])
+        p = np.array([float(r['M6_country_only']) for r in rows])
+        aucs = [ieg_baseline.roc_auc_score(y[i], p[i]) for i in ieg_baseline.cluster_resamples(
+            [r['source_project_id'] for r in rows], 300, ieg_baseline.SEED)]
+        by_project = ieg_baseline.interval(aucs)
+        width = report['auc_ci95'][1] - report['auc_ci95'][0]
+        self.assertGreater(width, 1.4 * (by_project[1] - by_project[0]))   # measured 0.147 vs 0.090
 
     def test_a_changed_model_or_input_is_refused(self):
         sha = self.frozen()['model_sha256']
