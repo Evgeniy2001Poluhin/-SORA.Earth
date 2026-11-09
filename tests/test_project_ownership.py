@@ -1269,3 +1269,27 @@ def test_saved_pdf_openapi_declares_binary_document(client):
     operation = client.get("/openapi.json").json()["paths"][
         "/api/v1/history/{eval_id}/report.pdf"]["get"]
     assert set(operation["responses"]["200"]["content"]) == {"application/pdf"}
+
+
+# ------------------------------------------------- history filter by risk
+
+
+@pytest.mark.parametrize("pill", ["LOW", "MED", "HIGH"])
+def test_the_history_risk_filter_finds_a_saved_evaluation(client, world, make_account, pill):
+    """The history page sends LOW / MED / HIGH (web/src/features/history/
+    HistoryPage.tsx → RISKS); calculate_esg stores Low / Medium / High. The
+    filter must match the stored value the pill names, and only that one --
+    a filter that answers an empty page for every pill looks like "no
+    projects at that risk"."""
+    saver = make_account(prefix=f"risk-{pill.lower()}", role="specialist")
+    r = client.post("/api/v1/evaluate?save=true", json=PROJECT, headers=H(saver))
+    assert r.status_code == 201, r.text
+    saved_id, stored = r.json()["evaluation_id"], r.json()["risk_level"]
+    assert stored in ("Low", "Medium", "High")
+    page = client.get(f"/api/v1/history?risk_level={pill}", headers=H(saver))
+    assert page.status_code == 200
+    names = {"LOW": "Low", "MED": "Medium", "HIGH": "High"}
+    if names[pill] == stored:
+        assert _ids(page) == {saved_id} and page.json()["total"] == 1
+    else:
+        assert _ids(page) == set() and page.json()["total"] == 0

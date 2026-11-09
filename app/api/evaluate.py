@@ -281,6 +281,9 @@ def _newest_first(query):
     return query.order_by(Evaluation.created_at.desc(), Evaluation.id.desc())
 
 
+_RISK_FILTER = {"LOW": "Low", "MED": "Medium", "MEDIUM": "Medium", "HIGH": "High"}
+
+
 @router.get("/history", response_model=EvaluationHistoryPage,
             response_model_exclude_unset=True)
 def get_history(
@@ -312,7 +315,11 @@ def get_history(
         if region:
             q = q.filter(Evaluation.region.ilike(f"%{region}%"))
         if risk_level:
-            q = q.filter(Evaluation.risk_level == risk_level.upper())
+            # calculate_esg stores Low / Medium / High; the history page sends
+            # LOW / MED / HIGH. Comparing with .upper() matched neither, so every
+            # risk filter answered an empty page.
+            stored = _RISK_FILTER.get(risk_level.strip().upper(), risk_level)
+            q = q.filter(Evaluation.risk_level == stored)
         if date_from:
             q = q.filter(Evaluation.created_at >= datetime.fromisoformat(date_from))
         if date_to:
