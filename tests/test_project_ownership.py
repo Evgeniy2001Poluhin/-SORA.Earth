@@ -1274,22 +1274,38 @@ def test_saved_pdf_openapi_declares_binary_document(client):
 # ------------------------------------------------- history filter by risk
 
 
-@pytest.mark.parametrize("pill", ["LOW", "MED", "HIGH"])
-def test_the_history_risk_filter_finds_a_saved_evaluation(client, world, make_account, pill):
-    """The history page sends LOW / MED / HIGH (web/src/features/history/
-    HistoryPage.tsx → RISKS); calculate_esg stores Low / Medium / High. The
-    filter must match the stored value the pill names, and only that one --
-    a filter that answers an empty page for every pill looks like "no
-    projects at that risk"."""
-    saver = make_account(prefix=f"risk-{pill.lower()}", role="specialist")
+def test_a_save_stores_one_of_the_three_risk_names(client, world, make_account):
+    """The names the filter below maps to are the ones calculate_esg stores."""
+    saver = make_account(prefix="risk-save", role="specialist")
     r = client.post("/api/v1/evaluate?save=true", json=PROJECT, headers=H(saver))
     assert r.status_code == 201, r.text
-    saved_id, stored = r.json()["evaluation_id"], r.json()["risk_level"]
+    with world.session() as s:
+        stored = s.get(Evaluation, r.json()["evaluation_id"]).risk_level
     assert stored in ("Low", "Medium", "High")
-    page = client.get(f"/api/v1/history?risk_level={pill}", headers=H(saver))
+
+
+@pytest.mark.parametrize("asked, expected", [
+    ("LOW", "Low"), ("low", "Low"), (" Low ", "Low"),
+    ("MED", "Medium"), ("MEDIUM", "Medium"), ("medium", "Medium"),
+    ("HIGH", "High"), ("high", "High"),
+    ("SEVERE", None),
+])
+def test_the_history_risk_filter_finds_each_stored_level(client, world, make_account,
+                                                        asked, expected):
+    """The history page sends LOW / MED / HIGH (web/src/features/history/
+    HistoryPage.tsx → RISKS); calculate_esg stores Low / Medium / High. Each
+    request returns exactly the row of the level it names -- the old filter
+    compared with .upper() and answered an empty page for every pill."""
+    owner = make_account(prefix="risk-filter", role="specialist")
+    ids = {}
+    when = datetime.utcnow() + timedelta(days=1)
+    with world.session() as s:
+        for level in ("Low", "Medium", "High"):
+            ids[level] = _evaluation(s, scope="pilot", owner=owner.id, name=f"risk {level}",
+                                     score=50.0, when=when)
+            s.get(Evaluation, ids[level]).risk_level = level
+        s.commit()
+    page = client.get("/api/v1/history", params={"risk_level": asked}, headers=H(owner))
     assert page.status_code == 200
-    names = {"LOW": "Low", "MED": "Medium", "HIGH": "High"}
-    if names[pill] == stored:
-        assert _ids(page) == {saved_id} and page.json()["total"] == 1
-    else:
-        assert _ids(page) == set() and page.json()["total"] == 0
+    want = {ids[expected]} if expected else set()
+    assert _ids(page) == want and page.json()["total"] == len(want)
