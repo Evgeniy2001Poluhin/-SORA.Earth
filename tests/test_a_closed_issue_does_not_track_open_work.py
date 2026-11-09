@@ -202,10 +202,12 @@ def tracked_files() -> list[Path]:
     other rather than each trusting its own glob.
     """
     out = subprocess.run(
-        ["git", "ls-files", "*.md", "app/*.py", "tests/*.py"],
+        ["git", "ls-files", "-z", "--", "*.md", "app/*.py", "tests/*.py"],
         cwd=REPO, capture_output=True, text=True, check=True,
     )
-    paths = (REPO / line for line in out.stdout.splitlines() if line)
+    # -z: without it git quotes a non-ASCII path ("\320\237...") and the
+    # quoted name is not a file.
+    paths = (REPO / name for name in out.stdout.split("\0") if name)
     # This file itself quotes the four real defects verbatim and cites #354
     # by way of explaining them -- the one file guaranteed to trip its own
     # rule by doing its job. The sibling line-pointer guard exempts
