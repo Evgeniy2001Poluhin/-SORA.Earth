@@ -154,7 +154,7 @@ jobs:
         run: |
           for t in test_outcomes test_profile_ieg test_ieg_join test_ieg_review \
                    test_ieg_outcomes test_ieg_features test_ieg_baseline \
-                   test_ieg_projects_features test_ieg_country_features; do
+                   test_ieg_projects_features test_ieg_country_features test_ieg_frozen_m6; do
             python -B "$t.py"
           done
 
