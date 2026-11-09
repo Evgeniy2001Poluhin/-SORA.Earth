@@ -148,6 +148,16 @@ jobs:
           python -m pytest tests/test_forecasting_*.py \
             -v --timeout=60
 
+      - name: Run IEG research tests
+        # Offline unittest scripts beside the IEG code; each exits non-zero on failure.
+        working-directory: local-tools/next-stage-20261107
+        run: |
+          for t in test_outcomes test_profile_ieg test_ieg_join test_ieg_review \
+                   test_ieg_outcomes test_ieg_features test_ieg_baseline \
+                   test_ieg_projects_features test_ieg_country_features; do
+            python -B "$t.py"
+          done
+
   frontend-checks:
     runs-on: ubuntu-24.04
     timeout-minutes: 5

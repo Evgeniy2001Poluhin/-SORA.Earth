@@ -1,0 +1,72 @@
+{
+  "inputs": {
+    "ieg_csv": {
+      "file": "SYNTHETIC-ieg-fixture-not-real-20261108.csv",
+      "sha256": "7e8257ad27e6e43412ce3dea7e8b6b3e79fb5e8238381e0c8f84f9ecc935b741",
+      "provenance": "operator-provided CSV; authenticity not verified by this tool",
+      "rows": 12,
+      "unique_project_ids": 10,
+      "rows_with_empty_project_id": 1,
+      "nonstandard_project_id_rows": 0,
+      "outcome_distribution_raw_categories": {
+        "highly satisfactory": 1,
+        "moderately satisfactory": 2,
+        "moderately unsatisfactory": 1,
+        "not rated": 1,
+        "satisfactory": 5,
+        "unrecognized": 1,
+        "unsatisfactory": 1
+      },
+      "unrecognized_outcome_values": {
+        "Rating TBD": 1
+      },
+      "unrecognized_outcome_distinct_values": 1,
+      "date_like_columns_present": [
+        "as_of_date",
+        "evaluation_fy"
+      ]
+    },
+    "catalog": {
+      "file": "documents.csv",
+      "sha256": "1f6a6537d2f46214f049dcb2a9f4ecfb040b1e8da9ef4fde9f507b4ef6273503",
+      "manifest_sha256_verified": true,
+      "documents": 7303,
+      "unique_document_ids": 7303,
+      "documents_without_project_id": 31,
+      "documents_listing_several_project_ids": 154,
+      "distinct_project_ids_after_splitting_lists": 7380,
+      "nonstandard_project_ids": 0,
+      "manifest_sha256": "189a07fc275074400ef38cb390e4911e96b32e2d53746cca52065ab3c5e6233a"
+    }
+  },
+  "coverage": {
+    "matched_project_ids": 8,
+    "matched_ieg_rows": 9,
+    "ieg_ids_missing_from_catalog": 2,
+    "catalog_ids_missing_from_ieg": 7372,
+    "matched_ids_one_row_one_document_unshared": 4,
+    "matched_ids_needing_manual_review": 4,
+    "matched_outcome_distribution_raw_categories": {
+      "highly satisfactory": 1,
+      "moderately satisfactory": 2,
+      "moderately unsatisfactory": 1,
+      "not rated": 1,
+      "satisfactory": 3,
+      "unsatisfactory": 1
+    }
+  },
+  "groups": {
+    "ieg_ids_with_multiple_rows": 1,
+    "ieg_additional_duplicate_rows": 1,
+    "catalog_ids_with_multiple_documents": 128,
+    "catalog_ids_in_shared_documents": 392,
+    "ambiguous_groups_total": 455,
+    "ambiguous_groups_file": "ambiguous-groups.csv"
+  },
+  "binary_labels_created": false,
+  "rows_dropped_or_deduplicated": false,
+  "training_performed": false,
+  "validation_performed": false,
+  "date_interpretation": "as_of_date, evaluation_fy and docdt are not used and are NOT exact first-publication or feature-availability dates.",
+  "limitation": "Join on project ID only, after trimming and upper-casing. Coverage of project IDs is not evidence that a document is the evaluation behind the rating, nor that the rating is the latest version. Duplicates are kept for manual review; no row is chosen."
+}
