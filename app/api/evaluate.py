@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi import Response
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
+from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.auth import UserInfo, optional_auth, require_admin, require_auth
@@ -281,7 +282,12 @@ def _newest_first(query):
     return query.order_by(Evaluation.created_at.desc(), Evaluation.id.desc())
 
 
-_RISK_FILTER = {"LOW": "Low", "MED": "Medium", "MEDIUM": "Medium", "HIGH": "High"}
+_RISK_FILTER = {
+    "LOW": ("low",),
+    "MED": ("med", "medium"),
+    "MEDIUM": ("med", "medium"),
+    "HIGH": ("high",),
+}
 
 
 @router.get("/history", response_model=EvaluationHistoryPage,
@@ -315,11 +321,11 @@ def get_history(
         if region:
             q = q.filter(Evaluation.region.ilike(f"%{region}%"))
         if risk_level:
-            # calculate_esg stores Low / Medium / High; the history page sends
-            # LOW / MED / HIGH. Comparing with .upper() matched neither, so every
-            # risk filter answered an empty page.
-            stored = _RISK_FILTER.get(risk_level.strip().upper(), risk_level)
-            q = q.filter(Evaluation.risk_level == stored)
+            levels = _RISK_FILTER.get(risk_level.strip().upper())
+            if levels is not None:
+                q = q.filter(func.lower(Evaluation.risk_level).in_(levels))
+            else:
+                q = q.filter(Evaluation.risk_level == risk_level)
         if date_from:
             q = q.filter(Evaluation.created_at >= datetime.fromisoformat(date_from))
         if date_to:

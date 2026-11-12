@@ -1292,20 +1292,24 @@ def test_a_save_stores_one_of_the_three_risk_names(client, world, make_account):
 ])
 def test_the_history_risk_filter_finds_each_stored_level(client, world, make_account,
                                                         asked, expected):
-    """The history page sends LOW / MED / HIGH (web/src/features/history/
-    HistoryPage.tsx → RISKS); calculate_esg stores Low / Medium / High. Each
-    request returns exactly the row of the level it names -- the old filter
-    compared with .upper() and answered an empty page for every pill."""
+    """Match current and legacy spellings while keeping the owner filter."""
     owner = make_account(prefix="risk-filter", role="specialist")
     ids = {}
     when = datetime.utcnow() + timedelta(days=1)
     with world.session() as s:
         for level in ("Low", "Medium", "High"):
-            ids[level] = _evaluation(s, scope="pilot", owner=owner.id, name=f"risk {level}",
+            ids[level] = set()
+            spellings = (level, level.lower(), level.upper())
+            if level == "Medium":
+                spellings += ("MED",)
+            for spelling in spellings:
+                row_id = _evaluation(s, scope="pilot", owner=owner.id, name=f"risk {spelling}",
                                      score=50.0, when=when)
-            s.get(Evaluation, ids[level]).risk_level = level
+                s.get(Evaluation, row_id).risk_level = spelling
+                ids[level].add(row_id)
+        s.get(Evaluation, world.b_eval).risk_level = expected or "Low"
         s.commit()
     page = client.get("/api/v1/history", params={"risk_level": asked}, headers=H(owner))
     assert page.status_code == 200
-    want = {ids[expected]} if expected else set()
+    want = ids[expected] if expected else set()
     assert _ids(page) == want and page.json()["total"] == len(want)
