@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from typing import Annotated, Optional, List, Tuple, Dict, Any, Literal, Union
 
@@ -989,6 +991,9 @@ class EvaluationView(BaseModel):
     lat: Optional[float] = None
     lon: Optional[float] = None
     created_at: Optional[Any] = None
+    saved_at_utc: Optional[datetime] = Field(
+        default=None, description="Confirmed UTC save time. Null for records without a known timezone."
+    )
     owner_user_id: Optional[str] = None
     data_scope: Optional[str] = None
 

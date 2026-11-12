@@ -1,3 +1,4 @@
+import { formatSavedAt } from "@/lib/formatSavedAt";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -50,11 +51,6 @@ export default function HistoryPage() {
   const page = Math.floor((params.offset || 0) / PAGE) + 1;
   const pages = data.total != null ? Math.max(1, Math.ceil(data.total / PAGE)) : null;
   const set = (patch: Partial<HistoryParams>) => setParams((p) => ({ ...p, ...patch, offset: 0 }));
-
-  const fmt = (s: string | null) =>
-    s == null ? "—" : new Date(s).toLocaleString("en-GB", {
-      year: "2-digit", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit",
-    });
 
   // `/history` returns the count for the filters and one page of rows, and no
   // aggregate (app/api/evaluate.py, `get_history`: `items`, `total`). So this
@@ -179,7 +175,7 @@ export default function HistoryPage() {
               className="hist-row hist-item"
               onClick={() => nav("/evaluate?snapshot=" + it.id)}
             >
-              <div className="tn">{fmt(it.created_at)}</div>
+              <div className="tn">{formatSavedAt(it)}</div>
               <div>{it.region ?? "—"}</div>
               <div className="tn">{it.total_score != null ? it.total_score.toFixed(1) : "—"}</div>
               <div className="tn">{it.success_probability != null ? `${it.success_probability.toFixed(0)}%` : "—"}</div>
