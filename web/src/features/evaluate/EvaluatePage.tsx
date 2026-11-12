@@ -536,14 +536,22 @@ function Empty() {
     </div>
   );
 }
-function ShapWaterfall({data}:{data:ExplainResponse}) {
-  const feats = [...data.explanation].sort((a,b)=>Math.abs(b.shap_value)-Math.abs(a.shap_value)).slice(0,8);
+// /predict/explain answers `probability` in percent but `base_value` and every
+// `shap_value` as fractions of 1 (app/api/explain.py). Everything here is shown
+// in percent, like the headline estimate, so base + contributions = f(x).
+const pct = (fraction:number) => fraction*100;
+export function ShapWaterfall({data}:{data:ExplainResponse}) {
+  const sorted = [...data.explanation].sort((a,b)=>Math.abs(b.shap_value)-Math.abs(a.shap_value));
+  const feats = sorted.slice(0,8);
+  const rest = sorted.slice(8);
+  const restSum = rest.reduce((s,f)=>s+f.shap_value,0);
   const max = Math.max(...feats.map(f=>Math.abs(f.shap_value))) || 1;
+  const signed = (fraction:number) => (fraction>0?"+":"")+pct(fraction).toFixed(1)+" pp";
   return (
     <div className="shap">
       <div className="shap-head mono">
-        <span>f(x) = {data.probability.toFixed(3)}</span>
-        <span>E[f(X)] = {data.base_value.toFixed(3)}</span>
+        <span>f(x) = {data.probability.toFixed(1)}%</span>
+        <span>E[f(X)] = {pct(data.base_value).toFixed(1)}%</span>
       </div>
       <div className="shap-rows">
         {feats.map(f => {
@@ -553,11 +561,16 @@ function ShapWaterfall({data}:{data:ExplainResponse}) {
               <div className="shap-label"><span className="mono" style={{color:"var(--faint)",marginRight:4}}>{f.value.toFixed(3)}</span> = <b>{f.feature}</b></div>
               <div className="shap-track">
                 <motion.span className={"shap-fill "+(pos?"pos":"neg")} initial={{width:0}} animate={{width:`${w}%`}} transition={{duration:.7,ease:[.16,1,.3,1]}}/>
-                <span className={"shap-val "+(pos?"pos":"neg")}>{pos?"+":""}{f.shap_value.toFixed(3)}</span>
+                <span className={"shap-val "+(pos?"pos":"neg")}>{signed(f.shap_value)}</span>
               </div>
             </div>
           );
         })}
+        {rest.length>0 && (
+          <div className="shap-row shap-rest mono" style={{color:"var(--faint)"}}>
+            {rest.length} other features: {signed(restSum)}
+          </div>
+        )}
       </div>
     </div>
   );

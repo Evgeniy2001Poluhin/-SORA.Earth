@@ -16,15 +16,16 @@ const COUNTRIES: CountriesMap = {
 const mockExplain = (b: EvaluateRequest): ExplainResponse => {
   const r = mockEvaluate(b);
   const feats: ShapFeature[] = [
-    { feature:"co2_reduction", value:b.co2_reduction_tons_per_year, shap_value:8.4, direction:"positive", impact:"high" },
-    { feature:"budget", value:b.budget_usd, shap_value:5.1, direction:"positive", impact:"medium" },
-    { feature:"social_impact", value:b.social_impact_score, shap_value:4.8, direction:"positive", impact:"medium" },
-    { feature:"duration_months", value:b.project_duration_months, shap_value:-2.3, direction:"negative", impact:"low" },
+    { feature:"co2_reduction", value:b.co2_reduction_tons_per_year, shap_value:0.084, direction:"positive", impact:"high" },
+    { feature:"budget", value:b.budget_usd, shap_value:0.051, direction:"positive", impact:"medium" },
+    { feature:"social_impact", value:b.social_impact_score, shap_value:0.048, direction:"positive", impact:"medium" },
+    { feature:"duration_months", value:b.project_duration_months, shap_value:-0.023, direction:"negative", impact:"low" },
   ];
   return {
     prediction: r.total_score >= 60 ? 1 : 0,
     probability: r.success_probability,
-    base_value: 50,
+    // Fractions, as /predict/explain answers; probability is in percent.
+    base_value: 0.5,
     explanation: feats,
     all_features: feats.map(f => ({ name:f.feature, direction:f.direction, impact:f.impact, shap_value:f.shap_value, value:f.value })),
   };
