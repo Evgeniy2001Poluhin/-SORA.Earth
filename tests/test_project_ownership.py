@@ -1178,6 +1178,46 @@ def test_the_application_initialises_sentry_with_those_options(monkeypatch):
 
 
 # Saved PDF is the same persisted assessment even after the serving model changes.
+def test_save_time_is_explicit_in_history_pdf_and_csv(client, world):
+    import csv
+    from datetime import timezone
+    from io import BytesIO
+
+    from pypdf import PdfReader
+
+    headers = H(world.people.a)
+    started = datetime.now(timezone.utc)
+    saved = client.post("/api/v1/evaluate?save=true", headers=headers, json=PROJECT)
+    assert saved.status_code == 201, saved.text
+    ident = saved.json()["evaluation_id"]
+    detail = client.get(f"/api/v1/history/{ident}", headers=headers).json()
+    instant = datetime.fromisoformat(detail["saved_at_utc"].replace("Z", "+00:00"))
+    assert instant.utcoffset() == timedelta(0)
+    assert started <= instant <= datetime.now(timezone.utc)
+
+    history = client.get("/api/v1/history", headers=headers).json()["items"]
+    by_id = {row["id"]: row for row in history}
+    assert by_id[ident]["saved_at_utc"] == detail["saved_at_utc"]
+    legacy = by_id[world.a_eval]
+    assert legacy["saved_at_utc"] is None
+
+    export = client.get("/api/v1/export/csv", headers=headers)
+    assert export.status_code == 200
+    rows = {int(row["ID"]): row for row in csv.DictReader(export.text.splitlines())}
+    assert datetime.fromisoformat(rows[ident]["Saved at (UTC)"]) == instant
+    assert rows[world.a_eval]["Saved at (UTC)"] == ""
+    assert rows[world.a_eval]["Date"] == legacy["created_at"].replace("T", " ")
+
+    for row_id, expected in (
+        (ident, instant.isoformat(sep=" ")),
+        (world.a_eval, legacy["created_at"].replace("T", " ") + " (timezone unknown)"),
+    ):
+        pdf = client.get(f"/api/v1/history/{row_id}/report.pdf", headers=headers)
+        assert pdf.status_code == 200
+        content = " ".join(page.extract_text() for page in PdfReader(BytesIO(pdf.content)).pages)
+        assert f"Saved at: {expected}" in content
+
+
 def test_saved_pdf_does_not_recompute_and_matches_history(client, world, monkeypatch):
     import app.main as main
     from pypdf import PdfReader

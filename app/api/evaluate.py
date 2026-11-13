@@ -36,7 +36,7 @@ from app.database import Evaluation
 from app.map_position import marker_offset
 
 import csv, io, time, math
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fpdf import FPDF
 import tempfile
@@ -267,9 +267,20 @@ _EVALUATION_FIELDS = tuple(f for f in EvaluationView.model_fields
                            if f not in ("owner_user_id", "data_scope"))
 
 
+def _saved_at_utc(row):
+    value = row.saved_at_utc
+    if value is None:
+        return None
+    # SQLite drops timezone information when reading the UTC-only column.
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _evaluation_view(row, *, service: bool) -> EvaluationView:
     """A row as the API shows it. Ownership only on the administrator's view."""
     fields = {f: getattr(row, f) for f in _EVALUATION_FIELDS}
+    fields["saved_at_utc"] = _saved_at_utc(row)
     if service:
         fields["owner_user_id"] = str(row.owner_user_id) if row.owner_user_id else None
         fields["data_scope"] = row.data_scope
@@ -469,14 +480,16 @@ def export_csv(request: Request, actor: UserInfo = Depends(require_auth)):
         w.writerow([
             "ID", "Name", "Budget", "CO2 Reduction", "Social Impact", "Duration (months)",
             "ESG Score", "Environment", "Social", "Economic",
-            "Success Probability", "Risk Level", "Region", "Date",
+            "Success Probability", "Risk Level", "Region", "Date", "Saved at (UTC)",
         ])
         for r in rows:
+            saved_at = _saved_at_utc(r)
             w.writerow([
                 r.id, neutralize_cell(r.name or ""), r.budget, r.co2_reduction, r.social_impact,
                 r.duration_months, r.total_score, r.environment_score,
                 r.social_score, r.economic_score, r.success_probability,
                 neutralize_cell(r.risk_level or ""), neutralize_cell(r.region or ""), r.created_at,
+                saved_at.isoformat() if saved_at is not None else "",
             ])
         body = output.getvalue().encode()
 

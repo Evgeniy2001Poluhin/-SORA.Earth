@@ -17,8 +17,14 @@ def render_saved_evaluation(row):
     pdf.cell(0, 12, "SORA.Earth - Saved ESG Evaluation", ln=True)
     pdf.set_font("DejaVu", "", 11)
     pdf.multi_cell(0, 7, "Stored assessment; not recalculated. Success probability is an unvalidated estimate, not a verified outcome.", align="L")
+    if row.saved_at_utc is not None:
+        saved_at = row.saved_at_utc.isoformat(sep=" ")
+    elif row.created_at is not None:
+        saved_at = f"{row.created_at} (timezone unknown)"
+    else:
+        saved_at = None
     fields = [
-        ("Evaluation ID", row.id), ("Saved at", row.created_at),
+        ("Evaluation ID", row.id), ("Saved at", saved_at),
         ("Project", row.name), ("Budget (USD)", row.budget),
         ("CO2 reduction (t/year)", row.co2_reduction),
         ("Social impact", row.social_impact), ("Duration (months)", row.duration_months),

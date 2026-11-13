@@ -42,6 +42,7 @@ class Evaluation(Base):
     lat = Column(Float, default=50.0)
     lon = Column(Float, default=10.0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    saved_at_utc = Column(DateTime(timezone=True), nullable=True)
 
     # Ownership: see the note after PredictionLog.
     owner_user_id = Column(

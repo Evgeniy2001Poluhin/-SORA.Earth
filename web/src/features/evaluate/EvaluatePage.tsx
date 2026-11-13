@@ -1,3 +1,4 @@
+import { formatSavedAt } from "@/lib/formatSavedAt";
 import { reportApi } from "../../api/endpoints/report";
 import Combobox from "../../components/Combobox";
 import CountryRanking from "./CountryRanking";
@@ -476,7 +477,7 @@ function SnapshotCard({ query, invalid, onClose, onUseInputs }: {
         <Row k="CO₂ reduction (t/yr)" v={shown(it.co2_reduction, 0)}/>
         <Row k="Social impact" v={shown(it.social_impact, 1)}/>
         <Row k="Duration (months)" v={it.duration_months ?? "—"}/>
-        <Row k="Saved" v={it.created_at ?? "—"}/>
+        <Row k="Saved" v={formatSavedAt(it)}/>
       </div>
       <p className="ev-save-note">
         As stored when it was saved; not recalculated. The record keeps the region, not the country,

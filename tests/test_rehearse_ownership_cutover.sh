@@ -196,8 +196,21 @@ rehearse
 check "the rehearsal passes on the synthetic dump" "$RC" "0"
 check "  the report says passed" "$(report_field 'doc["passed"]')" "True"
 check "  three measured runs" "$(report_field 'len(doc["runs"])')" "3"
-check "  from f4b7c2d91e06 to the ownership head" \
-    "$(report_field 'sorted({(r["alembic_before"], r["alembic_after"]) for r in doc["runs"]})')" "[('f4b7c2d91e06', 'b7d41f2e9c35')]"
+if release_head="$("$REAL_DOCKER" run --rm --network none --entrypoint python "$IMAGE" -c '
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
+head = ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
+if head is None:
+    raise SystemExit("release image has no Alembic head")
+print(head)
+')"; then
+    check "  from f4b7c2d91e06 to the release image head" \
+        "$(report_field 'sorted({(r["alembic_before"], r["alembic_after"]) for r in doc["runs"]})')" \
+        "[('f4b7c2d91e06', '$release_head')]"
+else
+    bad "cannot determine the Alembic head of the release image"
+fi
 check "  the bootstrap created the accounts" "$(report_field 'sorted({r["users_after"] for r in doc["runs"]})')" "['3']"
 check "  every run's sampler was believable" "$(report_field 'all(r["sampler"]["valid"] for r in doc["runs"])')" "True"
 check "  and saw the migrator" "$(report_field 'all(r["sampler"]["migrator_observed"] > 0 for r in doc["runs"])')" "True"

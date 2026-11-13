@@ -18,7 +18,7 @@ signed-in caller and nothing else: this module takes it as an argument from the
 route, which takes it from the verified token, never from the request body.
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app import database
 from app.database import Evaluation, PredictionLog
@@ -58,6 +58,7 @@ def prediction_log_row(*, endpoint, project, result, latency_ms, model_version,
 
 def evaluation_row(*, project, result, recommendation, region_name, lat, lon,
                    owner_user_id, data_scope):
+    saved_at = datetime.now(timezone.utc)
     return Evaluation(
         name=project.name,
         budget=project.budget,
@@ -71,7 +72,8 @@ def evaluation_row(*, project, result, recommendation, region_name, lat, lon,
         success_probability=result["success_probability"],
         recommendation=recommendation,
         risk_level=result["risk_level"],
-        created_at=datetime.now(),
+        created_at=saved_at.astimezone().replace(tzinfo=None),
+        saved_at_utc=saved_at,
         region=region_name,
         lat=lat,
         lon=lon,

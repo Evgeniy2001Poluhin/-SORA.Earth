@@ -25,6 +25,7 @@ export type HistoryItem = {
   lat: number | null;
   lon: number | null;
   created_at: string | null;
+  saved_at_utc?: string | null;
   owner_user_id?: string | null;
   data_scope?: string | null;
 };
@@ -42,7 +43,7 @@ const ITEMS: HistoryItem[] = Array.from({ length: 546 }, (_, i) => {
     total_score: +score.toFixed(1), environment_score: +(score + Math.random() * 8 - 4).toFixed(1),
     social_score: +(score + Math.random() * 10 - 5).toFixed(1), economic_score: +(score + Math.random() * 8 - 4).toFixed(1),
     success_probability: +(60 + score * 0.35).toFixed(1), recommendation: null, risk_level: rl,
-    region: REGIONS[i % 6], lat: 50 + Math.random() * 15, lon: Math.random() * 30 - 5, created_at: d.toISOString() };
+    region: REGIONS[i % 6], lat: 50 + Math.random() * 15, lon: Math.random() * 30 - 5, created_at: d.toISOString(), saved_at_utc: d.toISOString() };
 });
 
 /** Reads of project rows are private: never from, or into, the HTTP cache. */
