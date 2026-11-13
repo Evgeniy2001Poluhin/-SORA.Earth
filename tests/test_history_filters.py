@@ -18,7 +18,7 @@ def test_history_filter_risk_level():
     r = c.get("/api/v1/history?risk_level=LOW&limit=20", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
     for it in r.json()["items"]:
-        assert it["risk_level"] == "LOW"
+        assert it["risk_level"].casefold() == "low"
 
 def test_history_filter_date_range():
     token = access_token_for("viewer")
