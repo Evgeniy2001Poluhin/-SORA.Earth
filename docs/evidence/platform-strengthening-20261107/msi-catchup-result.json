@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "fixture_only": true,
+  "retained_backups": 3,
+  "new_backups_received": 2,
+  "newest_first": true,
+  "offline_and_interruption_controls": true,
+  "windows_scheduler_tested": false,
+  "production_contacted": false,
+  "transport_sha256": "4f0c34cd99bbb996b1c45a9b9d5bbb707fb1ed7bbaa76ab799c8ae1b50f92c42",
+  "receiver_platform": "posix",
+  "observed_utc": "2026-11-07T06:18:34.307827+00:00"
+}

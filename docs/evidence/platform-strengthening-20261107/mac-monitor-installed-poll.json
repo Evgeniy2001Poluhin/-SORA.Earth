@@ -1,0 +1,11 @@
+{
+  "observed_utc": "2026-11-07T06:39:55.363360+00:00",
+  "issues": [],
+  "offsite_status": {
+    "latest_backup": "20261107T033009Z",
+    "verified_completed_count": 1,
+    "freshness": "pass"
+  },
+  "notifications_submitted": [],
+  "human_receipt_confirmed": false
+}
